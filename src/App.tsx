@@ -158,7 +158,9 @@ function App() {
   });
   const [isLoadingFacilities, setIsLoadingFacilities] = useState(false);
   const [facilityToEdit, setFacilityToEdit] = useState<Facility | null>(null);
-  const [signatureBannerDismissed, setSignatureBannerDismissed] = useState(false);
+  const [signatureBannerDismissed, setSignatureBannerDismissed] = useState(() => {
+    return localStorage.getItem('signatureDeferred') === 'true';
+  });
 
   // Calculate visible facility count based on completedVisibility settings
   const visibleFacilityCount = useMemo(() => {
@@ -2002,159 +2004,76 @@ function App() {
       )}
       {!isFullScreenMap && (
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 transition-colors duration-200" style={{ marginTop: showSignatureBanner ? '60px' : '0' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Route className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Survey-Route</h1>
-                <p className="text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</p>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-300">{currentAccount.accountName}</p>
-                  {teamCount > 1 && effectiveUserTeam && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                      Team {effectiveUserTeam}
-                    </span>
-                  )}
-                  {teamCount > 1 && !effectiveUserTeam && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
-                      All Teams
-                    </span>
-                  )}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Route className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Survey-Route</h1>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-300">{currentAccount.accountName}</p>
+                    {teamCount > 1 && effectiveUserTeam && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                        Team {effectiveUserTeam}
+                      </span>
+                    )}
+                    {teamCount > 1 && !effectiveUserTeam && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+                        All Teams
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={toggleDarkMode}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              >
-                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                <span className="hidden sm:inline">{darkMode ? 'Light' : 'Dark'}</span>
-              </button>
-              {user?.isAgencyOwner && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate('/agency')}
+                  onClick={toggleDarkMode}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{darkMode ? 'Light' : 'Dark'}</span>
+                </button>
+                {user?.isAgencyOwner && (
+                  <button
+                    onClick={() => navigate('/agency')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Back to Agency</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleSignOut}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Back to Agency</span>
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
                 </button>
-              )}
-              <button
-                onClick={handleSignOut}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
       )}
 
       {(!isFullScreenMap || (currentView !== 'route-planning' && currentView !== 'survey')) && (
-      <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-colors duration-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center gap-2 py-2">
-            {/* Desktop navigation - hidden on mobile */}
-            <div className="hidden md:flex gap-1 overflow-x-auto scrollbar-hide">
-              <button
-                onClick={() => {
-                  setIsFullScreenMap(false);
-                  setCurrentView('facilities');
-                }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
-                  currentView === 'facilities'
-                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                <Building2 className="w-4 h-4" />
-                <span>Facilities</span>
-              </button>
-              <button
-                onClick={() => {
-                  const isMobile = window.innerWidth < 768;
-                  if (isMobile && currentView !== 'route-planning' && optimizationResult) {
-                    setIsFullScreenMap(true);
-                  }
-                  setCurrentView('route-planning');
-                }}
-                disabled={facilities.length === 0}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
-                  currentView === 'route-planning'
-                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                <MapPin className="w-4 h-4" />
-                <span>Route Planning</span>
-              </button>
-              <button
-                onClick={() => setCurrentView('survey')}
-                disabled={!optimizationResult}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
-                  currentView === 'survey'
-                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                <Navigation2 className="w-4 h-4" />
-                <span>Survey Mode</span>
-              </button>
-              <button
-                onClick={() => {
-                  setIsFullScreenMap(false);
-                  setCurrentView('settings');
-                }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${
-                  currentView === 'settings'
-                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                <UserCog className="w-4 h-4" />
-                <span>Settings</span>
-              </button>
-            </div>
-
-            {/* Mobile - Show current view name and hamburger */}
-            <div className="flex md:hidden items-center justify-between w-full">
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                {currentView === 'facilities' && 'Facilities'}
-                {currentView === 'route-planning' && 'Route Planning'}
-                {currentView === 'survey' && 'Survey Mode'}
-                {currentView === 'settings' && 'Settings'}
-              </span>
-              <button
-                onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                {showMobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Mobile menu dropdown */}
-          {showMobileMenu && (
-            <div className="md:hidden py-2 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex flex-col gap-1">
+        <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-colors duration-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center gap-2 py-2">
+              {/* Desktop navigation - hidden on mobile */}
+              <div className="hidden md:flex gap-1 overflow-x-auto scrollbar-hide">
                 <button
                   onClick={() => {
                     setIsFullScreenMap(false);
                     setCurrentView('facilities');
-                    setShowMobileMenu(false);
                   }}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${
-                    currentView === 'facilities'
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'facilities'
                       ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
-                  <Building2 className="w-5 h-5" />
+                  <Building2 className="w-4 h-4" />
                   <span>Facilities</span>
                 </button>
                 <button
@@ -2164,53 +2083,128 @@ function App() {
                       setIsFullScreenMap(true);
                     }
                     setCurrentView('route-planning');
-                    setShowMobileMenu(false);
                   }}
                   disabled={facilities.length === 0}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${
-                    currentView === 'route-planning'
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'route-planning'
                       ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                  <MapPin className="w-5 h-5" />
+                  <MapPin className="w-4 h-4" />
                   <span>Route Planning</span>
                 </button>
                 <button
-                  onClick={() => {
-                    setCurrentView('survey');
-                    setShowMobileMenu(false);
-                  }}
+                  onClick={() => setCurrentView('survey')}
                   disabled={!optimizationResult}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${
-                    currentView === 'survey'
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'survey'
                       ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                  <Navigation2 className="w-5 h-5" />
+                  <Navigation2 className="w-4 h-4" />
                   <span>Survey Mode</span>
                 </button>
                 <button
                   onClick={() => {
                     setIsFullScreenMap(false);
                     setCurrentView('settings');
-                    setShowMobileMenu(false);
                   }}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${
-                    currentView === 'settings'
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'settings'
                       ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
-                  <UserCog className="w-5 h-5" />
+                  <UserCog className="w-4 h-4" />
                   <span>Settings</span>
                 </button>
               </div>
+
+              {/* Mobile - Show current view name and hamburger */}
+              <div className="flex md:hidden items-center justify-between w-full">
+                <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {currentView === 'facilities' && 'Facilities'}
+                  {currentView === 'route-planning' && 'Route Planning'}
+                  {currentView === 'survey' && 'Survey Mode'}
+                  {currentView === 'settings' && 'Settings'}
+                </span>
+                <button
+                  onClick={() => setShowMobileMenu(!showMobileMenu)}
+                  className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  {showMobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                </button>
+              </div>
             </div>
-          )}
-        </div>
-      </nav>
+
+            {/* Mobile menu dropdown */}
+            {showMobileMenu && (
+              <div className="md:hidden py-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => {
+                      setIsFullScreenMap(false);
+                      setCurrentView('facilities');
+                      setShowMobileMenu(false);
+                    }}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'facilities'
+                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                  >
+                    <Building2 className="w-5 h-5" />
+                    <span>Facilities</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const isMobile = window.innerWidth < 768;
+                      if (isMobile && currentView !== 'route-planning' && optimizationResult) {
+                        setIsFullScreenMap(true);
+                      }
+                      setCurrentView('route-planning');
+                      setShowMobileMenu(false);
+                    }}
+                    disabled={facilities.length === 0}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'route-planning'
+                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    <MapPin className="w-5 h-5" />
+                    <span>Route Planning</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCurrentView('survey');
+                      setShowMobileMenu(false);
+                    }}
+                    disabled={!optimizationResult}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'survey'
+                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    <Navigation2 className="w-5 h-5" />
+                    <span>Survey Mode</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsFullScreenMap(false);
+                      setCurrentView('settings');
+                      setShowMobileMenu(false);
+                    }}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'settings'
+                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                  >
+                    <UserCog className="w-5 h-5" />
+                    <span>Settings</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </nav>
       )}
 
       <main className={currentView === 'survey' ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
@@ -2271,256 +2265,128 @@ function App() {
 
         {currentView === 'configure' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Number of Teams
-              </label>
-              <select
-                value={teamCount}
-                onChange={(e) => setTeamCount(parseInt(e.target.value))}
-                className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="1">1 Team (Single Home Base)</option>
-                <option value="2">2 Teams</option>
-                <option value="3">3 Teams</option>
-                <option value="4">4 Teams</option>
-              </select>
+            <div className="max-w-4xl mx-auto">
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Number of Teams
+                </label>
+                <select
+                  value={teamCount}
+                  onChange={(e) => setTeamCount(parseInt(e.target.value))}
+                  className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="1">1 Team (Single Home Base)</option>
+                  <option value="2">2 Teams</option>
+                  <option value="3">3 Teams</option>
+                  <option value="4">4 Teams</option>
+                </select>
+              </div>
+              {teamCount === 1 ? (
+                <HomeBaseConfig
+                  userId={user?.authUserId || ''}
+                  accountId={currentAccount.id}
+                  onSaved={() => loadData()}
+                />
+              ) : (
+                <MultiHomeBaseConfig
+                  userId={user?.authUserId || ''}
+                  accountId={currentAccount.id}
+                  teamCount={teamCount}
+                  onSaved={() => loadData()}
+                />
+              )}
             </div>
-            {teamCount === 1 ? (
-              <HomeBaseConfig
-                userId={user?.authUserId || ''}
-                accountId={currentAccount.id}
-                onSaved={() => loadData()}
-              />
-            ) : (
-              <MultiHomeBaseConfig
-                userId={user?.authUserId || ''}
-                accountId={currentAccount.id}
-                teamCount={teamCount}
-                onSaved={() => loadData()}
-              />
-            )}
-          </div>
           </div>
         )}
 
         {currentView === 'route-planning' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="space-y-6">
-            {!optimizationResult && !isLoadingRoutes && homeBase && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <RoutePlanningControls
-                  userId={currentAccount.id}
-                  onGenerate={handleGenerateRoutes}
-                  onVisitDurationChange={handleUpdateVisitDuration}
-                  isGenerating={isGenerating}
-                  disabled={!homeBase || facilities.length === 0}
-                  lastUsedSettings={lastUsedSettings}
-                />
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Home className="w-5 h-5 text-green-600" />
-                    <h2 className="text-xl font-semibold text-gray-800">Current Home Base</h2>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-gray-700">{homeBase.address}</p>
-                    <p className="text-sm text-gray-600">
-                      {Number(homeBase.latitude).toFixed(6)}, {Number(homeBase.longitude).toFixed(6)}
-                    </p>
-                    <button
-                      onClick={() => setCurrentView('configure')}
-                      className="text-sm text-blue-600 hover:text-blue-800 underline"
-                    >
-                      Change Home Base
-                    </button>
+            <div className="space-y-6">
+              {!optimizationResult && !isLoadingRoutes && homeBase && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <RoutePlanningControls
+                    userId={currentAccount.id}
+                    onGenerate={handleGenerateRoutes}
+                    onVisitDurationChange={handleUpdateVisitDuration}
+                    isGenerating={isGenerating}
+                    disabled={!homeBase || facilities.length === 0}
+                    lastUsedSettings={lastUsedSettings}
+                  />
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Home className="w-5 h-5 text-green-600" />
+                      <h2 className="text-xl font-semibold text-gray-800">Current Home Base</h2>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-gray-700">{homeBase.address}</p>
+                      <p className="text-sm text-gray-600">
+                        {Number(homeBase.latitude).toFixed(6)}, {Number(homeBase.longitude).toFixed(6)}
+                      </p>
+                      <button
+                        onClick={() => setCurrentView('configure')}
+                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                      >
+                        Change Home Base
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {isLoadingRoutes && (
-              <div className="flex flex-col items-center justify-center py-16 px-4">
-                <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-                  <div className="mb-6 flex justify-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-800 mb-2">Loading Routes...</h3>
-                  <p className="text-gray-600">Please wait while we load your route data.</p>
-                </div>
-              </div>
-            )}
-
-            {!homeBase && !isLoadingRoutes && !optimizationResult && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-yellow-800">
-                  Please configure your home base before generating routes.
-                </p>
-                <button
-                  onClick={() => setCurrentView('configure')}
-                  className="mt-2 text-yellow-700 hover:text-yellow-900 underline font-medium"
-                >
-                  Go to Home Base Configuration
-                </button>
-              </div>
-            )}
-
-            {isGenerating && optimizationResult && (
-              <div className="flex flex-col items-center justify-center py-16 px-4">
-                <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-                  <div className="mb-6 flex justify-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
-                  </div>
-                  <h3 className="text-xl font-semibold text-gray-800 mb-2">Updating Routes...</h3>
-                  <p className="text-gray-600">Please wait while we apply your new settings.</p>
-                </div>
-              </div>
-            )}
-
-            {optimizationResult && !isLoadingRoutes && !isGenerating && (
-              <>
-                <StickyStatsBar
-                  totalDays={optimizationResult.totalDays}
-                  totalFacilities={visibleFacilityCount}
-                  totalMiles={optimizationResult.totalMiles}
-                  totalDriveTime={optimizationResult.totalDriveTime}
-                  totalVisitTime={optimizationResult.totalVisitTime}
-                  totalTime={optimizationResult.totalTime}
-                  triggerElementId="main-stats-cards"
-                />
-
-                <RouteResults
-                  result={optimizationResult}
-                  settings={lastUsedSettings}
-                  facilities={facilities}
-                  userId={currentAccount.id}
-                  teamNumber={1}
-                  accountId={currentAccount.id}
-                  onSaveCurrentRoute={handleSaveCurrentRoute}
-                  onLoadRoute={handleLoadRoute}
-                  currentRouteId={currentRouteId || undefined}
-                  onConfigureHomeBase={() => setCurrentView('configure')}
-                  homeBase={homeBase || undefined}
-                  onUpdateResult={(newResult) => {
-                    setOptimizationResult(newResult);
-                    setRouteVersion(prev => prev + 1);
-                  }}
-                  onRefresh={async () => {
-                    console.log('RouteResults onRefresh called');
-                    setTriggerFitBounds(prev => prev + 1);
-                    // Reload latest settings from database
-                    const { data: latestSettings, error } = await supabase
-                      .from('user_settings')
-                      .select('*')
-                      .eq('account_id', currentAccount.id)
-                      .maybeSingle();
-
-                    if (error) {
-                      console.error('Error loading settings for refresh:', error);
-                      alert(`Failed to load settings: ${error.message}`);
-                      return;
-                    }
-
-                    if (latestSettings) {
-                      console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
-                      handleGenerateRoutes(latestSettings);
-                    } else {
-                      // Settings don't exist yet, use lastUsedSettings or create defaults
-                      console.warn('No settings found in database, using current settings');
-                      if (lastUsedSettings) {
-                        handleGenerateRoutes(lastUsedSettings);
-                      } else {
-                        alert('Settings not found. Please configure settings first.');
-                      }
-                    }
-                  }}
-                  onFacilitiesUpdated={loadData}
-                  isRefreshing={isGenerating}
-                  showOnlySettings={true}
-                  onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
-                />
-
-                <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Calendar className="w-4 h-4 md:w-5 md:h-5 text-blue-600 dark:text-blue-400" />
-                      <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Days / Time</h3>
+              {isLoadingRoutes && (
+                <div className="flex flex-col items-center justify-center py-16 px-4">
+                  <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+                    <div className="mb-6 flex justify-center">
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
                     </div>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{filteredOptimizationResult?.totalDays || 0} days</p>
-                    <p className="text-xs md:text-sm text-gray-600 dark:text-gray-300 mt-1">
-                      {isNaN(filteredOptimizationResult?.totalTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalTime || 0) % 60)}m`} total
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      ({isNaN(filteredOptimizationResult?.totalDriveTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalDriveTime || 0) % 60)}m`} drive + {isNaN(filteredOptimizationResult?.totalVisitTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalVisitTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalVisitTime || 0) % 60)}m`} onsite)
-                    </p>
-                  </div>
-
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <MapPin className="w-4 h-4 md:w-5 md:h-5 text-green-600 dark:text-green-400" />
-                      <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Facilities</h3>
-                    </div>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{visibleFacilityCount}</p>
-                  </div>
-
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-orange-600 dark:text-orange-400" />
-                      <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Miles</h3>
-                    </div>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
-                      {(filteredOptimizationResult?.totalMiles || 0).toFixed(1)}
-                    </p>
-                  </div>
-
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Clock className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
-                      <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Drive Time</h3>
-                    </div>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
-                      {Math.round((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h
-                    </p>
+                    <h3 className="text-xl font-semibold text-gray-800 mb-2">Loading Routes...</h3>
+                    <p className="text-gray-600">Please wait while we load your route data.</p>
                   </div>
                 </div>
+              )}
 
-                {!isFullScreenMap && (
-                  <div className="relative">
-                    <button
-                      onClick={() => setIsFullScreenMap(true)}
-                      className="absolute bottom-4 left-4 z-10 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg shadow-md flex items-center gap-2 transition-colors"
-                      title="Full screen map"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                      <span className="text-sm font-medium">Full Screen</span>
-                    </button>
-                    <RouteMap
-                      key={`route-map-${routeVersion}`}
-                      result={filteredOptimizationResult}
-                      homeBase={homeBase}
-                      onReassignFacility={handleReassignFacility}
-                      onBulkReassignFacilities={handleBulkReassignFacilities}
-                      onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
-                      onUpdateRoute={() => setShowRefreshOptions(true)}
-                      accountId={currentAccount?.id}
-                      settings={lastUsedSettings}
-                      inspections={inspections}
-                      completedVisibility={completedVisibility}
-                      facilities={filteredFacilities}
-                      userId={DEMO_USER_ID}
-                      teamNumber={1}
-                      onFacilitiesChange={loadData}
-                      onInspectionFormActiveChange={setIsInspectionFormActive}
-                      triggerFitBounds={triggerFitBounds}
-                      onEditFacility={handleEditFacility}
-                    />
+              {!homeBase && !isLoadingRoutes && !optimizationResult && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <p className="text-yellow-800">
+                    Please configure your home base before generating routes.
+                  </p>
+                  <button
+                    onClick={() => setCurrentView('configure')}
+                    className="mt-2 text-yellow-700 hover:text-yellow-900 underline font-medium"
+                  >
+                    Go to Home Base Configuration
+                  </button>
+                </div>
+              )}
+
+              {isGenerating && optimizationResult && (
+                <div className="flex flex-col items-center justify-center py-16 px-4">
+                  <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+                    <div className="mb-6 flex justify-center">
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-800 mb-2">Updating Routes...</h3>
+                    <p className="text-gray-600">Please wait while we apply your new settings.</p>
                   </div>
-                )}
-                {(!isFullScreenMap || showRefreshOptions) && (
+                </div>
+              )}
+
+              {optimizationResult && !isLoadingRoutes && !isGenerating && (
+                <>
+                  <StickyStatsBar
+                    totalDays={optimizationResult.totalDays}
+                    totalFacilities={visibleFacilityCount}
+                    totalMiles={optimizationResult.totalMiles}
+                    totalDriveTime={optimizationResult.totalDriveTime}
+                    totalVisitTime={optimizationResult.totalVisitTime}
+                    totalTime={optimizationResult.totalTime}
+                    triggerElementId="main-stats-cards"
+                  />
+
                   <RouteResults
-                    result={filteredOptimizationResult}
+                    result={optimizationResult}
                     settings={lastUsedSettings}
-                    facilities={filteredFacilities}
+                    facilities={facilities}
                     userId={currentAccount.id}
                     teamNumber={1}
                     accountId={currentAccount.id}
@@ -2528,15 +2394,11 @@ function App() {
                     onLoadRoute={handleLoadRoute}
                     currentRouteId={currentRouteId || undefined}
                     onConfigureHomeBase={() => setCurrentView('configure')}
-                    showRefreshOptions={showRefreshOptions}
-                    onShowRefreshOptions={setShowRefreshOptions}
                     homeBase={homeBase || undefined}
                     onUpdateResult={(newResult) => {
                       setOptimizationResult(newResult);
                       setRouteVersion(prev => prev + 1);
                     }}
-                    completedVisibility={completedVisibility}
-                    onToggleHideCompleted={() => setShowVisibilityModal(true)}
                     onRefresh={async () => {
                       console.log('RouteResults onRefresh called');
                       setTriggerFitBounds(prev => prev + 1);
@@ -2568,71 +2430,72 @@ function App() {
                     }}
                     onFacilitiesUpdated={loadData}
                     isRefreshing={isGenerating}
-                    showOnlyRouteList={true}
-                    onShowOnMap={(lat, lng) => {
-                      setMapTargetCoords({ latitude: lat, longitude: lng });
-                      setIsFullScreenMap(true);
-                    }}
+                    showOnlySettings={true}
                     onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                   />
-                )}
 
-                {isFullScreenMap && (
-                  <>
-                    <div className="fixed inset-0 z-[5] bg-white overflow-hidden">
-                      {filteredOptimizationResult && (
-                        <div className="absolute bottom-0 left-0 right-0 z-[60] pb-safe">
-                          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700 shadow-lg transition-colors duration-200">
-                          <div className="px-3 py-3 sm:px-4 sm:py-3">
-                            <div className="flex items-center justify-around gap-2 sm:gap-4 text-xs sm:text-sm overflow-x-auto">
-                              <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalDays} days</span>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                    {Math.floor(filteredOptimizationResult.totalTime / 60)}h {Math.round(filteredOptimizationResult.totalTime % 60)}m total
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
-                              <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
-                                <span className="font-semibold text-gray-900 dark:text-white">{visibleFacilityCount}</span>
-                                <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">facilities</span>
-                              </div>
-                              <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
-                              <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <TrendingUp className="w-4 h-4 text-orange-600 dark:text-orange-400" />
-                                <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalMiles.toFixed(1)}</span>
-                                <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">mi</span>
-                              </div>
-                              <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
-                              <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-gray-900 dark:text-white whitespace-nowrap">{Math.floor(filteredOptimizationResult.totalDriveTime / 60)}h {Math.round(filteredOptimizationResult.totalDriveTime % 60)}m</span>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">drive time</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                  <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Calendar className="w-4 h-4 md:w-5 md:h-5 text-blue-600 dark:text-blue-400" />
+                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Days / Time</h3>
                       </div>
-                    )}
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{filteredOptimizationResult?.totalDays || 0} days</p>
+                      <p className="text-xs md:text-sm text-gray-600 dark:text-gray-300 mt-1">
+                        {isNaN(filteredOptimizationResult?.totalTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalTime || 0) % 60)}m`} total
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        ({isNaN(filteredOptimizationResult?.totalDriveTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalDriveTime || 0) % 60)}m`} drive + {isNaN(filteredOptimizationResult?.totalVisitTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalVisitTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalVisitTime || 0) % 60)}m`} onsite)
+                      </p>
+                    </div>
 
-                    <div className="h-full w-full">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <MapPin className="w-4 h-4 md:w-5 md:h-5 text-green-600 dark:text-green-400" />
+                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Facilities</h3>
+                      </div>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{visibleFacilityCount}</p>
+                    </div>
+
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-orange-600 dark:text-orange-400" />
+                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Miles</h3>
+                      </div>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+                        {(filteredOptimizationResult?.totalMiles || 0).toFixed(1)}
+                      </p>
+                    </div>
+
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Clock className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
+                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Drive Time</h3>
+                      </div>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+                        {Math.round((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h
+                      </p>
+                    </div>
+                  </div>
+
+                  {!isFullScreenMap && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setIsFullScreenMap(true)}
+                        className="absolute bottom-4 left-4 z-10 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg shadow-md flex items-center gap-2 transition-colors"
+                        title="Full screen map"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                        <span className="text-sm font-medium">Full Screen</span>
+                      </button>
                       <RouteMap
-                        key={`route-map-fullscreen-${routeVersion}-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}`}
+                        key={`route-map-${routeVersion}`}
                         result={filteredOptimizationResult}
                         homeBase={homeBase}
-                        isFullScreen={true}
                         onReassignFacility={handleReassignFacility}
                         onBulkReassignFacilities={handleBulkReassignFacilities}
                         onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
-                        onUpdateRoute={() => {
-                          setShowRefreshOptions(true);
-                          setTriggerFitBounds(prev => prev + 1);
-                        }}
+                        onUpdateRoute={() => setShowRefreshOptions(true)}
                         accountId={currentAccount?.id}
                         settings={lastUsedSettings}
                         inspections={inspections}
@@ -2641,85 +2504,213 @@ function App() {
                         userId={DEMO_USER_ID}
                         teamNumber={1}
                         onFacilitiesChange={loadData}
-                        targetCoords={mapTargetCoords}
-                        onNavigateToView={(view) => {
-                          setCurrentView(view);
-                          setIsFullScreenMap(false);
-                        }}
                         onInspectionFormActiveChange={setIsInspectionFormActive}
-                        onToggleHideCompleted={() => setShowVisibilityModal(true)}
-                        showSearchFromParent={showMapSearch}
-                        triggerLocationCenter={triggerMapLocation}
-                        navigationMode={navigationMode}
-                        onNavigationModeChange={setNavigationMode}
-                        locationTracking={locationTracking}
-                        onLocationTrackingChange={setLocationTracking}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
                       />
                     </div>
-                  </div>
+                  )}
+                  {(!isFullScreenMap || showRefreshOptions) && (
+                    <RouteResults
+                      result={filteredOptimizationResult}
+                      settings={lastUsedSettings}
+                      facilities={filteredFacilities}
+                      userId={currentAccount.id}
+                      teamNumber={1}
+                      accountId={currentAccount.id}
+                      onSaveCurrentRoute={handleSaveCurrentRoute}
+                      onLoadRoute={handleLoadRoute}
+                      currentRouteId={currentRouteId || undefined}
+                      onConfigureHomeBase={() => setCurrentView('configure')}
+                      showRefreshOptions={showRefreshOptions}
+                      onShowRefreshOptions={setShowRefreshOptions}
+                      homeBase={homeBase || undefined}
+                      onUpdateResult={(newResult) => {
+                        setOptimizationResult(newResult);
+                        setRouteVersion(prev => prev + 1);
+                      }}
+                      completedVisibility={completedVisibility}
+                      onToggleHideCompleted={() => setShowVisibilityModal(true)}
+                      onRefresh={async () => {
+                        console.log('RouteResults onRefresh called');
+                        setTriggerFitBounds(prev => prev + 1);
+                        // Reload latest settings from database
+                        const { data: latestSettings, error } = await supabase
+                          .from('user_settings')
+                          .select('*')
+                          .eq('account_id', currentAccount.id)
+                          .maybeSingle();
 
-                  <div className="fixed bottom-16 left-4 z-20 flex gap-2">
-                      <button
-                        onClick={() => setIsFullScreenMap(false)}
-                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg border border-red-700"
-                      >
-                        <X className="w-4 h-4" />
-                        <span className="text-sm font-medium hidden sm:inline">Exit Fullscreen</span>
-                      </button>
-                      <button
-                        onClick={() => setShowVisibilityModal(true)}
-                        className={`p-2 rounded-lg transition-colors shadow-lg border ${
-                          completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
-                            ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                        }`}
-                        title="Adjust completed facilities visibility"
-                      >
-                        {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </button>
-                    </div>
+                        if (error) {
+                          console.error('Error loading settings for refresh:', error);
+                          alert(`Failed to load settings: ${error.message}`);
+                          return;
+                        }
 
-                    <div className="fixed bottom-16 right-4 z-20 flex items-center gap-3">
-                      <button
-                        onClick={() => setNavigationMode(!navigationMode)}
-                        className={`p-2 rounded-lg transition-colors shadow-lg border ${
-                          navigationMode
-                            ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                        }`}
-                        title="Toggle navigation mode with GPS speed and map rotation"
-                      >
-                        <Car className="w-5 h-5" />
-                      </button>
+                        if (latestSettings) {
+                          console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
+                          handleGenerateRoutes(latestSettings);
+                        } else {
+                          // Settings don't exist yet, use lastUsedSettings or create defaults
+                          console.warn('No settings found in database, using current settings');
+                          if (lastUsedSettings) {
+                            handleGenerateRoutes(lastUsedSettings);
+                          } else {
+                            alert('Settings not found. Please configure settings first.');
+                          }
+                        }
+                      }}
+                      onFacilitiesUpdated={loadData}
+                      isRefreshing={isGenerating}
+                      showOnlyRouteList={true}
+                      onShowOnMap={(lat, lng) => {
+                        setMapTargetCoords({ latitude: lat, longitude: lng });
+                        setIsFullScreenMap(true);
+                      }}
+                      onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
+                    />
+                  )}
 
-                      {!navigationMode && (
+                  {isFullScreenMap && (
+                    <>
+                      <div className="fixed inset-0 z-[5] bg-white overflow-hidden">
+                        {filteredOptimizationResult && (
+                          <div className="absolute bottom-0 left-0 right-0 z-[60] pb-safe">
+                            <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700 shadow-lg transition-colors duration-200">
+                              <div className="px-3 py-3 sm:px-4 sm:py-3">
+                                <div className="flex items-center justify-around gap-2 sm:gap-4 text-xs sm:text-sm overflow-x-auto">
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalDays} days</span>
+                                      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                        {Math.floor(filteredOptimizationResult.totalTime / 60)}h {Math.round(filteredOptimizationResult.totalTime % 60)}m total
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                    <span className="font-semibold text-gray-900 dark:text-white">{visibleFacilityCount}</span>
+                                    <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">facilities</span>
+                                  </div>
+                                  <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <TrendingUp className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                                    <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalMiles.toFixed(1)}</span>
+                                    <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">mi</span>
+                                  </div>
+                                  <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-gray-900 dark:text-white whitespace-nowrap">{Math.floor(filteredOptimizationResult.totalDriveTime / 60)}h {Math.round(filteredOptimizationResult.totalDriveTime % 60)}m</span>
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">drive time</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="h-full w-full">
+                          <RouteMap
+                            key={`route-map-fullscreen-${routeVersion}-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}`}
+                            result={filteredOptimizationResult}
+                            homeBase={homeBase}
+                            isFullScreen={true}
+                            onReassignFacility={handleReassignFacility}
+                            onBulkReassignFacilities={handleBulkReassignFacilities}
+                            onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
+                            onUpdateRoute={() => {
+                              setShowRefreshOptions(true);
+                              setTriggerFitBounds(prev => prev + 1);
+                            }}
+                            accountId={currentAccount?.id}
+                            settings={lastUsedSettings}
+                            inspections={inspections}
+                            completedVisibility={completedVisibility}
+                            facilities={filteredFacilities}
+                            userId={DEMO_USER_ID}
+                            teamNumber={1}
+                            onFacilitiesChange={loadData}
+                            targetCoords={mapTargetCoords}
+                            onNavigateToView={(view) => {
+                              setCurrentView(view);
+                              setIsFullScreenMap(false);
+                            }}
+                            onInspectionFormActiveChange={setIsInspectionFormActive}
+                            onToggleHideCompleted={() => setShowVisibilityModal(true)}
+                            showSearchFromParent={showMapSearch}
+                            triggerLocationCenter={triggerMapLocation}
+                            navigationMode={navigationMode}
+                            onNavigationModeChange={setNavigationMode}
+                            locationTracking={locationTracking}
+                            onLocationTrackingChange={setLocationTracking}
+                            triggerFitBounds={triggerFitBounds}
+                            onEditFacility={handleEditFacility}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="fixed bottom-16 left-4 z-20 flex gap-2">
                         <button
-                          onClick={() => {
-                            viewingFacilityRef.current = false;
-                            setMapTargetCoords(null);
-                            const newTracking = !locationTracking;
-                            setLocationTracking(newTracking);
-                            // Always trigger location center when clicking the button
-                            setTriggerMapLocation(prev => prev + 1);
-                          }}
-                          className={`p-2 rounded-lg transition-colors shadow-lg border ${
-                            locationTracking
-                              ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                              : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                          }`}
-                          title={locationTracking ? "Stop following my location" : "Follow my location"}
+                          onClick={() => setIsFullScreenMap(false)}
+                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg border border-red-700"
                         >
-                          <Crosshair className="w-5 h-5" />
+                          <X className="w-4 h-4" />
+                          <span className="text-sm font-medium hidden sm:inline">Exit Fullscreen</span>
                         </button>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+                        <button
+                          onClick={() => setShowVisibilityModal(true)}
+                          className={`p-2 rounded-lg transition-colors shadow-lg border ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
+                              ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          title="Adjust completed facilities visibility"
+                        >
+                          {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                        </button>
+                      </div>
+
+                      <div className="fixed bottom-16 right-4 z-20 flex items-center gap-3">
+                        <button
+                          onClick={() => setNavigationMode(!navigationMode)}
+                          className={`p-2 rounded-lg transition-colors shadow-lg border ${navigationMode
+                              ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          title="Toggle navigation mode with GPS speed and map rotation"
+                        >
+                          <Car className="w-5 h-5" />
+                        </button>
+
+                        {!navigationMode && (
+                          <button
+                            onClick={() => {
+                              viewingFacilityRef.current = false;
+                              setMapTargetCoords(null);
+                              const newTracking = !locationTracking;
+                              setLocationTracking(newTracking);
+                              // Always trigger location center when clicking the button
+                              setTriggerMapLocation(prev => prev + 1);
+                            }}
+                            className={`p-2 rounded-lg transition-colors shadow-lg border ${locationTracking
+                                ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                                : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                              }`}
+                            title={locationTracking ? "Stop following my location" : "Follow my location"}
+                          >
+                            <Crosshair className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
 
