@@ -1532,9 +1532,15 @@ export default function TeamManagement() {
                     return true;
                   }
                   // Otherwise, hide the agency owner from the list (case-insensitive comparison)
-                  if (agencyOwnerEmail && member.email) {
-                    return member.email.toLowerCase() !== agencyOwnerEmail.toLowerCase();
+                  if (agencyOwnerEmail && member.email && member.email.toLowerCase() === agencyOwnerEmail.toLowerCase()) {
+                    return false;
                   }
+
+                  // Fallback: also hide by name if it's "Agency Owner"
+                  if (member.full_name && member.full_name.toLowerCase() === 'agency owner') {
+                    return false;
+                  }
+
                   return true;
                 })
                 .map((member) => (
