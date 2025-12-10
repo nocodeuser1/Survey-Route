@@ -36,6 +36,7 @@ export default function TeamManagement() {
   const [success, setSuccess] = useState('');
   const [agencyOwnerEmail, setAgencyOwnerEmail] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [isCurrentUserAgencyOwner, setIsCurrentUserAgencyOwner] = useState<boolean>(false);
 
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -87,9 +88,20 @@ export default function TeamManagement() {
         .eq('id', currentAccount.id)
         .single();
 
+      // Get current user email first so we can check if they're the agency owner
+      const { data: { user: currentAuthUser } } = await supabase.auth.getUser();
+      const userEmail = currentAuthUser?.email || null;
+      setCurrentUserEmail(userEmail);
+
       if (accountData?.agencies) {
         const ownerEmail = (accountData?.agencies as any)?.owner_email;
         setAgencyOwnerEmail(ownerEmail);
+        // Check if current user is the agency owner
+        const isOwner = !!(userEmail && ownerEmail && userEmail.toLowerCase() === ownerEmail.toLowerCase());
+        setIsCurrentUserAgencyOwner(isOwner);
+        console.log('[TeamManagement] Agency owner check:', { userEmail, ownerEmail, isOwner });
+      } else {
+        setIsCurrentUserAgencyOwner(false);
       }
 
       // Use the security definer function to get team members
@@ -118,10 +130,8 @@ export default function TeamManagement() {
 
       });
 
-      // Get current user info for debugging
-      const { data: { user: currentAuthUser } } = await supabase.auth.getUser();
-      console.log('[TeamManagement] Current auth user:', currentAuthUser?.id, currentAuthUser?.email);
-      setCurrentUserEmail(currentAuthUser?.email || null);
+      // currentAuthUser already fetched above for agency owner check
+      console.log('[TeamManagement] Current auth user:', currentAuthUser?.id, userEmail);
 
       // Check current user's role in this account
       const { data: currentUserId } = await supabase
@@ -1518,11 +1528,14 @@ export default function TeamManagement() {
                 // Filter out agency owner for non-agency-owner users (admin/user shouldn't see agency owner)
                 .filter(member => {
                   // If current user is agency owner, show all members
-                  if (currentUserEmail && agencyOwnerEmail && currentUserEmail === agencyOwnerEmail) {
+                  if (isCurrentUserAgencyOwner) {
                     return true;
                   }
-                  // Otherwise, hide the agency owner from the list
-                  return member.email !== agencyOwnerEmail;
+                  // Otherwise, hide the agency owner from the list (case-insensitive comparison)
+                  if (agencyOwnerEmail && member.email) {
+                    return member.email.toLowerCase() !== agencyOwnerEmail.toLowerCase();
+                  }
+                  return true;
                 })
                 .map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-800 transition-colors duration-200">
