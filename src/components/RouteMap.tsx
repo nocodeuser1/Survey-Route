@@ -829,18 +829,20 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                         border: none;
                         border-radius: 4px;
                         cursor: pointer;
-                        font-size: 14px;
+                        font-size: 12px;
                         flex-shrink: 0;
                         display: flex;
                         align-items: center;
                         justify-content: center;
+                        gap: 4px;
                       "
-                      title="Fill Survey"
+                      title="${facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey'}"
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M9 11l3 3L22 4"></path>
                         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                       </svg>
+                      ${facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey'}
                     </button>
                     <button
                       id="navigate-btn-${facility.index}"
@@ -1222,9 +1224,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 <div style="display: flex; gap: 4px; margin-top: 8px;">
                   <button
                     id="survey-btn-${facilityIndex}"
-                    style="flex: 1; padding: 6px 8px; background-color: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;"
+                    style="flex: 1; padding: 6px 8px; background-color: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 4px;"
+                    title="${facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey'}"
                   >
-                    Fill Survey
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M9 11l3 3L22 4"></path>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                    ${facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey'}
                   </button>
                   <button
                     id="navigate-btn-${facilityIndex}"
