@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Mail, UserPlus, Trash2, Shield, User as UserIcon, CheckCircle, Clock, XCircle, Key, Copy, RefreshCw, AlertCircle, Bug } from 'lucide-react';
+import { Users, Mail, UserPlus, Trash2, Shield, User as UserIcon, CheckCircle, Clock, XCircle, Key, Copy, RefreshCw, AlertCircle, Bug, UserMinus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 
@@ -56,6 +56,18 @@ export default function TeamManagement() {
   const [checkingAuthStatus, setCheckingAuthStatus] = useState(false);
   const [authStatusResult, setAuthStatusResult] = useState<any>(null);
   const [authCheckEmail, setAuthCheckEmail] = useState('');
+
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
+
+  useEffect(() => {
+    console.log('[TeamManagement] showRevokeModal changed to:', showRevokeModal);
+  }, [showRevokeModal]);
+  const [invitationToRevoke, setInvitationToRevoke] = useState<{ id: string, email: string } | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const [showDeleteInviteModal, setShowDeleteInviteModal] = useState(false);
+  const [invitationToDelete, setInvitationToDelete] = useState<{ id: string, email: string } | null>(null);
+  const [showRemoveMemberModal, setShowRemoveMemberModal] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<{ id: string, email: string } | null>(null);
 
   useEffect(() => {
     if (currentAccount) {
@@ -450,14 +462,7 @@ export default function TeamManagement() {
     }
   }
 
-  function generateTemporaryPassword() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password;
-  }
+
 
   async function handleResendInvitation(invitationId: string, email: string) {
     if (!currentAccount) return;
@@ -545,8 +550,22 @@ export default function TeamManagement() {
     }
   }
 
-  async function handleRevokeInvitation(invitationId: string, email: string) {
-    if (!confirm('Are you sure you want to revoke this invitation? This will also clean up any incomplete account data.')) return;
+  function handleRevokeInvitation(invitationId: string, email: string) {
+    console.log('[TeamManagement] handleRevokeInvitation called for:', email);
+    try {
+      setInvitationToRevoke({ id: invitationId, email });
+      setShowRevokeModal(true);
+      console.log('[TeamManagement] Modal state set to true');
+    } catch (error) {
+      console.error('[TeamManagement] Error in handleRevokeInvitation:', error);
+    }
+  }
+
+  async function confirmRevokeInvitation() {
+    if (!invitationToRevoke) return;
+
+    setRevoking(true);
+    const { id: invitationId, email } = invitationToRevoke;
 
     try {
       // First, use force cleanup to be more aggressive
@@ -581,15 +600,26 @@ export default function TeamManagement() {
       }
 
       setTimeout(() => setSuccess(''), 5000);
+      setShowRevokeModal(false);
+      setInvitationToRevoke(null);
     } catch (err: any) {
       console.error('[TeamManagement] Error revoking invitation:', err);
       setError(err.message || 'Failed to revoke invitation');
       setTimeout(() => setError(''), 5000);
+    } finally {
+      setRevoking(false);
     }
   }
 
-  async function handleDeleteInvitation(invitationId: string, email: string) {
-    if (!confirm(`Are you sure you want to permanently delete this invitation record for ${email}? This action cannot be undone.`)) return;
+  function handleDeleteInvitation(invitationId: string, email: string) {
+    setInvitationToDelete({ id: invitationId, email });
+    setShowDeleteInviteModal(true);
+  }
+
+  async function confirmDeleteInvitation() {
+    if (!invitationToDelete) return;
+
+    const { id: invitationId, email } = invitationToDelete;
 
     try {
       setError('');
@@ -603,13 +633,13 @@ export default function TeamManagement() {
 
       if (error) throw error;
 
-      // Reload team data to refresh the list
+      setSuccess(`Invitation for ${email} deleted successfully`);
       await loadTeamData();
-
-      setSuccess(`Invitation record for ${email} has been permanently deleted`);
       setTimeout(() => setSuccess(''), 5000);
+      setShowDeleteInviteModal(false);
+      setInvitationToDelete(null);
     } catch (err: any) {
-      console.error('[TeamManagement] Error deleting invitation:', err);
+      console.error('Error deleting invitation:', err);
       setError(err.message || 'Failed to delete invitation');
       setTimeout(() => setError(''), 5000);
     }
@@ -633,8 +663,19 @@ export default function TeamManagement() {
         return;
       }
 
-      if (!confirm(`Are you sure you want to remove ${email} from this account?`)) return;
+      setMemberToRemove({ id: userId, email });
+      setShowRemoveMemberModal(true);
+    } catch (err: any) {
+      setError(err.message || 'Failed to check permissions');
+    }
+  }
 
+  async function confirmRemoveMember() {
+    if (!currentAccount || !memberToRemove) return;
+
+    const { id: userId, email } = memberToRemove;
+
+    try {
       const { error } = await supabase
         .from('account_users')
         .delete()
@@ -646,6 +687,8 @@ export default function TeamManagement() {
       setSuccess(`${email} has been removed from the account`);
       await loadTeamData();
       setTimeout(() => setSuccess(''), 3000);
+      setShowRemoveMemberModal(false);
+      setMemberToRemove(null);
     } catch (err: any) {
       setError(err.message || 'Failed to remove team member');
     }
@@ -1144,23 +1187,20 @@ export default function TeamManagement() {
 
             {emailTestResults && (
               <div className="space-y-3">
-                <div className={`p-4 rounded-lg border ${
-                  emailTestResults.finalResult?.success
-                    ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700'
-                    : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
-                }`}>
-                  <h5 className={`font-bold mb-2 ${
-                    emailTestResults.finalResult?.success
-                      ? 'text-green-900 dark:text-green-100'
-                      : 'text-red-900 dark:text-red-100'
+                <div className={`p-4 rounded-lg border ${emailTestResults.finalResult?.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
                   }`}>
+                  <h5 className={`font-bold mb-2 ${emailTestResults.finalResult?.success
+                    ? 'text-green-900 dark:text-green-100'
+                    : 'text-red-900 dark:text-red-100'
+                    }`}>
                     {emailTestResults.finalResult?.success ? 'Test Successful' : 'Test Failed'}
                   </h5>
-                  <p className={`text-sm font-sans ${
-                    emailTestResults.finalResult?.success
-                      ? 'text-green-800 dark:text-green-200'
-                      : 'text-red-800 dark:text-red-200'
-                  }`}>
+                  <p className={`text-sm font-sans ${emailTestResults.finalResult?.success
+                    ? 'text-green-800 dark:text-green-200'
+                    : 'text-red-800 dark:text-red-200'
+                    }`}>
                     {emailTestResults.finalResult?.message}
                   </p>
                   {emailTestResults.finalResult?.error && (
@@ -1292,17 +1332,16 @@ export default function TeamManagement() {
         </div>
       )}
 
-{invitations.length > 0 && (
+      {invitations.length > 0 && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
           <div className="border-b border-gray-200 dark:border-gray-600">
             <div className="flex gap-4 px-4">
               <button
                 onClick={() => setInvitationFilter('pending')}
-                className={`relative px-4 py-3 text-sm font-medium transition-colors ${
-                  invitationFilter === 'pending'
-                    ? 'text-blue-600 dark:text-blue-400'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
+                className={`relative px-4 py-3 text-sm font-medium transition-colors ${invitationFilter === 'pending'
+                  ? 'text-blue-600 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
               >
                 Pending
                 {invitations.filter(inv => inv.status === 'pending').length > 0 && (
@@ -1316,11 +1355,10 @@ export default function TeamManagement() {
               </button>
               <button
                 onClick={() => setInvitationFilter('all')}
-                className={`relative px-4 py-3 text-sm font-medium transition-colors ${
-                  invitationFilter === 'all'
-                    ? 'text-blue-600 dark:text-blue-400'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
+                className={`relative px-4 py-3 text-sm font-medium transition-colors ${invitationFilter === 'all'
+                  ? 'text-blue-600 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
               >
                 All History
                 <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
@@ -1401,6 +1439,7 @@ export default function TeamManagement() {
                               )}
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleRenewInvitation(invite.id, invite.email)}
                               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors font-medium"
                               title="Extend invitation expiration by 7 days"
@@ -1409,6 +1448,7 @@ export default function TeamManagement() {
                               Renew
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleResendInvitation(invite.id, invite.email)}
                               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors font-medium"
                               title="Resend invitation email"
@@ -1417,7 +1457,11 @@ export default function TeamManagement() {
                               Resend
                             </button>
                             <button
-                              onClick={() => handleRevokeInvitation(invite.id, invite.email)}
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleRevokeInvitation(invite.id, invite.email);
+                              }}
                               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors font-medium"
                               title="Revoke invitation and clean up orphaned auth accounts"
                             >
@@ -1428,6 +1472,7 @@ export default function TeamManagement() {
                         )}
                         {!isPending && (
                           <button
+                            type="button"
                             onClick={() => handleDeleteInvitation(invite.id, invite.email)}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors font-medium"
                             title="Permanently delete this invitation record"
@@ -1604,37 +1649,148 @@ export default function TeamManagement() {
                   onChange={(e) => setNewMemberRole(e.target.value as 'account_admin' | 'user')}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
                 >
-                  <option value="user">User - Can use the app and add their signature</option>
-                  <option value="account_admin">Admin - Can manage team and account settings</option>
+                  <option value="user">User</option>
+                  <option value="account_admin">Admin</option>
                 </select>
               </div>
 
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-3 transition-colors duration-200">
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  The user account will be created immediately. You'll receive an email template to copy and send to the new team member with their login credentials.
-                </p>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddMember}
+                  disabled={adding}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200 flex items-center gap-2"
+                >
+                  {adding ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      Add Member
+                    </>
+                  )}
+                </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="flex gap-3 mt-6">
+      {showRevokeModal && invitationToRevoke && (
+        (() => {
+          console.log('[TeamManagement] Rendering Revoke Modal', invitationToRevoke);
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-6 h-6" />
+                  Revoke Invitation?
+                </h3>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  Are you sure you want to revoke the invitation for <span className="font-semibold">{invitationToRevoke.email}</span>?
+                  <br /><br />
+                  This will invalidate the invitation link and clean up any associated incomplete account data.
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => {
+                      setShowRevokeModal(false);
+                      setInvitationToRevoke(null);
+                    }}
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                    disabled={revoking}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmRevokeInvitation}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors flex items-center gap-2"
+                    disabled={revoking}
+                  >
+                    {revoking ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Revoking...
+                      </>
+                    ) : (
+                      'Yes, Revoke Invitation'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()
+      )}
+
+      {showDeleteInviteModal && invitationToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 text-red-600 dark:text-red-400">
+              <Trash2 className="w-6 h-6" />
+              Delete Invitation Record?
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Are you sure you want to permanently delete the invitation record for <span className="font-semibold">{invitationToDelete.email}</span>?
+              <br /><br />
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
-                  setShowAddModal(false);
-                  setNewMemberEmail('');
-                  setNewMemberPassword('');
-                  setNewMemberRole('user');
-                  setError('');
+                  setShowDeleteInviteModal(false);
+                  setInvitationToDelete(null);
                 }}
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAddMember}
-                disabled={adding || !newMemberEmail}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={confirmDeleteInvitation}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
               >
-                {adding ? 'Adding...' : 'Add Member'}
+                Delete Record
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRemoveMemberModal && memberToRemove && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 text-red-600 dark:text-red-400">
+              <UserMinus className="w-6 h-6" />
+              Remove Team Member?
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Are you sure you want to remove <span className="font-semibold">{memberToRemove.email}</span> from this account?
+              <br /><br />
+              They will lose access to all account resources immediately.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowRemoveMemberModal(false);
+                  setMemberToRemove(null);
+                }}
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveMember}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+              >
+                Remove Member
               </button>
             </div>
           </div>
@@ -1736,69 +1892,72 @@ export default function TeamManagement() {
             </div>
           </div>
         </div>
-      )}
+      )
+      }
 
-      {showInviteDetailsModal && inviteDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Invitation Created</h3>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <p className="text-gray-700 dark:text-gray-200">
-                An invitation has been created for <strong>{inviteDetails.email}</strong>.
-              </p>
-
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
-                  Share this invitation link with the new team member:
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={inviteDetails.link}
-                    readOnly
-                    className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono text-gray-900 dark:text-white"
-                  />
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(inviteDetails.link);
-                      setSuccess('Link copied to clipboard!');
-                      setTimeout(() => setSuccess(''), 3000);
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-2"
-                  >
-                    <Copy className="w-4 h-4" />
-                    Copy
-                  </button>
+      {
+        showInviteDetailsModal && inviteDetails && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">Invitation Created</h3>
                 </div>
               </div>
 
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  <strong>Note:</strong> The email notification may not have been delivered. Please share the link above directly with the new team member. The invitation will expire in 7 days.
+              <div className="p-6 space-y-4">
+                <p className="text-gray-700 dark:text-gray-200">
+                  An invitation has been created for <strong>{inviteDetails.email}</strong>.
                 </p>
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                    Share this invitation link with the new team member:
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inviteDetails.link}
+                      readOnly
+                      className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono text-gray-900 dark:text-white"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(inviteDetails.link);
+                        setSuccess('Link copied to clipboard!');
+                        setTimeout(() => setSuccess(''), 3000);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                    <strong>Note:</strong> The email notification may not have been delivered. Please share the link above directly with the new team member. The invitation will expire in 7 days.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => {
+                    setShowInviteDetailsModal(false);
+                    setInviteDetails(null);
+                  }}
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Close
+                </button>
               </div>
             </div>
-
-            <div className="p-6 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => {
-                  setShowInviteDetailsModal(false);
-                  setInviteDetails(null);
-                }}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }
