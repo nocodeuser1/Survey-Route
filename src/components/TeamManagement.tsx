@@ -1802,9 +1802,18 @@ export default function TeamManagement() {
               Remove Team Member?
             </h3>
             <p className="text-gray-600 dark:text-gray-300 mb-6">
-              Are you sure you want to remove <span className="font-semibold">{memberToRemove.email}</span> from this account?
-              <br /><br />
-              They will lose access to all account resources immediately.
+              {memberToRemove.email && currentUserEmail && memberToRemove.email.toLowerCase() === currentUserEmail.toLowerCase() ? (
+                <>
+                  <span className="font-bold text-red-600 dark:text-red-400 block mb-2">Warning: You are removing yourself from this account.</span>
+                  You will lose access immediately and will need to be re-invited by an administrator to join this team again.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to remove <span className="font-semibold">{memberToRemove.email}</span> from this account?
+                  <br /><br />
+                  They will lose access to all account resources immediately.
+                </>
+              )}
             </p>
             <div className="flex justify-end gap-3">
               <button
