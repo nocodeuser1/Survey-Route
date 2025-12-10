@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff, AlertCircle, Route, UserPlus, Shield } from 'lucide-react';
 
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { reloadUserProfile, user: authUser } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<any>(null);
@@ -24,6 +26,10 @@ export default function AcceptInvitePage() {
   async function waitForAuthSession(maxWaitMs = 10000): Promise<boolean> {
     const startTime = Date.now();
     let attempt = 0;
+
+    // First force a reload of the user profile in context
+    console.log('[AcceptInvite] Forcing profile reload...');
+    await reloadUserProfile();
 
     while (Date.now() - startTime < maxWaitMs) {
       attempt++;
@@ -49,6 +55,10 @@ export default function AcceptInvitePage() {
 
         if (profile?.auth_user_id === session.user.id) {
           console.log('[AcceptInvite] User profile confirmed:', profile.id);
+
+          // CRITICAL: Ensure AuthContext has updated
+          await reloadUserProfile();
+
           return true;
         } else {
           console.log('[AcceptInvite] Profile not ready yet, waiting...');
@@ -299,6 +309,9 @@ export default function AcceptInvitePage() {
 
       localStorage.setItem('currentAccountId', invitation.account_id);
       localStorage.setItem('currentView', 'facilities');
+
+      // Ensure auth context is updated before navigating
+      await reloadUserProfile();
 
       navigate('/app', { replace: true });
     } catch (err: any) {
@@ -727,14 +740,14 @@ export default function AcceptInvitePage() {
 
               <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                 <p className="text-sm text-amber-900 mb-3">
-                  <strong>What happened?</strong><br/>
+                  <strong>What happened?</strong><br />
                   {authStatus?.is_fully_registered || authStatus?.is_member_of_target_account
                     ? 'It looks like you previously tried to create an account, but the process encountered an error and didn\'t complete successfully. Your account data exists in the system but isn\'t working properly.'
                     : 'It looks like this email address was previously invited but the signup process wasn\'t completed. Before you can accept this new invitation, we need to clean up the old account data.'
                   }
                 </p>
                 <p className="text-sm text-amber-900">
-                  <strong>What will happen?</strong><br/>
+                  <strong>What will happen?</strong><br />
                   Clicking "Start Fresh" will remove the incomplete account data and let you set up your account properly from scratch. You'll be able to choose a new password and complete the setup process. This won't affect any other accounts or data.
                 </p>
               </div>
