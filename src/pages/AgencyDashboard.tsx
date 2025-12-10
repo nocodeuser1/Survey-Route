@@ -434,9 +434,9 @@ export default function AgencyDashboard() {
 
           {accounts.length === 0 ? (
             <div className="p-12 text-center">
-              <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No accounts yet</h3>
-              <p className="text-gray-600 mb-4">
+              <Building2 className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No accounts yet</h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-4">
                 Create your first customer account to get started
               </p>
               <button
@@ -448,15 +448,15 @@ export default function AgencyDashboard() {
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
+            <div className="divide-y divide-gray-200 dark:divide-gray-700">
               {accounts.map((account) => (
-                <div key={account.id} className="p-6 hover:bg-gray-50 transition-colors">
+                <div key={account.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="flex-1">
-                      <h4 className="text-lg font-semibold text-gray-900 mb-2">
+                      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                         {account.company_name || account.account_name}
                       </h4>
-                      <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-sm text-gray-600">
+                      <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-sm text-gray-600 dark:text-gray-300">
                         <div className="flex items-center gap-2">
                           <Users className="w-4 h-4" />
                           <span>{account._userCount || 0} users</span>
@@ -471,14 +471,14 @@ export default function AgencyDashboard() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${account.status === 'active'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
+                            ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
                             }`}>
                             {account.status}
                           </span>
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         Created {new Date(account.created_at).toLocaleDateString()}
                       </p>
                     </div>
@@ -489,7 +489,7 @@ export default function AgencyDashboard() {
                           setSelectedAccountName(account.company_name || account.account_name);
                           setShowActivityLogs(true);
                         }}
-                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
                       >
                         <Activity className="w-4 h-4" />
                         <span>View Logs</span>
@@ -511,41 +511,41 @@ export default function AgencyDashboard() {
 
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Account</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Create New Account</h3>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded text-red-700 dark:text-red-300 text-sm">
                 {error}
               </div>
             )}
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Account Name *
                 </label>
                 <input
                   type="text"
                   value={newAccountName}
                   onChange={(e) => setNewAccountName(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder="Customer Company Name"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Admin Email (Optional)
                 </label>
                 <input
                   type="email"
                   value={newAccountAdminEmail}
                   onChange={(e) => setNewAccountAdminEmail(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   placeholder="admin@company.com"
                 />
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   If provided, an invitation will be sent to this email
                 </p>
               </div>
@@ -559,7 +559,7 @@ export default function AgencyDashboard() {
                   setNewAccountAdminEmail('');
                   setError('');
                 }}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 Cancel
               </button>
