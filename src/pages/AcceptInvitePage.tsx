@@ -856,17 +856,19 @@ export default function AcceptInvitePage() {
         ) : (
           <>
             <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white">
-              <div className="flex items-center justify-center mb-4">
-                <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
-                  <Route className="w-8 h-8 text-white" />
+              <div className="text-center mb-8">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+                    <Route className="w-8 h-8 text-white" />
+                  </div>
                 </div>
+                <h1 className="text-3xl font-bold text-center mb-2">
+                  {needsPasswordReset && !authStatus?.is_orphaned && !authStatus?.is_partial_registration ? 'Account Found' : 'Welcome to Survey Route'}
+                </h1>
+                <p className="text-blue-100 text-center text-sm">
+                  {needsPasswordReset && !authStatus?.is_orphaned && !authStatus?.is_partial_registration ? 'Set a new password to complete your registration' : 'Complete your account setup to get started'}
+                </p>
               </div>
-              <h1 className="text-3xl font-bold text-center mb-2">
-                {needsPasswordReset ? 'Account Found' : 'Welcome to Survey Route'}
-              </h1>
-              <p className="text-blue-100 text-center text-sm">
-                {needsPasswordReset ? 'Set a new password to complete your registration' : 'Complete your account setup to get started'}
-              </p>
             </div>
 
             <div className="p-8">
@@ -898,7 +900,7 @@ export default function AcceptInvitePage() {
                 </div>
               )}
 
-              {needsPasswordReset && !error && (
+              {needsPasswordReset && !error && !authStatus?.is_orphaned && !authStatus?.is_partial_registration && (
                 <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
@@ -913,29 +915,26 @@ export default function AcceptInvitePage() {
               <div className="space-y-5">
                 <div>
                   <label className="block text-sm font-semibold text-gray-900 mb-2">
-                    {needsPasswordReset ? 'Enter Your New Password' : 'Create Your Password'}
+                    {needsPasswordReset && !authStatus?.is_orphaned && !authStatus?.is_partial_registration ? 'Enter Your New Password' : 'Create Your Password'}
                   </label>
                   <div className="relative">
                     <input
                       type={showNewPassword ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-4 py-3 pr-11 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                      placeholder={needsPasswordReset ? "Enter your new password (min. 8 characters)" : "Enter your password (min. 8 characters)"}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      placeholder="Min. 8 characters"
                     />
                     <button
                       type="button"
                       onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
                       {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
                   </div>
                   <p className="mt-2 text-xs text-gray-500">
-                    {needsPasswordReset
-                      ? "Choose a new password with at least 8 characters"
-                      : "Choose a strong password with at least 8 characters"
-                    }
+                    Choose a new password with at least 8 characters
                   </p>
                 </div>
 
@@ -948,13 +947,13 @@ export default function AcceptInvitePage() {
                       type={showConfirmPassword ? 'text' : 'password'}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full px-4 py-3 pr-11 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       placeholder="Re-enter your password"
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
                       {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
@@ -964,9 +963,9 @@ export default function AcceptInvitePage() {
                 <button
                   onClick={handleAcceptInvitation}
                   disabled={!newPassword || !confirmPassword || newPassword.length < 8}
-                  className="w-full mt-2 px-4 py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-lg shadow-blue-500/30 disabled:shadow-none"
+                  className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-600/20"
                 >
-                  {needsPasswordReset ? 'Reset Password & Complete Registration' : 'Create Account & Continue'}
+                  {needsPasswordReset && !authStatus?.is_orphaned && !authStatus?.is_partial_registration ? 'Reset Password & Complete Registration' : 'Create Account & Accept Invite'}
                 </button>
 
                 <div className="pt-4 border-t border-gray-200">
