@@ -141,6 +141,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    // Clear saved view so users start fresh on Facilities tab when signing back in
+    localStorage.removeItem('currentView');
     setUser(null);
     setSupabaseUser(null);
   }

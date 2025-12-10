@@ -1514,74 +1514,84 @@ export default function TeamManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-              {teamMembers.map((member) => (
-                <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-800 transition-colors duration-200">
-                  <td className="px-6 py-4">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white dark:text-white">{member.full_name || 'No name'}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{member.email}</p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <select
-                      value={member.role}
-                      onChange={(e) => handleChangeRole(member.id, e.target.value as 'account_admin' | 'user')}
-                      className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white dark:text-white transition-colors duration-200"
-                    >
-                      <option value="user">User</option>
-                      <option value="account_admin">Admin</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4">
-                    {member.signature_completed ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded transition-colors duration-200">
-                        <CheckCircle className="w-3 h-3" />
-                        Completed
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium rounded transition-colors duration-200">
-                        <Clock className="w-3 h-3" />
-                        Pending
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                    {new Date(member.joined_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => {
-                          setSelectedMember(member);
-                          setNewPassword('');
-                          setPasswordError('');
-                          setPasswordSuccess('');
-                          setShowPasswordModal(true);
-                        }}
-                        className="inline-flex items-center gap-1 px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900 rounded transition-colors"
+              {teamMembers
+                // Filter out agency owner for non-agency-owner users (admin/user shouldn't see agency owner)
+                .filter(member => {
+                  // If current user is agency owner, show all members
+                  if (currentUserEmail && agencyOwnerEmail && currentUserEmail === agencyOwnerEmail) {
+                    return true;
+                  }
+                  // Otherwise, hide the agency owner from the list
+                  return member.email !== agencyOwnerEmail;
+                })
+                .map((member) => (
+                  <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-800 transition-colors duration-200">
+                    <td className="px-6 py-4">
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white dark:text-white">{member.full_name || 'No name'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{member.email}</p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <select
+                        value={member.role}
+                        onChange={(e) => handleChangeRole(member.id, e.target.value as 'account_admin' | 'user')}
+                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white dark:text-white transition-colors duration-200"
                       >
-                        <Key className="w-3 h-3" />
-                        Set Password
-                      </button>
-                      {member.email !== agencyOwnerEmail && (
-                        <button
-                          onClick={() => handleRemoveMember(member.id, member.email)}
-                          className="inline-flex items-center gap-1 px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          Remove
-                        </button>
-                      )}
-                      {member.email === agencyOwnerEmail && (
-                        <span className="inline-flex items-center gap-1 px-3 py-1 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded transition-colors duration-200">
-                          <Shield className="w-3 h-3" />
-                          Agency Owner
+                        <option value="user">User</option>
+                        <option value="account_admin">Admin</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4">
+                      {member.signature_completed ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded transition-colors duration-200">
+                          <CheckCircle className="w-3 h-3" />
+                          Completed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium rounded transition-colors duration-200">
+                          <Clock className="w-3 h-3" />
+                          Pending
                         </span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                      {new Date(member.joined_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedMember(member);
+                            setNewPassword('');
+                            setPasswordError('');
+                            setPasswordSuccess('');
+                            setShowPasswordModal(true);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900 rounded transition-colors"
+                        >
+                          <Key className="w-3 h-3" />
+                          Set Password
+                        </button>
+                        {member.email !== agencyOwnerEmail && (
+                          <button
+                            onClick={() => handleRemoveMember(member.id, member.email)}
+                            className="inline-flex items-center gap-1 px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Remove
+                          </button>
+                        )}
+                        {member.email === agencyOwnerEmail && (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded transition-colors duration-200">
+                            <Shield className="w-3 h-3" />
+                            Agency Owner
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               {teamMembers.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
