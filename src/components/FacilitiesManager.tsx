@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, Check, GripVertical, ChevronDown, ChevronUp, Database } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
@@ -42,14 +42,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'lat_well_sheet', 'long_well_sheet', 'first_prod_date', 'spcc_due_date', 'spcc_completed_date'
 ];
 
-const COLUMN_GROUPS = {
-  'Basic': ['name', 'latitude', 'longitude', 'visit_duration'] as ColumnId[],
-  'Status': ['spcc_status', 'inspection_status'] as ColumnId[],
-  'Well Names': ['matched_facility_name', 'well_name_1', 'well_name_2', 'well_name_3', 'well_name_4', 'well_name_5', 'well_name_6'] as ColumnId[],
-  'API Numbers': ['well_api_1', 'well_api_2', 'well_api_3', 'well_api_4', 'well_api_5', 'well_api_6', 'api_numbers_combined'] as ColumnId[],
-  'Coordinates': ['lat_well_sheet', 'long_well_sheet'] as ColumnId[],
-  'Dates': ['first_prod_date', 'spcc_due_date', 'spcc_completed_date'] as ColumnId[],
-};
+
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   name: 'Facility Name',
@@ -82,7 +75,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false }: FacilitiesManagerProps) {
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
-  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [editForm, setEditForm] = useState({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
   const [showAddForm, setShowAddForm] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -90,12 +83,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>('all');
   const [sortField, setSortField] = useState<'name' | 'day' | 'status' | 'nearest'>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{lat: number; lng: number} | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() => {
     const saved = localStorage.getItem('facilities_column_order');
@@ -111,12 +104,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [exportVisibleColumns, setExportVisibleColumns] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
   const [draggedExportColumn, setDraggedExportColumn] = useState<ColumnId | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
-  const [mobileEditingField, setMobileEditingField] = useState<{columnId: ColumnId, facilityId: string} | null>(null);
   const [mobileEditingFacility, setMobileEditingFacility] = useState<Facility | null>(null);
   const [mobileEditFormData, setMobileEditFormData] = useState<Record<ColumnId, string>>({} as Record<ColumnId, string>);
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('spcc_inspection_internal');
   const [showFilters, setShowFilters] = useState(false);
-  const [mobileContextMenu, setMobileContextMenu] = useState<{facilityId: string, x: number, y: number} | null>(null);
+  const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -247,7 +239,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const now = new Date();
 
       if (now > oneYearFromCompletion) {
-        return <AlertCircle className="w-4 h-4 text-orange-500" title="Internal completion expired - Reinspection needed" />;
+        return <span title="Internal completion expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
       }
       return <SPCCInspectionBadge />;
     } else if (facility.spcc_completion_type === 'external' && facility.spcc_completed_date) {
@@ -257,7 +249,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const now = new Date();
 
       if (now > oneYearFromCompletion) {
-        return <AlertCircle className="w-4 h-4 text-orange-500" title="External completion expired - Reinspection needed" />;
+        return <span title="External completion expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
       }
       return <SPCCExternalCompletionBadge completedDate={facility.spcc_completed_date} />;
     }
@@ -267,7 +259,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (isInspectionValid(inspection)) {
       return <SPCCInspectionBadge />;
     } else if (inspection) {
-      return <AlertCircle className="w-4 h-4 text-orange-500" title="Inspection expired - Reinspection needed" />;
+      return <span title="Inspection expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
     }
     return null;
   };
@@ -384,14 +376,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return filtered;
   };
 
-  const handleSort = (field: 'name' | 'day' | 'status') => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
+
 
   const filteredFacilities = getFilteredAndSortedFacilities();
 
@@ -459,7 +444,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
 
       const coordsChanged = String(lat) !== String(mobileEditingFacility.latitude) ||
-                            String(lng) !== String(mobileEditingFacility.longitude);
+        String(lng) !== String(mobileEditingFacility.longitude);
 
       // Parse numeric fields safely
       const latWellSheet = mobileEditFormData.lat_well_sheet && mobileEditFormData.lat_well_sheet.trim()
@@ -523,53 +508,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   };
 
-  const handleSaveEdit = async (facilityId: string) => {
-    setError(null);
 
-    const lat = parseFloat(editForm.latitude);
-    const lng = parseFloat(editForm.longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      setError('Invalid coordinates');
-      return;
-    }
-
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      setError('Latitude must be between -90 and 90, longitude between -180 and 180');
-      return;
-    }
-
-    const coordsChanged = editForm.latitude !== editForm.originalLatitude ||
-                          editForm.longitude !== editForm.originalLongitude;
-
-    try {
-      const { error: updateError } = await supabase
-        .from('facilities')
-        .update({
-          name: editForm.name,
-          latitude: lat,
-          longitude: lng,
-          visit_duration_minutes: editForm.visitDuration
-        })
-        .eq('id', facilityId);
-
-      if (updateError) throw updateError;
-
-      setEditingId(null);
-      onFacilitiesChange();
-
-      if (coordsChanged) {
-        localStorage.setItem('facilities_coords_updated', Date.now().toString());
-        // Notify parent to center map on updated facility
-        if (onCoordinatesUpdated) {
-          onCoordinatesUpdated(facilityId, lat, lng);
-        }
-      }
-    } catch (err) {
-      console.error('Error updating facility:', err);
-      setError('Failed to update facility');
-    }
-  };
 
   const handleDelete = async (facilityId: string) => {
     if (!confirm('Are you sure you want to delete this facility? This will also delete all associated inspections.')) {
@@ -631,7 +570,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (insertError) throw insertError;
 
       setShowAddForm(false);
-      setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30 });
+      setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
       onFacilitiesChange();
     } catch (err) {
       console.error('Error adding facility:', err);
@@ -875,7 +814,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const toggleColumn = (columnId: ColumnId) => {
-    setVisibleColumns(prev => {
+    setVisibleColumns((prev: ColumnId[]) => {
       let newColumns: ColumnId[];
       if (prev.includes(columnId)) {
         // Remove column
@@ -920,7 +859,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setColumnOrder(newOrder);
 
     // Update visible columns to match new order
-    setVisibleColumns(prev => {
+    setVisibleColumns((prev: ColumnId[]) => {
       const newVisible = newOrder.filter(id => prev.includes(id));
       localStorage.setItem('facilities_visible_columns', JSON.stringify(newVisible));
       return newVisible;
@@ -934,7 +873,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const toggleExportColumn = (columnId: ColumnId) => {
-    setExportVisibleColumns(prev => {
+    setExportVisibleColumns((prev: ColumnId[]) => {
       if (prev.includes(columnId)) {
         return prev.filter(id => id !== columnId);
       } else {
@@ -976,90 +915,44 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const renderCellContent = (facility: Facility, columnId: ColumnId, isEditing: boolean) => {
     if (isEditing) {
-      const isMobile = window.innerWidth < 768;
-
       switch (columnId) {
         case 'name':
           return (
-            <div
-              onClick={() => isMobile && setMobileEditingField({columnId, facilityId: facility.id})}
-              className={isMobile ? 'cursor-pointer' : ''}
-            >
-              {isMobile ? (
-                <div className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white">
-                  {editForm.name || 'Tap to edit'}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                />
-              )}
-            </div>
+            <input
+              type="text"
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
           );
         case 'latitude':
           return (
-            <div
-              onClick={() => isMobile && setMobileEditingField({columnId, facilityId: facility.id})}
-              className={isMobile ? 'cursor-pointer' : ''}
-            >
-              {isMobile ? (
-                <div className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white">
-                  {editForm.latitude || 'Tap to edit'}
-                </div>
-              ) : (
-                <input
-                  type="number"
-                  step="any"
-                  value={editForm.latitude}
-                  onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                />
-              )}
-            </div>
+            <input
+              type="number"
+              step="any"
+              value={editForm.latitude}
+              onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
           );
         case 'longitude':
           return (
-            <div
-              onClick={() => isMobile && setMobileEditingField({columnId, facilityId: facility.id})}
-              className={isMobile ? 'cursor-pointer' : ''}
-            >
-              {isMobile ? (
-                <div className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white">
-                  {editForm.longitude || 'Tap to edit'}
-                </div>
-              ) : (
-                <input
-                  type="number"
-                  step="any"
-                  value={editForm.longitude}
-                  onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                />
-              )}
-            </div>
+            <input
+              type="number"
+              step="any"
+              value={editForm.longitude}
+              onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
           );
         case 'visit_duration':
           return (
-            <div
-              onClick={() => isMobile && setMobileEditingField({columnId, facilityId: facility.id})}
-              className={isMobile ? 'cursor-pointer' : ''}
-            >
-              {isMobile ? (
-                <div className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white">
-                  {editForm.visitDuration || 'Tap to edit'}
-                </div>
-              ) : (
-                <input
-                  type="number"
-                  value={editForm.visitDuration}
-                  onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                />
-              )}
-            </div>
+            <input
+              type="number"
+              value={editForm.visitDuration}
+              onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
           );
         default:
           return renderCellContent(facility, columnId, false);
@@ -1191,148 +1084,148 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </div>
 
               <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 max-h-[calc(100vh-200px)] sm:max-h-[600px] overflow-y-auto">
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4 text-red-700 dark:text-red-300 shadow-sm animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                  <p className="whitespace-pre-line font-medium">{error}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Render fields in column order, only for visible columns with section grouping */}
-            {(() => {
-              const visibleCols = columnOrder.filter(colId => visibleColumns.includes(colId));
-              let lastSection = '';
-
-              return visibleCols.map((columnId, index) => {
-              // Skip status columns as they're read-only
-              if (columnId === 'spcc_status' || columnId === 'inspection_status') {
-                return null;
-              }
-
-              const label = COLUMN_LABELS[columnId];
-              const value = mobileEditFormData[columnId] || '';
-
-              // Determine input type based on field
-              let inputType = 'text';
-              if (columnId === 'latitude' || columnId === 'longitude' ||
-                  columnId === 'lat_well_sheet' || columnId === 'long_well_sheet') {
-                inputType = 'number';
-              } else if (columnId.includes('date')) {
-                inputType = 'date';
-              } else if (columnId === 'visit_duration') {
-                inputType = 'number';
-              }
-
-              // Determine section for grouping
-              let currentSection = '';
-              if (['name', 'latitude', 'longitude', 'visit_duration'].includes(columnId)) {
-                currentSection = 'basic';
-              } else if (columnId.includes('well_') || columnId === 'matched_facility_name' || columnId === 'api_numbers_combined') {
-                currentSection = 'well';
-              } else if (columnId.includes('date')) {
-                currentSection = 'date';
-              } else if (['lat_well_sheet', 'long_well_sheet'].includes(columnId)) {
-                currentSection = 'coords';
-              }
-
-              // Render section header if we're starting a new section
-              const sectionHeader = currentSection !== lastSection && currentSection ? (
-                <div className="pt-4 pb-2 border-t-2 border-gray-200 dark:border-gray-700 mt-6 first:mt-0 first:pt-0 first:border-0">
-                  <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                    {currentSection === 'basic' && (
-                      <>
-                        <MapPin className="w-4 h-4" />
-                        <span>Basic Information</span>
-                      </>
-                    )}
-                    {currentSection === 'well' && (
-                      <>
-                        <FileText className="w-4 h-4" />
-                        <span>Well Information</span>
-                      </>
-                    )}
-                    {currentSection === 'date' && (
-                      <>
-                        <CheckCircle className="w-4 h-4" />
-                        <span>SPCC Dates</span>
-                      </>
-                    )}
-                    {currentSection === 'coords' && (
-                      <>
-                        <MapPin className="w-4 h-4" />
-                        <span>Well Sheet Coordinates</span>
-                      </>
-                    )}
-                  </h3>
-                </div>
-              ) : null;
-
-              lastSection = currentSection;
-
-              return (
-                <div key={columnId}>
-                  {sectionHeader}
-                  <div className="space-y-2 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    {label}
-                    {['name', 'latitude', 'longitude'].includes(columnId) && (
-                      <span className="text-red-500 ml-1">*</span>
-                    )}
-                  </label>
-                  {columnId === 'visit_duration' ? (
-                    <input
-                      type="number"
-                      value={value}
-                      onChange={(e) => setMobileEditFormData({
-                        ...mobileEditFormData,
-                        [columnId]: e.target.value
-                      })}
-                      min="1"
-                      step="1"
-                      className="w-full px-4 py-3 text-base border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white shadow-sm hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                      placeholder="Minutes"
-                    />
-                  ) : inputType === 'number' ? (
-                    <input
-                      type="number"
-                      value={value}
-                      onChange={(e) => setMobileEditFormData({
-                        ...mobileEditFormData,
-                        [columnId]: e.target.value
-                      })}
-                      step="any"
-                      className="w-full px-4 py-3 text-base border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white shadow-sm hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                      placeholder={label}
-                    />
-                  ) : inputType === 'date' ? (
-                    <input
-                      type="date"
-                      value={value}
-                      onChange={(e) => setMobileEditFormData({
-                        ...mobileEditFormData,
-                        [columnId]: e.target.value
-                      })}
-                      className="w-full px-4 py-3 text-base border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white shadow-sm hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={value}
-                      onChange={(e) => setMobileEditFormData({
-                        ...mobileEditFormData,
-                        [columnId]: e.target.value
-                      })}
-                      className="w-full px-4 py-3 text-base border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white shadow-sm hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                      placeholder={label}
-                    />
-                  )}
+                {error && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4 text-red-700 dark:text-red-300 shadow-sm animate-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      <p className="whitespace-pre-line font-medium">{error}</p>
+                    </div>
                   </div>
-                </div>
-              );
-            });
-            })()}
+                )}
+
+                {/* Render fields in column order, only for visible columns with section grouping */}
+                {(() => {
+                  const visibleCols = columnOrder.filter(colId => visibleColumns.includes(colId));
+                  let lastSection = '';
+
+                  return visibleCols.map((columnId) => {
+                    // Skip status columns as they're read-only
+                    if (columnId === 'spcc_status' || columnId === 'inspection_status') {
+                      return null;
+                    }
+
+                    const label = COLUMN_LABELS[columnId];
+                    const value = mobileEditFormData[columnId] || '';
+
+                    // Determine input type based on field
+                    let inputType = 'text';
+                    if (columnId === 'latitude' || columnId === 'longitude' ||
+                      columnId === 'lat_well_sheet' || columnId === 'long_well_sheet') {
+                      inputType = 'number';
+                    } else if (columnId.includes('date')) {
+                      inputType = 'date';
+                    } else if (columnId === 'visit_duration') {
+                      inputType = 'number';
+                    }
+
+                    // Determine section for grouping
+                    let currentSection = '';
+                    if (['name', 'latitude', 'longitude', 'visit_duration'].includes(columnId)) {
+                      currentSection = 'basic';
+                    } else if (columnId.includes('well_') || columnId === 'matched_facility_name' || columnId === 'api_numbers_combined') {
+                      currentSection = 'well';
+                    } else if (columnId.includes('date')) {
+                      currentSection = 'date';
+                    } else if (['lat_well_sheet', 'long_well_sheet'].includes(columnId)) {
+                      currentSection = 'coords';
+                    }
+
+                    // Render section header if we're starting a new section
+                    const sectionHeader = currentSection !== lastSection && currentSection ? (
+                      <div className="pt-4 pb-2 border-t-2 border-gray-200 dark:border-gray-700 mt-6 first:mt-0 first:pt-0 first:border-0">
+                        <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                          {currentSection === 'basic' && (
+                            <>
+                              <MapPin className="w-4 h-4" />
+                              <span>Basic Information</span>
+                            </>
+                          )}
+                          {currentSection === 'well' && (
+                            <>
+                              <FileText className="w-4 h-4" />
+                              <span>Well Information</span>
+                            </>
+                          )}
+                          {currentSection === 'date' && (
+                            <>
+                              <CheckCircle className="w-4 h-4" />
+                              <span>SPCC Dates</span>
+                            </>
+                          )}
+                          {currentSection === 'coords' && (
+                            <>
+                              <MapPin className="w-4 h-4" />
+                              <span>Well Sheet Coordinates</span>
+                            </>
+                          )}
+                        </h3>
+                      </div>
+                    ) : null;
+
+                    lastSection = currentSection;
+
+                    return (
+                      <div key={columnId}>
+                        {sectionHeader}
+                        <div className="space-y-2 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            {label}
+                            {['name', 'latitude', 'longitude'].includes(columnId) && (
+                              <span className="text-red-500 ml-1">*</span>
+                            )}
+                          </label>
+                          {columnId === 'visit_duration' ? (
+                            <input
+                              type="number"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              min="1"
+                              step="1"
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder="Minutes"
+                            />
+                          ) : inputType === 'number' ? (
+                            <input
+                              type="number"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              step="any"
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder={label}
+                            />
+                          ) : inputType === 'date' ? (
+                            <input
+                              type="date"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              className="form-input w-full px-4 py-3 text-base"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder={label}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           </div>
@@ -1355,193 +1248,192 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             <div className="flex items-center gap-2 flex-wrap">
               {!isLoading && (
                 <>
-              {/* Filters button */}
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 rounded-lg transition-colors touch-manipulation"
-                title="Toggle Filters"
-              >
-                <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200">Filters</span>
-                {showFilters ? <ChevronUp className="w-4 h-4 text-gray-600 dark:text-gray-200" /> : <ChevronDown className="w-4 h-4 text-gray-600 dark:text-gray-200" />}
-              </button>
+                  {/* Filters button */}
+                  <button
+                    onClick={() => setShowFilters(!showFilters)}
+                    className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 rounded-lg transition-colors touch-manipulation"
+                    title="Toggle Filters"
+                  >
+                    <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200">Filters</span>
+                    {showFilters ? <ChevronUp className="w-4 h-4 text-gray-600 dark:text-gray-200" /> : <ChevronDown className="w-4 h-4 text-gray-600 dark:text-gray-200" />}
+                  </button>
 
-              {selectedFacilityIds.size > 0 && (
-                <button
-                  onClick={() => setShowCompletionModal(true)}
-                  className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
-                  title={`Mark ${selectedFacilityIds.size} as SPCC completed`}
-                  aria-label="Mark Complete"
-                >
-                  <CheckCircle className="w-5 h-5" />
-                  <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Mark Complete ({selectedFacilityIds.size})</span>
-                </button>
-              )}
-              {facilities.length > 0 && (
-                <>
-                  <button
-                    onClick={handleExportFacilities}
-                    className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
-                    title="Export Facilities"
-                    aria-label="Export Facilities"
-                  >
-                    <Database className="w-5 h-5" />
-                    <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">Export Facilities</span>
-                  </button>
-                  <button
-                    onClick={() => setShowExportPopup(true)}
-                    className="flex items-center justify-center p-2.5 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors touch-manipulation"
-                    title={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
-                    aria-label={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
-                  >
-                    <FileDown className="w-5 h-5" />
-                    <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">
-                      Export Reports{selectedFacilityIds.size > 0 ? ` (${selectedFacilityIds.size})` : ''}
-                    </span>
-                  </button>
-                </>
-              )}
-              {selectedFacilityIds.size === 0 && (
-                <>
-                  <button
-                    onClick={() => setShowAddForm(true)}
-                    className="flex items-center justify-center p-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors touch-manipulation"
-                    title="Add Facility"
-                    aria-label="Add Facility"
-                  >
-                    <Plus className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Add Facility</span>
-                  </button>
-                  <button
-                    onClick={() => setShowUpload(true)}
-                    className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
-                    title="Import CSV"
-                    aria-label="Import CSV"
-                  >
-                    <Upload className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Import CSV</span>
-                  </button>
-                </>
-              )}
-              <div className={selectedFacilityIds.size > 0 ? "hidden" : "relative"}>
-                <button
-                  onClick={() => setShowColumnSelector(!showColumnSelector)}
-                  className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
-                  title="Column Visibility"
-                  aria-label="Column Visibility"
-                >
-                  <Columns className="w-5 h-5" />
-                  <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Columns</span>
-                </button>
-                {showColumnSelector && (
-                  <>
-                    {/* Mobile: Backdrop overlay */}
-                    <div
-                      className="sm:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
-                      onClick={() => setShowColumnSelector(false)}
-                    />
-                    {/* Dropdown */}
-                    <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-auto sm:right-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 max-h-[80vh] sm:max-h-96 flex flex-col transition-colors duration-200">
-                    <div className="p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 flex-shrink-0 transition-colors duration-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-sm font-semibold text-gray-800 dark:text-white dark:text-white">Column Visibility</h3>
-                        <button
+                  {selectedFacilityIds.size > 0 && (
+                    <button
+                      onClick={() => setShowCompletionModal(true)}
+                      className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
+                      title={`Mark ${selectedFacilityIds.size} as SPCC completed`}
+                      aria-label="Mark Complete"
+                    >
+                      <CheckCircle className="w-5 h-5" />
+                      <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Mark Complete ({selectedFacilityIds.size})</span>
+                    </button>
+                  )}
+                  {facilities.length > 0 && (
+                    <>
+                      <button
+                        onClick={handleExportFacilities}
+                        className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
+                        title="Export Facilities"
+                        aria-label="Export Facilities"
+                      >
+                        <Database className="w-5 h-5" />
+                        <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">Export Facilities</span>
+                      </button>
+                      <button
+                        onClick={() => setShowExportPopup(true)}
+                        className="flex items-center justify-center p-2.5 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors touch-manipulation"
+                        title={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
+                        aria-label={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
+                      >
+                        <FileDown className="w-5 h-5" />
+                        <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">
+                          Export Reports{selectedFacilityIds.size > 0 ? ` (${selectedFacilityIds.size})` : ''}
+                        </span>
+                      </button>
+                    </>
+                  )}
+                  {selectedFacilityIds.size === 0 && (
+                    <>
+                      <button
+                        onClick={() => setShowAddForm(true)}
+                        className="flex items-center justify-center p-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors touch-manipulation"
+                        title="Add Facility"
+                        aria-label="Add Facility"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Add Facility</span>
+                      </button>
+                      <button
+                        onClick={() => setShowUpload(true)}
+                        className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
+                        title="Import CSV"
+                        aria-label="Import CSV"
+                      >
+                        <Upload className="w-5 h-5" />
+                        <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Import CSV</span>
+                      </button>
+                    </>
+                  )}
+                  <div className={selectedFacilityIds.size > 0 ? "hidden" : "relative"}>
+                    <button
+                      onClick={() => setShowColumnSelector(!showColumnSelector)}
+                      className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
+                      title="Column Visibility"
+                      aria-label="Column Visibility"
+                    >
+                      <Columns className="w-5 h-5" />
+                      <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Columns</span>
+                    </button>
+                    {showColumnSelector && (
+                      <>
+                        {/* Mobile: Backdrop overlay */}
+                        <div
+                          className="sm:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
                           onClick={() => setShowColumnSelector(false)}
-                          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={showAllColumns}
-                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                        >
-                          Show All
-                        </button>
-                        <button
-                          onClick={resetColumns}
-                          className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
-                        >
-                          Reset
-                        </button>
-                      </div>
-                    </div>
-                    <div className="p-4 overflow-y-auto flex-1 overscroll-contain">
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Drag grip handle to reorder columns</p>
-                      <div className="space-y-1">
-                        {columnOrder.map((columnId) => (
-                          <div
-                            key={columnId}
-                            data-column-id={columnId}
-                            className={`flex items-center gap-2 p-2 rounded transition-colors ${
-                              draggedColumn === columnId
-                                ? 'bg-blue-100 opacity-50'
-                                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={visibleColumns.includes(columnId)}
-                              onChange={() => toggleColumn(columnId)}
-                              className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <span className="text-sm text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
-                            <div
-                              draggable
-                              onDragStart={() => handleDragStart(columnId)}
-                              onDragOver={(e) => handleDragOver(e, columnId)}
-                              onDragEnd={handleDragEnd}
-                              onTouchStart={(e) => {
-                                const target = e.target as HTMLElement;
-                                if (target.closest('.grip-handle')) {
-                                  handleDragStart(columnId);
-                                  e.preventDefault();
-                                }
-                              }}
-                              onTouchMove={(e) => {
-                                if (draggedColumn) {
-                                  // Only handle touch move if we started dragging
-                                  const touch = e.touches[0];
-                                  const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
-                                  const targetDiv = elementAtPoint?.closest('[data-column-id]');
-                                  if (targetDiv) {
-                                    const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
-                                    if (targetColumnId && draggedColumn && targetColumnId !== draggedColumn) {
-                                      const syntheticEvent = {
-                                        preventDefault: () => {}
-                                      } as React.DragEvent;
-                                      handleDragOver(syntheticEvent, targetColumnId);
-                                    }
-                                  }
-                                  e.preventDefault();
-                                }
-                              }}
-                              onTouchEnd={handleDragEnd}
-                              className="grip-handle cursor-move touch-none p-1"
-                            >
-                              <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        />
+                        {/* Dropdown */}
+                        <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-auto sm:right-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 max-h-[80vh] sm:max-h-96 flex flex-col transition-colors duration-200">
+                          <div className="p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 flex-shrink-0 transition-colors duration-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-sm font-semibold text-gray-800 dark:text-white dark:text-white">Column Visibility</h3>
+                              <button
+                                onClick={() => setShowColumnSelector(false)}
+                                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={showAllColumns}
+                                className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                              >
+                                Show All
+                              </button>
+                              <button
+                                onClick={resetColumns}
+                                className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
+                              >
+                                Reset
+                              </button>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                          <div className="p-4 overflow-y-auto flex-1 overscroll-contain">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Drag grip handle to reorder columns</p>
+                            <div className="space-y-1">
+                              {columnOrder.map((columnId) => (
+                                <div
+                                  key={columnId}
+                                  data-column-id={columnId}
+                                  className={`flex items-center gap-2 p-2 rounded transition-colors ${draggedColumn === columnId
+                                    ? 'bg-blue-100 opacity-50'
+                                    : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                                    }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={visibleColumns.includes(columnId)}
+                                    onChange={() => toggleColumn(columnId)}
+                                    className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <span className="text-sm text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
+                                  <div
+                                    draggable
+                                    onDragStart={() => handleDragStart(columnId)}
+                                    onDragOver={(e) => handleDragOver(e, columnId)}
+                                    onDragEnd={handleDragEnd}
+                                    onTouchStart={(e) => {
+                                      const target = e.target as HTMLElement;
+                                      if (target.closest('.grip-handle')) {
+                                        handleDragStart(columnId);
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onTouchMove={(e) => {
+                                      if (draggedColumn) {
+                                        // Only handle touch move if we started dragging
+                                        const touch = e.touches[0];
+                                        const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
+                                        const targetDiv = elementAtPoint?.closest('[data-column-id]');
+                                        if (targetDiv) {
+                                          const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
+                                          if (targetColumnId && draggedColumn && targetColumnId !== draggedColumn) {
+                                            const syntheticEvent = {
+                                              preventDefault: () => { }
+                                            } as React.DragEvent;
+                                            handleDragOver(syntheticEvent, targetColumnId);
+                                          }
+                                        }
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onTouchEnd={handleDragEnd}
+                                    className="grip-handle cursor-move touch-none p-1"
+                                  >
+                                    <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  </>
-                )}
-              </div>
-              {selectedFacilityIds.size > 0 && (
-                <button
-                  onClick={handleDeleteSelected}
-                  className="flex items-center justify-center p-2.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors touch-manipulation"
-                  title={`Delete ${selectedFacilityIds.size} selected`}
-                  aria-label="Delete Selected Facilities"
-                >
-                  <Trash2 className="w-5 h-5" />
-                  <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Delete Selected ({selectedFacilityIds.size})</span>
-                </button>
-              )}
+                  {selectedFacilityIds.size > 0 && (
+                    <button
+                      onClick={handleDeleteSelected}
+                      className="flex items-center justify-center p-2.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors touch-manipulation"
+                      title={`Delete ${selectedFacilityIds.size} selected`}
+                      aria-label="Delete Selected Facilities"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Delete Selected ({selectedFacilityIds.size})</span>
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -1549,66 +1441,66 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
           {!isLoading && (
             <>
-          {/* Search box - always visible */}
-          <div className="relative mt-3">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search facilities..."
-              className="w-full px-3 py-2 pl-9 pr-9 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 dark:text-white"
-            />
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                title="Clear search"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+              {/* Search box - always visible */}
+              <div className="relative mt-3">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search facilities..."
+                  className="form-input w-full pl-9 pr-9 text-sm"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
 
-          {/* Collapsible filters dropdown */}
-          {showFilters && (
-            <div className="flex flex-col gap-3 mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors duration-200">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-600 dark:text-white"
-              >
-                <option value="all">All Status</option>
-                <option value="inspected">Inspected</option>
-                <option value="pending">Pending</option>
-                <option value="expired">Expired</option>
-              </select>
+              {/* Collapsible filters dropdown */}
+              {showFilters && (
+                <div className="flex flex-col gap-3 mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors duration-200">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="form-select w-full text-sm"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="inspected">Inspected</option>
+                    <option value="pending">Pending</option>
+                    <option value="expired">Expired</option>
+                  </select>
 
-              <select
-                value={selectedReportType}
-                onChange={(e) => handleReportTypeChange(e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-600 dark:text-white"
-                title="Filter by report type"
-              >
-                <option value="all">Report Type: All</option>
-                <option value="spcc_plan">Report Type: SPCC Plan</option>
-                <option value="spcc_inspection">Report Type: SPCC Inspection</option>
-                <option value="spcc_inspection_internal">Report Type: SPCC Inspection Internal</option>
-                <option value="spcc_inspection_external">Report Type: SPCC Inspection External</option>
-              </select>
+                  <select
+                    value={selectedReportType}
+                    onChange={(e) => handleReportTypeChange(e.target.value as any)}
+                    className="form-select w-full text-sm"
+                    title="Filter by report type"
+                  >
+                    <option value="all">Report Type: All</option>
+                    <option value="spcc_plan">Report Type: SPCC Plan</option>
+                    <option value="spcc_inspection">Report Type: SPCC Inspection</option>
+                    <option value="spcc_inspection_internal">Report Type: SPCC Inspection Internal</option>
+                    <option value="spcc_inspection_external">Report Type: SPCC Inspection External</option>
+                  </select>
 
-              <select
-                value={sortField}
-                onChange={(e) => setSortField(e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-600 dark:text-white"
-              >
-                <option value="name">Sort by Name</option>
-                <option value="day">Sort by Day</option>
-                <option value="status">Sort by Status</option>
-                <option value="nearest">Sort by Nearest to Me</option>
-              </select>
-            </div>
-          )}
+                  <select
+                    value={sortField}
+                    onChange={(e) => setSortField(e.target.value as any)}
+                    className="form-select w-full text-sm"
+                  >
+                    <option value="name">Sort by Name</option>
+                    <option value="day">Sort by Day</option>
+                    <option value="status">Sort by Status</option>
+                    <option value="nearest">Sort by Nearest to Me</option>
+                  </select>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1622,7 +1514,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   type="button"
                   onClick={() => {
                     setShowAddForm(false);
-                    setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30 });
+                    setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
                   }}
                   className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:hover:text-gray-300"
                 >
@@ -1635,7 +1527,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   placeholder="Facility Name"
                   value={editForm.name}
                   onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className="form-input"
                   required
                 />
                 <input
@@ -1644,7 +1536,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   placeholder="Latitude"
                   value={editForm.latitude}
                   onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className="form-input"
                   required
                 />
                 <input
@@ -1653,7 +1545,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   placeholder="Longitude"
                   value={editForm.longitude}
                   onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className="form-input"
                   required
                 />
                 <input
@@ -1661,7 +1553,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   placeholder="Visit Duration (mins)"
                   value={editForm.visitDuration}
                   onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-                  className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className="form-input"
                   required
                 />
               </div>
@@ -1727,93 +1619,91 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
                 {filteredFacilities.map((facility, index) => {
-                  const facilityInspection = inspections.get(facility.id);
-                  const status = getInspectionStatus(facility);
+
                   const highlightClass = getRowHighlightClass(facility);
                   return (
-                  <tr
-                    key={facility.id}
-                    className={`group ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass}`}
-                  >
-                    <td className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 relative">
-                      <div
-                        onTouchStart={(e) => {
-                          const touch = e.touches[0];
-                          const timer = setTimeout(() => {
-                            setMobileContextMenu({
-                              facilityId: facility.id,
-                              x: touch.clientX,
-                              y: touch.clientY
-                            });
-                          }, 500);
-                          setPressTimer(timer);
-                        }}
-                        onTouchEnd={() => {
-                          if (pressTimer) {
-                            clearTimeout(pressTimer);
-                            setPressTimer(null);
-                          }
-                        }}
-                        onTouchMove={() => {
-                          if (pressTimer) {
-                            clearTimeout(pressTimer);
-                            setPressTimer(null);
-                          }
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedFacilityIds.has(facility.id)}
-                          onChange={(e) => {
-                            const newSelected = new Set(selectedFacilityIds);
-                            if (e.target.checked) {
-                              newSelected.add(facility.id);
-                            } else {
-                              newSelected.delete(facility.id);
+                    <tr
+                      key={facility.id}
+                      className={`group ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass}`}
+                    >
+                      <td className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 relative">
+                        <div
+                          onTouchStart={(e) => {
+                            const touch = e.touches[0];
+                            const timer = setTimeout(() => {
+                              setMobileContextMenu({
+                                facilityId: facility.id,
+                                x: touch.clientX,
+                                y: touch.clientY
+                              });
+                            }, 500);
+                            setPressTimer(timer);
+                          }}
+                          onTouchEnd={() => {
+                            if (pressTimer) {
+                              clearTimeout(pressTimer);
+                              setPressTimer(null);
                             }
-                            setSelectedFacilityIds(newSelected);
                           }}
-                          className="w-4 h-4 text-blue-600 rounded"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                    </td>
-                    {visibleColumns.map(columnId => (
-                      <td
-                        key={columnId}
-                        className={`px-2 py-4 text-sm text-gray-600 dark:text-gray-300 cursor-pointer border-r border-gray-200 dark:border-gray-600 ${
-                          columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
-                        }`}
-                        onClick={() => setSelectedFacility(facility)}
-                      >
-                        {renderCellContent(facility, columnId, false)}
+                          onTouchMove={() => {
+                            if (pressTimer) {
+                              clearTimeout(pressTimer);
+                              setPressTimer(null);
+                            }
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedFacilityIds.has(facility.id)}
+                            onChange={(e) => {
+                              const newSelected = new Set(selectedFacilityIds);
+                              if (e.target.checked) {
+                                newSelected.add(facility.id);
+                              } else {
+                                newSelected.delete(facility.id);
+                              }
+                              setSelectedFacilityIds(newSelected);
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
                       </td>
-                    ))}
-                    <td className={`px-2 py-4 whitespace-nowrap text-sm sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(facility);
-                          }}
-                          className="text-blue-600 hover:text-blue-800"
-                          title="Edit"
+                      {visibleColumns.map(columnId => (
+                        <td
+                          key={columnId}
+                          className={`px-2 py-4 text-sm text-gray-600 dark:text-gray-300 cursor-pointer border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
+                            }`}
+                          onClick={() => setSelectedFacility(facility)}
                         >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(facility.id);
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                          {renderCellContent(facility, columnId, false)}
+                        </td>
+                      ))}
+                      <td className={`px-2 py-4 whitespace-nowrap text-sm sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEdit(facility);
+                            }}
+                            className="text-blue-600 hover:text-blue-800"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(facility.id);
+                            }}
+                            className="text-red-600 hover:text-red-800"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -1857,11 +1747,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <div
                     key={columnId}
                     data-column-id={columnId}
-                    className={`flex items-center gap-2 p-3 rounded transition-colors ${
-                      draggedExportColumn === columnId
-                        ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`flex items-center gap-2 p-3 rounded transition-colors ${draggedExportColumn === columnId
+                      ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <input
                       type="checkbox"
@@ -1892,7 +1781,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
                             if (targetColumnId && draggedExportColumn && targetColumnId !== draggedExportColumn) {
                               const syntheticEvent = {
-                                preventDefault: () => {}
+                                preventDefault: () => { }
                               } as React.DragEvent;
                               handleExportDragOver(syntheticEvent, targetColumnId);
                             }
@@ -1961,7 +1850,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           onShowOnMap={onShowOnMap}
           onEdit={() => handleEdit(selectedFacility)}
           facilities={facilities}
-          allInspections={inspections}
+          allInspections={Array.from(inspections.values())}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
           }}
@@ -1977,7 +1866,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             inspection={viewingInspection}
             facility={viewingFacility}
             onClose={() => setViewingInspection(null)}
-            onClone={() => {}}
+            onClone={() => { }}
             canClone={false}
             userId={userId}
             accountId={accountId}
@@ -2014,66 +1903,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         </div>
       )}
 
-      {mobileEditingField && (
-        <div className="fixed inset-0 bg-white z-[70] flex flex-col">
-          <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Edit {COLUMN_LABELS[mobileEditingField.columnId]}
-            </h3>
-            <button
-              onClick={() => setMobileEditingField(null)}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Check className="w-5 h-5" />
-              Done
-            </button>
-          </div>
-          <div className="flex-1 p-4">
-            {mobileEditingField.columnId === 'name' && (
-              <input
-                type="text"
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Facility Name"
-                autoFocus
-              />
-            )}
-            {mobileEditingField.columnId === 'latitude' && (
-              <input
-                type="number"
-                step="any"
-                value={editForm.latitude}
-                onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Latitude"
-                autoFocus
-              />
-            )}
-            {mobileEditingField.columnId === 'longitude' && (
-              <input
-                type="number"
-                step="any"
-                value={editForm.longitude}
-                onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Longitude"
-                autoFocus
-              />
-            )}
-            {mobileEditingField.columnId === 'visit_duration' && (
-              <input
-                type="number"
-                value={editForm.visitDuration}
-                onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Visit Duration (minutes)"
-                autoFocus
-              />
-            )}
-          </div>
-        </div>
-      )}
+      {/* mobileEditingField is no longer used for inline editing */}
 
       {showCompletionModal && (
         <CompletionTypeModal

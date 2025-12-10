@@ -24,14 +24,18 @@
   }
 
   /* Improve touch targets for mobile */
-  button, a {
+  button,
+  a {
     min-height: 44px;
     min-width: 44px;
   }
 
   /* Better mobile input styling */
-  input, textarea, select {
-    font-size: 16px; /* Prevents zoom on iOS */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+    /* Prevents zoom on iOS */
   }
 
   /* Smooth scrolling */
@@ -61,6 +65,24 @@
 
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+}
+
+@layer components {
+
+  .form-input,
+  .form-select,
+  .form-textarea {
+    @apply w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 hover:bg-white dark:hover:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-gray-50 dark:disabled:hover:bg-gray-700/50 transition-all duration-200 shadow-sm outline-none;
+  }
+
+  .form-select {
+    @apply pr-10;
+    /* Space for the dropdown arrow */
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2;
   }
 }
 

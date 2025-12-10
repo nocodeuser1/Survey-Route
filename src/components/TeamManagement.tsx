@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Mail, UserPlus, Trash2, Shield, User as UserIcon, CheckCircle, Clock, XCircle, Key, Copy, RefreshCw, AlertCircle, Bug, UserMinus } from 'lucide-react';
+import { Users, Mail, Shield, Trash2, AlertCircle, Copy, RefreshCw, Key, UserPlus, CheckCircle, Clock, XCircle, Bug, UserMinus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 
@@ -88,7 +88,8 @@ export default function TeamManagement() {
         .single();
 
       if (accountData?.agencies) {
-        setAgencyOwnerEmail(accountData.agencies.owner_email);
+        const ownerEmail = (accountData?.agencies as any)?.owner_email;
+        setAgencyOwnerEmail(ownerEmail);
       }
 
       // Use the security definer function to get team members
@@ -114,8 +115,7 @@ export default function TeamManagement() {
       console.log('[TeamManagement] Loading invitations for account:', currentAccount.id);
       console.log('[TeamManagement] Current account details:', {
         id: currentAccount.id,
-        accountName: currentAccount.accountName,
-        companyName: currentAccount.companyName,
+
       });
 
       // Get current user info for debugging
@@ -144,8 +144,8 @@ export default function TeamManagement() {
         .select('agency_id, agencies!inner(owner_email)')
         .eq('id', currentAccount.id)
         .single();
-      console.log('[TeamManagement] Agency owner email:', agencyCheck?.agencies?.owner_email);
-      console.log('[TeamManagement] Current user email matches agency owner:', currentAuthUser?.email === agencyCheck?.agencies?.owner_email);
+      console.log('[TeamManagement] Agency owner email:', (agencyCheck?.agencies as any)?.owner_email);
+      console.log('[TeamManagement] Current user email matches agency owner:', currentAuthUser?.email === (agencyCheck?.agencies as any)?.owner_email);
 
       // Get total count of invitations for this account (for debugging)
       const { count: totalInvitationsCount } = await supabase
@@ -159,10 +159,11 @@ export default function TeamManagement() {
         authUserId: currentAuthUser?.id,
         authUserEmail: currentAuthUser?.email,
         userRole: userRole?.role,
-        agencyOwnerEmail: agencyCheck?.agencies?.owner_email,
-        isAgencyOwner: currentAuthUser?.email === agencyCheck?.agencies?.owner_email,
+        agencyOwnerEmail: (agencyCheck?.agencies as any)?.owner_email,
+        isAgencyOwner: currentAuthUser?.email === (agencyCheck?.agencies as any)?.owner_email,
         totalInvitationsInDB: totalInvitationsCount,
         timestamp: new Date().toISOString(),
+        invitationsQuery: undefined as any,
       };
 
       const { data: invites, error: invitesError } = await supabase
@@ -214,7 +215,7 @@ export default function TeamManagement() {
   };
 
   const copyInviteLink = async (inviteId: string, token: string) => {
-    const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+    const baseUrl = (import.meta as any).env.VITE_APP_URL || window.location.origin;
     const inviteUrl = `${baseUrl}/accept-invite?token=${token}`;
 
     try {
@@ -243,7 +244,7 @@ export default function TeamManagement() {
       const { data: { session } } = await supabase.auth.getSession();
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-user-password`,
+        `${(import.meta as any).env.VITE_SUPABASE_URL}/functions/v1/update-user-password`,
         {
           method: 'POST',
           headers: {
@@ -413,7 +414,7 @@ export default function TeamManagement() {
       }
 
       const { data: { session } } = await supabase.auth.getSession();
-      const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+      const baseUrl = (import.meta as any).env.VITE_APP_URL || window.location.origin;
       const acceptUrl = `${baseUrl}/accept-invite?token=${token}`;
 
       const response = await fetch(
@@ -428,7 +429,7 @@ export default function TeamManagement() {
           body: JSON.stringify({
             inviteeEmail: email,
             inviterName: currentUserData.full_name || 'Your teammate',
-            accountName: currentAccount.accountName || currentAccount.companyName || 'Survey Route',
+            accountName: currentAccount.accountName || 'Survey Route',
             inviteToken: token,
             role: newMemberRole === 'account_admin' ? 'Administrator' : 'User',
             acceptUrl: acceptUrl,
@@ -504,7 +505,7 @@ export default function TeamManagement() {
           body: JSON.stringify({
             inviteeEmail: email,
             inviterName: currentUserData?.full_name || 'Your teammate',
-            accountName: currentAccount.accountName || currentAccount.companyName || 'Survey Route',
+            accountName: currentAccount.accountName || 'Survey Route',
             inviteToken: invitation.token,
             role: invitation.role === 'account_admin' ? 'Administrator' : 'User',
             acceptUrl: acceptUrl,
@@ -658,7 +659,7 @@ export default function TeamManagement() {
         .eq('id', currentAccount.id)
         .single();
 
-      if (agencyData?.agencies?.owner_email === email) {
+      if ((agencyData?.agencies as any)?.owner_email === email) {
         setError('Cannot remove agency owner from account');
         return;
       }
@@ -875,7 +876,7 @@ export default function TeamManagement() {
       results.payload = {
         inviteeEmail: testEmailAddress,
         inviterName: currentUserData.full_name || 'Test User',
-        accountName: currentAccount.accountName || currentAccount.companyName || 'Test Account',
+        accountName: currentAccount.accountName || 'Test Account',
         inviteToken: testToken,
         role: 'User',
         acceptUrl: testAcceptUrl,
@@ -1610,7 +1611,7 @@ export default function TeamManagement() {
                   type="email"
                   value={newMemberEmail}
                   onChange={(e) => setNewMemberEmail(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                  className="form-input"
                   placeholder="colleague@company.com"
                 />
               </div>
@@ -1624,7 +1625,7 @@ export default function TeamManagement() {
                     type="text"
                     value={newMemberPassword}
                     onChange={(e) => setNewMemberPassword(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                    className="form-input flex-1 font-mono"
                     placeholder="Leave blank for auto-generated"
                   />
                   <button
@@ -1647,7 +1648,7 @@ export default function TeamManagement() {
                 <select
                   value={newMemberRole}
                   onChange={(e) => setNewMemberRole(e.target.value as 'account_admin' | 'user')}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                  className="form-select"
                 >
                   <option value="user">User</option>
                   <option value="account_admin">Admin</option>
@@ -1819,8 +1820,8 @@ export default function TeamManagement() {
                   <input
                     type="text"
                     value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
+                    className="form-input flex-1 font-mono"
                     placeholder="Enter new password"
                   />
                   <button
@@ -1920,7 +1921,7 @@ export default function TeamManagement() {
                       type="text"
                       value={inviteDetails.link}
                       readOnly
-                      className="flex-1 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono text-gray-900 dark:text-white"
+                      className="form-input flex-1 text-sm font-mono"
                     />
                     <button
                       onClick={() => {

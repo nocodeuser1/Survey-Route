@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Building2, Mail, AlertCircle, CheckCircle, X, Users, Key, Copy, RefreshCw, DollarSign, UserPlus } from 'lucide-react';
+import { Building2, Users, Key, AlertCircle, CheckCircle, Mail, UserPlus, X, Copy, RefreshCw } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import StripeProductConfig from './StripeProductConfig';
 
@@ -113,7 +113,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
         accounts: (accountUsersData || [])
           .filter(au => au.user_id === user.id)
           .map(au => ({
-            account_name: au.account?.account_name || 'Unknown',
+            account_name: (au.account as any)?.account_name || 'Unknown',
             role: au.role
           }))
       }));
@@ -460,7 +460,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
     setTransferLoading(true);
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('agency_ownership_transfers')
         .insert({
           agency_id: agency.id,
@@ -508,43 +508,39 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
           <div className="flex overflow-x-auto">
             <button
               onClick={() => setActiveTab('users')}
-              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'users'
-                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                  : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
-              }`}
+              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'users'
+                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                }`}
             >
               User Management
             </button>
             {currentAccount && (
               <button
                 onClick={() => setActiveTab('stripe')}
-                className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'stripe'
-                    ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                    : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
-                }`}
+                className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'stripe'
+                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                  : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                  }`}
               >
                 Stripe Products
               </button>
             )}
             <button
               onClick={() => setActiveTab('rename')}
-              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'rename'
-                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                  : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
-              }`}
+              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'rename'
+                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                }`}
             >
               Rename Agency
             </button>
             <button
               onClick={() => setActiveTab('transfer')}
-              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'transfer'
-                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                  : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
-              }`}
+              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'transfer'
+                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                }`}
             >
               Transfer Ownership
             </button>
@@ -718,7 +714,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                   type="text"
                   value={newAgencyName}
                   onChange={(e) => setNewAgencyName(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="form-input"
                   placeholder="Enter new agency name"
                 />
               </div>
@@ -788,7 +784,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                     type="email"
                     value={newOwnerEmail}
                     onChange={(e) => setNewOwnerEmail(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="form-input pl-10"
                     placeholder="new.owner@example.com"
                   />
                 </div>
@@ -804,7 +800,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                     type="email"
                     value={confirmEmail}
                     onChange={(e) => setConfirmEmail(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="form-input pl-10"
                     placeholder="Confirm email address"
                   />
                 </div>
@@ -867,7 +863,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                     type="text"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+                    className="form-input flex-1 font-mono"
                     placeholder="Enter new password"
                   />
                   <button
@@ -977,7 +973,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                   type="email"
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="form-input"
                   placeholder="user@example.com"
                 />
               </div>
@@ -989,7 +985,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                 <select
                   value={selectedAccountForUser}
                   onChange={(e) => setSelectedAccountForUser(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="form-select"
                 >
                   <option value="">Choose an account...</option>
                   {accountsList.map((account) => (
@@ -1010,7 +1006,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                 <select
                   value={newUserRole}
                   onChange={(e) => setNewUserRole(e.target.value as 'account_admin' | 'user')}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="form-select"
                 >
                   <option value="user">User</option>
                   <option value="account_admin">Admin</option>

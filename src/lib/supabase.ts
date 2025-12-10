@@ -60,6 +60,8 @@ export interface Facility {
   last_inspection_date?: string | null;
   next_inspection_due?: string | null;
   inspection_due_notification_sent_at?: string | null;
+  spcc_external_completion?: boolean;
+  day?: number;
 }
 
 export interface HomeBase {
@@ -91,6 +93,7 @@ export interface RoutePlan {
 export interface UserSettings {
   id: string;
   user_id: string;
+  account_id?: string;
   max_facilities_per_day: number;
   max_hours_per_day: number;
   default_visit_duration_minutes: number;

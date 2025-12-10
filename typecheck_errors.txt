@@ -1,0 +1,271 @@
+
+> surveyroute@0.0.0 typecheck
+> tsc --noEmit -p tsconfig.app.json
+
+src/App.tsx(2,24): error TS6133: 'Settings' is declared but its value is never read.
+src/App.tsx(2,34): error TS6133: 'Upload' is declared but its value is never read.
+src/App.tsx(2,133): error TS6133: 'Image' is declared but its value is never read.
+src/App.tsx(2,140): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/App.tsx(2,153): error TS6133: 'AlertTriangle' is declared but its value is never read.
+src/App.tsx(2,168): error TS6133: 'Lock' is declared but its value is never read.
+src/App.tsx(2,187): error TS6133: 'Search' is declared but its value is never read.
+src/App.tsx(13,1): error TS6133: 'RouteSettings' is declared but its value is never read.
+src/App.tsx(134,9): error TS6133: 'mapRef' is declared but its value is never read.
+src/App.tsx(148,25): error TS6133: 'setShowMapSearch' is declared but its value is never read.
+src/App.tsx(681,57): error TS7006: Parameter 'route' implicitly has an 'any' type.
+src/App.tsx(685,48): error TS7006: Parameter 'routeFacility' implicitly has an 'any' type.
+src/App.tsx(712,52): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/App.tsx(712,57): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/App.tsx(713,56): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/App.tsx(713,61): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/App.tsx(714,56): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/App.tsx(714,61): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/App.tsx(715,51): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/App.tsx(715,56): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/App.tsx(784,9): error TS6133: 'handleClearFacilities' is declared but its value is never read.
+src/App.tsx(846,29): error TS18047: 'currentAccount' is possibly 'null'.
+src/App.tsx(997,17): error TS2345: Argument of type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is not assignable to parameter of type 'Promise<any>'.
+  Type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is missing the following properties from type 'Promise<any>': catch, finally, [Symbol.toStringTag]
+src/App.tsx(1020,17): error TS2345: Argument of type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is not assignable to parameter of type 'Promise<any>'.
+  Type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is missing the following properties from type 'Promise<any>': catch, finally, [Symbol.toStringTag]
+src/App.tsx(1065,27): error TS18047: 'currentAccount' is possibly 'null'.
+src/App.tsx(1070,21): error TS18047: 'currentAccount' is possibly 'null'.
+src/App.tsx(1110,27): error TS18047: 'currentAccount' is possibly 'null'.
+src/App.tsx(1188,25): error TS18047: 'currentAccount' is possibly 'null'.
+src/App.tsx(1634,15): error TS2345: Argument of type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is not assignable to parameter of type 'Promise<any>'.
+  Type 'PostgrestFilterBuilder<any, any, any, null, "facilities", unknown, "PATCH">' is missing the following properties from type 'Promise<any>': catch, finally, [Symbol.toStringTag]
+src/App.tsx(1769,9): error TS2554: Expected 5 arguments, but got 6.
+src/App.tsx(1931,7): error TS2322: Type '{ facilities: FacilityWithIndex[]; sequence: number[]; segments: RouteSegment[] | undefined; day: number; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; lastFacilityDepartureTime: string; }[]' is not assignable to type 'DailyRoute[]'.
+  Type '{ facilities: FacilityWithIndex[]; sequence: number[]; segments: RouteSegment[] | undefined; day: number; totalMiles: number; totalDriveTime: number; ... 4 more ...; lastFacilityDepartureTime: string; }' is not assignable to type 'DailyRoute'.
+    Types of property 'segments' are incompatible.
+      Type 'RouteSegment[] | undefined' is not assignable to type 'RouteSegment[]'.
+        Type 'undefined' is not assignable to type 'RouteSegment[]'.
+src/App.tsx(1962,10): error TS2339: Property 'catch' does not exist on type 'PromiseLike<void>'.
+src/App.tsx(1962,17): error TS7006: Parameter 'err' implicitly has an 'any' type.
+src/App.tsx(2248,38): error TS6133: 'facilityId' is declared but its value is never read.
+src/App.tsx(2515,23): error TS2322: Type 'OptimizationResult | null' is not assignable to type 'OptimizationResult'.
+  Type 'null' is not assignable to type 'OptimizationResult'.
+src/components/ActivityLogsModal.tsx(3,81): error TS6133: 'Info' is declared but its value is never read.
+src/components/ComplianceDashboard.tsx(2,45): error TS6133: 'TrendingUp' is declared but its value is never read.
+src/components/ComplianceDashboard.tsx(2,67): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/ComplianceDashboard.tsx(2,77): error TS6133: 'Filter' is declared but its value is never read.
+src/components/ComplianceDashboard.tsx(28,58): error TS6133: 'userId' is declared but its value is never read.
+src/components/ComplianceDashboard.tsx(173,61): error TS2367: This comparison appears to be unintentional because the types '"none" | "current"' and '"overdue"' have no overlap.
+src/components/CSVUpload.tsx(2,18): error TS6133: 'AlertCircle' is declared but its value is never read.
+src/components/CSVUpload.tsx(2,31): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/components/DataBackup.tsx(180,33): error TS2339: Property 'updated_at' does not exist on type 'Facility'.
+src/components/DataBackup.tsx(298,35): error TS2339: Property 'updated_at' does not exist on type 'RoutePlan'.
+src/components/DataBackup.tsx(300,25): error TS2339: Property 'facility_ids' does not exist on type '{ user_id: string; upload_batch_id: string; plan_data: any; total_days: number; total_miles: number; total_facilities: number; name: string; is_last_viewed: boolean; settings: any; home_base_data: any; }'.
+src/components/DataBackup.tsx(300,65): error TS2339: Property 'facility_ids' does not exist on type '{ user_id: string; upload_batch_id: string; plan_data: any; total_days: number; total_miles: number; total_facilities: number; name: string; is_last_viewed: boolean; settings: any; home_base_data: any; }'.
+src/components/DataBackup.tsx(301,23): error TS2339: Property 'facility_ids' does not exist on type '{ user_id: string; upload_batch_id: string; plan_data: any; total_days: number; total_miles: number; total_facilities: number; name: string; is_last_viewed: boolean; settings: any; home_base_data: any; }'.
+src/components/DataBackup.tsx(301,48): error TS2339: Property 'facility_ids' does not exist on type '{ user_id: string; upload_batch_id: string; plan_data: any; total_days: number; total_miles: number; total_facilities: number; name: string; is_last_viewed: boolean; settings: any; home_base_data: any; }'.
+src/components/ExportRoutes.tsx(20,60): error TS6133: 'homeBase' is declared but its value is never read.
+src/components/ExportRoutes.tsx(25,10): error TS6133: 'showTeamConfig' is declared but its value is never read.
+src/components/ExportRoutes.tsx(25,26): error TS6133: 'setShowTeamConfig' is declared but its value is never read.
+src/components/ExportRoutes.tsx(39,9): error TS6133: 'updateTeamDirection' is declared but its value is never read.
+src/components/ExportSurveys.tsx(16,3): error TS6133: 'userId' is declared but its value is never read.
+src/components/ExportSurveys.tsx(17,3): error TS6133: 'accountId' is declared but its value is never read.
+src/components/ExportSurveys.tsx(98,46): error TS6133: 'index' is declared but its value is never read.
+src/components/ExportSurveys.tsx(103,32): error TS2339: Property 'inspection_items' does not exist on type 'Inspection'.
+src/components/ExportSurveys.tsx(125,25): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/components/ExportSurveys.tsx(135,24): error TS2551: Property 'inspector_signature' does not exist on type 'Inspection'. Did you mean 'inspector_name'?
+src/components/ExportSurveys.tsx(138,38): error TS2551: Property 'inspector_signature' does not exist on type 'Inspection'. Did you mean 'inspector_name'?
+src/components/FacilitiesManager.tsx(45,7): error TS6133: 'COLUMN_GROUPS' is declared but its value is never read.
+src/components/FacilitiesManager.tsx(85,10): error TS6133: 'editingId' is declared but its value is never read.
+src/components/FacilitiesManager.tsx(332,33): error TS6133: 'facility' is declared but its value is never read.
+src/components/FacilitiesManager.tsx(387,9): error TS6133: 'handleSort' is declared but its value is never read.
+src/components/FacilitiesManager.tsx(526,9): error TS6133: 'handleSaveEdit' is declared but its value is never read.
+src/components/FacilitiesManager.tsx(1208,53): error TS6133: 'index' is declared but its value is never read.
+src/components/FacilityComplianceTimeline.tsx(10,64): error TS6133: 'accountId' is declared but its value is never read.
+src/components/FacilityComplianceTimeline.tsx(191,16): error TS18048: 'compliance.days_until_due' is possibly 'undefined'.
+src/components/FacilityComplianceTimeline.tsx(191,57): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/components/FacilityComplianceTimeline.tsx(194,21): error TS18048: 'compliance.days_until_due' is possibly 'undefined'.
+src/components/FacilityDetailModal.tsx(3,108): error TS6133: 'MapPin' is declared but its value is never read.
+src/components/FacilityDetailModal.tsx(82,11): error TS2322: Type '"google_maps"' is not assignable to type '"google" | "apple"'.
+src/components/FacilityDetailModal.tsx(88,11): error TS2322: Type 'null' is not assignable to type 'string | undefined'.
+src/components/FacilityDetailModal.tsx(101,9): error TS2322: Type '"google_maps"' is not assignable to type '"google" | "apple"'.
+src/components/FacilityDetailModal.tsx(107,9): error TS2322: Type 'null' is not assignable to type 'string | undefined'.
+src/components/FacilityDetailModal.tsx(261,9): error TS2322: Type '{ facility: Facility; userId: string; teamNumber: number; accountId: string | undefined; existingInspection: Inspection | undefined; onSaved: () => void; onClose: () => void; onInspectionCompletedWithFacility: (completedFacility: Facility) => void; }' is not assignable to type 'IntrinsicAttributes & InspectionFormProps'.
+  Property 'existingInspection' does not exist on type 'IntrinsicAttributes & InspectionFormProps'.
+src/components/InspectionForm.tsx(3,109): error TS6133: 'ImageIcon' is declared but its value is never read.
+src/components/InspectionForm.tsx(62,27): error TS6133: 'setGeneralComments' is declared but its value is never read.
+src/components/InspectionForm.tsx(386,36): error TS2339: Property 'inspector_name' does not exist on type 'UserSignature'.
+src/components/InspectionForm.tsx(485,29): error TS2339: Property 'flagged' does not exist on type '{ question_id: string; answer: "yes" | "no" | "na" | null; comments: string; action_required: boolean; action_notes: string; photos?: InspectionPhoto[] | undefined; }'.
+src/components/InspectionForm.tsx(712,25): error TS18047: 'signature' is possibly 'null'.
+src/components/InspectionForm.tsx(715,50): error TS18047: 'signature' is possibly 'null'.
+src/components/InspectionForm.tsx(795,26): error TS18047: 'template' is possibly 'null'.
+src/components/InspectionForm.tsx(796,38): error TS2339: Property 'type' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(796,70): error TS2339: Property 'optional' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(797,79): error TS2367: This comparison appears to be unintentional because the types '"yes" | "no" | "na"' and '""' have no overlap.
+src/components/InspectionForm.tsx(803,28): error TS18047: 'template' is possibly 'null'.
+src/components/InspectionForm.tsx(804,40): error TS2339: Property 'type' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(804,72): error TS2339: Property 'optional' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(806,65): error TS2367: This comparison appears to be unintentional because the types '"yes" | "no" | "na"' and '""' have no overlap.
+src/components/InspectionForm.tsx(818,32): error TS18047: 'template' is possibly 'null'.
+src/components/InspectionForm.tsx(819,44): error TS2339: Property 'type' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(819,76): error TS2339: Property 'optional' does not exist on type 'InspectionQuestion'.
+src/components/InspectionForm.tsx(831,28): error TS2551: Property 'comment' does not exist on type 'InspectionResponse'. Did you mean 'comments'?
+src/components/InspectionForm.tsx(836,26): error TS2345: Argument of type '(InspectionResponse | { answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[] | undefined; })[]' is not assignable to parameter of type 'SetStateAction<InspectionResponse[]>'.
+  Type '(InspectionResponse | { answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[] | undefined; })[]' is not assignable to type 'InspectionResponse[]'.
+    Type 'InspectionResponse | { answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[] | undefined; }' is not assignable to type 'InspectionResponse'.
+      Type '{ answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[]; }' is not assignable to type 'InspectionResponse'.
+        Types of property 'answer' are incompatible.
+          Type 'string' is not assignable to type '"yes" | "no" | "na" | null'.
+src/components/InspectionForm.tsx(839,40): error TS2345: Argument of type '(InspectionResponse | { answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[] | undefined; })[]' is not assignable to parameter of type 'InspectionResponse[]'.
+  Type 'InspectionResponse | { answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[] | undefined; }' is not assignable to type 'InspectionResponse'.
+    Type '{ answer: string; flagged: boolean; action_required: boolean; comment: any; question_id: string; comments: string; action_notes: string; photos?: InspectionPhoto[]; }' is not assignable to type 'InspectionResponse'.
+      Types of property 'answer' are incompatible.
+        Type 'string' is not assignable to type '"yes" | "no" | "na" | null'.
+src/components/InspectionForm.tsx(952,54): error TS2339: Property 'inspector_name' does not exist on type 'UserSignature'.
+src/components/InspectionReportExport.tsx(3,62): error TS6133: 'UserSettings' is declared but its value is never read.
+src/components/InspectionReportExport.tsx(13,62): error TS6133: 'userId' is declared but its value is never read.
+src/components/InspectionReportExport.tsx(37,81): error TS6133: 'photosResult' is declared but its value is never read.
+src/components/InspectionReportExport.tsx(170,11): error TS6133: 'flaggedResponses' is declared but its value is never read.
+src/components/InspectionReportExport.tsx(171,11): error TS6133: 'actionResponses' is declared but its value is never read.
+src/components/InspectionViewer.tsx(5,1): error TS6133: 'formatTimeTo12Hour' is declared but its value is never read.
+src/components/InspectionViewer.tsx(96,58): error TS2304: Cannot find name 'InspectionResponse'.
+src/components/InspectionViewer.tsx(319,66): error TS2304: Cannot find name 'InspectionResponse'.
+src/components/InspectionViewer.tsx(531,13): error TS2322: Type 'false | void' is not assignable to type 'ReactNode'.
+  Type 'void' is not assignable to type 'ReactNode'.
+src/components/MultiHomeBaseConfig.tsx(2,24): error TS6133: 'MapPin' is declared but its value is never read.
+src/components/MultiHomeBaseConfig.tsx(2,38): error TS6133: 'Plus' is declared but its value is never read.
+src/components/MultiHomeBaseConfig.tsx(2,44): error TS6133: 'Trash2' is declared but its value is never read.
+src/components/NavigationPopup.tsx(2,10): error TS6133: 'Navigation' is declared but its value is never read.
+src/components/NavigationSettings.tsx(13,5): error TS2322: Type '"google_maps"' is not assignable to type '"google" | "apple"'.
+src/components/NavigationSettings.tsx(67,31): error TS2339: Property 'dark_mode' does not exist on type 'UserSettings'.
+src/components/NavigationSettings.tsx(97,24): error TS2367: This comparison appears to be unintentional because the types '"google" | "apple"' and '"google_maps"' have no overlap.
+src/components/NavigationSettings.tsx(98,26): error TS6133: 'e' is declared but its value is never read.
+src/components/NavigationSettings.tsx(113,24): error TS2367: This comparison appears to be unintentional because the types '"google" | "apple"' and '"apple_maps"' have no overlap.
+src/components/NavigationSettings.tsx(114,26): error TS6133: 'e' is declared but its value is never read.
+src/components/NavigationSettings.tsx(175,33): error TS2339: Property 'dark_mode' does not exist on type 'UserSettings'.
+src/components/NavigationSettings.tsx(179,19): error TS2353: Object literal may only specify known properties, and 'dark_mode' does not exist in type 'SetStateAction<UserSettings>'.
+src/components/ReportDisplaySettings.tsx(3,20): error TS6133: 'UserSettings' is declared but its value is never read.
+src/components/RouteMap.tsx(4,10): error TS6133: 'Crosshair' is declared but its value is never read.
+src/components/RouteMap.tsx(4,72): error TS6133: 'ClipboardCheck' is declared but its value is never read.
+src/components/RouteMap.tsx(4,159): error TS6133: 'Car' is declared but its value is never read.
+src/components/RouteMap.tsx(150,10): error TS6133: 'addFacilityCoords' is declared but its value is never read.
+src/components/RouteMap.tsx(169,31): error TS6133: 'setEstimatedSpeedLimit' is declared but its value is never read.
+src/components/RouteMap.tsx(171,9): error TS6133: 'geoWatchIdRef' is declared but its value is never read.
+src/components/RouteMap.tsx(368,11): error TS6133: 'doubleTapTimeout' is declared but its value is never read.
+src/components/RouteMap.tsx(685,15): error TS6133: 'completionBorderColorRgb' is declared but its value is never read.
+src/components/RouteMap.tsx(1071,43): error TS2345: Argument of type 'LeafletMouseEvent' is not assignable to parameter of type 'Event'.
+  Type 'LeafletMouseEvent' is missing the following properties from type 'Event': bubbles, cancelBubble, cancelable, composed, and 16 more.
+src/components/RouteMap.tsx(1080,41): error TS2345: Argument of type 'LeafletMouseEvent' is not assignable to parameter of type 'Event'.
+  Type 'LeafletMouseEvent' is missing the following properties from type 'Event': bubbles, cancelBubble, cancelable, composed, and 16 more.
+src/components/RouteMap.tsx(1348,63): error TS2552: Cannot find name 'hideExternallyCompleted'. Did you mean 'isExternallyCompleted'?
+src/components/RouteMap.tsx(1814,28): error TS18047: 'mapRef.current' is possibly 'null'.
+src/components/RouteMap.tsx(1973,65): error TS2339: Property 'routeIndex' does not exist on type 'never'.
+src/components/RouteMap.tsx(1976,45): error TS2339: Property 'facilityIndex' does not exist on type 'never'.
+src/components/RouteMap.tsx(1990,43): error TS2339: Property 'routeIndex' does not exist on type 'never'.
+src/components/RouteMap.tsx(2005,37): error TS2339: Property 'latitude' does not exist on type 'LatLng'.
+src/components/RouteMap.tsx(2005,60): error TS2339: Property 'longitude' does not exist on type 'LatLng'.
+src/components/RouteMap.tsx(2067,9): error TS6133: 'toggleNavigationMode' is declared but its value is never read.
+src/components/RouteMap.tsx(2101,11): error TS2304: Cannot find name 'onTargetCoordsChange'.
+src/components/RouteMap.tsx(2102,9): error TS2304: Cannot find name 'onTargetCoordsChange'.
+src/components/RouteMap.tsx(2669,5): error TS2739: Type 'Polygon<any>' is missing the following properties from type 'Circle<any>': setRadius, getRadius, setLatLng, getLatLng
+src/components/RouteMap.tsx(3335,22): error TS2304: Cannot find name 'CheckCircle'.
+src/components/RoutePlanningControls.tsx(2,20): error TS6133: 'Clock' is declared but its value is never read.
+src/components/RoutePlanningControls.tsx(17,3): error TS6133: 'onVisitDurationChange' is declared but its value is never read.
+src/components/RoutePlanningControls.tsx(22,58): error TS2345: Argument of type '{ id: string; user_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: true; use_hours_constraint: true; updated_at: string; }' is not assignable to parameter of type 'UserSettings | (() => UserSettings)'.
+  Type '{ id: string; user_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: true; use_hours_constraint: true; updated_at: string; }' is missing the following properties from type 'UserSettings': map_preference, include_google_earth, location_permission_granted
+src/components/RoutePlanningControls.tsx(85,23): error TS2345: Argument of type '{ updated_at: string; user_id: string; account_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: boolean; use_hours_constraint: boolean; id: string; }' is not assignable to parameter of type 'SetStateAction<UserSettings>'.
+  Type '{ updated_at: string; user_id: string; account_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: boolean; use_hours_constraint: boolean; id: string; }' is missing the following properties from type 'UserSettings': map_preference, include_google_earth, location_permission_granted
+src/components/RoutePlanningSettings.tsx(15,58): error TS2345: Argument of type '{ id: string; user_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: true; use_hours_constraint: true; ... 4 more ...; updated_at: string; }' is not assignable to parameter of type 'UserSettings | (() => UserSettings)'.
+  Type '{ id: string; user_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: true; use_hours_constraint: true; ... 4 more ...; updated_at: string; }' is missing the following properties from type 'UserSettings': map_preference, include_google_earth, location_permission_granted
+src/components/RouteResults.tsx(2,10): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/RouteResults.tsx(2,70): error TS6133: 'Settings' is declared but its value is never read.
+src/components/RouteResults.tsx(2,194): error TS6133: 'Users' is declared but its value is never read.
+src/components/RouteResults.tsx(75,31): error TS6133: 'setSelectedFacilityIds' is declared but its value is never read.
+src/components/RouteResults.tsx(91,9): error TS2353: Object literal may only specify known properties, and 'account_id' does not exist in type 'UserSettings | ((prevState: UserSettings | null) => UserSettings | null)'.
+src/components/RouteResults.tsx(563,22): error TS2345: Argument of type '{ routes: (DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; })[]; ... 5 more ...; totalTime: number; }' is not assignable to parameter of type 'OptimizationResult'.
+  Types of property 'routes' are incompatible.
+    Type '(DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; })[]' is not assignable to type 'DailyRoute[]'.
+      Type 'DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; }' is not assignable to type 'DailyRoute'.
+        Property 'lastFacilityDepartureTime' is missing in type '{ day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; }' but required in type 'DailyRoute'.
+src/components/RouteResults.tsx(623,26): error TS2345: Argument of type '{ routes: (DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; })[]; ... 5 more ...; totalTime: number; }' is not assignable to parameter of type 'OptimizationResult'.
+  Types of property 'routes' are incompatible.
+    Type '(DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; })[]' is not assignable to type 'DailyRoute[]'.
+      Type 'DailyRoute | { day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; }' is not assignable to type 'DailyRoute'.
+        Property 'lastFacilityDepartureTime' is missing in type '{ day: number; facilities: never[]; sequence: never[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: never[]; }' but required in type 'DailyRoute'.
+src/components/RouteResults.tsx(1857,11): error TS2740: Type 'Map<string, Inspection>' is missing the following properties from type 'Inspection[]': length, pop, push, concat, and 23 more.
+src/components/RouteSettings.tsx(4,27): error TS6133: 'convertTo24Hour' is declared but its value is never read.
+src/components/RouteSettings.tsx(99,23): error TS2345: Argument of type '{ updated_at: string; user_id: string; account_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: boolean; ... 7 more ...; id: string; }' is not assignable to parameter of type 'SetStateAction<UserSettings>'.
+  Property 'location_permission_granted' is missing in type '{ updated_at: string; user_id: string; account_id: string; max_facilities_per_day: number; max_hours_per_day: number; default_visit_duration_minutes: number; use_facilities_constraint: boolean; ... 7 more ...; id: string; }' but required in type 'UserSettings'.
+src/components/SavedRoutesManager.tsx(16,3): error TS6133: 'currentRouteId' is declared but its value is never read.
+src/components/SPCCComplianceValidator.tsx(2,25): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/components/SPCCComplianceValidator.tsx(2,58): error TS6133: 'TrendingUp' is declared but its value is never read.
+src/components/StickyStatsBar.tsx(19,3): error TS6133: 'totalVisitTime' is declared but its value is never read.
+src/components/SurveyMode.backup.tsx(366,37): error TS2345: Argument of type 'string' is not assignable to parameter of type 'FacilityWithIndex'.
+src/components/SurveyMode.backup.tsx(453,9): error TS2304: Cannot find name 'openMap'.
+src/components/SurveyMode.tsx(2,22): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/components/SurveyMode.tsx(2,168): error TS6133: 'MapPin' is declared but its value is never read.
+src/components/SurveyMode.tsx(63,72): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string | undefined'.
+src/components/SurveyMode.tsx(78,74): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string | undefined'.
+src/components/SurveyMode.tsx(82,10): error TS6133: 'isRestoringState' is declared but its value is never read.
+src/components/SurveyMode.tsx(393,26): error TS2339: Property 'day' does not exist on type 'FacilityWithIndex'.
+src/components/SurveyMode.tsx(449,71): error TS2339: Property 'routeIndex' does not exist on type 'never'.
+src/components/SurveyMode.tsx(452,64): error TS2339: Property 'facilityIndex' does not exist on type 'never'.
+src/components/SurveyMode.tsx(487,24): error TS2339: Property 'routeOrderNumber' does not exist on type '{ distance: number; bearing: number; day: number | undefined; id: string; user_id: string; account_id?: string | undefined; name: string; address?: string | undefined; latitude: number; longitude: number; ... 29 more ...; spcc_external_completion?: boolean | undefined; }'.
+src/components/SurveyModeOld.tsx(366,37): error TS2345: Argument of type 'string' is not assignable to parameter of type 'FacilityWithIndex'.
+src/components/SurveyModeOld.tsx(453,9): error TS2304: Cannot find name 'openMap'.
+src/components/TeamManagement.tsx(91,50): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(118,37): error TS2339: Property 'companyName' does not exist on type 'Account'.
+src/components/TeamManagement.tsx(147,82): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(148,130): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(162,50): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(163,74): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(432,71): error TS2339: Property 'companyName' does not exist on type 'Account'.
+src/components/TeamManagement.tsx(508,71): error TS2339: Property 'companyName' does not exist on type 'Account'.
+src/components/TeamManagement.tsx(662,33): error TS2339: Property 'owner_email' does not exist on type '{ owner_email: any; }[]'.
+src/components/TeamManagement.tsx(879,67): error TS2339: Property 'companyName' does not exist on type 'Account'.
+src/contexts/AccountContext.tsx(1,69): error TS6133: 'useRef' is declared but its value is never read.
+src/contexts/AccountContext.tsx(92,46): error TS2345: Argument of type '(m: AccountMembership) => any' is not assignable to parameter of type '(value: { account_id: any; role: any; joined_at: any; }, index: number, array: { account_id: any; role: any; joined_at: any; }[]) => any'.
+  Types of parameters 'm' and 'value' are incompatible.
+    Type '{ account_id: any; role: any; joined_at: any; }' is missing the following properties from type 'AccountMembership': accountId, joinedAt
+src/contexts/AccountContext.tsx(92,74): error TS2551: Property 'account_id' does not exist on type 'AccountMembership'. Did you mean 'accountId'?
+src/contexts/AuthContext.tsx(170,69): error TS6133: 'fullName' is declared but its value is never read.
+src/contexts/DarkModeContext.tsx(14,9): error TS6133: 'user' is declared but its value is never read.
+src/hooks/useActivityLogger.ts(1,23): error TS6133: 'useEffect' is declared but its value is never read.
+src/pages/AcceptInvitePage.tsx(10,36): error TS6133: 'authUser' is declared but its value is never read.
+src/pages/AcceptInvitePage.tsx(320,15): error TS2345: Argument of type '"existing-user"' is not assignable to parameter of type 'SetStateAction<"creating" | "verify" | "setup" | "accepting" | "orphaned">'.
+src/pages/AgencyDashboard.tsx(4,67): error TS6133: 'Settings' is declared but its value is never read.
+src/pages/AgencyDashboard.tsx(4,90): error TS6133: 'AlertCircle' is declared but its value is never read.
+src/pages/AgencyDashboard.tsx(49,10): error TS6133: 'showAccountSettings' is declared but its value is never read.
+src/pages/AgencyDashboard.tsx(49,31): error TS6133: 'setShowAccountSettings' is declared but its value is never read.
+src/pages/AgencyDashboard.tsx(314,18): error TS6133: 'handleChangePassword' is declared but its value is never read.
+src/pages/AgencyDashboard.tsx(315,5): error TS2304: Cannot find name 'setSettingsError'.
+src/pages/AgencyDashboard.tsx(316,5): error TS2304: Cannot find name 'setSettingsSuccess'.
+src/pages/AgencyDashboard.tsx(318,9): error TS2304: Cannot find name 'newPassword'.
+src/pages/AgencyDashboard.tsx(318,25): error TS2304: Cannot find name 'confirmPassword'.
+src/pages/AgencyDashboard.tsx(319,7): error TS2304: Cannot find name 'setSettingsError'.
+src/pages/AgencyDashboard.tsx(323,9): error TS2304: Cannot find name 'newPassword'.
+src/pages/AgencyDashboard.tsx(324,7): error TS2304: Cannot find name 'setSettingsError'.
+src/pages/AgencyDashboard.tsx(330,19): error TS2304: Cannot find name 'newPassword'.
+src/pages/AgencyDashboard.tsx(335,7): error TS2304: Cannot find name 'setSettingsSuccess'.
+src/pages/AgencyDashboard.tsx(336,7): error TS2304: Cannot find name 'setNewPassword'.
+src/pages/AgencyDashboard.tsx(337,7): error TS2304: Cannot find name 'setConfirmPassword'.
+src/pages/AgencyDashboard.tsx(340,9): error TS2304: Cannot find name 'setSettingsSuccess'.
+src/pages/AgencyDashboard.tsx(343,7): error TS2304: Cannot find name 'setSettingsError'.
+src/pages/LandingPage.tsx(4,36): error TS6133: 'Users' is declared but its value is never read.
+src/pages/LandingPage.tsx(4,43): error TS6133: 'Clock' is declared but its value is never read.
+src/pages/LandingPage.tsx(4,101): error TS6133: 'Map' is declared but its value is never read.
+src/pages/SignatureSetupPage.tsx(4,10): error TS6133: 'PenTool' is declared but its value is never read.
+src/pages/UnsubscribePage.tsx(1,8): error TS6133: 'React' is declared but its value is never read.
+src/services/routeOptimizer.ts(118,15): error TS6133: 'nextI' is declared but its value is never read.
+src/services/routeOptimizer.ts(120,15): error TS6133: 'prevJ' is declared but its value is never read.
+src/services/routeOptimizer.ts(267,3): error TS2741: Property 'lastFacilityDepartureTime' is missing in type '{ day: number; facilities: FacilityWithIndex[]; sequence: number[]; totalMiles: number; totalDriveTime: number; totalVisitTime: number; totalTime: number; startTime: string; endTime: string; segments: RouteSegment[]; }' but required in type 'DailyRoute'.
+src/services/routeOptimizer.ts(339,13): error TS2304: Cannot find name 'Cluster'.
+src/services/routeOptimizer.ts(342,3): error TS6133: 'distanceMatrix' is declared but its value is never read.
+src/services/routeOptimizer.ts(343,3): error TS6133: 'homeIndex' is declared but its value is never read.
+src/services/routeOptimizer.ts(345,4): error TS2304: Cannot find name 'Cluster'.
+src/services/routeOptimizer.ts(348,17): error TS2304: Cannot find name 'Cluster'.
+src/services/routeOptimizer.ts(376,45): error TS2304: Cannot find name 'Cluster'.
+src/services/routeOptimizer.ts(403,15): error TS6133: 'combinedFacilityIds' is declared but its value is never read.
+src/services/routeOptimizer.ts(404,40): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/routeOptimizer.ts(405,42): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/routeOptimizer.ts(409,64): error TS2339: Property 'defaultVisitDuration' does not exist on type 'OptimizationConstraints'.
+src/services/routeOptimizer.ts(609,13): error TS6133: 'currentPos' is declared but its value is never read.
+src/services/routeOptimizer.ts(665,50): error TS6133: 'f' is declared but its value is never read.
+src/utils/geoClustering.ts(448,24): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/utils/geoClustering.ts(449,24): error TS2339: Property 'longitude' does not exist on type 'never'.

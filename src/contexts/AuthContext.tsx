@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signUpAgencyOwner(email: string, password: string, fullName: string, agencyName: string) {
+  async function signUpAgencyOwner(email: string, password: string, _fullName: string, agencyName: string) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,

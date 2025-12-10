@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useRef, useMemo } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -11,9 +11,9 @@ interface Account {
 }
 
 interface AccountMembership {
-  accountId: string;
+  account_id: string;
   role: 'account_admin' | 'user';
-  joinedAt: string;
+  joined_at: string;
 }
 
 interface AccountContextType {

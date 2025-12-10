@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Route, Plus, Users, MapPin, Calendar, LogOut, Building2, Settings, CheckCircle, AlertCircle, UserPlus, X, Mail, Briefcase, Activity } from 'lucide-react';
+import { Route, Plus, Users, MapPin, Calendar, LogOut, Building2, CheckCircle, UserPlus, X, Mail, Briefcase, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AgencySettings from '../components/AgencySettings';
 import ActivityLogsModal from '../components/ActivityLogsModal';
@@ -46,7 +46,6 @@ export default function AgencyDashboard() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [showAgencySettings, setShowAgencySettings] = useState(false);
-  const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedAccountName, setSelectedAccountName] = useState<string>('');
   const [showPendingRequests, setShowPendingRequests] = useState(false);
@@ -311,38 +310,7 @@ export default function AgencyDashboard() {
     }
   }
 
-  async function handleChangePassword() {
-    setSettingsError('');
-    setSettingsSuccess('');
 
-    if (newPassword !== confirmPassword) {
-      setSettingsError('Passwords do not match');
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setSettingsError('Password must be at least 6 characters');
-      return;
-    }
-
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) throw error;
-
-      setSettingsSuccess('Password updated successfully');
-      setNewPassword('');
-      setConfirmPassword('');
-
-      setTimeout(() => {
-        setSettingsSuccess('');
-      }, 3000);
-    } catch (err: any) {
-      setSettingsError(err.message || 'Failed to update password');
-    }
-  }
 
   if (loading) {
     return (
@@ -502,11 +470,10 @@ export default function AgencyDashboard() {
                           <span>{account._routeCount || 0} routes</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            account.status === 'active'
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${account.status === 'active'
                               ? 'bg-green-100 text-green-800'
                               : 'bg-gray-100 text-gray-800'
-                          }`}>
+                            }`}>
                             {account.status}
                           </span>
                         </div>

@@ -65,7 +65,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
-  const [accountBranding, setAccountBranding] = useState<{company_name?: string; logo_url?: string}>({});
+  const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
   const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -987,9 +987,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           return (
             <div
               key={question.id}
-              className={`p-3 sm:p-4 border-2 rounded-lg ${
-                response.answer === 'no' ? 'border-red-300 bg-red-50' : 'border-gray-200'
-              }`}
+              className={`p-3 sm:p-4 border-2 rounded-lg ${response.answer === 'no' ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                }`}
             >
               <div className="flex items-start gap-2 sm:gap-3">
                 <span className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-semibold text-xs sm:text-sm">
@@ -1007,33 +1006,30 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                     <div className="flex gap-2 mb-2 sm:mb-3">
                       <button
                         onClick={() => updateResponse(question.id, { answer: 'yes' })}
-                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${
-                          response.answer === 'yes'
-                            ? 'bg-green-600 text-white'
-                            : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
-                        }`}
+                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'yes'
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          }`}
                       >
                         <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mx-auto" />
                         <span className="text-xs mt-1 block">Yes</span>
                       </button>
                       <button
                         onClick={() => updateResponse(question.id, { answer: 'no' })}
-                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${
-                          response.answer === 'no'
-                            ? 'bg-red-600 text-white'
-                            : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
-                        }`}
+                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'no'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          }`}
                       >
                         <XCircle className="w-4 h-4 sm:w-5 sm:h-5 mx-auto" />
                         <span className="text-xs mt-1 block">No</span>
                       </button>
                       <button
                         onClick={() => updateResponse(question.id, { answer: 'na' })}
-                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${
-                          response.answer === 'na'
-                            ? 'bg-gray-600 text-white'
-                            : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
-                        }`}
+                        className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'na'
+                          ? 'bg-gray-600 text-white'
+                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          }`}
                       >
                         <span className="text-sm">N/A</span>
                       </button>
@@ -1044,7 +1040,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                     value={response.comments}
                     onChange={(e) => updateResponse(question.id, { comments: e.target.value })}
                     placeholder="Add comments..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-2"
+                    className="form-textarea mb-2"
                     rows={2}
                   />
 
@@ -1117,7 +1113,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                             updateResponse(question.id, { action_notes: e.target.value })
                           }
                           placeholder="Describe required action..."
-                          className="w-full px-3 py-2 border border-yellow-300 rounded-md text-sm"
+                          className="form-textarea border-yellow-300 focus:border-yellow-500 focus:ring-yellow-500/20"
                           rows={2}
                         />
                       )}

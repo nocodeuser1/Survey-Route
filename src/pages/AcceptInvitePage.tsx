@@ -7,7 +7,7 @@ import { Eye, EyeOff, AlertCircle, Route, UserPlus, Shield } from 'lucide-react'
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { reloadUserProfile, user: authUser } = useAuth();
+  const { reloadUserProfile } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<any>(null);
@@ -16,7 +16,7 @@ export default function AcceptInvitePage() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
-  const [step, setStep] = useState<'verify' | 'setup' | 'creating' | 'accepting' | 'orphaned'>('verify');
+  const [step, setStep] = useState<'verify' | 'setup' | 'creating' | 'accepting' | 'orphaned' | 'existing-user'>('verify');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authStatus, setAuthStatus] = useState<any>(null);
   const [cleaningUp, setCleaningUp] = useState(false);

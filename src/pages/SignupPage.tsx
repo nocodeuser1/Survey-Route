@@ -177,7 +177,7 @@ export default function SignupPage() {
             <p className="text-gray-600 mb-6">{error}</p>
             <a
               href="/login"
-              className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+              className="form-input"
             >
               Go to Login
             </a>
@@ -223,7 +223,7 @@ export default function SignupPage() {
                 type="email"
                 value={invitation.email}
                 disabled
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-gray-50 text-gray-600"
+                className="form-input"
               />
             </div>
 
@@ -235,7 +235,7 @@ export default function SignupPage() {
                 type="text"
                 value={invitation.role === 'account_admin' ? 'Account Admin' : 'User'}
                 disabled
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-gray-50 text-gray-600"
+                className="form-input"
               />
             </div>
 
@@ -249,7 +249,7 @@ export default function SignupPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="John Doe"
               />
             </div>
@@ -264,7 +264,7 @@ export default function SignupPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="••••••••"
               />
             </div>
@@ -279,7 +279,7 @@ export default function SignupPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="••••••••"
               />
             </div>

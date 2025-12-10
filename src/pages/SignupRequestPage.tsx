@@ -152,7 +152,7 @@ export default function SignupRequestPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="form-input"
                   placeholder="john@company.com"
                 />
               </div>
@@ -169,7 +169,7 @@ export default function SignupRequestPage() {
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
                   required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="form-input"
                   placeholder="Acme Inc."
                 />
               </div>
@@ -184,7 +184,7 @@ export default function SignupRequestPage() {
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="form-input"
                   placeholder="Field Inspector"
                 />
               </div>
@@ -199,7 +199,7 @@ export default function SignupRequestPage() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 rows={4}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors resize-none"
+                className="form-textarea resize-none"
                 placeholder="Tell us about your inspection needs or team size..."
               />
             </div>

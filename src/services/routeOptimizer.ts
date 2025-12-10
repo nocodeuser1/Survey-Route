@@ -1,5 +1,5 @@
 import { DistanceMatrix } from './osrm';
-import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, GeoPoint } from '../utils/geoClustering';
+import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, GeoPoint, Cluster } from '../utils/geoClustering';
 
 export interface FacilityWithIndex {
   index: number;
@@ -50,6 +50,7 @@ export interface OptimizationConstraints {
   startTime: string;
   clusteringTightness?: number;
   clusterBalanceWeight?: number;
+  defaultVisitDuration?: number;
 }
 
 function nearestNeighborTSP(
@@ -115,9 +116,8 @@ export function optimizeRouteOrder(
 
         const prevI = i === 0 ? homeIndex : bestRoute[i - 1];
         const currI = bestRoute[i];
-        const nextI = i + 1 < bestRoute.length ? bestRoute[i + 1] : homeIndex;
+        // nextI unused
 
-        const prevJ = j === 0 ? homeIndex : bestRoute[j - 1];
         const currJ = bestRoute[j];
         const nextJ = j + 1 < bestRoute.length ? bestRoute[j + 1] : homeIndex;
 
@@ -274,6 +274,7 @@ export function calculateDayRoute(
     totalTime: totalDriveTime + totalVisitTime,
     startTime,
     endTime: currentTime,
+    lastFacilityDepartureTime: currentTime,
     segments,
   };
 }
@@ -339,8 +340,6 @@ function mergeAdjacentClusters(
   clusters: Cluster[],
   maxFacilitiesPerDay: number,
   constraints: OptimizationConstraints,
-  distanceMatrix: DistanceMatrix,
-  homeIndex: number,
   homeBase: GeoPoint
 ): Cluster[] {
   // Try to merge small clusters that are geographically adjacent
@@ -400,10 +399,7 @@ function mergeAdjacentClusters(
 
       // Estimate if combined route would fit time constraint
       if (constraints.useHoursConstraint && constraints.maxHoursPerDay) {
-        const combinedFacilityIds = [
-          ...currentCluster.points.map(p => p.id as number),
-          ...candidateCluster.points.map(p => p.id as number)
-        ];
+        // combinedFacilityIds unused
 
         // Quick time estimate: assume 30 minutes per facility + travel time
         const estimatedVisitTime = combinedSize * (constraints.defaultVisitDuration || 30);
@@ -419,11 +415,11 @@ function mergeAdjacentClusters(
         id: currentCluster.id,
         centroid: {
           latitude: (currentCluster.centroid.latitude * currentCluster.points.length +
-                     candidateCluster.centroid.latitude * candidateCluster.points.length) /
-                    combinedSize,
+            candidateCluster.centroid.latitude * candidateCluster.points.length) /
+            combinedSize,
           longitude: (currentCluster.centroid.longitude * currentCluster.points.length +
-                      candidateCluster.centroid.longitude * candidateCluster.points.length) /
-                     combinedSize,
+            candidateCluster.centroid.longitude * candidateCluster.points.length) /
+            combinedSize,
         },
         points: [...currentCluster.points, ...candidateCluster.points]
       };
@@ -507,7 +503,7 @@ export function optimizeRoutes(
   });
 
   // Merge small adjacent clusters before day building
-  clusters = mergeAdjacentClusters(clusters, maxFacilitiesPerDay, constraints, distanceMatrix, homeIndex, homeBase);
+  clusters = mergeAdjacentClusters(clusters, maxFacilitiesPerDay, constraints, homeBase);
 
   let dayNumber = 1;
 
@@ -576,12 +572,12 @@ export function optimizeRoutes(
     );
 
     const exceedsTime = constraints.useHoursConstraint &&
-                        constraints.maxHoursPerDay &&
-                        fullRoute.totalTime / 60 > constraints.maxHoursPerDay;
+      constraints.maxHoursPerDay &&
+      fullRoute.totalTime / 60 > constraints.maxHoursPerDay;
 
     const exceedsFacilities = constraints.useFacilitiesConstraint &&
-                              constraints.maxFacilitiesPerDay &&
-                              fullClusterRoute.length > constraints.maxFacilitiesPerDay;
+      constraints.maxFacilitiesPerDay &&
+      fullClusterRoute.length > constraints.maxFacilitiesPerDay;
 
     if (!exceedsTime && !exceedsFacilities) {
       // Entire cluster fits in one day - perfect!
@@ -606,7 +602,6 @@ export function optimizeRoutes(
 
         // Start with first facility in remaining
         dayFacilities.push(remainingInCluster[0]);
-        let currentPos = remainingInCluster[0];
 
         // Add facilities one by one using nearest-neighbor until constraint hit
         for (let i = 1; i < remainingInCluster.length; i++) {
@@ -621,12 +616,12 @@ export function optimizeRoutes(
           );
 
           const wouldExceedTime = constraints.useHoursConstraint &&
-                                  constraints.maxHoursPerDay &&
-                                  testDayRoute.totalTime / 60 > constraints.maxHoursPerDay;
+            constraints.maxHoursPerDay &&
+            testDayRoute.totalTime / 60 > constraints.maxHoursPerDay;
 
           const wouldExceedFacilities = constraints.useFacilitiesConstraint &&
-                                        constraints.maxFacilitiesPerDay &&
-                                        testRoute.length >= constraints.maxFacilitiesPerDay;
+            constraints.maxFacilitiesPerDay &&
+            testRoute.length >= constraints.maxFacilitiesPerDay;
 
           if (wouldExceedTime || wouldExceedFacilities) {
             break; // Stop adding to this day
@@ -662,7 +657,7 @@ export function optimizeRoutes(
     });
   });
 
-  const allFacilityIds = new Set(facilities.map((f, idx) => idx + 1));
+  const allFacilityIds = new Set(facilities.map((_, idx) => idx + 1));
   const missingFacilities = [...allFacilityIds].filter(id => !assignedFacilityIds.has(id));
 
   // If any facilities are missing, add them to their own day(s)

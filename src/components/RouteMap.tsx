@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Crosshair, CheckSquare, Square, Route, RefreshCw, Navigation, ClipboardCheck, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, Car } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -159,14 +159,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [spiderfiedMarkers, setSpiderfiedMarkers] = useState<Map<number, L.Marker>>(new Map());
   const spiderfyLinesRef = useRef<L.Polyline[]>([]);
-  const spiderfyBackdropRef = useRef<L.Circle | null>(null);
+  const spiderfyBackdropRef = useRef<L.Layer | null>(null);
   const [showMenu, setShowMenu] = useState(false);
 
   const [internalNavigationMode, setInternalNavigationMode] = useState(false);
   const navigationMode = externalNavigationMode !== undefined ? externalNavigationMode : internalNavigationMode;
   const [gpsHeading, setGpsHeading] = useState<number | null>(null);
   const [gpsSpeed, setGpsSpeed] = useState<number | null>(null);
-  const [estimatedSpeedLimit, setEstimatedSpeedLimit] = useState<number | null>(null);
+  const [estimatedSpeedLimit] = useState<number | null>(null);
   const previousPositionRef = useRef<GeolocationPosition | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
   const [autoCentering, setAutoCentering] = useState(true);
@@ -176,7 +176,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const autoCenteringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userInteractedWithMapRef = useRef(false);
   const isDraggingRef = useRef(false);
-  const [nextFacility, setNextFacility] = useState<{facility: any, distance: number, routeIndex: number, facilityIndex: number} | null>(null);
+  const [nextFacility, setNextFacility] = useState<{ facility: any, distance: number, routeIndex: number, facilityIndex: number } | null>(null);
   const [internalLocationTracking, setInternalLocationTracking] = useState(false);
   const locationTracking = externalLocationTracking !== undefined ? externalLocationTracking : internalLocationTracking;
   const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
@@ -268,7 +268,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         options: {
           position: 'topleft'
         },
-        onAdd: function() {
+        onAdd: function () {
           const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom-north');
           const link = L.DomUtil.create('a', '', container);
           link.href = '#';
@@ -285,7 +285,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           L.DomEvent
             .on(link, 'click', L.DomEvent.stopPropagation)
             .on(link, 'click', L.DomEvent.preventDefault)
-            .on(link, 'click', function() {
+            .on(link, 'click', function () {
               if (mapRef.current) {
                 const map = mapRef.current as any;
                 if (map.setBearing) {
@@ -307,7 +307,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         options: {
           position: 'topleft'
         },
-        onAdd: function() {
+        onAdd: function () {
           const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
           const link = L.DomUtil.create('a', '', container);
           link.href = '#';
@@ -328,7 +328,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           L.DomEvent
             .on(link, 'click', L.DomEvent.stopPropagation)
             .on(link, 'click', L.DomEvent.preventDefault)
-            .on(link, 'click', function() {
+            .on(link, 'click', function () {
               if (mapRef.current && homeBase) {
                 const bounds = L.latLngBounds([[
                   Number(homeBase.latitude),
@@ -365,7 +365,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       });
 
       // Add double-tap-hold-drag zoom for mobile
-      let doubleTapTimeout: number | null = null;
+      let doubleTapTimeout: NodeJS.Timeout | null = null;
       let lastTapTime = 0;
       let isDraggingZoom = false;
       let dragStartY = 0;
@@ -652,8 +652,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 isValid: isInspectionValid(latestInspection),
                 validationFailureReason: !latestInspection ? 'No inspection' :
                   latestInspection.status !== 'completed' ? `Status is '${latestInspection.status}' (needs 'completed')` :
-                  inspectionDate && inspectionDate < oneYearAgo ? `Inspection is ${daysSinceInspection} days old (>365 days)` :
-                  'Unknown reason'
+                    inspectionDate && inspectionDate < oneYearAgo ? `Inspection is ${daysSinceInspection} days old (>365 days)` :
+                      'Unknown reason'
               } : null,
               hasCompletedInspection,
               completionType,
@@ -676,29 +676,27 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerContent = isManuallyRemoved
             ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
             : hasAnyValidCompletion
-            ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-            : `D${route.day}-${index + 1}`;
+              ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+              : `D${route.day}-${index + 1}`;
 
           // Determine border colors based on completion type
           // Blue border for internal completion, yellow border for external completion
           let completionBorderColor = '#3B82F6'; // Blue for internal/regular inspections
-          let completionBorderColorRgb = '59, 130, 246';
           if (isExternalCompletion) {
             completionBorderColor = '#EAB308'; // Yellow for external
-            completionBorderColorRgb = '234, 179, 8';
           }
 
           const borderColor = isSelected
             ? '#000000'
             : hasAnyValidCompletion
-            ? completionBorderColor
-            : 'white';
+              ? completionBorderColor
+              : 'white';
           const borderWidth = isSelected ? '4px' : hasAnyValidCompletion ? '5px' : '3px';
           const boxShadow = hasAnyValidCompletion && !isSelected
             ? `0 0 0 3px white, 0 0 0 6px ${completionBorderColor}, 0 4px 6px rgba(0,0,0,0.3)`
             : isSelected
-            ? '0 0 0 3px white, 0 0 0 6px #000000, 0 4px 6px rgba(0,0,0,0.4)'
-            : '0 2px 4px rgba(0,0,0,0.3)';
+              ? '0 0 0 3px white, 0 0 0 6px #000000, 0 4px 6px rgba(0,0,0,0.4)'
+              : '0 2px 4px rgba(0,0,0,0.3)';
           const markerOpacity = shouldBeHidden ? '0.2' : '1';
 
           // Completed plans are slightly smaller than non-completed plans
@@ -901,9 +899,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     </button>
                     <div id="day-options-${facility.index}" style="display: none; margin-top: 4px; grid-template-columns: 1fr 1fr 1fr; gap: 3px; max-height: 120px; overflow-y: auto;">
                       ${result.routes.map(r => {
-                        const color = COLORS[(r.day - 1) % COLORS.length];
-                        const isCurrentDay = r.day === route.day;
-                        return `
+              const color = COLORS[(r.day - 1) % COLORS.length];
+              const isCurrentDay = r.day === route.day;
+              return `
                           <button
                             class="day-option-btn"
                             data-day="${r.day}"
@@ -927,7 +925,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                             D${r.day} (${r.facilities.length})
                           </button>
                         `;
-                      }).join('')}
+            }).join('')}
                     </div>
                   </div>
                 ` : ''}
@@ -1067,8 +1065,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               const overlappingIndexes = findOverlappingMarkers(facility.index);
               if (overlappingIndexes.length > 1) {
                 // Multiple markers at this location - spiderfy them
-                L.DomEvent.stopPropagation(e);
-                L.DomEvent.preventDefault(e);
+                L.DomEvent.stopPropagation(e as any);
+                L.DomEvent.preventDefault(e as any);
                 spiderfyMarkers(overlappingIndexes, marker.getLatLng());
               }
               // For single marker, let default Leaflet behavior handle the popup
@@ -1076,8 +1074,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Add context menu support (right-click on desktop)
             marker.on('contextmenu', (e) => {
-              L.DomEvent.stopPropagation(e);
-              L.DomEvent.preventDefault(e);
+              L.DomEvent.stopPropagation(e as any);
+              L.DomEvent.preventDefault(e as any);
               const fullFacility = facilities.find(f => f.name === facility.name);
               if (fullFacility) {
                 setContextMenu({
@@ -1157,8 +1155,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerContent = isManuallyRemoved
             ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
             : hasAnyValidCompletion
-            ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-            : '?';
+              ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+              : '?';
 
           // Determine border colors
           let completionBorderColor = '#3B82F6';
@@ -1207,8 +1205,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Assign to Day:</div>
                   <div id="day-buttons-${facilityIndex}" style="display: flex; flex-wrap: wrap; gap: 4px;">
                     ${availableDays.map(day => {
-                      const color = COLORS[(day - 1) % COLORS.length];
-                      return `<button
+            const color = COLORS[(day - 1) % COLORS.length];
+            return `<button
                         data-day="${day}"
                         data-facility-index="${facilityIndex}"
                         class="assign-day-btn"
@@ -1216,7 +1214,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       >
                         Day ${day}
                       </button>`;
-                    }).join('')}
+          }).join('')}
                   </div>
                 </div>
               ` : ''}
@@ -1345,7 +1343,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const currentLng = Number(facility.longitude);
 
             // Check if should be hidden based on visibility settings
-            const shouldBeHidden = hideCompletedFacilities && hideExternallyCompleted;
+            const shouldBeHidden = hideCompletedFacilities && completedVisibility.hideExternallyCompleted;
 
             if (!shouldBeHidden) {
               bounds.extend([currentLat, currentLng]);
@@ -1545,9 +1543,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
     // Validate coordinates to prevent map jumping to invalid locations
     if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
-        isNaN(latitude) || isNaN(longitude) ||
-        latitude < -90 || latitude > 90 ||
-        longitude < -180 || longitude > 180) {
+      isNaN(latitude) || isNaN(longitude) ||
+      latitude < -90 || latitude > 90 ||
+      longitude < -180 || longitude > 180) {
       console.error('Invalid coordinates:', { latitude, longitude });
       return;
     }
@@ -1782,9 +1780,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           locationTracking,
           autoCentering,
           reason: !mapRef.current ? 'no map ref' :
-                  isDraggingRef.current ? 'user dragging' :
-                  !navigationMode && !locationTracking ? 'no tracking mode active' :
-                  !navigationMode && locationTracking && !autoCentering ? 'location tracking disabled by user interaction' : 'unknown'
+            isDraggingRef.current ? 'user dragging' :
+              !navigationMode && !locationTracking ? 'no tracking mode active' :
+                !navigationMode && locationTracking && !autoCentering ? 'location tracking disabled by user interaction' : 'unknown'
         });
       } else {
         console.log('[RouteMap] Auto-center ENABLED:', {
@@ -1799,9 +1797,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
         // Validate coordinates before auto-centering
         if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
-            isNaN(latitude) || isNaN(longitude) ||
-            latitude < -90 || latitude > 90 ||
-            longitude < -180 || longitude > 180) {
+          isNaN(latitude) || isNaN(longitude) ||
+          latitude < -90 || latitude > 90 ||
+          longitude < -180 || longitude > 180) {
           console.warn('Invalid coordinates from position update, skipping auto-center:', { latitude, longitude });
           return;
         }
@@ -1878,7 +1876,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
     const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
-              Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+      Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
     const heading = Math.atan2(y, x) * 180 / Math.PI;
     return (heading + 360) % 360;
   };
@@ -2121,15 +2119,15 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Validate coordinates before proceeding
           if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
-              isNaN(latitude) || isNaN(longitude) ||
-              latitude < -90 || latitude > 90 ||
-              longitude < -180 || longitude > 180) {
+            isNaN(latitude) || isNaN(longitude) ||
+            latitude < -90 || latitude > 90 ||
+            longitude < -180 || longitude > 180) {
             console.error('Invalid location data received:', position.coords);
 
             // Try to use existing userLocation as fallback
             if (userLocation &&
-                userLocation.lat >= -90 && userLocation.lat <= 90 &&
-                userLocation.lng >= -180 && userLocation.lng <= 180) {
+              userLocation.lat >= -90 && userLocation.lat <= 90 &&
+              userLocation.lng >= -180 && userLocation.lng <= 180) {
               console.log('Using existing user location as fallback with offset');
               centerMapOnLocation(userLocation.lat, userLocation.lng, 17, true, true);
             } else {
@@ -2158,7 +2156,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           let errorMessage = 'Unable to get your location for Drive Mode.';
 
-          switch(error.code) {
+          switch (error.code) {
             case error.PERMISSION_DENIED:
               errorMessage = 'Location permission denied. Please enable location access to use Drive Mode.';
               break;
@@ -2172,8 +2170,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // If we can't get fresh location, try using existing userLocation if valid
           if (userLocation &&
-              userLocation.lat >= -90 && userLocation.lat <= 90 &&
-              userLocation.lng >= -180 && userLocation.lng <= 180) {
+            userLocation.lat >= -90 && userLocation.lat <= 90 &&
+            userLocation.lng >= -180 && userLocation.lng <= 180) {
             console.log('Using last known location for Drive Mode with offset');
             centerMapOnLocation(userLocation.lat, userLocation.lng, 17, true, true);
           } else {
@@ -2531,7 +2529,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
         let errorMessage = 'Unable to get your location';
 
-        switch(error.code) {
+        switch (error.code) {
           case error.PERMISSION_DENIED:
             errorMessage = 'Location permission denied. Please enable location access in your browser settings.';
             break;
@@ -2991,11 +2989,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     }
                   }
                 }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${
-                  showRoadRoutes
-                    ? 'bg-green-600 text-white hover:bg-green-700'
-                    : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
-                }`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showRoadRoutes
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                  }`}
                 title="Toggle actual road routes"
                 disabled={isLoadingRoutes}
               >
@@ -3010,11 +3007,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     setSelectionMode(!selectionMode);
                     setSelectedFacilities(new Set());
                   }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${
-                    selectionMode
-                      ? 'bg-green-600 text-white hover:bg-green-700'
-                      : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
-                  }`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${selectionMode
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                    }`}
                   title="Toggle multi-select mode"
                 >
                   {selectionMode ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
@@ -3026,11 +3022,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               <div className="relative">
                 <button
                   onClick={() => setShowSearch(!showSearch)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${
-                    showSearch
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
-                  }`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showSearch
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                    }`}
                   title="Search facilities"
                 >
                   <Search className="w-4 h-4" />
@@ -3042,11 +3037,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               <div className="relative">
                 <button
                   onClick={onToggleHideCompleted}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${
-                    hideCompletedFacilities
-                      ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
-                  }`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${hideCompletedFacilities
+                    ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    }`}
                   title="Adjust completed facilities visibility"
                 >
                   {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -3098,9 +3092,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   <button
                     key={r.day}
                     onClick={() => setBulkTargetDay(r.day)}
-                    className={`px-3 py-2 rounded-md text-sm font-semibold transition-all ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-800 scale-105' : 'hover:scale-105'
-                    }`}
+                    className={`px-3 py-2 rounded-md text-sm font-semibold transition-all ${isSelected ? 'ring-2 ring-offset-2 ring-gray-800 scale-105' : 'hover:scale-105'
+                      }`}
                     style={{
                       backgroundColor: color,
                       color: 'white',
@@ -3119,9 +3112,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 return (
                   <button
                     onClick={() => setBulkTargetDay(newDayNumber)}
-                    className={`px-3 py-2 rounded-md text-sm font-semibold transition-all border-2 border-dashed ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-800 scale-105 border-gray-800' : 'hover:scale-105 border-gray-400'
-                    }`}
+                    className={`px-3 py-2 rounded-md text-sm font-semibold transition-all border-2 border-dashed ${isSelected ? 'ring-2 ring-offset-2 ring-gray-800 scale-105 border-gray-800' : 'hover:scale-105 border-gray-400'
+                      }`}
                     style={{
                       backgroundColor: isSelected ? color : 'white',
                       color: isSelected ? 'white' : color,
@@ -3158,8 +3150,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           paddingTop: isFullScreen
             ? (showSearch && selectionMode && selectedFacilities.size > 0 ? '160px'
               : showSearch ? '104px'
-              : selectionMode && selectedFacilities.size > 0 ? '108px'
-              : '56px')
+                : selectionMode && selectedFacilities.size > 0 ? '108px'
+                  : '56px')
             : '0'
         }}
       >

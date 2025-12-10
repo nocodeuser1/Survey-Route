@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Search, Filter, Eye, Maximize2 } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Search, Eye, Maximize2 } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
-import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
+
 import { isInspectionValid } from '../utils/inspectionUtils';
 
 interface FacilitiesTableProps {
@@ -53,39 +53,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
     }
   };
 
-  const getVerificationIcon = (facility: Facility) => {
-    // Check for completion type first (internal or external)
-    if (facility.spcc_completion_type === 'internal' && facility.spcc_completed_date) {
-      const completedDate = new Date(facility.spcc_completed_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      const now = new Date();
 
-      if (now > oneYearFromCompletion) {
-        return <AlertCircle className="w-4 h-4 text-orange-500" title="Internal completion expired - Reinspection needed" />;
-      }
-      return <CheckCircle className="w-4 h-4 text-blue-600" title="SPCC Completed Internally - Inspection within last year" />;
-    } else if (facility.spcc_completion_type === 'external' && facility.spcc_completed_date) {
-      const completedDate = new Date(facility.spcc_completed_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      const now = new Date();
-
-      if (now > oneYearFromCompletion) {
-        return <AlertCircle className="w-4 h-4 text-orange-500" title="External completion expired - Reinspection needed" />;
-      }
-      return <CheckCircle className="w-4 h-4 text-yellow-600" title="SPCC Completed Externally - Inspection within last year" />;
-    }
-
-    // Fall back to checking inspection records
-    const inspection = inspections.get(facility.id);
-    if (isInspectionValid(inspection)) {
-      return <CheckCircle className="w-4 h-4 text-green-600" title="Verified - Inspection within last year" />;
-    } else if (inspection) {
-      return <AlertCircle className="w-4 h-4 text-orange-500" title="Inspection expired - Reinspection needed" />;
-    }
-    return null;
-  };
 
   const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' => {
     // Check for internal or external completion
@@ -249,9 +217,8 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
               return (
                 <tr
                   key={facility.id}
-                  className={`hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${
-                    index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'
-                  }`}
+                  className={`hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'
+                    }`}
                 >
                   <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">
                     <div className="flex items-center gap-2">
@@ -266,11 +233,10 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
                     {facility.day ? `Day ${facility.day}` : '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                      status === 'inspected' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-200' :
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${status === 'inspected' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-200' :
                       status === 'expired' ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200' :
-                      'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200'
-                    }`}
+                        'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200'
+                      }`}>
                       {status === 'inspected' && <CheckCircle className="w-3 h-3" />}
                       {status === 'expired' && <AlertCircle className="w-3 h-3" />}
                       {status === 'inspected' ? 'Inspected' : status === 'expired' ? 'Expired' : 'Pending'}
@@ -313,7 +279,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
             loadInspections();
           }}
           facilities={facilities}
-          allInspections={inspections}
+          allInspections={Array.from(inspections.values())}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
           }}
@@ -329,7 +295,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
             inspection={viewingInspection}
             facility={viewingFacility}
             onClose={() => setViewingInspection(null)}
-            onClone={() => {}}
+            onClone={() => { }}
             canClone={false}
             userId={userId}
             accountId={accountId}

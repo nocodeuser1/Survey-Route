@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { MapPin, Route, BarChart3, Users, Clock, CheckCircle, Navigation, Camera, FileText, Upload, Map, Smartphone, Monitor, Shield, Zap, TrendingUp, Globe, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStripeCheckout } from '../hooks/useStripeCheckout';
 
@@ -412,17 +412,15 @@ export default function LandingPage() {
               <div className="inline-flex items-center gap-4 bg-white rounded-lg p-1 shadow-md border border-gray-200">
                 <button
                   onClick={() => setIsAnnual(false)}
-                  className={`px-6 py-2 rounded-md font-medium transition-all ${
-                    !isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`px-6 py-2 rounded-md font-medium transition-all ${!isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'
+                    }`}
                 >
                   Monthly
                 </button>
                 <button
                   onClick={() => setIsAnnual(true)}
-                  className={`px-6 py-2 rounded-md font-medium transition-all ${
-                    isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`px-6 py-2 rounded-md font-medium transition-all ${isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'
+                    }`}
                 >
                   Annual
                   <span className="ml-2 text-sm bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
@@ -458,9 +456,8 @@ export default function LandingPage() {
                   return (
                     <div
                       key={product.id}
-                      className={`bg-white rounded-2xl shadow-lg ${config.borderColor} p-8 hover:shadow-xl transition-shadow ${
-                        config.popular ? 'relative transform scale-105 shadow-2xl' : ''
-                      }`}
+                      className={`bg-white rounded-2xl shadow-lg ${config.borderColor} p-8 hover:shadow-xl transition-shadow ${config.popular ? 'relative transform scale-105 shadow-2xl' : ''
+                        }`}
                     >
                       {config.popular && (
                         <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">

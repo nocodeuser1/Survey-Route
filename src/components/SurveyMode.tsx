@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Navigation, CheckCircle, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, MapPin, Calendar, Download, Route } from 'lucide-react';
+import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { Facility, Inspection, supabase, UserSettings } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
@@ -60,7 +60,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     return statePersistence.get<FilterType>('surveyMode_filter', 'all') ?? 'all';
   });
   const [expandedFacility, setExpandedFacility] = useState<string | null>(() => {
-    return statePersistence.get<string>('surveyMode_expandedFacility', null);
+    return statePersistence.get<string>('surveyMode_expandedFacility', undefined) ?? null;
   });
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [managingInspectionsFacility, setManagingInspectionsFacility] = useState<Facility | null>(null);
@@ -75,7 +75,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     return statePersistence.get<'distance' | 'name' | 'status' | 'route'>('surveyMode_sortBy', 'distance') ?? 'distance';
   });
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(() => {
-    return statePersistence.get<string>('surveyMode_selectedFacilityId', null);
+    return statePersistence.get<string>('surveyMode_selectedFacilityId', undefined) ?? null;
   });
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
@@ -389,7 +389,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
       const teamRoute = result.routes[teamNumber - 1];
       let day: number | undefined;
       if (teamRoute && teamRoute.facilities) {
-        const routeItem = teamRoute.facilities.find((f: any) => f.id === facility.id);
+        const routeItem = teamRoute.facilities.find((f: any) => f.id === facility.id) as any;
         day = routeItem?.day;
       }
 
@@ -401,7 +401,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
       };
     });
 
-    let sorted = [...withDistance];
+    let sorted: FacilityWithDistance[] = [...withDistance];
 
     switch (sortBy) {
       case 'distance':
@@ -634,7 +634,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
           inspection={viewingInspection}
           facility={viewingFacility}
           onClose={() => setViewingInspection(null)}
-          onClone={() => {}}
+          onClone={() => { }}
           canClone={false}
           userId={userId}
           accountId={accountId}
@@ -701,55 +701,50 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
           <div className="grid grid-cols-5 gap-2 mb-3">
             <button
               onClick={() => setFilter('all')}
-              className={`p-2 rounded-lg transition-all ${
-                filter === 'all'
+              className={`p-2 rounded-lg transition-all ${filter === 'all'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               <div className="text-lg font-bold">{facilitiesWithDistance.length}</div>
               <div className="text-[10px] opacity-90">All Sites</div>
             </button>
             <button
               onClick={() => setFilter('incomplete')}
-              className={`p-2 rounded-lg transition-all ${
-                filter === 'incomplete'
+              className={`p-2 rounded-lg transition-all ${filter === 'incomplete'
                   ? 'bg-orange-600 text-white'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               <div className="text-lg font-bold">{incompleteCount}</div>
               <div className="text-[10px] opacity-90">Pending</div>
             </button>
             <button
               onClick={() => setFilter('draft')}
-              className={`p-2 rounded-lg transition-all ${
-                filter === 'draft'
+              className={`p-2 rounded-lg transition-all ${filter === 'draft'
                   ? 'bg-yellow-600 text-white'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               <div className="text-lg font-bold">{draftCount}</div>
               <div className="text-[10px] opacity-90">Draft</div>
             </button>
             <button
               onClick={() => setFilter('completed')}
-              className={`p-2 rounded-lg transition-all ${
-                filter === 'completed'
+              className={`p-2 rounded-lg transition-all ${filter === 'completed'
                   ? 'bg-green-600 text-white'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               <div className="text-lg font-bold">{completedCount}</div>
               <div className="text-[10px] opacity-90">Complete</div>
             </button>
             <button
               onClick={() => setFilter('expired')}
-              className={`p-2 rounded-lg transition-all ${
-                filter === 'expired'
+              className={`p-2 rounded-lg transition-all ${filter === 'expired'
                   ? 'bg-red-600 text-white'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               <div className="text-lg font-bold">{expiredCount}</div>
               <div className="text-[10px] opacity-90">Expired</div>
@@ -845,219 +840,218 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
         <div className="space-y-2">
           {filteredFacilities.length === 0 ? (
-          <div className="text-center py-12">
-            <Filter className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white dark:text-white mb-1">No facilities found</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Try adjusting your filters or search</p>
-          </div>
+            <div className="text-center py-12">
+              <Filter className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white dark:text-white mb-1">No facilities found</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Try adjusting your filters or search</p>
+            </div>
           ) : (
             filteredFacilities.map((facility, index) => {
-            const status = getInspectionStatus(facility);
-            const isExpanded = expandedFacility === facility.id;
-            const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
-            const latestInspection = facilityInspections[0];
+              const status = getInspectionStatus(facility);
+              const isExpanded = expandedFacility === facility.id;
+              const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
+              const latestInspection = facilityInspections[0];
 
-            return (
-              <div
-                key={facility.id}
-                onClick={() => setSelectedFacilityId(selectedFacilityId === facility.id ? null : facility.id)}
-                className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${getBorderColorClass(facility, status)}`}
-              >
-                <div className="p-3">
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedFacilityIds.has(facility.id)}
-                      onChange={(e) => {
-                        const newSelected = new Set(selectedFacilityIds);
-                        if (e.target.checked) {
-                          newSelected.add(facility.id);
-                        } else {
-                          newSelected.delete(facility.id);
-                        }
-                        setSelectedFacilityIds(newSelected);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-1 w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                    />
-                    <div className="relative flex-shrink-0">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-                        style={{
-                          backgroundColor: facility.day ? COLORS[(facility.day - 1) % COLORS.length] : '#9CA3AF'
+              return (
+                <div
+                  key={facility.id}
+                  onClick={() => setSelectedFacilityId(selectedFacilityId === facility.id ? null : facility.id)}
+                  className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${getBorderColorClass(facility, status)}`}
+                >
+                  <div className="p-3">
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedFacilityIds.has(facility.id)}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedFacilityIds);
+                          if (e.target.checked) {
+                            newSelected.add(facility.id);
+                          } else {
+                            newSelected.delete(facility.id);
+                          }
+                          setSelectedFacilityIds(newSelected);
                         }}
-                      >
-                        {sortBy === 'route' && facility.routeOrderNumber ? facility.routeOrderNumber : index + 1}
-                      </div>
-                      {sortBy === 'distance' && index === 0 && currentPosition && (
-                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-600 rounded-full flex items-center justify-center" title="Nearest facility">
-                          <Target className="w-2 h-2 text-white" />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex-1">
-                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white dark:text-white mb-0.5">{facility.name}</h3>
-                          {facility.address && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{facility.address}</p>
-                          )}
-                        </div>
-
-                        {currentPosition && (
-                          <div className="text-right">
-                            <div className="flex items-center gap-1 text-xs font-semibold text-gray-900 dark:text-white dark:text-white">
-                              <Compass className="w-3 h-3 text-blue-600" />
-                              {formatDistance(facility.distance)}
-                            </div>
-                            <div className="text-[10px] text-gray-500 dark:text-gray-400">{getDirectionLabel(facility.bearing)}</div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                        {status === 'completed' && <SPCCInspectionBadge className="text-[10px]" />}
-                        {status === 'expired' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200">
-                            <AlertCircle className="w-2.5 h-2.5" />
-                            Expired
-                          </span>
-                        )}
-                        {status === 'incomplete' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200">
-                            <Clock className="w-2.5 h-2.5" />
-                            Pending
-                          </span>
-                        )}
-
-                        {facility.day && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200">
-                            <Calendar className="w-2.5 h-2.5" />
-                            Day {facility.day}
-                          </span>
-                        )}
-
-                        <SPCCCompletedBadge completedDate={facility.spcc_completed_date} className="text-[10px]" />
-
-                        {latestInspection && (
-                          <span className="text-[10px] text-gray-500">
-                            Last: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </span>
-                        )}
-                      </div>
-
-                      {selectedFacilityId === facility.id && (
-                        <>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setNavigationTarget(facility);
-                              }}
-                              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
-                            >
-                              <Navigation className="w-3.5 h-3.5" />
-                              Navigate
-                            </button>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                console.log('[SurveyMode] Starting inspection', {
-                                  facilityId: facility.id,
-                                  facilityName: facility.name,
-                                  userId,
-                                  accountId,
-                                  teamNumber,
-                                  currentStatus: status,
-                                  timestamp: new Date().toISOString()
-                                });
-                                setInspectingFacility(facility);
-                              }}
-                              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium"
-                            >
-                              <FileText className="w-3.5 h-3.5" />
-                              {status === 'completed' ? 'Re-inspect' : 'Inspect'}
-                            </button>
-                          </div>
-
-                          {facilityInspections.length > 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedFacility(isExpanded ? null : facility.id);
-                              }}
-                              className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-700 dark:text-gray-200 dark:text-gray-200 rounded-lg hover:bg-gray-100 transition-colors text-xs font-medium border border-gray-200"
-                            >
-                              <History className="w-3 h-3" />
-                              History ({facilityInspections.length})
-                              {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            </button>
-                          )}
-
-                          {userRole !== 'user' && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setManagingInspectionsFacility(facility);
-                              }}
-                              className="w-full mt-1.5 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors text-xs font-medium border border-gray-200"
-                            >
-                              <List className="w-3 h-3" />
-                              Manage
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {isExpanded && facilityInspections.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-200 space-y-1.5">
-                      {facilityInspections.slice(0, 3).map(inspection => (
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                      />
+                      <div className="relative flex-shrink-0">
                         <div
-                          key={inspection.id}
-                          className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
+                          style={{
+                            backgroundColor: facility.day ? COLORS[(facility.day - 1) % COLORS.length] : '#9CA3AF'
+                          }}
                         >
+                          {sortBy === 'route' && facility.routeOrderNumber ? facility.routeOrderNumber : index + 1}
+                        </div>
+                        {sortBy === 'distance' && index === 0 && currentPosition && (
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-600 rounded-full flex items-center justify-center" title="Nearest facility">
+                            <Target className="w-2 h-2 text-white" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-2">
                           <div className="flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold text-gray-900 dark:text-white">
-                                {new Date(inspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
-                              </span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                isInspectionValid(inspection)
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
-                              }`}>
-                                {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
-                              </span>
-                            </div>
-                            {inspection.inspector_name && (
-                              <p className="text-[10px] text-gray-500 mt-0.5">By {inspection.inspector_name}</p>
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white dark:text-white mb-0.5">{facility.name}</h3>
+                            {facility.address && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{facility.address}</p>
                             )}
                           </div>
-                          <button
-                            onClick={() => setViewingInspection(inspection)}
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="View"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
+
+                          {currentPosition && (
+                            <div className="text-right">
+                              <div className="flex items-center gap-1 text-xs font-semibold text-gray-900 dark:text-white dark:text-white">
+                                <Compass className="w-3 h-3 text-blue-600" />
+                                {formatDistance(facility.distance)}
+                              </div>
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400">{getDirectionLabel(facility.bearing)}</div>
+                            </div>
+                          )}
                         </div>
-                      ))}
-                      {facilityInspections.length > 3 && (
-                        <button
-                          onClick={() => setManagingInspectionsFacility(facility)}
-                          className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium py-1.5 hover:bg-blue-50 rounded transition-colors"
-                        >
-                          View all {facilityInspections.length}
-                        </button>
-                      )}
+
+                        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                          {status === 'completed' && <SPCCInspectionBadge className="text-[10px]" />}
+                          {status === 'expired' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200">
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              Expired
+                            </span>
+                          )}
+                          {status === 'incomplete' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200">
+                              <Clock className="w-2.5 h-2.5" />
+                              Pending
+                            </span>
+                          )}
+
+                          {facility.day && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200">
+                              <Calendar className="w-2.5 h-2.5" />
+                              Day {facility.day}
+                            </span>
+                          )}
+
+                          <SPCCCompletedBadge completedDate={facility.spcc_completed_date} className="text-[10px]" />
+
+                          {latestInspection && (
+                            <span className="text-[10px] text-gray-500">
+                              Last: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                        </div>
+
+                        {selectedFacilityId === facility.id && (
+                          <>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setNavigationTarget(facility);
+                                }}
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                              >
+                                <Navigation className="w-3.5 h-3.5" />
+                                Navigate
+                              </button>
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  console.log('[SurveyMode] Starting inspection', {
+                                    facilityId: facility.id,
+                                    facilityName: facility.name,
+                                    userId,
+                                    accountId,
+                                    teamNumber,
+                                    currentStatus: status,
+                                    timestamp: new Date().toISOString()
+                                  });
+                                  setInspectingFacility(facility);
+                                }}
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                {status === 'completed' ? 'Re-inspect' : 'Inspect'}
+                              </button>
+                            </div>
+
+                            {facilityInspections.length > 0 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedFacility(isExpanded ? null : facility.id);
+                                }}
+                                className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-700 dark:text-gray-200 dark:text-gray-200 rounded-lg hover:bg-gray-100 transition-colors text-xs font-medium border border-gray-200"
+                              >
+                                <History className="w-3 h-3" />
+                                History ({facilityInspections.length})
+                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            )}
+
+                            {userRole !== 'user' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setManagingInspectionsFacility(facility);
+                                }}
+                                className="w-full mt-1.5 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors text-xs font-medium border border-gray-200"
+                              >
+                                <List className="w-3 h-3" />
+                                Manage
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-                  )}
-              </div>
-            </div>
+
+                    {isExpanded && facilityInspections.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 space-y-1.5">
+                        {facilityInspections.slice(0, 3).map(inspection => (
+                          <div
+                            key={inspection.id}
+                            className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                  {new Date(inspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                                </span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isInspectionValid(inspection)
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-red-100 text-red-700'
+                                  }`}>
+                                  {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
+                                </span>
+                              </div>
+                              {inspection.inspector_name && (
+                                <p className="text-[10px] text-gray-500 mt-0.5">By {inspection.inspector_name}</p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => setViewingInspection(inspection)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="View"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        {facilityInspections.length > 3 && (
+                          <button
+                            onClick={() => setManagingInspectionsFacility(facility)}
+                            className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium py-1.5 hover:bg-blue-50 rounded transition-colors"
+                          >
+                            View all {facilityInspections.length}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               );
             })
           )}

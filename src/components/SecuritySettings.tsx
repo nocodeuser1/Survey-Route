@@ -6,7 +6,7 @@ interface SecuritySettingsProps {
   userId: string;
 }
 
-export default function SecuritySettings({ userId }: SecuritySettingsProps) {
+export default function SecuritySettings({ userId: _userId }: SecuritySettingsProps) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -35,7 +35,7 @@ export default function SecuritySettings({ userId }: SecuritySettingsProps) {
     setPasswordChanging(true);
 
     try {
-      const { data, error } = await supabase.auth.updateUser({
+      const { error } = await supabase.auth.updateUser({
         password: newPassword,
       });
 
@@ -72,8 +72,8 @@ export default function SecuritySettings({ userId }: SecuritySettingsProps) {
             <input
               type={showNewPassword ? "text" : "password"}
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full px-4 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
+              className="form-input pr-10"
               placeholder="Enter new password"
             />
             <button
@@ -97,8 +97,8 @@ export default function SecuritySettings({ userId }: SecuritySettingsProps) {
             <input
               type={showConfirmPassword ? "text" : "password"}
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
+              className="form-input pr-10"
               placeholder="Confirm new password"
             />
             <button
@@ -112,11 +112,10 @@ export default function SecuritySettings({ userId }: SecuritySettingsProps) {
         </div>
 
         {passwordMessage && (
-          <div className={`flex items-center gap-2 p-3 rounded-lg transition-colors duration-200 ${
-            passwordMessage.type === 'success'
-              ? 'bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 text-green-800 dark:text-green-200'
-              : 'bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-200'
-          }`}>
+          <div className={`flex items-center gap-2 p-3 rounded-lg transition-colors duration-200 ${passwordMessage.type === 'success'
+            ? 'bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 text-green-800 dark:text-green-200'
+            : 'bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-200'
+            }`}>
             {passwordMessage.type === 'success' ? (
               <CheckCircle className="w-5 h-5 flex-shrink-0" />
             ) : (

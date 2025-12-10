@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, TrendingUp, MapPin, Navigation, RefreshCw, Settings, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Users, FileDown, Plus, X as XIcon, CheckSquare, Square, Eye, EyeOff } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, FileDown, Plus, X as XIcon, CheckSquare, Square, Eye, EyeOff } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -72,11 +72,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [showLoadRoutePopup, setShowLoadRoutePopup] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [showExportSurveysPopup, setShowExportSurveysPopup] = useState(false);
-  const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
+  const [selectedFacilityIds] = useState<Set<string>>(new Set());
   const [listSelectionMode, setListSelectionMode] = useState(false);
   const [selectedFacilityNames, setSelectedFacilityNames] = useState<Set<string>>(new Set());
   const [bulkReassignTargetDay, setBulkReassignTargetDay] = useState<number>(1);
-  const [draggedFacility, setDraggedFacility] = useState<{name: string, fromDay: number} | null>(null);
+  const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
 
   useEffect(() => {
     loadInspections();
@@ -203,112 +203,112 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
         // Save the updated settings FIRST (keeping visit duration, start time, and sunset offset from current settings)
         const { error } = await supabase
-        .from('user_settings')
-        .upsert({
-          user_id: accountId,
-          account_id: accountId,
-          max_facilities_per_day: tempSettings.max_facilities_per_day,
-          max_hours_per_day: tempSettings.max_hours_per_day,
-          default_visit_duration_minutes: settings?.default_visit_duration_minutes || 30,
-          use_facilities_constraint: tempSettings.use_facilities_constraint,
-          use_hours_constraint: tempSettings.use_hours_constraint,
-          clustering_tightness: tempSettings.clustering_tightness,
-          cluster_balance_weight: tempSettings.cluster_balance_weight,
-          start_time: settings?.start_time || '08:00',
-          sunset_offset_minutes: settings?.sunset_offset_minutes ?? 0,
-          map_preference: tempSettings.map_preference || 'google',
-          include_google_earth: tempSettings.include_google_earth || false,
-          location_permission_granted: tempSettings.location_permission_granted || false,
-          exclude_completed_facilities: excludeCompleted,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'account_id',
-          ignoreDuplicates: false,
-        });
+          .from('user_settings')
+          .upsert({
+            user_id: accountId,
+            account_id: accountId,
+            max_facilities_per_day: tempSettings.max_facilities_per_day,
+            max_hours_per_day: tempSettings.max_hours_per_day,
+            default_visit_duration_minutes: settings?.default_visit_duration_minutes || 30,
+            use_facilities_constraint: tempSettings.use_facilities_constraint,
+            use_hours_constraint: tempSettings.use_hours_constraint,
+            clustering_tightness: tempSettings.clustering_tightness,
+            cluster_balance_weight: tempSettings.cluster_balance_weight,
+            start_time: settings?.start_time || '08:00',
+            sunset_offset_minutes: settings?.sunset_offset_minutes ?? 0,
+            map_preference: tempSettings.map_preference || 'google',
+            include_google_earth: tempSettings.include_google_earth || false,
+            location_permission_granted: tempSettings.location_permission_granted || false,
+            exclude_completed_facilities: excludeCompleted,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'account_id',
+            ignoreDuplicates: false,
+          });
 
-      if (error) {
-        console.error('Error saving settings:', error);
-        alert(`Failed to save settings: ${error.message}`);
-        return;
-      }
+        if (error) {
+          console.error('Error saving settings:', error);
+          alert(`Failed to save settings: ${error.message}`);
+          return;
+        }
 
-      console.log('Settings saved successfully to database');
+        console.log('Settings saved successfully to database');
 
-      // If only time or visit duration changed, recalculate times without regenerating the route
-      if (onlyTimeOrVisitDurationChanged && onUpdateResult) {
-        console.log('Only start time or visit duration changed, recalculating times without regenerating route...');
-        console.log('New start time:', tempSettings.start_time, 'New visit duration:', tempSettings.default_visit_duration_minutes);
+        // If only time or visit duration changed, recalculate times without regenerating the route
+        if (onlyTimeOrVisitDurationChanged && onUpdateResult) {
+          console.log('Only start time or visit duration changed, recalculating times without regenerating route...');
+          console.log('New start time:', tempSettings.start_time, 'New visit duration:', tempSettings.default_visit_duration_minutes);
 
-        // Recalculate times for each route
-        const updatedRoutes = result.routes.map(route => {
-          const updatedSegments = [];
-          let currentTime = tempSettings.start_time || '08:00';
-          let totalDriveTime = 0;
-          let totalVisitTime = 0;
+          // Recalculate times for each route
+          const updatedRoutes = result.routes.map(route => {
+            const updatedSegments = [];
+            let currentTime = tempSettings.start_time || '08:00';
+            let totalDriveTime = 0;
+            let totalVisitTime = 0;
 
-          // Helper function to add minutes to time
-          const addMinutesToTime = (time: string, minutes: number): string => {
-            const [hours, mins] = time.split(':').map(Number);
-            const totalMinutes = Math.round(hours * 60 + mins + minutes);
-            const newHours = Math.floor(totalMinutes / 60) % 24;
-            const newMins = totalMinutes % 60;
-            return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
-          };
+            // Helper function to add minutes to time
+            const addMinutesToTime = (time: string, minutes: number): string => {
+              const [hours, mins] = time.split(':').map(Number);
+              const totalMinutes = Math.round(hours * 60 + mins + minutes);
+              const newHours = Math.floor(totalMinutes / 60) % 24;
+              const newMins = totalMinutes % 60;
+              return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
+            };
 
-          // Process each segment
-          for (const segment of route.segments) {
-            const arrivalTime = addMinutesToTime(currentTime, segment.duration);
-            totalDriveTime += segment.duration;
+            // Process each segment
+            for (const segment of route.segments) {
+              const arrivalTime = addMinutesToTime(currentTime, segment.duration);
+              totalDriveTime += segment.duration;
 
-            let departureTime = arrivalTime;
-            if (segment.to !== 'Home Base') {
-              const facility = facilities.find(f => f.name === segment.to);
-              const visitDuration = facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes;
-              departureTime = addMinutesToTime(arrivalTime, visitDuration);
-              totalVisitTime += visitDuration;
+              let departureTime = arrivalTime;
+              if (segment.to !== 'Home Base') {
+                const facility = facilities.find(f => f.name === segment.to);
+                const visitDuration = facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes;
+                departureTime = addMinutesToTime(arrivalTime, visitDuration);
+                totalVisitTime += visitDuration;
+              }
+
+              updatedSegments.push({
+                ...segment,
+                arrivalTime,
+                departureTime
+              });
+
+              currentTime = departureTime;
             }
 
-            updatedSegments.push({
-              ...segment,
-              arrivalTime,
-              departureTime
-            });
+            return {
+              ...route,
+              startTime: tempSettings.start_time || '08:00',
+              endTime: currentTime,
+              totalDriveTime,
+              totalVisitTime,
+              totalTime: totalDriveTime + totalVisitTime,
+              segments: updatedSegments
+            };
+          });
 
-            currentTime = departureTime;
-          }
-
-          return {
-            ...route,
-            startTime: tempSettings.start_time || '08:00',
-            endTime: currentTime,
-            totalDriveTime,
-            totalVisitTime,
-            totalTime: totalDriveTime + totalVisitTime,
-            segments: updatedSegments
+          const updatedResult = {
+            ...result,
+            routes: updatedRoutes,
+            totalDriveTime: updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
+            totalVisitTime: updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
+            totalTime: updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0),
           };
-        });
 
-        const updatedResult = {
-          ...result,
-          routes: updatedRoutes,
-          totalDriveTime: updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
-          totalVisitTime: updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
-          totalTime: updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0),
-        };
+          console.log('Time recalculation complete:', {
+            oldTotalVisitTime: result.totalVisitTime,
+            newTotalVisitTime: updatedResult.totalVisitTime,
+            oldTotalTime: result.totalTime,
+            newTotalTime: updatedResult.totalTime,
+          });
 
-        console.log('Time recalculation complete:', {
-          oldTotalVisitTime: result.totalVisitTime,
-          newTotalVisitTime: updatedResult.totalVisitTime,
-          oldTotalTime: result.totalTime,
-          newTotalTime: updatedResult.totalTime,
-        });
-
-        onUpdateResult(updatedResult);
-        setShowRefreshOptions(false);
-        setExcludeCompleted(false);
-        setShowAdvanced(false);
-        return;
-      }
+          onUpdateResult(updatedResult);
+          setShowRefreshOptions(false);
+          setExcludeCompleted(false);
+          setShowAdvanced(false);
+          return;
+        }
 
         // Exclude completed facilities if requested
         if (excludeCompleted) {
@@ -352,28 +352,28 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
         // Save the updated settings (keeping visit duration and sunset offset from current settings)
         const { error } = await supabase
-        .from('user_settings')
-        .upsert({
-          user_id: accountId,
-          account_id: accountId,
-          max_facilities_per_day: tempSettings.max_facilities_per_day,
-          max_hours_per_day: tempSettings.max_hours_per_day,
-          default_visit_duration_minutes: settings.default_visit_duration_minutes,
-          use_facilities_constraint: tempSettings.use_facilities_constraint,
-          use_hours_constraint: tempSettings.use_hours_constraint,
-          clustering_tightness: tempSettings.clustering_tightness,
-          cluster_balance_weight: tempSettings.cluster_balance_weight,
-          start_time: settings.start_time || '08:00',
-          sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
-          map_preference: tempSettings.map_preference || 'google',
-          include_google_earth: tempSettings.include_google_earth || false,
-          location_permission_granted: tempSettings.location_permission_granted || false,
-          exclude_completed_facilities: excludeCompleted,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'account_id',
-          ignoreDuplicates: false,
-        });
+          .from('user_settings')
+          .upsert({
+            user_id: accountId,
+            account_id: accountId,
+            max_facilities_per_day: tempSettings.max_facilities_per_day,
+            max_hours_per_day: tempSettings.max_hours_per_day,
+            default_visit_duration_minutes: settings.default_visit_duration_minutes,
+            use_facilities_constraint: tempSettings.use_facilities_constraint,
+            use_hours_constraint: tempSettings.use_hours_constraint,
+            clustering_tightness: tempSettings.clustering_tightness,
+            cluster_balance_weight: tempSettings.cluster_balance_weight,
+            start_time: settings.start_time || '08:00',
+            sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
+            map_preference: tempSettings.map_preference || 'google',
+            include_google_earth: tempSettings.include_google_earth || false,
+            location_permission_granted: tempSettings.location_permission_granted || false,
+            exclude_completed_facilities: excludeCompleted,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'account_id',
+            ignoreDuplicates: false,
+          });
 
         if (error) {
           console.error('Error saving settings:', error);
@@ -550,6 +550,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       totalTime: 0,
       startTime: settings.start_time || '08:00',
       endTime: settings.start_time || '08:00',
+      lastFacilityDepartureTime: settings.start_time || '08:00',
       segments: []
     };
 
@@ -611,6 +612,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           totalTime: 0,
           startTime: settings.start_time || '08:00',
           endTime: settings.start_time || '08:00',
+          lastFacilityDepartureTime: settings.start_time || '08:00',
           segments: []
         };
 
@@ -1399,11 +1401,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         <div className="flex gap-2">
           <button
             onClick={handleToggleListSelectionMode}
-            className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors group relative ${
-              listSelectionMode
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
-            }`}
+            className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors group relative ${listSelectionMode
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+              }`}
             title={listSelectionMode ? 'Exit Selection Mode' : 'Select Facilities'}
           >
             {listSelectionMode ? <CheckSquare className="w-5 h-5 sm:w-4 sm:h-4" /> : <Square className="w-5 h-5 sm:w-4 sm:h-4" />}
@@ -1425,11 +1426,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           {onToggleHideCompleted && (
             <button
               onClick={onToggleHideCompleted}
-              className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors ${
-                completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
-                  ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
-              }`}
+              className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
+                ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                }`}
               title="Adjust completed facilities visibility"
             >
               {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted ? <EyeOff className="w-5 h-5 sm:w-4 sm:h-4" /> : <Eye className="w-5 h-5 sm:w-4 sm:h-4" />}
@@ -1501,66 +1501,66 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         </div>
                         {(() => {
 
-                    // Calculate sunset for the first facility location
-                    const firstFacility = route.facilities[0];
-                    if (!firstFacility || !lastDepartureTime) return null;
+                          // Calculate sunset for the first facility location
+                          const firstFacility = route.facilities[0];
+                          if (!firstFacility || !lastDepartureTime) return null;
 
-                    const calculateSunset = (lat: number) => {
-                      const today = new Date();
-                      const month = today.getMonth() + 1;
-                      const isWinter = month >= 11 || month <= 2;
-                      const isSummer = month >= 5 && month <= 8;
-                      let baseHour = 18;
-                      if (isWinter) baseHour = 17;
-                      if (isSummer) baseHour = 20;
-                      const latAdjust = Math.floor((lat - 35) / 10);
-                      baseHour += latAdjust;
-                      return baseHour;
-                    };
+                          const calculateSunset = (lat: number) => {
+                            const today = new Date();
+                            const month = today.getMonth() + 1;
+                            const isWinter = month >= 11 || month <= 2;
+                            const isSummer = month >= 5 && month <= 8;
+                            let baseHour = 18;
+                            if (isWinter) baseHour = 17;
+                            if (isSummer) baseHour = 20;
+                            const latAdjust = Math.floor((lat - 35) / 10);
+                            baseHour += latAdjust;
+                            return baseHour;
+                          };
 
-                    const sunsetHour = calculateSunset(Number(firstFacility.latitude));
+                          const sunsetHour = calculateSunset(Number(firstFacility.latitude));
 
-                    // Parse end time
-                    const endHour = lastDepartureTime.includes('PM')
-                      ? parseInt(lastDepartureTime) + (lastDepartureTime.includes('12:') ? 0 : 12)
-                      : parseInt(lastDepartureTime);
-                    const endMinutes = parseInt(lastDepartureTime.split(':')[1] || '0');
-                    const endTimeInMinutes = endHour * 60 + endMinutes;
+                          // Parse end time
+                          const endHour = lastDepartureTime.includes('PM')
+                            ? parseInt(lastDepartureTime) + (lastDepartureTime.includes('12:') ? 0 : 12)
+                            : parseInt(lastDepartureTime);
+                          const endMinutes = parseInt(lastDepartureTime.split(':')[1] || '0');
+                          const endTimeInMinutes = endHour * 60 + endMinutes;
 
-                    // Apply sunset offset from settings
-                    const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
-                    const sunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
-                    const minutesUntilSunset = sunsetInMinutes - endTimeInMinutes;
+                          // Apply sunset offset from settings
+                          const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
+                          const sunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
+                          const minutesUntilSunset = sunsetInMinutes - endTimeInMinutes;
 
-                    let icon = '';
-                    let bgColor = '';
-                    let textColor = '';
-                    let label = '';
+                          let icon = '';
+                          let bgColor = '';
+                          let textColor = '';
+                          let label = '';
 
-                    if (minutesUntilSunset < 0) {
-                      icon = '🌙';
-                      bgColor = 'bg-red-500';
-                      textColor = 'text-white';
-                      label = 'After sunset';
-                    } else if (minutesUntilSunset < 60) {
-                      icon = '🌅';
-                      bgColor = 'bg-orange-400';
-                      textColor = 'text-white';
-                      label = 'Near sunset';
-                    } else {
-                      icon = '☀️';
-                      bgColor = 'bg-green-500';
-                      textColor = 'text-white';
-                      label = 'Before sunset';
-                    }
+                          if (minutesUntilSunset < 0) {
+                            icon = '🌙';
+                            bgColor = 'bg-red-500';
+                            textColor = 'text-white';
+                            label = 'After sunset';
+                          } else if (minutesUntilSunset < 60) {
+                            icon = '🌅';
+                            bgColor = 'bg-orange-400';
+                            textColor = 'text-white';
+                            label = 'Near sunset';
+                          } else {
+                            icon = '☀️';
+                            bgColor = 'bg-green-500';
+                            textColor = 'text-white';
+                            label = 'Before sunset';
+                          }
 
-                    return (
-                      <div className={`px-2 py-1 ${bgColor} ${textColor} rounded text-xs font-semibold flex items-center gap-1`} title={`Leaving last facility: ${formatTimeTo12Hour(lastDepartureTime)}`}>
-                        <span>{icon}</span>
-                        <span>{label}</span>
-                      </div>
-                    );
-                  })()}
+                          return (
+                            <div className={`px-2 py-1 ${bgColor} ${textColor} rounded text-xs font-semibold flex items-center gap-1`} title={`Leaving last facility: ${formatTimeTo12Hour(lastDepartureTime)}`}>
+                              <span>{icon}</span>
+                              <span>{label}</span>
+                            </div>
+                          );
+                        })()}
                       </>
                     );
                   })()}
@@ -1573,183 +1573,182 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
             {!collapsedDays.has(route.day) && (
               <div className="p-6">
-              {route.facilities.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                  <p className="text-sm">No facilities assigned to this day</p>
-                  <p className="text-xs mt-1">Drag facilities here or use the selection tool to assign them</p>
-                </div>
-              ) : (
-              <div className="space-y-3">
-                {route.segments.filter(segment => {
-                  // Always show home base segments
-                  if (segment.from === 'Home Base' || segment.to === 'Home Base') {
-                    return true;
-                  }
-                  // Filter based on visibility settings
-                  const facilityName = segment.to;
-                  return !shouldHideFacility(facilityName);
-                }).map((segment, index) => {
-                  const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
-                  const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
-                  const isSelected = selectedFacilityNames.has(facilityName);
-
-                  return (
-                  <div
-                    key={index}
-                    className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50' : ''}`}
-                    draggable={!isHomeBaseSegment}
-                    onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
-                    onClick={() => {
-                      if (listSelectionMode && !isHomeBaseSegment) {
-                        handleToggleFacilitySelection(facilityName);
+                {route.facilities.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No facilities assigned to this day</p>
+                    <p className="text-xs mt-1">Drag facilities here or use the selection tool to assign them</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {route.segments.filter(segment => {
+                      // Always show home base segments
+                      if (segment.from === 'Home Base' || segment.to === 'Home Base') {
+                        return true;
                       }
-                    }}
-                  >
-                    {listSelectionMode && !isHomeBaseSegment && (
-                      <div className="flex-shrink-0 mt-1" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleFacilitySelection(facilityName)}
-                          className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                        />
-                      </div>
-                    )}
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">
-                      {segment.from === 'Home Base' ? (
-                        <Navigation className="w-4 h-4" />
-                      ) : segment.to === 'Home Base' ? (
-                        <Navigation className="w-4 h-4" />
-                      ) : (
-                        index
-                      )}
-                    </div>
+                      // Filter based on visibility settings
+                      const facilityName = segment.to;
+                      return !shouldHideFacility(facilityName);
+                    }).map((segment, index) => {
+                      const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
+                      const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
+                      const isSelected = selectedFacilityNames.has(facilityName);
 
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p
-                              className={`font-medium ${
-                                segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
-                              }`}
-                              onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
-                            >
-                              {segment.to === 'Home Base' ? `${segment.from} → Home Base` : segment.to}
-                            </p>
-                            {segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
-                              <span title="Verified - Inspection within last year">
-                                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                              </span>
-                            )}
-                            {segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
-                              <span title="Inspection expired - Reinspection needed">
-                                <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
-                              </span>
-                            )}
-                            {segment.to !== 'Home Base' && !getInspection(segment.to) && (
-                              <span title="No inspection yet">
-                                <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                              </span>
+                      return (
+                        <div
+                          key={index}
+                          className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50' : ''}`}
+                          draggable={!isHomeBaseSegment}
+                          onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
+                          onClick={() => {
+                            if (listSelectionMode && !isHomeBaseSegment) {
+                              handleToggleFacilitySelection(facilityName);
+                            }
+                          }}
+                        >
+                          {listSelectionMode && !isHomeBaseSegment && (
+                            <div className="flex-shrink-0 mt-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleFacilitySelection(facilityName)}
+                                className="w-5 h-5 text-blue-600 rounded cursor-pointer"
+                              />
+                            </div>
+                          )}
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">
+                            {segment.from === 'Home Base' ? (
+                              <Navigation className="w-4 h-4" />
+                            ) : segment.to === 'Home Base' ? (
+                              <Navigation className="w-4 h-4" />
+                            ) : (
+                              index
                             )}
                           </div>
-                          <p className="text-sm text-gray-600 mt-1">
-                            <span className="inline-flex items-center gap-1">
-                              <TrendingUp className="w-3 h-3" />
-                              {segment.distance.toFixed(1)} mi
-                            </span>
-                            <span className="mx-2">•</span>
-                            <span className="inline-flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {Math.round(segment.duration)} mins drive
-                            </span>
-                          </p>
+
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p
+                                    className={`font-medium ${segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
+                                      }`}
+                                    onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
+                                  >
+                                    {segment.to === 'Home Base' ? `${segment.from} → Home Base` : segment.to}
+                                  </p>
+                                  {segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
+                                    <span title="Verified - Inspection within last year">
+                                      <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                    </span>
+                                  )}
+                                  {segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
+                                    <span title="Inspection expired - Reinspection needed">
+                                      <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
+                                    </span>
+                                  )}
+                                  {segment.to !== 'Home Base' && !getInspection(segment.to) && (
+                                    <span title="No inspection yet">
+                                      <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  <span className="inline-flex items-center gap-1">
+                                    <TrendingUp className="w-3 h-3" />
+                                    {segment.distance.toFixed(1)} mi
+                                  </span>
+                                  <span className="mx-2">•</span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {Math.round(segment.duration)} mins drive
+                                  </span>
+                                </p>
+                              </div>
+                              <div className="text-right text-sm">
+                                <p className="text-gray-600">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
+                                {segment.to !== 'Home Base' && (
+                                  <p className="text-gray-600">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right text-sm">
-                          <p className="text-gray-600">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
-                          {segment.to !== 'Home Base' && (
-                            <p className="text-gray-600">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })}
                   </div>
-                  );
-                })}
-              </div>
-              )}
+                )}
               </div>
             )}
           </div>
         ))}
 
         {removedFacilities.length > 0 && (
-            <div className="bg-white rounded-lg shadow-md overflow-hidden mt-4">
-              <div
-                className="relative px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 text-white cursor-pointer hover:from-gray-600 hover:to-gray-700 transition-colors"
-                onClick={() => setRemovedCollapsed(!removedCollapsed)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold">Removed Facilities</h3>
-                    {removedCollapsed ? (
-                      <ChevronDown className="w-5 h-5" />
-                    ) : (
-                      <ChevronUp className="w-5 h-5" />
-                    )}
-                  </div>
+          <div className="bg-white rounded-lg shadow-md overflow-hidden mt-4">
+            <div
+              className="relative px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 text-white cursor-pointer hover:from-gray-600 hover:to-gray-700 transition-colors"
+              onClick={() => setRemovedCollapsed(!removedCollapsed)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-semibold">Removed Facilities</h3>
+                  {removedCollapsed ? (
+                    <ChevronDown className="w-5 h-5" />
+                  ) : (
+                    <ChevronUp className="w-5 h-5" />
+                  )}
+                </div>
 
-                  <div className="flex items-center gap-4 text-sm">
-                    <span className="flex items-center gap-1">
-                      <XIcon className="w-4 h-4" />
-                      {removedFacilities.length} removed
-                    </span>
-                  </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="flex items-center gap-1">
+                    <XIcon className="w-4 h-4" />
+                    {removedFacilities.length} removed
+                  </span>
                 </div>
               </div>
+            </div>
 
-              {!removedCollapsed && (
-                <div className="p-6">
-                  <div className="mb-4">
-                    <button
-                      onClick={handleRestoreAllRemoved}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            {!removedCollapsed && (
+              <div className="p-6">
+                <div className="mb-4">
+                  <button
+                    onClick={handleRestoreAllRemoved}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Undo2 className="w-4 h-4" />
+                    Restore All Removed Facilities
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {removedFacilities.map((facility, index) => (
+                    <div
+                      key={index}
+                      className="p-4 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-all"
                     >
-                      <Undo2 className="w-4 h-4" />
-                      Restore All Removed Facilities
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    {removedFacilities.map((facility, index) => (
-                      <div
-                        key={index}
-                        className="p-4 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-all"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-1">
-                            <XIcon className="w-5 h-5 text-gray-600 flex-shrink-0" />
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                {facility.latitude.toFixed(6)}, {facility.longitude.toFixed(6)}
-                              </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1">
+                          <XIcon className="w-5 h-5 text-gray-600 flex-shrink-0" />
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {facility.latitude.toFixed(6)}, {facility.longitude.toFixed(6)}
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleRestoreRemovedFacility(facility.id)}
-                            className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors flex items-center gap-1"
-                          >
-                            <Undo2 className="w-3 h-3" />
-                            Restore
-                          </button>
                         </div>
+                        <button
+                          onClick={() => handleRestoreRemovedFacility(facility.id)}
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors flex items-center gap-1"
+                        >
+                          <Undo2 className="w-3 h-3" />
+                          Restore
+                        </button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
         )}
 
         {getCompletedFacilities().length > 0 && (
@@ -1787,11 +1786,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     return (
                       <div
                         key={index}
-                        className={`p-4 border rounded-lg transition-all ${
-                          isSelected
-                            ? 'border-blue-500 bg-blue-50 shadow-md'
-                            : 'border-gray-200 bg-gray-50 hover:border-gray-300'
-                        }`}
+                        className={`p-4 border rounded-lg transition-all ${isSelected
+                          ? 'border-blue-500 bg-blue-50 shadow-md'
+                          : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                          }`}
                         onClick={() => handleFacilityClick(facility.name)}
                       >
                         <div className="flex items-center justify-between">
@@ -1854,7 +1852,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           }}
           onShowOnMap={onShowOnMap}
           facilities={facilities}
-          allInspections={inspections}
+          allInspections={Array.from(inspections.values())}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
           }}

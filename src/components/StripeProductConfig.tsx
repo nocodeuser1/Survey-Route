@@ -41,7 +41,7 @@ export default function StripeProductConfig() {
   };
 
   const updateProduct = (id: number, field: keyof StripeProduct, value: any) => {
-    setProducts(products.map(p => p.id === id ? { ...p, [field]: value } : p));
+    setProducts(products.map((p: StripeProduct) => p.id === id ? { ...p, [field]: value } : p));
   };
 
   const saveProduct = async (product: StripeProduct) => {
@@ -103,11 +103,10 @@ export default function StripeProductConfig() {
 
       {message && (
         <div
-          className={`p-4 rounded-lg flex items-center gap-3 ${
-            message.type === 'success'
-              ? 'bg-green-50 border border-green-200'
-              : 'bg-red-50 border border-red-200'
-          }`}
+          className={`p-4 rounded-lg flex items-center gap-3 ${message.type === 'success'
+            ? 'bg-green-50 border border-green-200'
+            : 'bg-red-50 border border-red-200'
+            }`}
         >
           {message.type === 'success' ? (
             <CheckCircle className="w-5 h-5 text-green-600" />
@@ -115,9 +114,8 @@ export default function StripeProductConfig() {
             <AlertCircle className="w-5 h-5 text-red-600" />
           )}
           <span
-            className={`text-sm ${
-              message.type === 'success' ? 'text-green-800' : 'text-red-800'
-            }`}
+            className={`text-sm ${message.type === 'success' ? 'text-green-800' : 'text-red-800'
+              }`}
           >
             {message.text}
           </span>
@@ -150,7 +148,7 @@ export default function StripeProductConfig() {
                   <input
                     type="checkbox"
                     checked={product.is_active}
-                    onChange={(e) => updateProduct(product.id, 'is_active', e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateProduct(product.id, 'is_active', e.target.checked)}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-sm text-gray-600">Active</span>
@@ -176,9 +174,9 @@ export default function StripeProductConfig() {
                   <input
                     type="text"
                     value={product.monthly_price_id || ''}
-                    onChange={(e) => updateProduct(product.id, 'monthly_price_id', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateProduct(product.id, 'monthly_price_id', e.target.value)}
                     placeholder="price_..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="form-input"
                   />
                 </div>
                 <div>
@@ -191,14 +189,14 @@ export default function StripeProductConfig() {
                       type="number"
                       step="0.01"
                       value={formatPrice(product.monthly_price_amount)}
-                      onChange={(e) =>
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                         updateProduct(
                           product.id,
                           'monthly_price_amount',
                           Math.round(parseFloat(e.target.value) * 100)
                         )
                       }
-                      className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="form-input pl-8"
                     />
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
@@ -216,9 +214,9 @@ export default function StripeProductConfig() {
                   <input
                     type="text"
                     value={product.annual_price_id || ''}
-                    onChange={(e) => updateProduct(product.id, 'annual_price_id', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateProduct(product.id, 'annual_price_id', e.target.value)}
                     placeholder="price_..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="form-input"
                   />
                 </div>
                 <div>
@@ -231,14 +229,14 @@ export default function StripeProductConfig() {
                       type="number"
                       step="0.01"
                       value={formatPrice(product.annual_price_amount)}
-                      onChange={(e) =>
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                         updateProduct(
                           product.id,
                           'annual_price_amount',
                           Math.round(parseFloat(e.target.value) * 100)
                         )
                       }
-                      className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="form-input pl-8"
                     />
                   </div>
                   <p className="mt-1 text-xs text-gray-500">

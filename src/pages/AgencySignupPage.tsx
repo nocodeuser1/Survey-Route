@@ -74,7 +74,7 @@ export default function AgencySignupPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="John Doe"
               />
             </div>
@@ -89,7 +89,7 @@ export default function AgencySignupPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="you@example.com"
               />
             </div>
@@ -104,7 +104,7 @@ export default function AgencySignupPage() {
                 value={agencyName}
                 onChange={(e) => setAgencyName(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="Your Agency Name"
               />
             </div>
@@ -119,7 +119,7 @@ export default function AgencySignupPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="••••••••"
               />
             </div>
@@ -134,7 +134,7 @@ export default function AgencySignupPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="form-input"
                 placeholder="••••••••"
               />
             </div>
