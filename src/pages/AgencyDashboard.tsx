@@ -324,15 +324,15 @@ export default function AgencyDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
-      <header className="bg-white shadow-sm border-b border-gray-200">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Route className="w-8 h-8 text-blue-600 flex-shrink-0" />
               <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Survey-Route</h1>
-                <p className="text-xs sm:text-sm text-gray-600">Agency Dashboard</p>
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Survey-Route</h1>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Agency Dashboard</p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
@@ -351,7 +351,7 @@ export default function AgencyDashboard() {
               )}
               <button
                 onClick={() => setShowAgencySettings(true)}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
               >
                 <Building2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Agency Settings</span>
@@ -359,7 +359,7 @@ export default function AgencyDashboard() {
               </button>
               <button
                 onClick={handleSignOut}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
               >
                 <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Sign Out</span>
@@ -374,10 +374,10 @@ export default function AgencyDashboard() {
         <div className="mb-6 sm:mb-8">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 mb-4">
             <div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
                 {agency?.name || 'My Agency'}
               </h2>
-              <p className="text-sm sm:text-base text-gray-600 mt-1">
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">
                 Manage all your customer accounts
               </p>
             </div>
@@ -391,30 +391,30 @@ export default function AgencyDashboard() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
               <div className="flex items-center gap-3 mb-2">
                 <Building2 className="w-6 h-6 text-blue-600" />
-                <h3 className="text-sm font-medium text-gray-600">Total Accounts</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Accounts</h3>
               </div>
-              <p className="text-3xl font-bold text-gray-900">{accounts.length}</p>
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">{accounts.length}</p>
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
               <div className="flex items-center gap-3 mb-2">
                 <Users className="w-6 h-6 text-green-600" />
-                <h3 className="text-sm font-medium text-gray-600">Total Users</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Users</h3>
               </div>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">
                 {accounts.reduce((sum, acc) => sum + (acc._userCount || 0), 0)}
               </p>
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
               <div className="flex items-center gap-3 mb-2">
                 <MapPin className="w-6 h-6 text-orange-600" />
-                <h3 className="text-sm font-medium text-gray-600">Total Facilities</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Facilities</h3>
               </div>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">
                 {accounts.reduce((sum, acc) => sum + (acc._facilityCount || 0), 0)}
               </p>
             </div>
@@ -427,9 +427,9 @@ export default function AgencyDashboard() {
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Customer Accounts</h3>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Customer Accounts</h3>
           </div>
 
           {accounts.length === 0 ? (
@@ -471,8 +471,8 @@ export default function AgencyDashboard() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${account.status === 'active'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-gray-100 text-gray-800'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
                             }`}>
                             {account.status}
                           </span>

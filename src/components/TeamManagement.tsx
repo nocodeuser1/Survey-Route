@@ -1826,7 +1826,7 @@ export default function TeamManagement() {
                   />
                   <button
                     onClick={generatePassword}
-                    className="px-3 py-2 bg-gray-200 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                     title="Generate random password"
                   >
                     <RefreshCw className="w-5 h-5" />
@@ -1837,7 +1837,7 @@ export default function TeamManagement() {
                         copyToClipboard(newPassword);
                         alert('Password copied to clipboard!');
                       }}
-                      className="px-3 py-2 bg-gray-200 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                      className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                       title="Copy to clipboard"
                     >
                       <Copy className="w-5 h-5" />

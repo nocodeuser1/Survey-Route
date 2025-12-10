@@ -167,25 +167,25 @@ export default function SavedRoutesManager({
 
       {showSaveDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold mb-4">Save Current Route</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Save Current Route</h3>
             <input
               type="text"
               value={saveName}
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="Enter route name (optional)"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-2"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSave();
                 if (e.key === 'Escape') setShowSaveDialog(false);
               }}
             />
-            <p className="text-xs text-gray-500 mb-4">Leave empty to use a timestamped name</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Leave empty to use a timestamped name</p>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowSaveDialog(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
               >
                 Cancel
               </button>
@@ -202,12 +202,12 @@ export default function SavedRoutesManager({
 
       {isOpen && !hideButtons && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold">Saved Routes</h3>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Saved Routes</h3>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1 hover:bg-gray-100 rounded"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -215,15 +215,14 @@ export default function SavedRoutesManager({
 
             <div className="overflow-y-auto flex-1">
               {savedRoutes.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No saved routes yet</p>
+                <p className="text-gray-500 dark:text-gray-400 text-center py-8">No saved routes yet</p>
               ) : (
                 <div className="space-y-2">
                   {savedRoutes.map((route) => (
                     <div
                       key={route.id}
-                      className={`p-4 border rounded-lg hover:bg-gray-50 transition-colors ${
-                        route.is_last_viewed ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                      }`}
+                      className={`p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${route.is_last_viewed ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600'
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex-1 min-w-0">
@@ -233,7 +232,7 @@ export default function SavedRoutesManager({
                                 type="text"
                                 value={editingName}
                                 onChange={(e) => setEditingName(e.target.value)}
-                                className="flex-1 px-2 py-1 border border-gray-300 rounded"
+                                className="flex-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') handleRename(route.id);
@@ -254,7 +253,7 @@ export default function SavedRoutesManager({
                                   setEditingId(null);
                                   setEditingName('');
                                 }}
-                                className="p-1 text-gray-600 hover:bg-gray-100 rounded"
+                                className="p-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
                               >
                                 <X className="w-4 h-4" />
                               </button>
@@ -262,27 +261,27 @@ export default function SavedRoutesManager({
                           ) : (
                             <div>
                               <div className="flex items-center gap-2">
-                                <h4 className="font-semibold truncate">{route.name || 'Unnamed Route'}</h4>
+                                <h4 className="font-semibold truncate text-gray-900 dark:text-white">{route.name || 'Unnamed Route'}</h4>
                                 {route.is_last_viewed && (
-                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                  <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
                                     Current
                                   </span>
                                 )}
                               </div>
                               <div className="space-y-1 mt-2">
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-gray-600 dark:text-gray-300">
                                   {route.total_days} days • {route.total_facilities} facilities • {route.total_miles.toFixed(1)} mi
                                 </p>
                                 {(() => {
                                   const metrics = calculateRouteMetrics(route);
                                   return (
-                                    <p className="text-sm text-gray-600 flex items-center gap-1">
+                                    <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1">
                                       <Clock className="w-3.5 h-3.5" />
                                       {metrics.totalHours}h {metrics.totalMinutes}m total • {metrics.avgMinutesOnsite} min avg onsite
                                     </p>
                                   );
                                 })()}
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {new Date(route.created_at).toLocaleString()}
                                 </p>
                               </div>
@@ -301,7 +300,7 @@ export default function SavedRoutesManager({
                               setEditingId(route.id);
                               setEditingName(route.name || '');
                             }}
-                            className="p-1.5 text-gray-600 hover:bg-gray-100 rounded"
+                            className="p-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -334,9 +333,8 @@ export default function SavedRoutesManager({
                 return (
                   <div
                     key={route.id}
-                    className={`p-4 border rounded-lg hover:bg-gray-50 transition-colors ${
-                      route.is_last_viewed ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                    }`}
+                    className={`p-4 border rounded-lg hover:bg-gray-50 transition-colors ${route.is_last_viewed ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                      }`}
                   >
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex-1 min-w-0">

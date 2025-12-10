@@ -437,11 +437,10 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
 
           <label
             htmlFor="backup-file-input"
-            className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg cursor-pointer transition-colors ${
-              isRestoring
+            className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg cursor-pointer transition-colors ${isRestoring
                 ? 'bg-gray-400 cursor-not-allowed'
                 : 'bg-green-600 hover:bg-green-700 text-white'
-            }`}
+              }`}
           >
             {isRestoring ? (
               <>
@@ -474,11 +473,10 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
           )}
 
           {restoreResult && (
-            <div className={`mt-4 p-4 rounded-lg border-2 ${
-              restoreResult.success
+            <div className={`mt-4 p-4 rounded-lg border-2 ${restoreResult.success
                 ? 'bg-green-50 dark:bg-green-900/30 border-green-300 dark:border-green-700'
                 : 'bg-red-50 dark:bg-red-900/30 border-red-300 dark:border-red-700'
-            }`}>
+              }`}>
               <div className="flex items-start gap-3">
                 {restoreResult.success ? (
                   <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
@@ -486,14 +484,12 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
                   <XCircle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
                 )}
                 <div>
-                  <h4 className={`font-semibold mb-1 ${
-                    restoreResult.success ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'
-                  }`}>
+                  <h4 className={`font-semibold mb-1 ${restoreResult.success ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'
+                    }`}>
                     {restoreResult.success ? 'Restore Complete' : 'Restore Failed'}
                   </h4>
-                  <p className={`text-sm whitespace-pre-line ${
-                    restoreResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
-                  }`}>
+                  <p className={`text-sm whitespace-pre-line ${restoreResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
+                    }`}>
                     {restoreResult.message}
                   </p>
                 </div>
@@ -577,7 +573,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
               <button
                 onClick={() => setShowClearAllWarning(false)}
                 disabled={isClearing}
-                className="px-4 py-2 bg-gray-200 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
               >
                 Cancel
               </button>

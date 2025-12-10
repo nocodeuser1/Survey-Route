@@ -2991,7 +2991,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showRoadRoutes
                   ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                   }`}
                 title="Toggle actual road routes"
                 disabled={isLoadingRoutes}
@@ -3009,7 +3009,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${selectionMode
                     ? 'bg-green-600 text-white hover:bg-green-700'
-                    : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                     }`}
                   title="Toggle multi-select mode"
                 >
@@ -3024,7 +3024,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   onClick={() => setShowSearch(!showSearch)}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showSearch
                     ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-200 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                     }`}
                   title="Search facilities"
                 >
@@ -3053,7 +3053,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       </div>
 
       {showSearch && isFullScreen && (
-        <div className="px-6 py-3 bg-gray-100 border-b border-gray-200 fixed top-[80px] left-0 right-0 z-[9998]">
+        <div className="px-6 py-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-[80px] left-0 right-0 z-[9998]">
           <div className="relative">
             <input
               ref={searchInputRef}
@@ -3061,7 +3061,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search facilities by name..."
-              className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
               autoFocus
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -3205,7 +3205,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       {showAddFacilityModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Add Facility at Current Location</h3>
 
             {addFacilityError && (
@@ -3289,7 +3289,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             style={{ pointerEvents: 'none' }}
           />
           <div
-            className="fixed bg-white rounded-xl shadow-2xl border border-gray-300 overflow-hidden z-[1300]"
+            className="fixed bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-300 dark:border-gray-600 overflow-hidden z-[1300]"
             style={{
               left: `${contextMenu.x}px`,
               top: `${contextMenu.y}px`,
@@ -3354,7 +3354,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       )}
 
       {navigationMode && nextFacility && (
-        <div className="fixed top-20 right-4 z-[1000] bg-white rounded-lg shadow-xl border-2 border-blue-500 overflow-hidden max-w-xs">
+        <div className="fixed top-20 right-4 z-[1000] bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-blue-500 overflow-hidden max-w-xs">
           <button
             onClick={() => {
               // Pan map to next facility
