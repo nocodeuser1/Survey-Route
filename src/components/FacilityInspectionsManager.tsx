@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Eye, Copy, Trash2, AlertCircle, CheckCircle, Calendar, User, FileText, Edit, Plus } from 'lucide-react';
 import { Inspection, Facility, supabase } from '../lib/supabase';
 import InspectionViewer from './InspectionViewer';
@@ -90,113 +91,115 @@ export default function FacilityInspectionsManager({
 
   const canDelete = userRole === 'owner' || userRole === 'admin';
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999999] p-4 overflow-y-auto">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full my-8">
           <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-t-lg">
             <div>
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inspection History</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{facility.name}</p>
             </div>
-            <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+            >
+              <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex gap-2">
+                <div className="flex items-center gap-2 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full text-sm font-medium">
+                  <CheckCircle className="w-4 h-4" />
+                  {inspections.filter(i => i.status === 'completed').length} Completed
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded-full text-sm font-medium">
+                  <FileText className="w-4 h-4" />
+                  {inspections.filter(i => i.status === 'draft').length} Drafts
+                </div>
+              </div>
               {onAddNewInspection && (
                 <button
                   onClick={onAddNewInspection}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                 >
                   <Plus className="w-4 h-4" />
                   Add New Survey
                 </button>
               )}
-              <button
-                onClick={onClose}
-                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
             </div>
-          </div>
 
-          <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
             {loading ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading inspections...</p>
+              <div className="flex justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               </div>
             ) : inspections.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-                <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-                <p className="text-lg">No inspections found</p>
-                <p className="text-sm mt-2">Complete an inspection to see it here</p>
+              <div className="text-center py-12 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600 dark:text-gray-300">No inspection history found</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {inspections.map((inspection) => {
-                  const conductedDate = new Date(inspection.conducted_at);
                   const isValid = isInspectionValid(inspection);
+                  const date = new Date(inspection.conducted_at);
 
                   return (
                     <div
                       key={inspection.id}
-                      className={`border rounded-lg overflow-hidden hover:border-blue-300 dark:hover:border-blue-600 transition-colors ${inspection.status === 'draft'
-                        ? 'border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20'
-                        : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50'
-                        }`}
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-300 dark:hover:border-blue-500 transition-colors bg-white dark:bg-gray-800"
                     >
-                      <div className="p-4">
-                        <div className="flex items-start justify-between gap-4 mb-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-                                Inspection {conductedDate.toLocaleDateString()}
-                              </h4>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="font-semibold text-gray-900 dark:text-white">
+                              Inspection {date.toLocaleDateString()}
+                            </h3>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${inspection.status === 'draft'
+                                ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'
+                                : isValid
+                                  ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                                  : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
+                                }`}
+                            >
                               {inspection.status === 'draft' ? (
-                                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-200 dark:bg-yellow-900/50 text-yellow-900 dark:text-yellow-300 text-xs font-medium rounded">
-                                  <Edit className="w-3 h-3" />
-                                  Draft
-                                </span>
+                                <>Draft</>
                               ) : isValid ? (
-                                <span className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300 text-xs font-medium rounded">
-                                  <CheckCircle className="w-3 h-3" />
-                                  Valid
-                                </span>
+                                <><CheckCircle className="w-3 h-3" /> Valid</>
                               ) : (
-                                <span className="flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900/50 text-orange-800 dark:text-orange-300 text-xs font-medium rounded">
-                                  <AlertCircle className="w-3 h-3" />
-                                  Expired
-                                </span>
+                                <><AlertCircle className="w-3 h-3" /> Expired</>
                               )}
-                            </div>
+                            </span>
+                          </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-600 dark:text-gray-400">
-                              <div className="flex items-center gap-2">
-                                <User className="w-4 h-4" />
-                                <span>Inspector: {inspection.inspector_name}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Calendar className="w-4 h-4" />
-                                <span>
-                                  {conductedDate.toLocaleDateString()} at{' '}
-                                  {formatTimeTo12Hour(conductedDate.toTimeString().slice(0, 5))}
-                                </span>
-                              </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
+                            <div className="flex items-center gap-2">
+                              <User className="w-4 h-4" />
+                              <span>Inspector: {inspection.inspector_name}</span>
                             </div>
-
-                            {inspection.flagged_items_count > 0 && (
-                              <div className="mt-2">
-                                <span className="inline-block px-2 py-1 text-xs bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300 rounded">
-                                  {inspection.flagged_items_count} flagged item{inspection.flagged_items_count !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4" />
+                              <span>
+                                {date.toLocaleDateString()} at {formatTimeTo12Hour(date.toTimeString().slice(0, 5))}
+                              </span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex gap-2 pt-3 border-t border-gray-200 dark:border-gray-600">
-                          {inspection.status === 'draft' && onEditDraft ? (
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          {inspection.status === 'draft' ? (
                             <button
-                              onClick={() => onEditDraft(inspection)}
+                              onClick={() => {
+                                if (onEditDraft) {
+                                  onEditDraft(inspection);
+                                } else {
+                                  // Fallback if prop not provided
+                                  setViewingInspection(inspection);
+                                }
+                              }}
                               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                             >
                               <Edit className="w-4 h-4" />
@@ -255,6 +258,7 @@ export default function FacilityInspectionsManager({
           accountId={facility.account_id}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 }
