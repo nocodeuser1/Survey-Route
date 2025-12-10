@@ -1,0 +1,12 @@
+<svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="80" height="80" rx="12" fill="#3B82F6"/>
+  <path d="M35 25C35 23.3431 36.3431 22 38 22H42C43.6569 22 45 23.3431 45 25V25C45 26.6569 43.6569 28 42 28H38C36.3431 28 35 26.6569 35 25V25Z" fill="white"/>
+  <circle cx="40" cy="40" r="4" fill="white"/>
+  <path d="M35 55C35 53.3431 36.3431 52 38 52H42C43.6569 52 45 53.3431 45 55V55C45 56.6569 43.6569 58 42 58H38C36.3431 58 35 56.6569 35 55V55Z" fill="white"/>
+  <path d="M28 38C28 36.3431 29.3431 35 31 35H35C36.6569 35 38 36.3431 38 38V42C38 43.6569 36.6569 45 35 45H31C29.3431 45 28 43.6569 28 42V38Z" fill="white"/>
+  <path d="M42 38C42 36.3431 43.3431 35 45 35H49C50.6569 35 52 36.3431 52 38V42C52 43.6569 50.6569 45 49 45H45C43.3431 45 42 43.6569 42 42V38Z" fill="white"/>
+  <line x1="40" y1="28" x2="40" y2="36" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="40" y1="44" x2="40" y2="52" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="38" y1="40" x2="28" y2="40" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="52" y1="40" x2="42" y2="40" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Eye, Copy, Trash2, AlertCircle, CheckCircle, Calendar, User, FileText, Edit } from 'lucide-react';
+import { X, Eye, Copy, Trash2, AlertCircle, CheckCircle, Calendar, User, FileText, Edit, Plus } from 'lucide-react';
 import { Inspection, Facility, supabase } from '../lib/supabase';
 import InspectionViewer from './InspectionViewer';
 import { isInspectionValid } from '../utils/inspectionUtils';
@@ -13,6 +13,7 @@ interface FacilityInspectionsManagerProps {
   onInspectionUpdated: () => void;
   onCloneInspection: (inspection: Inspection) => void;
   onEditDraft?: (inspection: Inspection) => void;
+  onAddNewInspection?: () => void;
 }
 
 export default function FacilityInspectionsManager({
@@ -23,6 +24,7 @@ export default function FacilityInspectionsManager({
   onInspectionUpdated,
   onCloneInspection,
   onEditDraft,
+  onAddNewInspection,
 }: FacilityInspectionsManagerProps) {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,12 +99,23 @@ export default function FacilityInspectionsManager({
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inspection History</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{facility.name}</p>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+              {onAddNewInspection && (
+                <button
+                  onClick={onAddNewInspection}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add New Survey
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
 
           <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
@@ -127,8 +140,8 @@ export default function FacilityInspectionsManager({
                     <div
                       key={inspection.id}
                       className={`border rounded-lg overflow-hidden hover:border-blue-300 dark:hover:border-blue-600 transition-colors ${inspection.status === 'draft'
-                          ? 'border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20'
-                          : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50'
+                        ? 'border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20'
+                        : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50'
                         }`}
                     >
                       <div className="p-4">

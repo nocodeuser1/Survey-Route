@@ -9,6 +9,7 @@ import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import NavigationPopup from './NavigationPopup';
 import FacilityDetailModal from './FacilityDetailModal';
+import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SpeedDisplay from './SpeedDisplay';
 
 interface RouteMapProps {
@@ -146,6 +147,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
   const [surveyFacility, setSurveyFacility] = useState<Facility | null>(null);
+  const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
   const [addFacilityCoords, setAddFacilityCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [newFacilityName, setNewFacilityName] = useState('');
@@ -1021,9 +1023,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   console.log('[RouteMap] Survey button clicked!');
                   console.log('[RouteMap] - Popup facility name:', currentFacilityName);
                   console.log('[RouteMap] - Matched facility:', facilityForThisMarker?.name, facilityForThisMarker?.id);
+                  console.log('[RouteMap] - Facility inspections count:', facilityInspections.length);
 
                   if (facilityForThisMarker) {
-                    setSurveyFacility(facilityForThisMarker);
+                    // If facility has existing inspections, show the inspections list modal
+                    if (facilityInspections.length > 0) {
+                      setInspectionsListFacility(facilityForThisMarker);
+                    } else {
+                      // No existing inspections, open the survey form directly
+                      setSurveyFacility(facilityForThisMarker);
+                    }
                   } else {
                     alert('Could not find facility data. Please refresh the page.');
                   }
@@ -1295,9 +1304,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               }
             });
 
-            if (surveyBtn && onNavigateToView) {
+            if (surveyBtn) {
               surveyBtn.addEventListener('click', () => {
-                onNavigateToView('survey');
+                console.log('[RouteMap] Non-route survey button clicked!');
+                console.log('[RouteMap] - Facility inspections count:', facilityInspections.length);
+
+                // If facility has existing inspections, show the inspections list modal
+                if (facilityInspections.length > 0) {
+                  setInspectionsListFacility(facility);
+                } else {
+                  // No existing inspections, open the survey form directly
+                  setSurveyFacility(facility);
+                }
                 marker.closePopup();
               });
             }
@@ -3206,6 +3224,36 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           allInspections={inspections}
           onViewNearbyFacility={(facility) => {
             setSurveyFacility(facility);
+          }}
+        />
+      )}
+
+      {/* Inspection History List Modal */}
+      {inspectionsListFacility && userId && (
+        <FacilityInspectionsManager
+          facility={inspectionsListFacility}
+          userId={userId}
+          userRole="user"
+          onClose={() => setInspectionsListFacility(null)}
+          onInspectionUpdated={() => {
+            if (onFacilitiesChange) {
+              onFacilitiesChange();
+            }
+          }}
+          onCloneInspection={(inspection) => {
+            // Clone = open survey form with pre-filled data
+            setInspectionsListFacility(null);
+            setSurveyFacility(inspectionsListFacility);
+          }}
+          onEditDraft={(inspection) => {
+            // Edit draft = open survey form with draft
+            setInspectionsListFacility(null);
+            setSurveyFacility(inspectionsListFacility);
+          }}
+          onAddNewInspection={() => {
+            // Close inspection list and open survey form
+            setInspectionsListFacility(null);
+            setSurveyFacility(inspectionsListFacility);
           }}
         />
       )}
