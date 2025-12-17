@@ -116,7 +116,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setLoading(false);
       } else {
-        console.log('No user profile found');
+        console.log('No user profile found, checking if agency owner...');
+
+        // Self-healing: Check if this user is an agency owner but missing a profile
+        const { data: agency } = await supabase
+          .from('agencies')
+          .select('*')
+          .eq('owner_email', authData.user.email)
+          .maybeSingle();
+
+        if (agency) {
+          console.log('Found agency for user, creating missing profile...');
+          // Create the missing user profile
+          const { data: newUser, error: createError } = await supabase
+            .from('users')
+            .insert({
+              auth_user_id: authUserId,
+              email: authData.user.email!,
+              full_name: agency.name + ' Owner', // Default name
+              is_agency_owner: true
+            })
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Failed to create missing agency owner profile:', createError);
+            setLoading(false);
+            return;
+          }
+
+          if (newUser) {
+            console.log('Created missing profile:', newUser);
+            setUser({
+              id: newUser.id,
+              email: newUser.email,
+              fullName: newUser.full_name,
+              isAgencyOwner: newUser.is_agency_owner,
+              authUserId: newUser.auth_user_id,
+              signatureCompleted: false,
+            });
+          }
+        } else {
+          console.log('No agency found either');
+        }
         setLoading(false);
       }
     } catch (error) {
@@ -169,14 +211,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signUpAgencyOwner(email: string, password: string, _fullName: string, agencyName: string) {
+  async function signUpAgencyOwner(email: string, password: string, fullName: string, agencyName: string) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
     if (error) throw error;
 
-    // Create agency for owner (no user profile, no account needed)
+    // Create agency for owner
     if (data.user) {
       const { error: agencyError } = await supabase
         .from('agencies')
@@ -186,6 +228,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
       if (agencyError) throw agencyError;
+
+      // Create user profile for agency owner
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          auth_user_id: data.user.id,
+          email,
+          full_name: fullName,
+          is_agency_owner: true,
+        });
+
+      if (profileError) {
+        console.error('Error creating agency owner profile:', profileError);
+        // Don't throw here to avoid blocking the signup flow if agency was created
+      }
     }
   }
 

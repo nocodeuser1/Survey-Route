@@ -36,9 +36,8 @@ const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 type View = 'facilities' | 'configure' | 'route-planning' | 'survey' | 'settings';
 
-// Helper function to check if a facility is active (not excluded or removed)
 const isActiveFacility = (facility: Facility): boolean => {
-  return facility.day_assignment !== -1 && facility.day_assignment !== -2;
+  return facility.day_assignment !== -1 && facility.day_assignment !== -2 && facility.status !== 'sold';
 };
 
 // Helper function to filter optimization result by team and renumber days
@@ -156,7 +155,7 @@ function App() {
     const savedView = localStorage.getItem('currentView');
     return savedView === 'route-planning';
   });
-  const [isLoadingFacilities, setIsLoadingFacilities] = useState(false);
+  const [isLoadingFacilities, setIsLoadingFacilities] = useState(true); // Always start true to prevent empty flash
   const [facilityToEdit, setFacilityToEdit] = useState<Facility | null>(null);
   const [signatureBannerDismissed, setSignatureBannerDismissed] = useState(() => {
     return localStorage.getItem('signatureDeferred') === 'true';
@@ -571,10 +570,12 @@ function App() {
     }
 
     isLoadingDataRef.current = true;
-    // Only show facilities loading if we don't have any facilities yet
+    // Note: isLoadingFacilities is already true by default, but we ensure it here
+    // only if we have 0 facilities to allow for the "loading" state to persist
     if (facilities.length === 0) {
       setIsLoadingFacilities(true);
     }
+    const loadStartTime = Date.now();
     console.log('[loadData] Starting data load for account:', currentAccount.id);
 
     // Show loading state if we're on route-planning view and don't have results yet
@@ -767,7 +768,27 @@ function App() {
       }
 
       // Clear facilities loading state after all data processing is complete
-      setIsLoadingFacilities(false);
+      // If we have facilities, clear immediately. If 0 facilities, ensure 7s minimum wait.
+      const hasFacilities = facilitiesData && facilitiesData.length > 0;
+
+      if (hasFacilities) {
+        setIsLoadingFacilities(false);
+      } else {
+        // Enforce minimum 7 second wait time for empty state
+        const elapsed = Date.now() - loadStartTime;
+        const minimumWait = 7000; // 7 seconds
+        const remainingWait = Math.max(0, minimumWait - elapsed);
+
+        if (remainingWait > 0) {
+          console.log(`[loadData] No facilities found. Waiting ${remainingWait}ms before showing empty state.`);
+          setTimeout(() => {
+            setIsLoadingFacilities(false);
+          }, remainingWait);
+        } else {
+          setIsLoadingFacilities(false);
+        }
+      }
+
     } catch (err) {
       console.error('Error loading data:', err);
       // On error, clear loading state
@@ -2069,8 +2090,8 @@ function App() {
                     setCurrentView('facilities');
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'facilities'
-                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
                   <Building2 className="w-4 h-4" />
@@ -2086,8 +2107,8 @@ function App() {
                   }}
                   disabled={facilities.length === 0}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'route-planning'
-                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <MapPin className="w-4 h-4" />
@@ -2097,8 +2118,8 @@ function App() {
                   onClick={() => setCurrentView('survey')}
                   disabled={!optimizationResult}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'survey'
-                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <Navigation2 className="w-4 h-4" />
@@ -2110,8 +2131,8 @@ function App() {
                     setCurrentView('settings');
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'settings'
-                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                 >
                   <UserCog className="w-4 h-4" />
@@ -2147,8 +2168,8 @@ function App() {
                       setShowMobileMenu(false);
                     }}
                     className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'facilities'
-                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                       }`}
                   >
                     <Building2 className="w-5 h-5" />
@@ -2165,8 +2186,8 @@ function App() {
                     }}
                     disabled={facilities.length === 0}
                     className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'route-planning'
-                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <MapPin className="w-5 h-5" />
@@ -2179,8 +2200,8 @@ function App() {
                     }}
                     disabled={!optimizationResult}
                     className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'survey'
-                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <Navigation2 className="w-5 h-5" />
@@ -2193,8 +2214,8 @@ function App() {
                       setShowMobileMenu(false);
                     }}
                     className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors ${currentView === 'settings'
-                        ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                       }`}
                   >
                     <UserCog className="w-5 h-5" />
@@ -2514,7 +2535,7 @@ function App() {
                     <RouteResults
                       result={filteredOptimizationResult}
                       settings={lastUsedSettings}
-                      facilities={filteredFacilities}
+                      facilities={filteredFacilities.filter(f => f.status !== 'sold')}
                       userId={currentAccount.id}
                       teamNumber={1}
                       accountId={currentAccount.id}
@@ -2631,7 +2652,7 @@ function App() {
                             settings={lastUsedSettings}
                             inspections={inspections}
                             completedVisibility={completedVisibility}
-                            facilities={filteredFacilities}
+                            facilities={filteredFacilities.filter(f => f.status !== 'sold')}
                             userId={DEMO_USER_ID}
                             teamNumber={1}
                             onFacilitiesChange={loadData}
@@ -2665,8 +2686,8 @@ function App() {
                         <button
                           onClick={() => setShowVisibilityModal(true)}
                           className={`p-2 rounded-lg transition-colors shadow-lg border ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
-                              ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
-                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                             }`}
                           title="Adjust completed facilities visibility"
                         >
@@ -2678,8 +2699,8 @@ function App() {
                         <button
                           onClick={() => setNavigationMode(!navigationMode)}
                           className={`p-2 rounded-lg transition-colors shadow-lg border ${navigationMode
-                              ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                             }`}
                           title="Toggle navigation mode with GPS speed and map rotation"
                         >
@@ -2697,8 +2718,8 @@ function App() {
                               setTriggerMapLocation(prev => prev + 1);
                             }}
                             className={`p-2 rounded-lg transition-colors shadow-lg border ${locationTracking
-                                ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                                : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                              ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                              : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                               }`}
                             title={locationTracking ? "Stop following my location" : "Follow my location"}
                           >
@@ -2719,7 +2740,7 @@ function App() {
             <SurveyMode
               key={`survey-${currentAccount.id}`}
               result={filteredOptimizationResult}
-              facilities={filteredFacilities}
+              facilities={filteredFacilities.filter(f => f.status !== 'sold')}
               userId={currentAccount.id}
               teamNumber={1}
               accountId={currentAccount.id}

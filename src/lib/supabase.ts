@@ -62,6 +62,8 @@ export interface Facility {
   inspection_due_notification_sent_at?: string | null;
   spcc_external_completion?: boolean;
   day?: number;
+  status?: 'active' | 'sold';
+  sold_at?: string | null;
 }
 
 export interface HomeBase {

@@ -14,7 +14,7 @@ export default function NotificationSettings({ userId, accountId }: Notification
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [customDays, setCustomDays] = useState('');
+
 
   useEffect(() => {
     loadPreferences();
@@ -106,36 +106,7 @@ export default function NotificationSettings({ userId, accountId }: Notification
     }
   };
 
-  const toggleReminderDay = (day: number) => {
-    if (!preferences) return;
 
-    const currentDays = preferences.reminder_days_before || [];
-    const newDays = currentDays.includes(day)
-      ? currentDays.filter(d => d !== day)
-      : [...currentDays, day].sort((a, b) => b - a);
-
-    setPreferences({ ...preferences, reminder_days_before: newDays });
-  };
-
-  const addCustomReminderDay = () => {
-    if (!preferences) return;
-
-    const day = parseInt(customDays);
-    if (isNaN(day) || day <= 0 || day > 365) {
-      setMessage({ type: 'error', text: 'Please enter a valid number of days (1-365)' });
-      return;
-    }
-
-    const currentDays = preferences.reminder_days_before || [];
-    if (currentDays.includes(day)) {
-      setMessage({ type: 'error', text: 'This reminder day is already added' });
-      return;
-    }
-
-    const newDays = [...currentDays, day].sort((a, b) => b - a);
-    setPreferences({ ...preferences, reminder_days_before: newDays });
-    setCustomDays('');
-  };
 
   if (loading) {
     return (
@@ -156,11 +127,10 @@ export default function NotificationSettings({ userId, accountId }: Notification
   return (
     <div className="space-y-6">
       {message && (
-        <div className={`p-4 rounded-lg flex items-center gap-2 ${
-          message.type === 'success'
+        <div className={`p-4 rounded-lg flex items-center gap-2 ${message.type === 'success'
             ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'
             : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
-        }`}>
+          }`}>
           {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <span>{message.text}</span>
         </div>
@@ -210,54 +180,9 @@ export default function NotificationSettings({ userId, accountId }: Notification
           <Clock className="w-5 h-5" />
           Reminder Timing
         </h3>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Send reminders this many days before due date:
-            </label>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {[30, 14, 7, 3, 1].map(day => (
-                <button
-                  key={day}
-                  onClick={() => toggleReminderDay(day)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    preferences.reminder_days_before?.includes(day)
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {day} day{day !== 1 ? 's' : ''}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min="1"
-                max="365"
-                value={customDays}
-                onChange={(e) => setCustomDays(e.target.value)}
-                placeholder="Custom days"
-                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-              />
-              <button
-                onClick={addCustomReminderDay}
-                disabled={!customDays}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Add
-              </button>
-            </div>
-
-            {preferences.reminder_days_before && preferences.reminder_days_before.length > 0 && (
-              <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-                Active reminders: {preferences.reminder_days_before.sort((a, b) => b - a).join(', ')} days before
-              </div>
-            )}
-          </div>
-        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Reminder schedules are configured by your company administrator. You will receive notifications based on those settings if enabled above.
+        </p>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">

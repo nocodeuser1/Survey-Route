@@ -562,7 +562,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // This is VIEW-ONLY logic - does not affect route assignments or data
           const isCompleted = completedFacilityNames.has(facility.name);
           const isManuallyRemoved = latestFacilityData?.day_assignment === -2;
-          const shouldBeHidden = hideCompletedFacilities && (isCompleted || isManuallyRemoved);
+          const isSold = latestFacilityData?.status === 'sold';
+          const shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved)) || isSold;
 
           if (!shouldBeHidden) {
             bounds.extend([currentLat, currentLng]);

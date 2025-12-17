@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, Plus, CheckCircle, AlertTriangle, Clock, Navigation, Trash2, ChevronDown, ChevronUp, MapPin, Edit2 } from 'lucide-react';
+import { X, FileText, Plus, CheckCircle, AlertTriangle, Clock, Navigation, Trash2, ChevronDown, ChevronUp, MapPin, Edit2, DollarSign } from 'lucide-react';
 import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
@@ -288,6 +288,12 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                   <SPCCExternalCompletionBadge completedDate={facility.spcc_completed_date} />
                 ) : (
                   <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />
+                )}
+                {facility.status === 'sold' && (
+                  <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300">
+                    <DollarSign className="w-3 h-3" />
+                    Sold {facility.sold_at ? `on ${new Date(facility.sold_at).toLocaleDateString()}` : ''}
+                  </span>
                 )}
               </div>
               <p className="text-sm text-blue-100 mt-1">
@@ -589,11 +595,10 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span
-                          className={`px-2 py-1 rounded text-xs font-semibold ${
-                            inspection.status === 'completed'
+                          className={`px-2 py-1 rounded text-xs font-semibold ${inspection.status === 'completed'
                               ? 'bg-green-100 text-green-800'
                               : 'bg-yellow-100 text-yellow-800'
-                          }`}
+                            }`}
                         >
                           {inspection.status === 'completed' ? 'Completed' : 'Draft'}
                         </span>

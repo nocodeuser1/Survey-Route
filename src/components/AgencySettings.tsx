@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Building2, Users, Key, AlertCircle, CheckCircle, Mail, UserPlus, X, Copy, RefreshCw } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import StripeProductConfig from './StripeProductConfig';
+import CompanyNotificationSettings from './CompanyNotificationSettings';
 
 interface AgencySettingsProps {
   agency: {
@@ -37,7 +38,7 @@ interface Invitation {
 
 export default function AgencySettings({ agency, onClose, onUpdate }: AgencySettingsProps) {
   const { currentAccount } = useAccount();
-  const [activeTab, setActiveTab] = useState<'users' | 'stripe' | 'rename' | 'transfer'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'stripe' | 'rename' | 'transfer' | 'notifications'>('users');
 
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -544,6 +545,15 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
             >
               Transfer Ownership
             </button>
+            <button
+              onClick={() => setActiveTab('notifications')}
+              className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'notifications'
+                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                }`}
+            >
+              Notifications
+            </button>
           </div>
         </div>
 
@@ -836,6 +846,10 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                 </button>
               </div>
             </div>
+          )}
+
+          {activeTab === 'notifications' && currentAccount && (
+            <CompanyNotificationSettings accountId={currentAccount.id} />
           )}
         </div>
       </div>
