@@ -2394,15 +2394,17 @@ function App() {
 
               {optimizationResult && !isLoadingRoutes && !isGenerating && (
                 <>
-                  <StickyStatsBar
-                    totalDays={optimizationResult.totalDays}
-                    totalFacilities={visibleFacilityCount}
-                    totalMiles={optimizationResult.totalMiles}
-                    totalDriveTime={optimizationResult.totalDriveTime}
-                    totalVisitTime={optimizationResult.totalVisitTime}
-                    totalTime={optimizationResult.totalTime}
-                    triggerElementId="main-stats-cards"
-                  />
+                  {!isFullScreenMap && (
+                    <StickyStatsBar
+                      totalDays={optimizationResult.totalDays}
+                      totalFacilities={visibleFacilityCount}
+                      totalMiles={optimizationResult.totalMiles}
+                      totalDriveTime={optimizationResult.totalDriveTime}
+                      totalVisitTime={optimizationResult.totalVisitTime}
+                      totalTime={optimizationResult.totalTime}
+                      triggerElementId="main-stats-cards"
+                    />
+                  )}
 
                   <RouteResults
                     result={optimizationResult}

@@ -1301,10 +1301,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       )}
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200">
-        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 transition-colors duration-200">
+        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 transition-colors duration-200">
           {/* Header Row - Title + Primary Actions */}
           {/* Header Row - Title only */}
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-1">
             <MapPin className="w-5 h-5 text-blue-600" />
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
               {isLoading ? (
@@ -1497,7 +1497,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         {!isLoading && (
           <>
             {/* Search box + Primary Actions */}
-            <div className="flex items-center gap-3 px-6 py-3 bg-gray-100 dark:bg-gray-900">
+            <div className="flex items-center gap-3 px-4 py-2 bg-gray-100 dark:bg-gray-900">
               <div className="relative flex-1">
                 <input
                   type="text"
@@ -1537,7 +1537,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
             {/* Collapsible filters dropdown */}
             {showFilters && (
-              <div className="flex flex-col gap-3 mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors duration-200">
+              <div className="flex flex-col gap-3 mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors duration-200">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -1655,7 +1655,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           ) : (
             <div
-              className="overflow-auto mt-4 relative max-h-[calc(100vh-250px)] min-h-[400px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm"
+              className="overflow-auto mt-0 relative max-h-[calc(100vh-150px)] min-h-[500px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm"
               ref={tableContainerRef}
             >
               <div ref={headerSentinelRef} className="absolute top-0 left-0 w-full h-[1px] pointer-events-none" />

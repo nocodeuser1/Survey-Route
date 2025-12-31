@@ -2912,7 +2912,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
   return (
     <div className={isFullScreen ? "h-full flex flex-col relative" : "bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"}>
-      <div className={isFullScreen ? "px-6 py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-0 left-0 right-0 z-[9999] transition-colors duration-200" : "px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-[1000] transition-colors duration-200"}>
+      <div className={isFullScreen ? "px-6 py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-0 left-0 right-0 z-40 transition-colors duration-200" : "px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">Route Map</h2>
