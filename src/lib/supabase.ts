@@ -55,6 +55,8 @@ export interface Facility {
   spcc_completed_date?: string | null;
   // Completion type tracking
   spcc_completion_type?: 'internal' | 'external' | null;
+  spcc_plan_url?: string | null;
+  spcc_pe_stamp_date?: string | null;
   // Inspection tracking
   inspection_frequency_days?: number;
   last_inspection_date?: string | null;

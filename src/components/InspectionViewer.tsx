@@ -82,7 +82,7 @@ interface InspectionViewerProps {
 
 export default function InspectionViewer({ inspection, facility, onClose, onClone, canClone = true, userId, accountId }: InspectionViewerProps) {
   const [template, setTemplate] = useState<InspectionTemplate | null>(null);
-  const [accountBranding, setAccountBranding] = useState<{company_name?: string; logo_url?: string}>({});
+  const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
   const [hideReportTimestamps, setHideReportTimestamps] = useState(false);
   const [photos, setPhotos] = useState<Record<string, InspectionPhoto[]>>({});
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
@@ -480,13 +480,13 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       );
     } else if (answer === 'na') {
       return (
-        <div className="flex items-center gap-2 text-gray-600">
+        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
           <MinusCircle className="w-5 h-5" />
           <span className="font-medium">N/A</span>
         </div>
       );
     }
-    return <span className="text-gray-400 italic">Not answered</span>;
+    return <span className="text-gray-400 dark:text-gray-500 italic">Not answered</span>;
   };
 
   const groupedQuestions = template?.questions.reduce((acc: any, question: any) => {
@@ -503,10 +503,10 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full my-8"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full my-8 transition-colors duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-lg z-20">
+        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 rounded-t-lg z-20 transition-colors duration-200">
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 transition-colors z-10"
@@ -524,60 +524,60 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           )}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Inspection Details</h2>
-              <p className="text-sm text-gray-900 font-bold mt-1">{facility.name}</p>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inspection Details</h2>
+              <p className="text-sm text-gray-900 dark:text-white font-bold mt-1">{facility.name}</p>
             </div>
             <div className="flex items-center gap-2">
-            {canEditReport && !isEditMode && inspection.status === 'completed' && console.log('[InspectionViewer] Showing Edit Report button')}
-            {canEditReport && !isEditMode && inspection.status === 'completed' && (
-              <button
-                onClick={handleEnterEditMode}
-                className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm sm:text-base"
-              >
-                <Edit3 className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Edit Report</span>
-                <span className="sm:hidden">Edit</span>
-              </button>
-            )}
-            {isEditMode && (
-              <>
+              {canEditReport && !isEditMode && inspection.status === 'completed' && console.log('[InspectionViewer] Showing Edit Report button')}
+              {canEditReport && !isEditMode && inspection.status === 'completed' && (
                 <button
-                  onClick={handleCancelEdit}
-                  disabled={isSavingEdit}
-                  className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm sm:text-base disabled:opacity-50"
+                  onClick={handleEnterEditMode}
+                  className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm sm:text-base"
                 >
-                  <X className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Cancel</span>
+                  <Edit3 className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">Edit Report</span>
+                  <span className="sm:hidden">Edit</span>
                 </button>
+              )}
+              {isEditMode && (
+                <>
+                  <button
+                    onClick={handleCancelEdit}
+                    disabled={isSavingEdit}
+                    className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm sm:text-base disabled:opacity-50"
+                  >
+                    <X className="w-3 h-3 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Cancel</span>
+                  </button>
+                  <button
+                    onClick={handleSaveEdit}
+                    disabled={isSavingEdit || uploadingPhotos}
+                    className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm sm:text-base disabled:opacity-50"
+                  >
+                    {(isSavingEdit || uploadingPhotos) ? (
+                      <div className="animate-spin rounded-full h-3 w-3 sm:h-4 sm:w-4 border-2 border-white border-t-transparent"></div>
+                    ) : (
+                      <Save className="w-3 h-3 sm:w-4 sm:h-4" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {uploadingPhotos ? 'Uploading Photos...' : isSavingEdit ? 'Saving...' : 'Save Changes'}
+                    </span>
+                    <span className="sm:hidden">
+                      {uploadingPhotos ? 'Uploading...' : isSavingEdit ? 'Saving...' : 'Save'}
+                    </span>
+                  </button>
+                </>
+              )}
+              {canClone && !isEditMode && (
                 <button
-                  onClick={handleSaveEdit}
-                  disabled={isSavingEdit || uploadingPhotos}
-                  className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm sm:text-base disabled:opacity-50"
+                  onClick={onClone}
+                  className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
                 >
-                  {(isSavingEdit || uploadingPhotos) ? (
-                    <div className="animate-spin rounded-full h-3 w-3 sm:h-4 sm:w-4 border-2 border-white border-t-transparent"></div>
-                  ) : (
-                    <Save className="w-3 h-3 sm:w-4 sm:h-4" />
-                  )}
-                  <span className="hidden sm:inline">
-                    {uploadingPhotos ? 'Uploading Photos...' : isSavingEdit ? 'Saving...' : 'Save Changes'}
-                  </span>
-                  <span className="sm:hidden">
-                    {uploadingPhotos ? 'Uploading...' : isSavingEdit ? 'Saving...' : 'Save'}
-                  </span>
+                  <Copy className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">Clone Inspection</span>
+                  <span className="sm:hidden">Clone</span>
                 </button>
-              </>
-            )}
-            {canClone && !isEditMode && (
-              <button
-                onClick={onClone}
-                className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
-              >
-                <Copy className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Clone Inspection</span>
-                <span className="sm:hidden">Clone</span>
-              </button>
-            )}
+              )}
             </div>
           </div>
         </div>
@@ -598,16 +598,16 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
         <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-600 mb-1">
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300 mb-1">
                 <User className="w-4 h-4" />
                 <span className="text-sm font-medium">Inspector</span>
               </div>
-              <p className="text-gray-900 font-semibold">{inspection.inspector_name}</p>
+              <p className="text-gray-900 dark:text-white font-semibold">{inspection.inspector_name}</p>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="flex items-center justify-between gap-2 text-gray-600 mb-1">
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">
+              <div className="flex items-center justify-between gap-2 text-gray-600 dark:text-gray-300 mb-1">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
                   <span className="text-sm font-medium">Date & Time</span>
@@ -630,13 +630,13 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                   </button>
                 )}
               </div>
-              <p className="text-gray-900 font-semibold">
+              <p className="text-gray-900 dark:text-white font-semibold">
                 {formatInspectionTimestamp(conductedDate, hideReportTimestamps)}
               </p>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-gray-600 mb-1">
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300 mb-1">
                 <FileText className="w-4 h-4" />
                 <span className="text-sm font-medium">Status</span>
               </div>
@@ -647,20 +647,20 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-sm text-red-600 font-medium mb-1">Flagged Items</p>
-              <p className="text-3xl font-bold text-red-700">{inspection.flagged_items_count}</p>
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-lg p-4 transition-colors">
+              <p className="text-sm text-red-600 dark:text-red-400 font-medium mb-1">Flagged Items</p>
+              <p className="text-3xl font-bold text-red-700 dark:text-red-300">{inspection.flagged_items_count}</p>
             </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-600 font-medium mb-1">Action Items</p>
-              <p className="text-3xl font-bold text-blue-700">{inspection.actions_count}</p>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/30 rounded-lg p-4 transition-colors">
+              <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-1">Action Items</p>
+              <p className="text-3xl font-bold text-blue-700 dark:text-blue-300">{inspection.actions_count}</p>
             </div>
           </div>
 
           {inspection.signature_data && (
-            <div className="mb-6 bg-gray-50 rounded-lg p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">Inspector Signature</p>
-              <div className="bg-white border border-gray-200 rounded p-3 inline-block">
+            <div className="mb-6 bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Inspector Signature</p>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3 inline-block">
                 <img
                   src={inspection.signature_data}
                   alt="Signature"
@@ -671,11 +671,11 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           )}
 
           <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-gray-900 border-b pb-2">Inspection Responses</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">Inspection Responses</h3>
 
             {Object.entries(groupedQuestions).map(([category, questions]: [string, any]) => (
               <div key={category} className="space-y-3">
-                <h4 className="font-semibold text-gray-800 bg-gray-100 px-3 py-2 rounded">
+                <h4 className="font-semibold text-gray-800 dark:text-white bg-gray-100 dark:bg-gray-700 px-3 py-2 rounded transition-colors">
                   {category}
                 </h4>
 
@@ -684,9 +684,9 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                   const response = responses.find(r => r.question_id === question.id);
 
                   return (
-                    <div key={question.id} className="bg-white border border-gray-200 rounded-lg p-4">
+                    <div key={question.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 transition-colors">
                       <div className="flex items-start justify-between gap-4 mb-3">
-                        <p className="text-gray-900 font-medium flex-1">{question.text}</p>
+                        <p className="text-gray-900 dark:text-white font-medium flex-1">{question.text}</p>
                         {!isEditMode ? (
                           getAnswerDisplay(response?.answer || null)
                         ) : (
@@ -695,13 +695,12 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                               <button
                                 key={val}
                                 onClick={() => handleResponseChange(question.id, 'answer', val)}
-                                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                                  response?.answer === val
+                                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${response?.answer === val
                                     ? val === 'yes' ? 'bg-green-600 text-white'
-                                    : val === 'no' ? 'bg-red-600 text-white'
-                                    : 'bg-gray-600 text-white'
+                                      : val === 'no' ? 'bg-red-600 text-white'
+                                        : 'bg-gray-600 text-white'
                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
+                                  }`}
                               >
                                 {val.toUpperCase()}
                               </button>

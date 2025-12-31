@@ -858,15 +858,15 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     return (
       <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 sm:p-8">
         <div className="max-w-md w-full">
-          <div className="bg-white rounded-lg shadow-xl">
-            <div className="bg-red-50 border-b-2 border-red-200 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl overflow-hidden transition-colors">
+            <div className="bg-red-50 dark:bg-red-900/20 border-b-2 border-red-200 dark:border-red-800 p-4">
               <div className="flex items-center gap-3">
-                <AlertTriangle className="w-8 h-8 text-red-600 flex-shrink-0" />
-                <h3 className="text-lg font-bold text-red-900">Failed to Load Inspection Form</h3>
+                <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <h3 className="text-lg font-bold text-red-900 dark:text-red-200">Failed to Load Inspection Form</h3>
               </div>
             </div>
             <div className="p-6">
-              <p className="text-red-800 mb-6">{loadError}</p>
+              <p className="text-red-800 dark:text-red-300 mb-6">{loadError}</p>
               <div className="flex gap-3">
                 <button
                   onClick={() => {
@@ -879,7 +879,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                 </button>
                 <button
                   onClick={onClose}
-                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                  className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
                 >
                   Close
                 </button>
@@ -894,15 +894,15 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   if (!template) {
     return (
       <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 sm:p-8">
-        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 max-w-md w-full transition-colors">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-700 dark:text-gray-200 text-lg font-medium">Loading inspection form...</p>
-            <p className="text-gray-500 text-sm mt-2">Preparing your inspection template...</p>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">Preparing your inspection template...</p>
             {onClose && (
               <button
                 onClick={onClose}
-                className="mt-4 text-sm text-gray-600 hover:text-gray-800 dark:text-white underline"
+                className="mt-4 text-sm text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white underline"
               >
                 Cancel
               </button>
@@ -916,10 +916,10 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const { flaggedCount, actionsCount } = calculateCounts();
 
   const formContent = (
-    <div className="fixed inset-0 bg-white overflow-y-auto overflow-x-hidden" style={{ zIndex: 99999 }}>
+    <div className="fixed inset-0 bg-white dark:bg-gray-900 overflow-y-auto overflow-x-hidden" style={{ zIndex: 99999 }}>
       <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 z-[101]">
         {accountBranding.logo_url && (
-          <div className="flex justify-center mb-4 bg-white rounded-lg p-2">
+          <div className="flex justify-center mb-4 bg-white dark:bg-gray-800 rounded-lg p-2">
             <img
               src={accountBranding.logo_url}
               alt="Company Logo"
@@ -987,7 +987,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           return (
             <div
               key={question.id}
-              className={`p-3 sm:p-4 border-2 rounded-lg ${response.answer === 'no' ? 'border-red-300 bg-red-50' : 'border-gray-200'
+              className={`p-3 sm:p-4 border-2 rounded-lg transition-colors ${response.answer === 'no' ? 'border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-800' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
                 }`}
             >
               <div className="flex items-start gap-2 sm:gap-3">
@@ -995,7 +995,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                   {index + 1}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 mb-2 sm:mb-3 text-sm sm:text-base">
+                  <p className="font-medium text-gray-900 dark:text-white mb-2 sm:mb-3 text-sm sm:text-base">
                     {question.text}
                     {isCommentOnly && (
                       <span className="ml-2 text-xs text-gray-500 font-normal">(Optional)</span>
@@ -1040,7 +1040,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                     value={response.comments}
                     onChange={(e) => updateResponse(question.id, { comments: e.target.value })}
                     placeholder="Add comments..."
-                    className="form-textarea mb-2"
+                    className="form-textarea mb-2 w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 dark:text-white rounded-md focus:border-blue-500 focus:ring-blue-500"
                     rows={2}
                   />
 
@@ -1094,7 +1094,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                   )}
 
                   {response.answer === 'no' && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-md">
                       <label className="flex items-center gap-2 mb-2">
                         <input
                           type="checkbox"
@@ -1102,9 +1102,9 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                           onChange={(e) =>
                             updateResponse(question.id, { action_required: e.target.checked })
                           }
-                          className="w-3 h-3"
+                          className="w-3 h-3 rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-blue-600 focus:ring-blue-500"
                         />
-                        <span className="text-sm font-medium text-yellow-900">Action Required</span>
+                        <span className="text-sm font-medium text-yellow-900 dark:text-yellow-200">Action Required</span>
                       </label>
                       {response.action_required && (
                         <textarea
@@ -1113,7 +1113,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                             updateResponse(question.id, { action_notes: e.target.value })
                           }
                           placeholder="Describe required action..."
-                          className="form-textarea border-yellow-300 focus:border-yellow-500 focus:ring-yellow-500/20"
+                          className="form-textarea w-full bg-white dark:bg-gray-700 border-yellow-300 dark:border-yellow-600 dark:text-white rounded-md focus:border-yellow-500 focus:ring-yellow-500/20"
                           rows={2}
                         />
                       )}
@@ -1126,15 +1126,15 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         })}
 
         {!signature && (
-          <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-4">
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 mb-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-semibold text-yellow-900 mb-1">Signature Required</h4>
-                <p className="text-sm text-yellow-800 mb-2">
+                <h4 className="font-semibold text-yellow-900 dark:text-yellow-200 mb-1">Signature Required</h4>
+                <p className="text-sm text-yellow-800 dark:text-yellow-300 mb-2">
                   You need to set up your signature before you can complete inspections. Your signature will be automatically applied to all inspections you complete.
                 </p>
-                <p className="text-sm text-yellow-800">
+                <p className="text-sm text-yellow-800 dark:text-yellow-300">
                   Go to <strong>Settings → Team Management</strong> to create your signature.
                 </p>
               </div>
@@ -1142,7 +1142,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           </div>
         )}
 
-        <div className="sticky bottom-0 bg-white border-t-2 border-gray-200 pt-4 pb-2 -mx-4 px-4">
+        <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t-2 border-gray-200 dark:border-gray-700 pt-4 pb-2 -mx-4 px-4 transition-colors">
           <div className="flex gap-2">
             <button
               onClick={() => handleSave('draft')}
@@ -1165,21 +1165,21 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
       {showCloseWarning && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Unsaved Changes</h3>
-            <p className="text-gray-600 mb-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Unsaved Changes</h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
               You have unsaved changes. Are you sure you want to close without saving?
             </p>
             <div className="flex gap-3">
               <button
                 onClick={() => setShowCloseWarning(false)}
-                className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 dark:text-white rounded-md hover:bg-gray-300 font-medium"
+                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 font-medium transition-colors"
               >
                 Continue Editing
               </button>
               <button
                 onClick={confirmClose}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium"
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium transition-colors"
               >
                 Discard Changes
               </button>

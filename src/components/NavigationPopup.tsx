@@ -60,8 +60,14 @@ export default function NavigationPopup({
   const preferredMapIcon = <MapPin className="w-5 h-5" />;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">Navigate to</h3>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{facilityName}</p>
 
@@ -128,8 +134,8 @@ export default function NavigationPopup({
                 <button
                   onClick={copyCoordinates}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${copied
-                      ? 'bg-green-600 text-white'
-                      : 'bg-white dark:bg-gray-700 border-2 border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-gray-600'
+                    ? 'bg-green-600 text-white'
+                    : 'bg-white dark:bg-gray-700 border-2 border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-gray-600'
                     }`}
                   disabled={copied}
                 >

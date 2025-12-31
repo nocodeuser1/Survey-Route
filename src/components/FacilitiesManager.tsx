@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
@@ -8,9 +8,11 @@ import InspectionReportExport from './InspectionReportExport';
 import SPCCCompletedBadge from './SPCCCompletedBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
+import SPCCPlanManager from './SPCCPlanManager';
 import CompletionTypeModal from './CompletionTypeModal';
 import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
+import InspectionsOverviewModal from './InspectionsOverviewModal';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { ParseResult } from '../utils/csvParser';
 
@@ -110,11 +112,37 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('spcc_inspection_internal');
   const [showFilters, setShowFilters] = useState(false);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
-  const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [showSoldFacilities, setShowSoldFacilities] = useState(false);
   const [showSoldModal, setShowSoldModal] = useState(false);
   const [isMarkingSold, setIsMarkingSold] = useState(false);
+  const [showInspectionOverview, setShowInspectionOverview] = useState(false);
+  const [showSPCCPlanManager, setShowSPCCPlanManager] = useState(false);
+  const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
+  const [isHeaderSticky, setIsHeaderSticky] = useState(false);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const headerSentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Wait for ref to be available
+    if (!tableContainerRef.current) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsHeaderSticky(!entry.isIntersecting);
+      },
+      {
+        threshold: [0, 1],
+        root: tableContainerRef.current // Observe relative to the scrolling container
+      }
+    );
+
+    if (headerSentinelRef.current) {
+      observer.observe(headerSentinelRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [tableContainerRef.current]); // Re-run if ref changes (e.g. initial render)
 
   useEffect(() => {
     const loadReportTypePreference = async () => {
@@ -760,773 +788,751 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       console.error('Error deleting facilities:', err);
       setError('Failed to delete facilities');
     }
-  }
-};
+  };
 
-const handleMarkAsSold = async (soldDate: string) => {
-  if (selectedFacilityIds.size === 0) return;
+  const handleMarkAsSold = async (soldDate: string) => {
+    if (selectedFacilityIds.size === 0) return;
 
-  setIsMarkingSold(true);
-  try {
-    const facilityIds = Array.from(selectedFacilityIds);
-    const { error } = await supabase
-      .from('facilities')
-      .update({
-        status: 'sold',
-        sold_at: soldDate
-      })
-      .in('id', facilityIds);
+    setIsMarkingSold(true);
+    try {
+      const facilityIds = Array.from(selectedFacilityIds);
+      const { error } = await supabase
+        .from('facilities')
+        .update({
+          status: 'sold',
+          sold_at: soldDate
+        })
+        .in('id', facilityIds);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    setSelectedFacilityIds(new Set());
-    setShowSoldModal(false);
-    onFacilitiesChange();
-  } catch (err) {
-    console.error('Error marking facilities as sold:', err);
-    alert('Failed to update facilities');
-  } finally {
-    setIsMarkingSold(false);
-  }
-};
+      setSelectedFacilityIds(new Set());
+      setShowSoldModal(false);
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error marking facilities as sold:', err);
+      alert('Failed to update facilities');
+    } finally {
+      setIsMarkingSold(false);
+    }
+  };
 
-const handleExportFacilities = () => {
-  setShowExportColumnSelector(true);
-};
+  const handleExportFacilities = () => {
+    setShowExportColumnSelector(true);
+  };
 
-const performExport = () => {
-  const headers = exportColumnOrder
-    .filter(col => exportVisibleColumns.includes(col))
-    .map(col => COLUMN_LABELS[col]);
-
-  const csvRows = [headers];
-
-  filteredFacilities.forEach(facility => {
-    const row = exportColumnOrder
+  const performExport = () => {
+    const headers = exportColumnOrder
       .filter(col => exportVisibleColumns.includes(col))
-      .map(columnId => {
-        if (columnId === 'spcc_status') {
-          if (facility.spcc_completed_date) return 'Completed';
-          if (facility.spcc_external_completion) return 'External';
-          if (facility.spcc_due_date) {
-            const dueDate = new Date(facility.spcc_due_date);
-            const today = new Date();
-            const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysDiff < 0) return 'Overdue';
-            if (daysDiff <= 30) return 'Due Soon';
-            return 'Current';
+      .map(col => COLUMN_LABELS[col]);
+
+    const csvRows = [headers];
+
+    filteredFacilities.forEach(facility => {
+      const row = exportColumnOrder
+        .filter(col => exportVisibleColumns.includes(col))
+        .map(columnId => {
+          if (columnId === 'spcc_status') {
+            if (facility.spcc_completed_date) return 'Completed';
+            if (facility.spcc_external_completion) return 'External';
+            if (facility.spcc_due_date) {
+              const dueDate = new Date(facility.spcc_due_date);
+              const today = new Date();
+              const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              if (daysDiff < 0) return 'Overdue';
+              if (daysDiff <= 30) return 'Due Soon';
+              return 'Current';
+            }
+            return 'No Date';
+          } else if (columnId === 'inspection_status') {
+            const inspection = inspections.get(facility.id);
+            if (!inspection) return 'Pending';
+            return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
+          } else if (columnId === 'visit_duration') {
+            return facility.visit_duration_minutes?.toString() || '30';
+          } else if (columnId === 'spcc_due_date' || columnId === 'spcc_completed_date' || columnId === 'first_prod_date') {
+            const value = facility[columnId];
+            return value ? new Date(value).toLocaleDateString() : '';
+          } else {
+            const value = facility[columnId];
+            return value?.toString() || '';
           }
-          return 'No Date';
-        } else if (columnId === 'inspection_status') {
-          const inspection = inspections.get(facility.id);
-          if (!inspection) return 'Pending';
-          return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
-        } else if (columnId === 'visit_duration') {
-          return facility.visit_duration_minutes?.toString() || '30';
-        } else if (columnId === 'spcc_due_date' || columnId === 'spcc_completed_date' || columnId === 'first_prod_date') {
-          const value = facility[columnId];
-          return value ? new Date(value).toLocaleDateString() : '';
-        } else {
-          const value = facility[columnId];
-          return value?.toString() || '';
-        }
-      });
+        });
 
-    csvRows.push(row);
-  });
+      csvRows.push(row);
+    });
 
-  const csvContent = csvRows.map(row =>
-    row.map(cell => `"${cell.toString().replace(/"/g, '""')}"`).join(',')
-  ).join('\n');
+    const csvContent = csvRows.map(row =>
+      row.map(cell => `"${cell.toString().replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
 
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
 
-  link.setAttribute('href', url);
-  link.setAttribute('download', `facilities_export_${new Date().toISOString().split('T')[0]}.csv`);
-  link.style.visibility = 'hidden';
+    link.setAttribute('href', url);
+    link.setAttribute('download', `facilities_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
 
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-  setShowExportColumnSelector(false);
-};
+    setShowExportColumnSelector(false);
+  };
 
-const toggleColumn = (columnId: ColumnId) => {
-  setVisibleColumns((prev: ColumnId[]) => {
-    let newColumns: ColumnId[];
-    if (prev.includes(columnId)) {
-      // Remove column
-      newColumns = prev.filter(id => id !== columnId);
-    } else {
-      // Add column in the correct order based on columnOrder
-      newColumns = columnOrder.filter(id => prev.includes(id) || id === columnId);
+  const toggleColumn = (columnId: ColumnId) => {
+    setVisibleColumns((prev: ColumnId[]) => {
+      let newColumns: ColumnId[];
+      if (prev.includes(columnId)) {
+        // Remove column
+        newColumns = prev.filter(id => id !== columnId);
+      } else {
+        // Add column in the correct order based on columnOrder
+        newColumns = columnOrder.filter(id => prev.includes(id) || id === columnId);
+      }
+      localStorage.setItem('facilities_visible_columns', JSON.stringify(newColumns));
+      return newColumns;
+    });
+  };
+
+  const showAllColumns = () => {
+    // Show all columns in the current order
+    setVisibleColumns([...columnOrder]);
+    localStorage.setItem('facilities_visible_columns', JSON.stringify(columnOrder));
+  };
+
+  const resetColumns = () => {
+    setColumnOrder(ALL_COLUMNS_ORDER);
+    setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+    localStorage.setItem('facilities_column_order', JSON.stringify(ALL_COLUMNS_ORDER));
+    localStorage.setItem('facilities_visible_columns', JSON.stringify(DEFAULT_VISIBLE_COLUMNS));
+  };
+
+  const handleDragStart = (columnId: ColumnId) => {
+    setDraggedColumn(columnId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetColumnId: ColumnId) => {
+    e.preventDefault();
+    if (!draggedColumn || draggedColumn === targetColumnId) return;
+
+    const newOrder = [...columnOrder];
+    const draggedIndex = newOrder.indexOf(draggedColumn);
+    const targetIndex = newOrder.indexOf(targetColumnId);
+
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIndex, 0, draggedColumn);
+
+    setColumnOrder(newOrder);
+
+    // Update visible columns to match new order
+    setVisibleColumns((prev: ColumnId[]) => {
+      const newVisible = newOrder.filter(id => prev.includes(id));
+      localStorage.setItem('facilities_visible_columns', JSON.stringify(newVisible));
+      return newVisible;
+    });
+
+    localStorage.setItem('facilities_column_order', JSON.stringify(newOrder));
+  };
+
+  const handleDragEnd = () => {
+    setDraggedColumn(null);
+  };
+
+  const toggleExportColumn = (columnId: ColumnId) => {
+    setExportVisibleColumns((prev: ColumnId[]) => {
+      if (prev.includes(columnId)) {
+        return prev.filter(id => id !== columnId);
+      } else {
+        return [...prev, columnId];
+      }
+    });
+  };
+
+  const showAllExportColumns = () => {
+    setExportVisibleColumns([...exportColumnOrder]);
+  };
+
+  const resetExportColumns = () => {
+    setExportColumnOrder(ALL_COLUMNS_ORDER);
+    setExportVisibleColumns(ALL_COLUMNS_ORDER);
+  };
+
+  const handleExportDragStart = (columnId: ColumnId) => {
+    setDraggedExportColumn(columnId);
+  };
+
+  const handleExportDragOver = (e: React.DragEvent, targetColumnId: ColumnId) => {
+    e.preventDefault();
+    if (!draggedExportColumn || draggedExportColumn === targetColumnId) return;
+
+    const newOrder = [...exportColumnOrder];
+    const draggedIndex = newOrder.indexOf(draggedExportColumn);
+    const targetIndex = newOrder.indexOf(targetColumnId);
+
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIndex, 0, draggedExportColumn);
+
+    setExportColumnOrder(newOrder);
+  };
+
+  const handleExportDragEnd = () => {
+    setDraggedExportColumn(null);
+  };
+
+  const renderCellContent = (facility: Facility, columnId: ColumnId, isEditing: boolean) => {
+    if (isEditing) {
+      switch (columnId) {
+        case 'name':
+          return (
+            <input
+              type="text"
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
+          );
+        case 'latitude':
+          return (
+            <input
+              type="number"
+              step="any"
+              value={editForm.latitude}
+              onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
+          );
+        case 'longitude':
+          return (
+            <input
+              type="number"
+              step="any"
+              value={editForm.longitude}
+              onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
+          );
+        case 'visit_duration':
+          return (
+            <input
+              type="number"
+              value={editForm.visitDuration}
+              onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
+              className="form-input w-full px-2 py-1 text-sm"
+            />
+          );
+        default:
+          return renderCellContent(facility, columnId, false);
+      }
     }
-    localStorage.setItem('facilities_visible_columns', JSON.stringify(newColumns));
-    return newColumns;
-  });
-};
 
-const showAllColumns = () => {
-  // Show all columns in the current order
-  setVisibleColumns([...columnOrder]);
-  localStorage.setItem('facilities_visible_columns', JSON.stringify(columnOrder));
-};
-
-const resetColumns = () => {
-  setColumnOrder(ALL_COLUMNS_ORDER);
-  setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
-  localStorage.setItem('facilities_column_order', JSON.stringify(ALL_COLUMNS_ORDER));
-  localStorage.setItem('facilities_visible_columns', JSON.stringify(DEFAULT_VISIBLE_COLUMNS));
-};
-
-const handleDragStart = (columnId: ColumnId) => {
-  setDraggedColumn(columnId);
-};
-
-const handleDragOver = (e: React.DragEvent, targetColumnId: ColumnId) => {
-  e.preventDefault();
-  if (!draggedColumn || draggedColumn === targetColumnId) return;
-
-  const newOrder = [...columnOrder];
-  const draggedIndex = newOrder.indexOf(draggedColumn);
-  const targetIndex = newOrder.indexOf(targetColumnId);
-
-  newOrder.splice(draggedIndex, 1);
-  newOrder.splice(targetIndex, 0, draggedColumn);
-
-  setColumnOrder(newOrder);
-
-  // Update visible columns to match new order
-  setVisibleColumns((prev: ColumnId[]) => {
-    const newVisible = newOrder.filter(id => prev.includes(id));
-    localStorage.setItem('facilities_visible_columns', JSON.stringify(newVisible));
-    return newVisible;
-  });
-
-  localStorage.setItem('facilities_column_order', JSON.stringify(newOrder));
-};
-
-const handleDragEnd = () => {
-  setDraggedColumn(null);
-};
-
-const toggleExportColumn = (columnId: ColumnId) => {
-  setExportVisibleColumns((prev: ColumnId[]) => {
-    if (prev.includes(columnId)) {
-      return prev.filter(id => id !== columnId);
-    } else {
-      return [...prev, columnId];
-    }
-  });
-};
-
-const showAllExportColumns = () => {
-  setExportVisibleColumns([...exportColumnOrder]);
-};
-
-const resetExportColumns = () => {
-  setExportColumnOrder(ALL_COLUMNS_ORDER);
-  setExportVisibleColumns(ALL_COLUMNS_ORDER);
-};
-
-const handleExportDragStart = (columnId: ColumnId) => {
-  setDraggedExportColumn(columnId);
-};
-
-const handleExportDragOver = (e: React.DragEvent, targetColumnId: ColumnId) => {
-  e.preventDefault();
-  if (!draggedExportColumn || draggedExportColumn === targetColumnId) return;
-
-  const newOrder = [...exportColumnOrder];
-  const draggedIndex = newOrder.indexOf(draggedExportColumn);
-  const targetIndex = newOrder.indexOf(targetColumnId);
-
-  newOrder.splice(draggedIndex, 1);
-  newOrder.splice(targetIndex, 0, draggedExportColumn);
-
-  setExportColumnOrder(newOrder);
-};
-
-const handleExportDragEnd = () => {
-  setDraggedExportColumn(null);
-};
-
-const renderCellContent = (facility: Facility, columnId: ColumnId, isEditing: boolean) => {
-  if (isEditing) {
     switch (columnId) {
       case 'name':
         return (
-          <input
-            type="text"
-            value={editForm.name}
-            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-            className="form-input w-full px-2 py-1 text-sm"
-          />
+          <div className="flex items-center gap-2 flex-wrap">
+            <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+            <span className="break-words">{facility.name}</span>
+          </div>
         );
       case 'latitude':
-        return (
-          <input
-            type="number"
-            step="any"
-            value={editForm.latitude}
-            onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-            className="form-input w-full px-2 py-1 text-sm"
-          />
-        );
+        return Number(facility.latitude).toFixed(6);
       case 'longitude':
-        return (
-          <input
-            type="number"
-            step="any"
-            value={editForm.longitude}
-            onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-            className="form-input w-full px-2 py-1 text-sm"
-          />
-        );
+        return Number(facility.longitude).toFixed(6);
       case 'visit_duration':
-        return (
-          <input
-            type="number"
-            value={editForm.visitDuration}
-            onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-            className="form-input w-full px-2 py-1 text-sm"
-          />
-        );
+        return `${facility.visit_duration_minutes} mins`;
+      case 'spcc_status':
+        return <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />;
+      case 'inspection_status':
+        return getVerificationIcon(facility);
+      case 'matched_facility_name':
+        return facility.matched_facility_name || '-';
+      case 'well_name_1':
+        return facility.well_name_1 || '-';
+      case 'well_name_2':
+        return facility.well_name_2 || '-';
+      case 'well_name_3':
+        return facility.well_name_3 || '-';
+      case 'well_name_4':
+        return facility.well_name_4 || '-';
+      case 'well_name_5':
+        return facility.well_name_5 || '-';
+      case 'well_name_6':
+        return facility.well_name_6 || '-';
+      case 'well_api_1':
+        return facility.well_api_1 || '-';
+      case 'well_api_2':
+        return facility.well_api_2 || '-';
+      case 'well_api_3':
+        return facility.well_api_3 || '-';
+      case 'well_api_4':
+        return facility.well_api_4 || '-';
+      case 'well_api_5':
+        return facility.well_api_5 || '-';
+      case 'well_api_6':
+        return facility.well_api_6 || '-';
+      case 'api_numbers_combined':
+        return facility.api_numbers_combined || '-';
+      case 'lat_well_sheet':
+        return facility.lat_well_sheet ? Number(facility.lat_well_sheet).toFixed(6) : '-';
+      case 'long_well_sheet':
+        return facility.long_well_sheet ? Number(facility.long_well_sheet).toFixed(6) : '-';
+      case 'first_prod_date':
+        return facility.first_prod_date || '-';
+      case 'spcc_due_date':
+        return facility.spcc_due_date || '-';
+      case 'spcc_completed_date':
+        return facility.spcc_completed_date || '-';
       default:
-        return renderCellContent(facility, columnId, false);
+        return '-';
     }
-  }
+  };
 
-  switch (columnId) {
-    case 'name':
-      return (
-        <div className="flex items-center gap-2 flex-wrap">
-          <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
-          <span className="break-words">{facility.name}</span>
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+          <p className="whitespace-pre-line">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+          >
+            Dismiss
+          </button>
         </div>
-      );
-    case 'latitude':
-      return Number(facility.latitude).toFixed(6);
-    case 'longitude':
-      return Number(facility.longitude).toFixed(6);
-    case 'visit_duration':
-      return `${facility.visit_duration_minutes} mins`;
-    case 'spcc_status':
-      return <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />;
-    case 'inspection_status':
-      return getVerificationIcon(facility);
-    case 'matched_facility_name':
-      return facility.matched_facility_name || '-';
-    case 'well_name_1':
-      return facility.well_name_1 || '-';
-    case 'well_name_2':
-      return facility.well_name_2 || '-';
-    case 'well_name_3':
-      return facility.well_name_3 || '-';
-    case 'well_name_4':
-      return facility.well_name_4 || '-';
-    case 'well_name_5':
-      return facility.well_name_5 || '-';
-    case 'well_name_6':
-      return facility.well_name_6 || '-';
-    case 'well_api_1':
-      return facility.well_api_1 || '-';
-    case 'well_api_2':
-      return facility.well_api_2 || '-';
-    case 'well_api_3':
-      return facility.well_api_3 || '-';
-    case 'well_api_4':
-      return facility.well_api_4 || '-';
-    case 'well_api_5':
-      return facility.well_api_5 || '-';
-    case 'well_api_6':
-      return facility.well_api_6 || '-';
-    case 'api_numbers_combined':
-      return facility.api_numbers_combined || '-';
-    case 'lat_well_sheet':
-      return facility.lat_well_sheet ? Number(facility.lat_well_sheet).toFixed(6) : '-';
-    case 'long_well_sheet':
-      return facility.long_well_sheet ? Number(facility.long_well_sheet).toFixed(6) : '-';
-    case 'first_prod_date':
-      return facility.first_prod_date || '-';
-    case 'spcc_due_date':
-      return facility.spcc_due_date || '-';
-    case 'spcc_completed_date':
-      return facility.spcc_completed_date || '-';
-    default:
-      return '-';
-  }
-};
+      )}
 
-return (
-  <div className="space-y-4">
-    {error && (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-        <p className="whitespace-pre-line">{error}</p>
-        <button
-          onClick={() => setError(null)}
-          className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-        >
-          Dismiss
-        </button>
-      </div>
-    )}
+      {locationError && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
+          <p>{locationError}</p>
+          <button
+            onClick={() => setLocationError(null)}
+            className="mt-2 text-sm text-yellow-600 hover:text-yellow-800 underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
-    {locationError && (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
-        <p>{locationError}</p>
-        <button
-          onClick={() => setLocationError(null)}
-          className="mt-2 text-sm text-yellow-600 hover:text-yellow-800 underline"
-        >
-          Dismiss
-        </button>
-      </div>
-    )}
-
-    {/* Edit Modal - Full-Screen on Mobile, Popup on Desktop */}
-    {mobileEditingFacility && (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 overflow-y-auto animate-in fade-in duration-200">
-        <div className="min-h-full flex items-center justify-center p-4 sm:p-0">
-          <div className="bg-white dark:bg-gray-800 w-full sm:max-w-3xl sm:rounded-xl sm:shadow-2xl overflow-hidden flex flex-col my-8 sm:my-0 animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between shadow-lg flex-shrink-0 sticky top-0 z-10">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/10 rounded-lg">
-                  <Edit2 className="w-5 h-5" />
+      {/* Edit Modal - Full-Screen on Mobile, Popup on Desktop */}
+      {mobileEditingFacility && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 overflow-y-auto animate-in fade-in duration-200">
+          <div className="min-h-full flex items-center justify-center p-4 sm:p-0">
+            <div className="bg-white dark:bg-gray-800 w-full sm:max-w-3xl sm:rounded-xl sm:shadow-2xl overflow-hidden flex flex-col my-8 sm:my-0 animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between shadow-lg flex-shrink-0 sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-lg">
+                    <Edit2 className="w-5 h-5" />
+                  </div>
+                  <h2 className="text-xl font-bold">Edit Facility</h2>
                 </div>
-                <h2 className="text-xl font-bold">Edit Facility</h2>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleSaveMobileEdit}
-                  className="px-5 py-2.5 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 active:scale-95 transition-all shadow-md hover:shadow-lg"
-                >
-                  <div className="flex items-center gap-2">
-                    <Save className="w-4 h-4" />
-                    <span>Save</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileEditingFacility(null);
-                    setMobileEditFormData({} as Record<ColumnId, string>);
-                  }}
-                  className="px-5 py-2.5 border-2 border-white/30 text-white rounded-lg font-semibold hover:bg-white/10 active:scale-95 transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <X className="w-4 h-4" />
-                    <span>Cancel</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 max-h-[calc(100vh-200px)] sm:max-h-[600px] overflow-y-auto">
-              {error && (
-                <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4 text-red-700 dark:text-red-300 shadow-sm animate-in slide-in-from-top-2 duration-200">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <p className="whitespace-pre-line font-medium">{error}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Render fields in column order, only for visible columns with section grouping */}
-              {(() => {
-                const visibleCols = columnOrder.filter(colId => visibleColumns.includes(colId));
-                let lastSection = '';
-
-                return visibleCols.map((columnId) => {
-                  // Skip status columns as they're read-only
-                  if (columnId === 'spcc_status' || columnId === 'inspection_status') {
-                    return null;
-                  }
-
-                  const label = COLUMN_LABELS[columnId];
-                  const value = mobileEditFormData[columnId] || '';
-
-                  // Determine input type based on field
-                  let inputType = 'text';
-                  if (columnId === 'latitude' || columnId === 'longitude' ||
-                    columnId === 'lat_well_sheet' || columnId === 'long_well_sheet') {
-                    inputType = 'number';
-                  } else if (columnId.includes('date')) {
-                    inputType = 'date';
-                  } else if (columnId === 'visit_duration') {
-                    inputType = 'number';
-                  }
-
-                  // Determine section for grouping
-                  let currentSection = '';
-                  if (['name', 'latitude', 'longitude', 'visit_duration'].includes(columnId)) {
-                    currentSection = 'basic';
-                  } else if (columnId.includes('well_') || columnId === 'matched_facility_name' || columnId === 'api_numbers_combined') {
-                    currentSection = 'well';
-                  } else if (columnId.includes('date')) {
-                    currentSection = 'date';
-                  } else if (['lat_well_sheet', 'long_well_sheet'].includes(columnId)) {
-                    currentSection = 'coords';
-                  }
-
-                  // Render section header if we're starting a new section
-                  const sectionHeader = currentSection !== lastSection && currentSection ? (
-                    <div className="pt-4 pb-2 border-t-2 border-gray-200 dark:border-gray-700 mt-6 first:mt-0 first:pt-0 first:border-0">
-                      <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                        {currentSection === 'basic' && (
-                          <>
-                            <MapPin className="w-4 h-4" />
-                            <span>Basic Information</span>
-                          </>
-                        )}
-                        {currentSection === 'well' && (
-                          <>
-                            <FileText className="w-4 h-4" />
-                            <span>Well Information</span>
-                          </>
-                        )}
-                        {currentSection === 'date' && (
-                          <>
-                            <CheckCircle className="w-4 h-4" />
-                            <span>SPCC Dates</span>
-                          </>
-                        )}
-                        {currentSection === 'coords' && (
-                          <>
-                            <MapPin className="w-4 h-4" />
-                            <span>Well Sheet Coordinates</span>
-                          </>
-                        )}
-                      </h3>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveMobileEdit}
+                    className="px-5 py-2.5 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 active:scale-95 transition-all shadow-md hover:shadow-lg"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Save className="w-4 h-4" />
+                      <span>Save</span>
                     </div>
-                  ) : null;
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMobileEditingFacility(null);
+                      setMobileEditFormData({} as Record<ColumnId, string>);
+                    }}
+                    className="px-5 py-2.5 border-2 border-white/30 text-white rounded-lg font-semibold hover:bg-white/10 active:scale-95 transition-all"
+                  >
+                    <div className="flex items-center gap-2">
+                      <X className="w-4 h-4" />
+                      <span>Cancel</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
 
-                  lastSection = currentSection;
+              <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 max-h-[calc(100vh-200px)] sm:max-h-[600px] overflow-y-auto">
+                {error && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4 text-red-700 dark:text-red-300 shadow-sm animate-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      <p className="whitespace-pre-line font-medium">{error}</p>
+                    </div>
+                  </div>
+                )}
 
-                  return (
-                    <div key={columnId}>
-                      {sectionHeader}
-                      <div className="space-y-2 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          {label}
-                          {['name', 'latitude', 'longitude'].includes(columnId) && (
-                            <span className="text-red-500 ml-1">*</span>
+                {/* Render fields in column order, only for visible columns with section grouping */}
+                {(() => {
+                  const visibleCols = columnOrder.filter(colId => visibleColumns.includes(colId));
+                  let lastSection = '';
+
+                  return visibleCols.map((columnId) => {
+                    // Skip status columns as they're read-only
+                    if (columnId === 'spcc_status' || columnId === 'inspection_status') {
+                      return null;
+                    }
+
+                    const label = COLUMN_LABELS[columnId];
+                    const value = mobileEditFormData[columnId] || '';
+
+                    // Determine input type based on field
+                    let inputType = 'text';
+                    if (columnId === 'latitude' || columnId === 'longitude' ||
+                      columnId === 'lat_well_sheet' || columnId === 'long_well_sheet') {
+                      inputType = 'number';
+                    } else if (columnId.includes('date')) {
+                      inputType = 'date';
+                    } else if (columnId === 'visit_duration') {
+                      inputType = 'number';
+                    }
+
+                    // Determine section for grouping
+                    let currentSection = '';
+                    if (['name', 'latitude', 'longitude', 'visit_duration'].includes(columnId)) {
+                      currentSection = 'basic';
+                    } else if (columnId.includes('well_') || columnId === 'matched_facility_name' || columnId === 'api_numbers_combined') {
+                      currentSection = 'well';
+                    } else if (columnId.includes('date')) {
+                      currentSection = 'date';
+                    } else if (['lat_well_sheet', 'long_well_sheet'].includes(columnId)) {
+                      currentSection = 'coords';
+                    }
+
+                    // Render section header if we're starting a new section
+                    const sectionHeader = currentSection !== lastSection && currentSection ? (
+                      <div className="pt-4 pb-2 border-t-2 border-gray-200 dark:border-gray-700 mt-6 first:mt-0 first:pt-0 first:border-0">
+                        <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                          {currentSection === 'basic' && (
+                            <>
+                              <MapPin className="w-4 h-4" />
+                              <span>Basic Information</span>
+                            </>
                           )}
-                        </label>
-                        {columnId === 'visit_duration' ? (
-                          <input
-                            type="number"
-                            value={value}
-                            onChange={(e) => setMobileEditFormData({
-                              ...mobileEditFormData,
-                              [columnId]: e.target.value
-                            })}
-                            min="1"
-                            step="1"
-                            className="form-input w-full px-4 py-3 text-base"
-                            placeholder="Minutes"
-                          />
-                        ) : inputType === 'number' ? (
-                          <input
-                            type="number"
-                            value={value}
-                            onChange={(e) => setMobileEditFormData({
-                              ...mobileEditFormData,
-                              [columnId]: e.target.value
-                            })}
-                            step="any"
-                            className="form-input w-full px-4 py-3 text-base"
-                            placeholder={label}
-                          />
-                        ) : inputType === 'date' ? (
-                          <input
-                            type="date"
-                            value={value}
-                            onChange={(e) => setMobileEditFormData({
-                              ...mobileEditFormData,
-                              [columnId]: e.target.value
-                            })}
-                            className="form-input w-full px-4 py-3 text-base"
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            value={value}
-                            onChange={(e) => setMobileEditFormData({
-                              ...mobileEditFormData,
-                              [columnId]: e.target.value
-                            })}
-                            className="form-input w-full px-4 py-3 text-base"
-                            placeholder={label}
-                          />
-                        )}
+                          {currentSection === 'well' && (
+                            <>
+                              <FileText className="w-4 h-4" />
+                              <span>Well Information</span>
+                            </>
+                          )}
+                          {currentSection === 'date' && (
+                            <>
+                              <CheckCircle className="w-4 h-4" />
+                              <span>SPCC Dates</span>
+                            </>
+                          )}
+                          {currentSection === 'coords' && (
+                            <>
+                              <MapPin className="w-4 h-4" />
+                              <span>Well Sheet Coordinates</span>
+                            </>
+                          )}
+                        </h3>
                       </div>
-                    </div>
-                  );
-                });
-              })()}
+                    ) : null;
+
+                    lastSection = currentSection;
+
+                    return (
+                      <div key={columnId}>
+                        {sectionHeader}
+                        <div className="space-y-2 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            {label}
+                            {['name', 'latitude', 'longitude'].includes(columnId) && (
+                              <span className="text-red-500 ml-1">*</span>
+                            )}
+                          </label>
+                          {columnId === 'visit_duration' ? (
+                            <input
+                              type="number"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              min="1"
+                              step="1"
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder="Minutes"
+                            />
+                          ) : inputType === 'number' ? (
+                            <input
+                              type="number"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              step="any"
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder={label}
+                            />
+                          ) : inputType === 'date' ? (
+                            <input
+                              type="date"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              className="form-input w-full px-4 py-3 text-base"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={value}
+                              onChange={(e) => setMobileEditFormData({
+                                ...mobileEditFormData,
+                                [columnId]: e.target.value
+                              })}
+                              className="form-input w-full px-4 py-3 text-base"
+                              placeholder={label}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
 
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200">
-      <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 transition-colors duration-200">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200">
+        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 transition-colors duration-200">
+          {/* Header Row - Title + Primary Actions */}
+          {/* Header Row - Title only */}
+          <div className="flex items-center gap-2 mb-3">
             <MapPin className="w-5 h-5 text-blue-600" />
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
               {isLoading ? (
                 <>Facilities</>
               ) : (
-                <>Facilities ({filteredFacilities.length} of {facilities.length})</>
+                <>Facilities <span className="text-gray-400 dark:text-gray-500 font-normal">({filteredFacilities.length} of {facilities.length})</span></>
               )}
             </h2>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {!isLoading && (
-              <>
-                {/* Show Sold Toggle */}
+
+          {/* Controls Row - View/Filter controls */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            {/* Left: View Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setShowSoldFacilities(!showSoldFacilities)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${showSoldFacilities
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : 'bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-500 border border-gray-200 dark:border-gray-500'
+                  }`}
+                title={showSoldFacilities ? "Show Active Facilities" : "Show Sold Facilities"}
+              >
+                <DollarSign className="w-4 h-4" />
+                <span className="hidden sm:inline">{showSoldFacilities ? 'Show Active' : 'Show Sold'}</span>
+              </button>
+
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${showFilters
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  : 'bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-500 border border-gray-200 dark:border-gray-500'
+                  }`}
+                title="Toggle Filters"
+              >
+                <Filter className="w-4 h-4" />
+                <span className="hidden sm:inline">Filters</span>
+                {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+
+              <div className="relative">
                 <button
-                  onClick={() => setShowSoldFacilities(!showSoldFacilities)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors touch-manipulation ${showSoldFacilities
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-500'
+                  onClick={() => setShowColumnSelector(!showColumnSelector)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${showColumnSelector
+                    ? 'bg-gray-200 text-gray-800 dark:bg-gray-500 dark:text-white'
+                    : 'bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-500 border border-gray-200 dark:border-gray-500'
                     }`}
-                  title={showSoldFacilities ? "Show Active Facilities" : "Show Sold Facilities"}
+                  title="Column Visibility"
                 >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="text-sm font-medium hidden sm:inline">
-                    {showSoldFacilities ? 'Show Active' : 'Show Sold'}
-                  </span>
+                  <Columns className="w-4 h-4" />
+                  <span className="hidden sm:inline">Columns</span>
                 </button>
-
-                {/* Filters button */}
-                <button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 rounded-lg transition-colors touch-manipulation"
-                  title="Toggle Filters"
-                >
-                  <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200">Filters</span>
-                  {showFilters ? <ChevronUp className="w-4 h-4 text-gray-600 dark:text-gray-200" /> : <ChevronDown className="w-4 h-4 text-gray-600 dark:text-gray-200" />}
-                </button>
-
-                {selectedFacilityIds.size > 0 && (
-                  <button
-                    onClick={() => setShowCompletionModal(true)}
-                    className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
-                    title={`Mark ${selectedFacilityIds.size} as SPCC completed`}
-                    aria-label="Mark Complete"
-                  >
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Mark Complete ({selectedFacilityIds.size})</span>
-                  </button>
-                )}
-
-                {selectedFacilityIds.size > 0 && !showSoldFacilities && (
-                  <button
-                    onClick={() => setShowSoldModal(true)}
-                    className="flex items-center justify-center p-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors touch-manipulation"
-                    title={`Mark ${selectedFacilityIds.size} as Sold`}
-                  >
-                    <DollarSign className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Mark Sold ({selectedFacilityIds.size})</span>
-                  </button>
-                )}
-                {facilities.length > 0 && (
+                {showColumnSelector && (
                   <>
-                    <button
-                      onClick={handleExportFacilities}
-                      className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
-                      title="Export Facilities"
-                      aria-label="Export Facilities"
-                    >
-                      <Database className="w-5 h-5" />
-                      <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">Export Facilities</span>
-                    </button>
-                    <button
-                      onClick={() => setShowExportPopup(true)}
-                      className="flex items-center justify-center p-2.5 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors touch-manipulation"
-                      title={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
-                      aria-label={selectedFacilityIds.size > 0 ? `Export Inspection Reports (${selectedFacilityIds.size})` : 'Export Inspection Reports'}
-                    >
-                      <FileDown className="w-5 h-5" />
-                      <span className="hidden md:inline ml-2 text-sm whitespace-nowrap">
-                        Export Reports{selectedFacilityIds.size > 0 ? ` (${selectedFacilityIds.size})` : ''}
-                      </span>
-                    </button>
-                  </>
-                )}
-                {selectedFacilityIds.size === 0 && (
-                  <>
-                    <button
-                      onClick={() => setShowAddForm(true)}
-                      className="flex items-center justify-center p-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors touch-manipulation"
-                      title="Add Facility"
-                      aria-label="Add Facility"
-                    >
-                      <Plus className="w-5 h-5" />
-                      <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Add Facility</span>
-                    </button>
-                    <button
-                      onClick={() => setShowUpload(true)}
-                      className="flex items-center justify-center p-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
-                      title="Import CSV"
-                      aria-label="Import CSV"
-                    >
-                      <Upload className="w-5 h-5" />
-                      <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Import CSV</span>
-                    </button>
-                  </>
-                )}
-                <div className={selectedFacilityIds.size > 0 ? "hidden" : "relative"}>
-                  <button
-                    onClick={() => setShowColumnSelector(!showColumnSelector)}
-                    className="flex items-center justify-center p-2.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors touch-manipulation"
-                    title="Column Visibility"
-                    aria-label="Column Visibility"
-                  >
-                    <Columns className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Columns</span>
-                  </button>
-                  {showColumnSelector && (
-                    <>
-                      {/* Mobile: Backdrop overlay */}
-                      <div
-                        className="sm:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
-                        onClick={() => setShowColumnSelector(false)}
-                      />
-                      {/* Dropdown */}
-                      <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-auto sm:right-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 max-h-[80vh] sm:max-h-96 flex flex-col transition-colors duration-200">
-                        <div className="p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 flex-shrink-0 transition-colors duration-200">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-sm font-semibold text-gray-800 dark:text-white dark:text-white">Column Visibility</h3>
-                            <button
-                              onClick={() => setShowColumnSelector(false)}
-                              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={showAllColumns}
-                              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                            >
-                              Show All
-                            </button>
-                            <button
-                              onClick={resetColumns}
-                              className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
-                            >
-                              Reset
-                            </button>
-                          </div>
-                        </div>
-                        <div className="p-4 overflow-y-auto flex-1 overscroll-contain">
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Drag grip handle to reorder columns</p>
-                          <div className="space-y-1">
-                            {columnOrder.map((columnId) => (
-                              <div
-                                key={columnId}
-                                data-column-id={columnId}
-                                className={`flex items-center gap-2 p-2 rounded transition-colors ${draggedColumn === columnId
-                                  ? 'bg-blue-100 opacity-50'
-                                  : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                                  }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={visibleColumns.includes(columnId)}
-                                  onChange={() => toggleColumn(columnId)}
-                                  className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <span className="text-sm text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
-                                <div
-                                  draggable
-                                  onDragStart={() => handleDragStart(columnId)}
-                                  onDragOver={(e) => handleDragOver(e, columnId)}
-                                  onDragEnd={handleDragEnd}
-                                  onTouchStart={(e) => {
-                                    const target = e.target as HTMLElement;
-                                    if (target.closest('.grip-handle')) {
-                                      handleDragStart(columnId);
-                                      e.preventDefault();
-                                    }
-                                  }}
-                                  onTouchMove={(e) => {
-                                    if (draggedColumn) {
-                                      // Only handle touch move if we started dragging
-                                      const touch = e.touches[0];
-                                      const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
-                                      const targetDiv = elementAtPoint?.closest('[data-column-id]');
-                                      if (targetDiv) {
-                                        const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
-                                        if (targetColumnId && draggedColumn && targetColumnId !== draggedColumn) {
-                                          const syntheticEvent = {
-                                            preventDefault: () => { }
-                                          } as React.DragEvent;
-                                          handleDragOver(syntheticEvent, targetColumnId);
-                                        }
-                                      }
-                                      e.preventDefault();
-                                    }
-                                  }}
-                                  onTouchEnd={handleDragEnd}
-                                  className="grip-handle cursor-move touch-none p-1"
-                                >
-                                  <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                    {/* Mobile: Backdrop overlay */}
+                    <div
+                      className="sm:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
+                      onClick={() => setShowColumnSelector(false)}
+                    />
+                    {/* Dropdown */}
+                    <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-auto sm:right-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 max-h-[80vh] sm:max-h-96 flex flex-col transition-colors duration-200">
+                      <div className="p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 flex-shrink-0 transition-colors duration-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Column Visibility</h3>
+                          <button
+                            onClick={() => setShowColumnSelector(false)}
+                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-100"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-                    </>
-                  )}
-                </div>
-                {selectedFacilityIds.size > 0 && (
+                      <div className="p-3 overflow-y-auto flex-1">
+                        {columnOrder.map((columnId) => (
+                          <div
+                            key={columnId}
+                            data-column-id={columnId}
+                            className={`flex items-center gap-2 p-2 rounded transition-colors ${draggedColumn === columnId
+                              ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                              }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={visibleColumns.includes(columnId)}
+                              onChange={() => toggleColumn(columnId)}
+                              className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
+                            <div
+                              draggable
+                              onDragStart={() => handleDragStart(columnId)}
+                              onDragOver={(e) => handleDragOver(e, columnId)}
+                              onDragEnd={handleDragEnd}
+                              className="grip-handle cursor-move touch-none p-1"
+                            >
+                              <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right: Export & Overview */}
+            <div className="flex items-center gap-2">
+              {facilities.length > 0 && (
+                <>
                   <button
-                    onClick={handleDeleteSelected}
-                    className="flex items-center justify-center p-2.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors touch-manipulation"
-                    title={`Delete ${selectedFacilityIds.size} selected`}
-                    aria-label="Delete Selected Facilities"
+                    onClick={handleExportFacilities}
+                    className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-500 transition-colors text-sm border border-gray-200 dark:border-gray-500"
+                    title="Export Facilities to CSV"
                   >
-                    <Trash2 className="w-5 h-5" />
-                    <span className="hidden sm:inline ml-2 text-sm whitespace-nowrap">Delete Selected ({selectedFacilityIds.size})</span>
+                    <Database className="w-4 h-4" />
+                    <span className="hidden md:inline">Export CSV</span>
+                  </button>
+                  <button
+                    onClick={() => setShowExportPopup(true)}
+                    className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm shadow-sm"
+                    title="Export Inspection Reports"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    <span className="hidden md:inline">Reports</span>
+                  </button>
+                  <div className="h-6 w-px bg-gray-300 dark:bg-gray-500 mx-1 hidden md:block"></div>
+                  <button
+                    onClick={() => setShowInspectionOverview(true)}
+                    className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
+                    title="Inspection Overview"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    <span className="hidden md:inline">Overview</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Selection Actions Bar - Only visible when items selected */}
+          {selectedFacilityIds.size > 0 && (
+            <div className="mt-3 flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+                <CheckCircle className="w-4 h-4" />
+                <span>{selectedFacilityIds.size} selected</span>
+              </div>
+              <div className="h-5 w-px bg-blue-300 dark:bg-blue-700"></div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowCompletionModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm"
+                  title="Mark as SPCC completed"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Mark Complete</span>
+                </button>
+                {!showSoldFacilities && (
+                  <button
+                    onClick={() => setShowSoldModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                    title="Mark as Sold"
+                  >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>Mark Sold</span>
                   </button>
                 )}
-              </>
-            )}
-          </div>
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
+                  title="Delete Selected"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+                <button
+                  onClick={() => setSelectedFacilityIds(new Set())}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors text-sm"
+                  title="Clear Selection"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {!isLoading && (
           <>
-            {/* Search box - always visible */}
-            <div className="relative mt-3">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search facilities..."
-                className="form-input w-full pl-9 pr-9 text-sm"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                  title="Clear search"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+            {/* Search box + Primary Actions */}
+            <div className="flex items-center gap-3 px-6 py-3 bg-gray-100 dark:bg-gray-900">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search facilities..."
+                  className="form-input w-full pl-9 pr-9 text-sm"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Primary Actions - Icon only, Glass style */}
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="p-2.5 rounded-lg transition-all backdrop-blur-sm bg-white/10 dark:bg-white/5 border border-green-500/50 text-green-600 dark:text-green-400 hover:bg-green-500/10 hover:border-green-500"
+                title="Add Facility"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowUpload(true)}
+                className="p-2.5 rounded-lg transition-all backdrop-blur-sm bg-white/10 dark:bg-white/5 border border-blue-500/50 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500"
+                title="Import CSV"
+              >
+                <Upload className="w-5 h-5" />
+              </button>
             </div>
 
             {/* Collapsible filters dropdown */}
@@ -1570,457 +1576,538 @@ return (
             )}
           </>
         )}
-      </div>
 
-      {showAddForm && (
-        <div className="px-6 py-4 bg-blue-50 border-b border-blue-200">
-          <form onSubmit={handleAddFacility} className="space-y-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-gray-900 dark:text-white">Add New Facility</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddForm(false);
-                  setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
-                }}
-                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:hover:text-gray-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <input
-                type="text"
-                placeholder="Facility Name"
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className="form-input"
-                required
-              />
-              <input
-                type="number"
-                step="any"
-                placeholder="Latitude"
-                value={editForm.latitude}
-                onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-                className="form-input"
-                required
-              />
-              <input
-                type="number"
-                step="any"
-                placeholder="Longitude"
-                value={editForm.longitude}
-                onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                className="form-input"
-                required
-              />
-              <input
-                type="number"
-                placeholder="Visit Duration (mins)"
-                value={editForm.visitDuration}
-                onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-                className="form-input"
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Facility
-            </button>
-          </form>
-        </div>
-      )}
 
-      {isLoading ? (
-        <div className="px-6 py-12 text-center">
-          <LoadingSpinner size="lg" text="Loading facilities..." />
-        </div>
-      ) : facilities.length === 0 ? (
-        <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-          <MapPin className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
-          <p>No facilities yet. Add a facility or import from CSV.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 sticky top-0 transition-colors duration-200">
-              <tr>
-                <th className="px-4 py-3 text-left border-r border-gray-300 dark:border-gray-600">
-                  {selectedFacilityIds.size > 0 ? (
-                    <button
-                      onClick={() => setSelectedFacilityIds(new Set())}
-                      className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-                      title="Clear selection"
-                    >
-                      <span className="font-medium">{selectedFacilityIds.size}</span>
-                      <X className="w-3 h-3" />
-                    </button>
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={filteredFacilities.length > 0 && selectedFacilityIds.size === filteredFacilities.length}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedFacilityIds(new Set(filteredFacilities.map(f => f.id)));
-                        } else {
-                          setSelectedFacilityIds(new Set());
-                        }
-                      }}
-                      className="w-4 h-4 text-blue-600 rounded"
-                    />
-                  )}
-                </th>
-                {visibleColumns.map(columnId => (
-                  <th key={columnId} className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600">
-                    {COLUMN_LABELS[columnId]}
-                  </th>
-                ))}
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 bg-gray-50 dark:bg-gray-700 hidden md:table-cell transition-colors duration-200">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-              {filteredFacilities.map((facility, index) => {
-
-                const highlightClass = getRowHighlightClass(facility);
-                return (
-                  <tr
-                    key={facility.id}
-                    className={`group ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass}`}
+        {
+          showAddForm && (
+            <div className="px-6 py-4 bg-blue-50 border-b border-blue-200">
+              <form onSubmit={handleAddFacility} className="space-y-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-gray-900 dark:text-white">Add New Facility</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddForm(false);
+                      setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
+                    }}
+                    className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:hover:text-gray-300"
                   >
-                    <td className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 relative">
-                      <div
-                        onTouchStart={(e) => {
-                          const touch = e.touches[0];
-                          const timer = setTimeout(() => {
-                            setMobileContextMenu({
-                              facilityId: facility.id,
-                              x: touch.clientX,
-                              y: touch.clientY
-                            });
-                          }, 500);
-                          setPressTimer(timer);
-                        }}
-                        onTouchEnd={() => {
-                          if (pressTimer) {
-                            clearTimeout(pressTimer);
-                            setPressTimer(null);
-                          }
-                        }}
-                        onTouchMove={() => {
-                          if (pressTimer) {
-                            clearTimeout(pressTimer);
-                            setPressTimer(null);
-                          }
-                        }}
-                      >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Facility Name"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="form-input"
+                    required
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Latitude"
+                    value={editForm.latitude}
+                    onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
+                    className="form-input"
+                    required
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Longitude"
+                    value={editForm.longitude}
+                    onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
+                    className="form-input"
+                    required
+                  />
+                  <input
+                    type="number"
+                    placeholder="Visit Duration (mins)"
+                    value={editForm.visitDuration}
+                    onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
+                    className="form-input"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Facility
+                </button>
+              </form>
+            </div>
+          )
+        }
+
+        {
+          isLoading ? (
+            <div className="px-6 py-12 text-center">
+              <LoadingSpinner size="lg" text="Loading facilities..." />
+            </div>
+          ) : facilities.length === 0 ? (
+            <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+              <MapPin className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
+              <p>No facilities yet. Add a facility or import from CSV.</p>
+            </div>
+          ) : (
+            <div
+              className="overflow-auto mt-4 relative max-h-[calc(100vh-250px)] min-h-[400px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm"
+              ref={tableContainerRef}
+            >
+              <div ref={headerSentinelRef} className="absolute top-0 left-0 w-full h-[1px] pointer-events-none" />
+              <table className="w-full border-collapse">
+                <thead className={`sticky top-0 z-20 transition-all duration-300 ${isHeaderSticky
+                  ? 'bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-lg border-b border-white/20 dark:border-gray-700/50'
+                  : 'bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600'
+                  }`}>
+                  <tr>
+                    <th className={`px-4 py-3 text-left border-r transition-colors ${isHeaderSticky ? 'border-gray-200/50 dark:border-gray-600/50' : 'border-gray-300 dark:border-gray-600'
+                      }`}>
+                      {selectedFacilityIds.size > 0 ? (
+                        <button
+                          onClick={() => setSelectedFacilityIds(new Set())}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+                          title="Clear selection"
+                        >
+                          <span className="font-medium">{selectedFacilityIds.size}</span>
+                          <X className="w-3 h-3" />
+                        </button>
+                      ) : (
                         <input
                           type="checkbox"
-                          checked={selectedFacilityIds.has(facility.id)}
+                          checked={filteredFacilities.length > 0 && selectedFacilityIds.size === filteredFacilities.length}
                           onChange={(e) => {
-                            const newSelected = new Set(selectedFacilityIds);
                             if (e.target.checked) {
-                              newSelected.add(facility.id);
+                              setSelectedFacilityIds(new Set(filteredFacilities.map(f => f.id)));
                             } else {
-                              newSelected.delete(facility.id);
+                              setSelectedFacilityIds(new Set());
                             }
-                            setSelectedFacilityIds(newSelected);
                           }}
                           className="w-4 h-4 text-blue-600 rounded"
-                          onClick={(e) => e.stopPropagation()}
                         />
-                      </div>
-                    </td>
+                      )}
+                    </th>
                     {visibleColumns.map(columnId => (
-                      <td
-                        key={columnId}
-                        className={`px-2 py-4 text-sm text-gray-600 dark:text-gray-300 cursor-pointer border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
-                          }`}
-                        onClick={() => setSelectedFacility(facility)}
-                      >
-                        {renderCellContent(facility, columnId, false)}
-                      </td>
+                      <th key={columnId} className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600">
+                        {COLUMN_LABELS[columnId]}
+                      </th>
                     ))}
-                    <td className={`px-2 py-4 whitespace-nowrap text-sm sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(facility);
-                          }}
-                          className="text-blue-600 hover:text-blue-800"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(facility.id);
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+                    <th className={`px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky
+                      ? 'bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.1)]'
+                      : 'bg-gray-50 dark:bg-gray-700'
+                      }`}>
+                      Actions
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                  {filteredFacilities.map((facility, index) => {
 
-    {showExportColumnSelector && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Select Columns to Export</h3>
-            <button
-              onClick={() => setShowExportColumnSelector(false)}
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-          <div className="p-4 overflow-y-auto flex-1">
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={showAllExportColumns}
-                className="text-sm px-3 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-900"
-              >
-                Select All
-              </button>
-              <button
-                onClick={resetExportColumns}
-                className="text-sm px-3 py-2 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
-              >
-                Reset
-              </button>
+                    const highlightClass = getRowHighlightClass(facility);
+                    return (
+                      <tr
+                        key={facility.id}
+                        className={`group ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass}`}
+                      >
+                        <td className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 relative">
+                          <div
+                            onTouchStart={(e) => {
+                              const touch = e.touches[0];
+                              const timer = setTimeout(() => {
+                                setMobileContextMenu({
+                                  facilityId: facility.id,
+                                  x: touch.clientX,
+                                  y: touch.clientY
+                                });
+                              }, 500);
+                              setPressTimer(timer);
+                            }}
+                            onTouchEnd={() => {
+                              if (pressTimer) {
+                                clearTimeout(pressTimer);
+                                setPressTimer(null);
+                              }
+                            }}
+                            onTouchMove={() => {
+                              if (pressTimer) {
+                                clearTimeout(pressTimer);
+                                setPressTimer(null);
+                              }
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedFacilityIds.has(facility.id)}
+                              onChange={(e) => {
+                                const newSelected = new Set(selectedFacilityIds);
+                                if (e.target.checked) {
+                                  newSelected.add(facility.id);
+                                } else {
+                                  newSelected.delete(facility.id);
+                                }
+                                setSelectedFacilityIds(newSelected);
+                              }}
+                              className="w-4 h-4 text-blue-600 rounded"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                        </td>
+                        {visibleColumns.map(columnId => (
+                          <td
+                            key={columnId}
+                            className={`px-2 py-2 text-sm text-gray-600 dark:text-gray-300 cursor-pointer border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
+                              }`}
+                            onClick={() => setSelectedFacility(facility)}
+                          >
+                            {renderCellContent(facility, columnId, false)}
+                          </td>
+                        ))}
+                        <td className={`px-1 py-2 whitespace-nowrap text-sm sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
+                          <div className="flex gap-1.5 items-center justify-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEdit(facility);
+                              }}
+                              className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-200 hover:scale-110"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setManagingFacility(facility);
+                                setShowSPCCPlanManager(true);
+                              }}
+                              className="p-1.5 rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
+                              title="Manage SPCC Plan"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(facility.id);
+                              }}
+                              className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Drag the grip handle to reorder columns. The CSV will be exported with columns in this order.
-            </p>
-            <div className="space-y-1">
-              {exportColumnOrder.map((columnId) => (
-                <div
-                  key={columnId}
-                  data-column-id={columnId}
-                  className={`flex items-center gap-2 p-3 rounded transition-colors ${draggedExportColumn === columnId
-                    ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+          )
+        }
+      </div >
+
+      {
+        showExportColumnSelector && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Select Columns to Export</h3>
+                <button
+                  onClick={() => setShowExportColumnSelector(false)}
+                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                 >
-                  <input
-                    type="checkbox"
-                    checked={exportVisibleColumns.includes(columnId)}
-                    onChange={() => toggleExportColumn(columnId)}
-                    className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
-                  <div
-                    draggable
-                    onDragStart={() => handleExportDragStart(columnId)}
-                    onDragOver={(e) => handleExportDragOver(e, columnId)}
-                    onDragEnd={handleExportDragEnd}
-                    onTouchStart={(e) => {
-                      const target = e.target as HTMLElement;
-                      if (target.closest('.grip-handle')) {
-                        handleExportDragStart(columnId);
-                        e.preventDefault();
-                      }
-                    }}
-                    onTouchMove={(e) => {
-                      if (draggedExportColumn) {
-                        const touch = e.touches[0];
-                        const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
-                        const targetDiv = elementAtPoint?.closest('[data-column-id]');
-                        if (targetDiv) {
-                          const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
-                          if (targetColumnId && draggedExportColumn && targetColumnId !== draggedExportColumn) {
-                            const syntheticEvent = {
-                              preventDefault: () => { }
-                            } as React.DragEvent;
-                            handleExportDragOver(syntheticEvent, targetColumnId);
-                          }
-                        }
-                        e.preventDefault();
-                      }
-                    }}
-                    onTouchEnd={handleExportDragEnd}
-                    className="grip-handle cursor-move touch-none p-1"
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={showAllExportColumns}
+                    className="text-sm px-3 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-900"
                   >
-                    <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  </div>
+                    Select All
+                  </button>
+                  <button
+                    onClick={resetExportColumns}
+                    className="text-sm px-3 py-2 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
+                  >
+                    Reset
+                  </button>
                 </div>
-              ))}
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Drag the grip handle to reorder columns. The CSV will be exported with columns in this order.
+                </p>
+                <div className="space-y-1">
+                  {exportColumnOrder.map((columnId) => (
+                    <div
+                      key={columnId}
+                      data-column-id={columnId}
+                      className={`flex items-center gap-2 p-3 rounded transition-colors ${draggedExportColumn === columnId
+                        ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                        }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={exportVisibleColumns.includes(columnId)}
+                        onChange={() => toggleExportColumn(columnId)}
+                        className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
+                      <div
+                        draggable
+                        onDragStart={() => handleExportDragStart(columnId)}
+                        onDragOver={(e) => handleExportDragOver(e, columnId)}
+                        onDragEnd={handleExportDragEnd}
+                        onTouchStart={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (target.closest('.grip-handle')) {
+                            handleExportDragStart(columnId);
+                            e.preventDefault();
+                          }
+                        }}
+                        onTouchMove={(e) => {
+                          if (draggedExportColumn) {
+                            const touch = e.touches[0];
+                            const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
+                            const targetDiv = elementAtPoint?.closest('[data-column-id]');
+                            if (targetDiv) {
+                              const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
+                              if (targetColumnId && draggedExportColumn && targetColumnId !== draggedExportColumn) {
+                                const syntheticEvent = {
+                                  preventDefault: () => { }
+                                } as React.DragEvent;
+                                handleExportDragOver(syntheticEvent, targetColumnId);
+                              }
+                            }
+                            e.preventDefault();
+                          }
+                        }}
+                        onTouchEnd={handleExportDragEnd}
+                        className="grip-handle cursor-move touch-none p-1"
+                      >
+                        <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="p-4 border-t border-gray-200 dark:border-gray-600 flex gap-3 flex-shrink-0">
+                <button
+                  onClick={performExport}
+                  disabled={exportVisibleColumns.length === 0}
+                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
+                >
+                  Export {exportVisibleColumns.length} Column{exportVisibleColumns.length !== 1 ? 's' : ''} to CSV
+                </button>
+                <button
+                  onClick={() => setShowExportColumnSelector(false)}
+                  className="px-4 py-3 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-          <div className="p-4 border-t border-gray-200 dark:border-gray-600 flex gap-3 flex-shrink-0">
-            <button
-              onClick={performExport}
-              disabled={exportVisibleColumns.length === 0}
-              className="flex-1 px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
+        )
+      }
+
+      {
+        showUpload && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowUpload(false)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-6 transition-colors duration-200"
+              onClick={(e) => e.stopPropagation()}
             >
-              Export {exportVisibleColumns.length} Column{exportVisibleColumns.length !== 1 ? 's' : ''} to CSV
-            </button>
-            <button
-              onClick={() => setShowExportColumnSelector(false)}
-              className="px-4 py-3 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
-            >
-              Cancel
-            </button>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Import Facilities from CSV</h3>
+                <button
+                  onClick={() => setShowUpload(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                Upload a CSV file containing your facilities. The file should have columns for facility name, latitude, and longitude.
+              </p>
+              <CSVUpload onDataParsed={handleCSVParsed} />
+            </div>
           </div>
-        </div>
-      </div>
-    )}
+        )
+      }
 
-    {showUpload && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Import Facilities from CSV</h3>
-            <button
-              onClick={() => setShowUpload(false)}
-              className="text-gray-500 hover:text-gray-700 dark:text-gray-200 dark:text-gray-200"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-          <p className="text-gray-600 mb-4">
-            Upload a CSV file containing your facilities. The file should have columns for facility name, latitude, and longitude.
-          </p>
-          <CSVUpload onDataParsed={handleCSVParsed} />
-        </div>
-      </div>
-    )}
+      {
+        selectedFacility && (
+          <FacilityDetailModal
+            facility={selectedFacility}
+            userId={userId}
+            teamNumber={1}
+            accountId={accountId}
+            onClose={() => {
+              setSelectedFacility(null);
+              loadInspections();
+            }}
+            onShowOnMap={onShowOnMap}
+            onEdit={() => handleEdit(selectedFacility)}
+            facilities={facilities}
+            allInspections={Array.from(inspections.values())}
+            onViewNearbyFacility={(facility) => {
+              setSelectedFacility(facility);
+            }}
+          />
+        )
+      }
 
-    {selectedFacility && (
-      <FacilityDetailModal
-        facility={selectedFacility}
-        userId={userId}
-        teamNumber={1}
-        accountId={accountId}
-        onClose={() => {
-          setSelectedFacility(null);
-          loadInspections();
-        }}
-        onShowOnMap={onShowOnMap}
-        onEdit={() => handleEdit(selectedFacility)}
-        facilities={facilities}
-        allInspections={Array.from(inspections.values())}
-        onViewNearbyFacility={(facility) => {
-          setSelectedFacility(facility);
-        }}
-      />
-    )}
+      {
+        viewingInspection && (() => {
+          const viewingFacility = facilities.find(f => f.id === viewingInspection.facility_id);
+          if (!viewingFacility) return null;
 
-    {viewingInspection && (() => {
-      const viewingFacility = facilities.find(f => f.id === viewingInspection.facility_id);
-      if (!viewingFacility) return null;
-
-      return (
-        <InspectionViewer
-          inspection={viewingInspection}
-          facility={viewingFacility}
-          onClose={() => setViewingInspection(null)}
-          onClone={() => { }}
-          canClone={false}
-          userId={userId}
-          accountId={accountId}
-        />
-      );
-    })()}
-
-    {showExportPopup && (
-      <div
-        className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
-        onClick={() => setShowExportPopup(false)}
-      >
-        <div
-          className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-4 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
-            <button
-              onClick={() => setShowExportPopup(false)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            >
-              <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-            </button>
-          </div>
-          <div className="p-4 bg-white dark:bg-gray-800 transition-colors duration-200 overflow-y-auto">
-            <InspectionReportExport
-              facilities={facilities.filter(f => selectedFacilityIds.has(f.id))}
+          return (
+            <InspectionViewer
+              inspection={viewingInspection}
+              facility={viewingFacility}
+              onClose={() => setViewingInspection(null)}
+              onClone={() => { }}
+              canClone={false}
               userId={userId}
               accountId={accountId}
             />
+          );
+        })()
+      }
+
+      {
+        showExportPopup && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+            onClick={() => setShowExportPopup(false)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
+                <button
+                  onClick={() => setShowExportPopup(false)}
+                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                >
+                  <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                </button>
+              </div>
+              <div className="p-4 bg-white dark:bg-gray-800 transition-colors duration-200 overflow-y-auto">
+                <InspectionReportExport
+                  facilities={facilities.filter(f => selectedFacilityIds.has(f.id))}
+                  userId={userId}
+                  accountId={accountId}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    )}
+        )
+      }
 
-    {/* mobileEditingField is no longer used for inline editing */}
+      {/* mobileEditingField is no longer used for inline editing */}
 
-    {showCompletionModal && (
-      <CompletionTypeModal
-        facilityCount={selectedFacilityIds.size}
-        onSelectInternal={() => handleBulkMarkComplete('internal')}
-        onSelectExternal={() => handleBulkMarkComplete('external')}
-        onClose={() => setShowCompletionModal(false)}
+      {
+        showCompletionModal && (
+          <CompletionTypeModal
+            facilityCount={selectedFacilityIds.size}
+            onSelectInternal={() => handleBulkMarkComplete('internal')}
+            onSelectExternal={() => handleBulkMarkComplete('external')}
+            onClose={() => setShowCompletionModal(false)}
+          />
+        )
+      }
+
+      {/* Mobile context menu for long-press on checkbox */}
+      {
+        mobileContextMenu && (
+          <>
+            <div
+              className="fixed inset-0 z-40 md:hidden"
+              onClick={() => setMobileContextMenu(null)}
+            />
+            <div
+              className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-2 md:hidden"
+              style={{
+                top: `${mobileContextMenu.y}px`,
+                left: `${mobileContextMenu.x}px`,
+                transform: 'translate(-50%, -100%)',
+                minWidth: '150px'
+              }}
+            >
+              <button
+                onClick={() => {
+                  const facility = facilities.find(f => f.id === mobileContextMenu.facilityId);
+                  if (facility) handleEdit(facility);
+                  setMobileContextMenu(null);
+                }}
+                className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-blue-600 dark:text-blue-400"
+              >
+                <Edit2 className="w-4 h-4" />
+                <span>Edit</span>
+              </button>
+              <button
+                onClick={() => {
+                  handleDelete(mobileContextMenu.facilityId);
+                  setMobileContextMenu(null);
+                }}
+                className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-red-600 dark:text-red-400"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </div>
+          </>
+        )
+      }
+
+      {/* Inspection Overview Modal */}
+      <InspectionsOverviewModal
+        isOpen={showInspectionOverview}
+        onClose={() => setShowInspectionOverview(false)}
+        facilities={facilities}
+        accountId={accountId}
       />
-    )}
 
-    {/* Mobile context menu for long-press on checkbox */}
-    {mobileContextMenu && (
-      <>
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          onClick={() => setMobileContextMenu(null)}
-        />
-        <div
-          className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-2 md:hidden"
-          style={{
-            top: `${mobileContextMenu.y}px`,
-            left: `${mobileContextMenu.x}px`,
-            transform: 'translate(-50%, -100%)',
-            minWidth: '150px'
-          }}
-        >
-          <button
-            onClick={() => {
-              const facility = facilities.find(f => f.id === mobileContextMenu.facilityId);
-              if (facility) handleEdit(facility);
-              setMobileContextMenu(null);
-            }}
-            className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-blue-600 dark:text-blue-400"
-          >
-            <Edit2 className="w-4 h-4" />
-            <span>Edit</span>
-          </button>
-          <button
-            onClick={() => {
-              handleDelete(mobileContextMenu.facilityId);
-              setMobileContextMenu(null);
-            }}
-            className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-red-600 dark:text-red-400"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>Delete</span>
-          </button>
-        </div>
-      </>
-    )}
-  </div>
-);
+      {/* SPCC Plan Manager Modal */}
+      {
+        showSPCCPlanManager && managingFacility && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div
+              className="absolute inset-0 bg-black/70"
+              onClick={() => setShowSPCCPlanManager(false)}
+            />
+            <div className="relative w-full max-w-lg z-10">
+              <SPCCPlanManager
+                facility={managingFacility}
+                onPlanUpdate={() => {
+                  // Trigger a refresh of facilities
+                  onFacilitiesChange();
+                }}
+              />
+              <button
+                onClick={() => setShowSPCCPlanManager(false)}
+                className="absolute -top-10 right-0 text-white hover:text-gray-300"
+              >
+                <X className="w-8 h-8" />
+              </button>
+            </div>
+          </div>
+        )
+      }
+    </div >
+  );
 }

@@ -49,19 +49,22 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
   useEffect(() => {
     loadInspections();
     loadSettings();
-  }, [facility.id, userId]);
+  }, [facility.id]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    function handleClickOutside(event: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setShowCompletionMenu(false);
       }
-    };
+    }
 
     if (showCompletionMenu) {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
     }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, [showCompletionMenu]);
 
   const loadSettings = async () => {
@@ -276,7 +279,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-2xl my-8"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl my-8 transition-colors duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-lg z-10">
@@ -409,7 +412,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                     <X className="w-4 h-4" />
                     <span>Clear Status</span>
                   </button>
-                  <div className="flex items-center justify-center px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 dark:text-gray-200 dark:text-gray-200 min-h-[44px]">
+                  <div className="flex items-center justify-center px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 min-h-[44px]">
                     {facility.spcc_completion_type === 'internal' ? (
                       <span className="flex items-center gap-1.5">
                         <CheckCircle className="w-4 h-4 text-blue-600" />
@@ -435,20 +438,20 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                     <ChevronDown className="w-4 h-4" />
                   </button>
                   {showCompletionMenu && (
-                    <div className="absolute right-0 mt-2 w-full sm:w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
+                    <div className="absolute right-0 mt-2 w-full sm:w-56 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 z-50">
                       <button
                         onClick={() => {
                           handleMarkComplete('internal');
                           setShowCompletionMenu(false);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-left"
                       >
                         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
                           <CheckCircle className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1">
                           <div className="font-medium text-gray-900 dark:text-white">Mark Internal</div>
-                          <div className="text-xs text-gray-500">Completed by your team outside of this app</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Completed by your team outside of this app</div>
                         </div>
                       </button>
                       <button
@@ -456,14 +459,14 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                           handleMarkComplete('external');
                           setShowCompletionMenu(false);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-yellow-50 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-colors text-left"
                       >
                         <div className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center flex-shrink-0">
                           <CheckCircle className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1">
                           <div className="font-medium text-gray-900 dark:text-white">Mark External</div>
-                          <div className="text-xs text-gray-500">Completed by another company outside of this app</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Completed by another company outside of this app</div>
                         </div>
                       </button>
                     </div>
@@ -474,9 +477,9 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
           </div>
 
           {inspections.length === 0 && !facility.spcc_completion_type ? (
-            <div className="text-center py-12 bg-gray-50 rounded-lg">
-              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600 mb-4">No inspections yet</p>
+            <div className="text-center py-12 bg-gray-50 dark:bg-gray-700 rounded-lg transition-colors">
+              <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
+              <p className="text-gray-600 dark:text-gray-300 mb-4">No inspections yet</p>
               <button
                 onClick={handleNewInspection}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -488,7 +491,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
           ) : (
             <div className="space-y-4">
               {facility.spcc_completion_type === 'internal' && facility.spcc_completed_date && inspections.length === 0 && (
-                <div className="border-2 border-blue-200 bg-blue-50 rounded-lg p-4">
+                <div className="border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 transition-colors">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
                       <CheckCircle className="w-6 h-6 text-white" />
@@ -500,9 +503,9 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                         </span>
                       </div>
                       <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
-                        Marked as Completed Internally
+                        Markup as Completed Internally
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
                         Completed on {new Date(facility.spcc_completed_date).toLocaleDateString()}
                       </p>
@@ -515,7 +518,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                         const daysUntilExpiration = Math.ceil((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
                         return (
-                          <p className={`text-sm mt-2 ${isExpired ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                          <p className={`text-sm mt-2 ${isExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
                             {isExpired ? (
                               <>
                                 <AlertTriangle className="w-4 h-4 inline mr-1" />
@@ -529,7 +532,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                           </p>
                         );
                       })()}
-                      <p className="text-xs text-gray-500 mt-2 italic">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 italic">
                         This facility was marked as completed internally without a formal inspection record.
                       </p>
                     </div>
@@ -537,7 +540,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                 </div>
               )}
               {facility.spcc_completion_type === 'external' && facility.spcc_completed_date && (
-                <div className="border-2 border-yellow-200 bg-yellow-50 rounded-lg p-4">
+                <div className="border-2 border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 transition-colors">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center flex-shrink-0">
                       <CheckCircle className="w-6 h-6 text-white" />
@@ -551,7 +554,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
                         Marked as Completed by External Company
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
                         Completed on {new Date(facility.spcc_completed_date).toLocaleDateString()}
                       </p>
@@ -564,7 +567,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                         const daysUntilExpiration = Math.ceil((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
                         return (
-                          <p className={`text-sm mt-2 ${isExpired ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                          <p className={`text-sm mt-2 ${isExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
                             {isExpired ? (
                               <>
                                 <AlertTriangle className="w-4 h-4 inline mr-1" />
@@ -578,7 +581,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                           </p>
                         );
                       })()}
-                      <p className="text-xs text-gray-500 mt-2 italic">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 italic">
                         This facility was marked as completed by an external company. No inspection details are available.
                       </p>
                     </div>
@@ -588,7 +591,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
               {inspections.map((inspection) => (
                 <div
                   key={inspection.id}
-                  className="border border-gray-200 rounded-lg p-4 transition-shadow cursor-pointer hover:shadow-md hover:border-blue-400"
+                  className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-4 transition-shadow cursor-pointer hover:shadow-md hover:border-blue-400 dark:hover:border-blue-500"
                   onClick={() => handleInspectionClick(inspection)}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -596,39 +599,39 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       <div className="flex items-center gap-2 mb-2">
                         <span
                           className={`px-2 py-1 rounded text-xs font-semibold ${inspection.status === 'completed'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
                             }`}
                         >
                           {inspection.status === 'completed' ? 'Completed' : 'Draft'}
                         </span>
                         {inspection.flagged_items_count > 0 && (
-                          <span className="flex items-center gap-1 text-xs text-red-600">
+                          <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
                             <AlertTriangle className="w-3 h-3" />
                             {inspection.flagged_items_count} flagged
                           </span>
                         )}
                         {inspection.actions_count > 0 && (
-                          <span className="flex items-center gap-1 text-xs text-orange-600">
+                          <span className="flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400">
                             <FileText className="w-3 h-3" />
                             {inspection.actions_count} actions
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
                         {new Date(inspection.conducted_at).toLocaleDateString()} at{' '}
                         {formatTimeTo12Hour(
                           new Date(inspection.conducted_at).toTimeString().slice(0, 5)
                         )}
                       </p>
-                      <p className="text-sm text-gray-600 mt-1">
+                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                         Inspector: {inspection.inspector_name}
                       </p>
                     </div>
                     <div className="flex flex-col sm:flex-row items-end gap-2">
                       {inspection.signature_data && (
-                        <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                        <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded p-2">
                           <img
                             src={inspection.signature_data}
                             alt="Signature"
@@ -638,7 +641,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       )}
                       <button
                         onClick={(e) => handleDeleteInspection(inspection.id, e)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+                        className="p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 rounded transition-colors flex-shrink-0"
                         title="Delete inspection"
                       >
                         <Trash2 className="w-4 h-4" />
