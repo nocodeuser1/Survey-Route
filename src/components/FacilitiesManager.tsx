@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
@@ -85,8 +85,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>('all');
-  const [sortField, setSortField] = useState<'name' | 'day' | 'status' | 'nearest' | 'spcc_plan_due'>('name');
-  const [sortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortColumn, setSortColumn] = useState<ColumnId | null>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
@@ -214,7 +214,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   useEffect(() => {
     // Get user's current location when sort is set to nearest
-    if (sortField === 'nearest' && !currentLocation) {
+    if (sortColumn === 'latitude' && !currentLocation) {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
@@ -227,15 +227,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           (error) => {
             console.error('Error getting location:', error);
             setLocationError('Unable to get your location. Please enable location services.');
-            setSortField('name'); // Fallback to name sort
+            setSortColumn('name'); // Fallback to name sort
           }
         );
       } else {
         setLocationError('Geolocation is not supported by your browser.');
-        setSortField('name'); // Fallback to name sort
+        setSortColumn('name'); // Fallback to name sort
       }
     }
-  }, [sortField, currentLocation]);
+  }, [sortColumn, currentLocation]);
 
   const loadInspections = async () => {
     try {
@@ -416,27 +416,79 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     filtered.sort((a, b) => {
       let comparison = 0;
 
-      if (sortField === 'name') {
-        comparison = a.name.localeCompare(b.name);
-      } else if (sortField === 'day') {
-        comparison = (a.day || 0) - (b.day || 0);
-      } else if (sortField === 'status') {
-        const statusA = getInspectionStatus(a);
-        const statusB = getInspectionStatus(b);
-        const order = { pending: 0, expired: 1, inspected: 2 };
-        comparison = order[statusA] - order[statusB];
-      } else if (sortField === 'nearest' && currentLocation) {
-        const distA = calculateDistance(currentLocation.lat, currentLocation.lng, Number(a.latitude), Number(a.longitude));
-        const distB = calculateDistance(currentLocation.lat, currentLocation.lng, Number(b.latitude), Number(b.longitude));
-        comparison = distA - distB;
-      } else if (sortField === 'spcc_plan_due') {
-        const dateA = getSPCCPlanDueDate(a);
-        const dateB = getSPCCPlanDueDate(b);
-        // Facilities with no due date go to the end
-        if (!dateA && !dateB) comparison = 0;
-        else if (!dateA) comparison = 1;
-        else if (!dateB) comparison = -1;
-        else comparison = dateA.getTime() - dateB.getTime();
+      if (!sortColumn) return 0;
+
+      // Get values for comparison based on column
+      const getColumnValue = (facility: Facility, col: ColumnId): string | number | Date | null => {
+        switch (col) {
+          case 'name':
+            return facility.name || '';
+          case 'latitude':
+            return Number(facility.latitude) || 0;
+          case 'longitude':
+            return Number(facility.longitude) || 0;
+          case 'visit_duration':
+            return facility.visit_duration_minutes || 0;
+          case 'spcc_status': {
+            // Sort by SPCC plan due date
+            const dueDate = getSPCCPlanDueDate(facility);
+            return dueDate ? dueDate.getTime() : Number.MAX_SAFE_INTEGER;
+          }
+          case 'inspection_status': {
+            const status = getInspectionStatus(facility);
+            const order = { pending: 0, expired: 1, inspected: 2 };
+            return order[status];
+          }
+          case 'matched_facility_name':
+            return facility.matched_facility_name || '';
+          case 'well_name_1':
+            return facility.well_name_1 || '';
+          case 'well_name_2':
+            return facility.well_name_2 || '';
+          case 'well_name_3':
+            return facility.well_name_3 || '';
+          case 'well_name_4':
+            return facility.well_name_4 || '';
+          case 'well_name_5':
+            return facility.well_name_5 || '';
+          case 'well_name_6':
+            return facility.well_name_6 || '';
+          case 'well_api_1':
+            return facility.well_api_1 || '';
+          case 'well_api_2':
+            return facility.well_api_2 || '';
+          case 'well_api_3':
+            return facility.well_api_3 || '';
+          case 'well_api_4':
+            return facility.well_api_4 || '';
+          case 'well_api_5':
+            return facility.well_api_5 || '';
+          case 'well_api_6':
+            return facility.well_api_6 || '';
+          case 'api_numbers_combined':
+            return facility.api_numbers_combined || '';
+          case 'lat_well_sheet':
+            return Number(facility.lat_well_sheet) || 0;
+          case 'long_well_sheet':
+            return Number(facility.long_well_sheet) || 0;
+          case 'first_prod_date':
+            return facility.first_prod_date ? new Date(facility.first_prod_date).getTime() : 0;
+          case 'spcc_due_date':
+            return facility.spcc_due_date ? new Date(facility.spcc_due_date).getTime() : 0;
+          case 'spcc_completed_date':
+            return facility.spcc_completed_date ? new Date(facility.spcc_completed_date).getTime() : 0;
+          default:
+            return '';
+        }
+      };
+
+      const valA = getColumnValue(a, sortColumn);
+      const valB = getColumnValue(b, sortColumn);
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        comparison = valA.localeCompare(valB);
+      } else if (typeof valA === 'number' && typeof valB === 'number') {
+        comparison = valA - valB;
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -1640,15 +1692,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 </select>
 
                 <select
-                  value={sortField}
-                  onChange={(e) => setSortField(e.target.value as any)}
+                  value={sortColumn || 'name'}
+                  onChange={(e) => setSortColumn(e.target.value as ColumnId)}
                   className="form-select w-full text-sm"
                 >
                   <option value="name">Sort by Name</option>
-                  <option value="day">Sort by Day</option>
-                  <option value="status">Sort by Status</option>
-                  <option value="nearest">Sort by Nearest to Me</option>
-                  <option value="spcc_plan_due">Sort by SPCC Plan Due Date</option>
+                  <option value="latitude">Sort by Latitude</option>
+                  <option value="longitude">Sort by Longitude</option>
+                  <option value="visit_duration">Sort by Visit Duration</option>
+                  <option value="spcc_status">Sort by SPCC Status</option>
+                  <option value="inspection_status">Sort by Inspection Status</option>
                 </select>
               </div>
             )}
@@ -1770,8 +1823,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       )}
                     </th>
                     {visibleColumns.map(columnId => (
-                      <th key={columnId} className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600">
-                        {COLUMN_LABELS[columnId]}
+                      <th
+                        key={columnId}
+                        className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors select-none"
+                        onClick={() => {
+                          if (sortColumn === columnId) {
+                            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                          } else {
+                            setSortColumn(columnId);
+                            setSortDirection('asc');
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>{COLUMN_LABELS[columnId]}</span>
+                          {sortColumn === columnId && (
+                            <span className="text-blue-500 dark:text-blue-400">
+                              {sortDirection === 'asc' ? (
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              ) : (
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </th>
                     ))}
                     <th className={`px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky

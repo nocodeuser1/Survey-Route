@@ -632,10 +632,23 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     let inspectionCount = 0;
     let planPastDueCount = 0;
     let inspectionPastDueCount = 0;
+    let planInRouteCount = 0;
+    let inspectionInRouteCount = 0;
+
+    // Get all facility names that are in the current route
+    const facilitiesInRoute = new Set<string>();
+    result.routes.forEach(route => {
+      route.facilities.forEach(f => {
+        facilitiesInRoute.add(f.name);
+      });
+    });
 
     facilities.forEach(f => {
+      const isInRoute = facilitiesInRoute.has(f.name);
+
       if (facilityNeedsSPCCPlan(f)) {
         planCount++;
+        if (isInRoute) planInRouteCount++;
         const status = getSPCCPlanStatus(f);
         if (status.status === 'overdue' || status.status === 'expired') {
           planPastDueCount++;
@@ -643,6 +656,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }
       if (facilityNeedsSPCCInspection(f)) {
         inspectionCount++;
+        if (isInRoute) inspectionInRouteCount++;
         // Check if inspection is past due (no valid inspection at all)
         const inspection = inspections.get(f.id);
         if (!inspection && !f.spcc_completed_date) {
@@ -668,7 +682,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }
     });
 
-    return { planCount, inspectionCount, planPastDueCount, inspectionPastDueCount };
+    return {
+      planCount,
+      inspectionCount,
+      planPastDueCount,
+      inspectionPastDueCount,
+      planInRouteCount,
+      inspectionInRouteCount
+    };
   };
 
   const toggleDayCollapse = (day: number) => {
@@ -1574,15 +1595,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   >
                     <FileText className="w-4 h-4" />
                     SPCC Inspections
-                    {counts.inspectionCount > 0 && (
+                    {counts.inspectionInRouteCount > 0 && (
                       <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                        }`}>
-                        {counts.inspectionCount}
+                        }`} title={`${counts.inspectionInRouteCount} in current route, ${counts.inspectionCount} total need inspection`}>
+                        {counts.inspectionInRouteCount}
                       </span>
                     )}
                     {counts.inspectionPastDueCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title="Past due">
-                        {counts.inspectionPastDueCount} due
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueCount} past due`}>
+                        {counts.inspectionPastDueCount} overdue
                       </span>
                     )}
                   </button>
@@ -1595,15 +1616,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   >
                     <FileCheck className="w-4 h-4" />
                     SPCC Plans
-                    {counts.planCount > 0 && (
+                    {counts.planInRouteCount > 0 && (
                       <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                        }`}>
-                        {counts.planCount}
+                        }`} title={`${counts.planInRouteCount} in current route, ${counts.planCount} total facilities need attention`}>
+                        {counts.planInRouteCount}
                       </span>
                     )}
                     {counts.planPastDueCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title="Past due / expired">
-                        {counts.planPastDueCount} due
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueCount} past due / expired`}>
+                        {counts.planPastDueCount} overdue
                       </span>
                     )}
                   </button>
@@ -1615,8 +1636,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         {surveyType !== 'all' && (
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
             {surveyType === 'spcc_inspection'
-              ? 'Showing facilities that need their yearly SPCC inspection.'
-              : 'Showing facilities that need an SPCC plan (no plan, overdue, or expiring).'}
+              ? `Showing ${getSurveyTypeCounts().inspectionInRouteCount} of ${getSurveyTypeCounts().inspectionCount} facilities that need their yearly SPCC inspection (only those in current route).`
+              : `Showing ${getSurveyTypeCounts().planInRouteCount} of ${getSurveyTypeCounts().planCount} facilities needing SPCC plan attention (missing, overdue, expiring, or expired).`}
           </p>
         )}
       </div>
@@ -1861,17 +1882,42 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                   >
                                     {segment.to === 'Home Base' ? `${segment.from} → Home Base` : segment.to}
                                   </p>
-                                  {segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
+                                  {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
+                                  {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
+                                    const facility = getFacilityForStop(segment.to);
+                                    if (!facility) return null;
+                                    const status = getSPCCPlanStatus(facility);
+                                    const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
+                                      missing: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '⚠️ No Plan' },
+                                      overdue: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '🔴 Initial Overdue' },
+                                      expired: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '🔴 Plan Expired' },
+                                      warning: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-400', label: '🟠 Initial Due Soon' },
+                                      expiring: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-400', label: '🟠 Expiring Soon' },
+                                      valid: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400', label: '✅ Valid' },
+                                      pending: { bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-600 dark:text-gray-300', label: '⏳ Pending' },
+                                    };
+                                    const config = statusConfig[status.status] || statusConfig.pending;
+                                    return (
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text}`}
+                                        title={status.message + (status.dueDate ? ` (${status.dueDate.toLocaleDateString()})` : '')}
+                                      >
+                                        {config.label}
+                                      </span>
+                                    );
+                                  })()}
+                                  {/* Standard inspection icons - show when not filtering by spcc_plan */}
+                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
                                     <span title="Verified - Inspection within last year">
                                       <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
                                     </span>
                                   )}
-                                  {segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
+                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
                                     <span title="Inspection expired - Reinspection needed">
                                       <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
                                     </span>
                                   )}
-                                  {segment.to !== 'Home Base' && !getInspection(segment.to) && (
+                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to) && (
                                     <span title="No inspection yet">
                                       <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
                                     </span>

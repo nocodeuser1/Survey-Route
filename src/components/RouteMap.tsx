@@ -595,13 +595,57 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // SPCC Plan status calculation (for surveyType === 'spcc_plan')
           let hasValidSPCCPlan = false;
+          let spccPlanStatus: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'pending' = 'missing';
+          let spccPlanStatusColor = '#EF4444'; // Default red for problems
+
           if (latestFacilityData) {
-            // Plan is valid if it has a URL and PE stamp date, and is not expired (5 years)
-            if (latestFacilityData.spcc_plan_url && latestFacilityData.spcc_pe_stamp_date) {
+            // Check if plan exists
+            if (!latestFacilityData.spcc_plan_url || !latestFacilityData.spcc_pe_stamp_date) {
+              // Check First Prod Date for initial plan requirement
+              if (latestFacilityData.first_prod_date) {
+                const firstProd = new Date(latestFacilityData.first_prod_date);
+                const sixMonthsLater = new Date(firstProd);
+                sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
+                const today = new Date();
+
+                if (today > sixMonthsLater) {
+                  spccPlanStatus = 'overdue';
+                  spccPlanStatusColor = '#EF4444'; // Red
+                } else {
+                  const daysUntilDue = Math.ceil((sixMonthsLater.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                  if (daysUntilDue <= 30) {
+                    spccPlanStatus = 'warning';
+                    spccPlanStatusColor = '#F97316'; // Orange
+                  } else {
+                    spccPlanStatus = 'pending';
+                    spccPlanStatusColor = '#6B7280'; // Gray
+                  }
+                }
+              } else {
+                spccPlanStatus = 'missing';
+                spccPlanStatusColor = '#EF4444'; // Red
+              }
+            } else {
+              // Check Renewal (5 years from PE stamp date)
               const peStampDate = new Date(latestFacilityData.spcc_pe_stamp_date);
               const renewalDate = new Date(peStampDate);
               renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-              hasValidSPCCPlan = new Date() <= renewalDate;
+              const today = new Date();
+
+              if (today > renewalDate) {
+                spccPlanStatus = 'expired';
+                spccPlanStatusColor = '#EF4444'; // Red
+              } else {
+                const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                if (daysUntilExpire <= 90) {
+                  spccPlanStatus = 'expiring';
+                  spccPlanStatusColor = '#F97316'; // Orange
+                } else {
+                  spccPlanStatus = 'valid';
+                  spccPlanStatusColor = '#22C55E'; // Green
+                  hasValidSPCCPlan = true;
+                }
+              }
             }
           }
 
@@ -723,7 +767,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerAnchor = hasAnyValidCompletion ? 15 : 18;
 
           // Use gray background for manually removed facilities
-          const markerBgColor = isManuallyRemoved ? '#9CA3AF' : color;
+          // Use status-based color when SPCC Plans filter is active
+          const markerBgColor = isManuallyRemoved
+            ? '#9CA3AF'
+            : surveyType === 'spcc_plan'
+              ? spccPlanStatusColor
+              : color;
           const markerFinalOpacity = isManuallyRemoved ? '0.6' : markerOpacity;
 
           const markerIcon = L.divIcon({
