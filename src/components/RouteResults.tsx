@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, FileDown, Plus, X as XIcon, CheckSquare, Square, Eye, EyeOff } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, FileDown, Plus, X as XIcon, CheckSquare, Square, Eye, EyeOff, ClipboardList, FileCheck } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -46,10 +46,14 @@ interface RouteResultsProps {
   onApplyWithTimeRefresh?: () => Promise<void>;
 }
 
+// Survey type for route planning filtering
+type SurveyType = 'all' | 'spcc_inspection' | 'spcc_plan';
+
 export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, onToggleHideCompleted, onShowOnMap, onApplyWithTimeRefresh }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [internalShowRefreshOptions, setInternalShowRefreshOptions] = useState(false);
+  const [surveyType, setSurveyType] = useState<SurveyType>('all');
 
   const showRefreshOptions = externalShowRefreshOptions !== undefined ? externalShowRefreshOptions : internalShowRefreshOptions;
   const setShowRefreshOptions = onShowRefreshOptions || setInternalShowRefreshOptions;
@@ -522,6 +526,139 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     if (facility) {
       setSelectedFacility(facility);
     }
+  };
+
+  // SPCC Plan Status Helper Functions
+  const getSPCCPlanStatus = (facility: Facility): { status: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'pending'; message: string; dueDate?: Date } => {
+    // Check if plan exists
+    if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
+      // Check First Prod Date for initial plan requirement
+      if (facility.first_prod_date) {
+        const firstProd = new Date(facility.first_prod_date);
+        const sixMonthsLater = new Date(firstProd);
+        sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
+        const today = new Date();
+
+        if (today > sixMonthsLater) {
+          return { status: 'overdue', message: 'Initial plan overdue', dueDate: sixMonthsLater };
+        }
+
+        const daysUntilDue = Math.ceil((sixMonthsLater.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysUntilDue <= 30) {
+          return { status: 'warning', message: `Initial plan due in ${daysUntilDue} days`, dueDate: sixMonthsLater };
+        }
+
+        return { status: 'pending', message: 'Plan needed within 6 months of First Prod', dueDate: sixMonthsLater };
+      }
+      return { status: 'missing', message: 'No plan on file' };
+    }
+
+    // Check Renewal (5 years from PE stamp date)
+    const peStampDate = new Date(facility.spcc_pe_stamp_date);
+    const renewalDate = new Date(peStampDate);
+    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+    const today = new Date();
+
+    if (today > renewalDate) {
+      return { status: 'expired', message: 'Plan expired (5 years)', dueDate: renewalDate };
+    }
+
+    const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysUntilExpire <= 90) {
+      return { status: 'expiring', message: `Expires in ${daysUntilExpire} days`, dueDate: renewalDate };
+    }
+
+    return { status: 'valid', message: 'Plan Active', dueDate: renewalDate };
+  };
+
+  // Check if facility needs an SPCC Plan (for filtering)
+  const facilityNeedsSPCCPlan = (facility: Facility): boolean => {
+    const planStatus = getSPCCPlanStatus(facility);
+    return ['missing', 'overdue', 'warning', 'expiring', 'expired'].includes(planStatus.status);
+  };
+
+  // Check if facility needs an SPCC Inspection (for filtering)
+  const facilityNeedsSPCCInspection = (facility: Facility): boolean => {
+    // Check for valid completion type
+    if (facility.spcc_completion_type && facility.spcc_completed_date) {
+      const completedDate = new Date(facility.spcc_completed_date);
+      const oneYearFromCompletion = new Date(completedDate);
+      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
+      if (new Date() <= oneYearFromCompletion) {
+        return false; // Has valid inspection
+      }
+    }
+
+    // Check for valid internal inspection
+    const inspection = inspections.get(facility.id);
+    if (isInspectionValid(inspection)) {
+      return false; // Has valid inspection
+    }
+
+    return true; // Needs inspection
+  };
+
+  // Filter facility based on survey type selection
+  const matchesSurveyTypeFilter = (facilityName: string): boolean => {
+    if (surveyType === 'all') return true;
+
+    const facility = getFacilityForStop(facilityName);
+    if (!facility) return true;
+
+    if (surveyType === 'spcc_plan') {
+      return facilityNeedsSPCCPlan(facility);
+    }
+
+    if (surveyType === 'spcc_inspection') {
+      return facilityNeedsSPCCInspection(facility);
+    }
+
+    return true;
+  };
+
+  // Get counts for survey type badges
+  const getSurveyTypeCounts = () => {
+    let planCount = 0;
+    let inspectionCount = 0;
+    let planPastDueCount = 0;
+    let inspectionPastDueCount = 0;
+
+    facilities.forEach(f => {
+      if (facilityNeedsSPCCPlan(f)) {
+        planCount++;
+        const status = getSPCCPlanStatus(f);
+        if (status.status === 'overdue' || status.status === 'expired') {
+          planPastDueCount++;
+        }
+      }
+      if (facilityNeedsSPCCInspection(f)) {
+        inspectionCount++;
+        // Check if inspection is past due (no valid inspection at all)
+        const inspection = inspections.get(f.id);
+        if (!inspection && !f.spcc_completed_date) {
+          // No inspection ever - check if facility has been active > 1 year (past due)
+          if (f.first_prod_date) {
+            const firstProd = new Date(f.first_prod_date);
+            const oneYearLater = new Date(firstProd);
+            oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+            if (new Date() > oneYearLater) {
+              inspectionPastDueCount++;
+            }
+          }
+        } else if (inspection && !isInspectionValid(inspection)) {
+          inspectionPastDueCount++;
+        } else if (f.spcc_completed_date) {
+          const completedDate = new Date(f.spcc_completed_date);
+          const oneYearFromCompletion = new Date(completedDate);
+          oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
+          if (new Date() > oneYearFromCompletion) {
+            inspectionPastDueCount++;
+          }
+        }
+      }
+    });
+
+    return { planCount, inspectionCount, planPastDueCount, inspectionPastDueCount };
   };
 
   const toggleDayCollapse = (day: number) => {
@@ -1302,22 +1439,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     <div className="space-y-6 relative">
       {isRefreshing && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-[2000] flex items-center justify-center">
-          <div className="bg-white rounded-lg shadow-2xl p-8 max-w-sm mx-4 text-center">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-8 max-w-sm mx-4 text-center transition-colors duration-200">
             <div className="mb-4 flex justify-center">
-              <Route className="w-16 h-16 text-blue-600 animate-bounce" />
+              <Route className="w-16 h-16 text-blue-600 dark:text-blue-400 animate-bounce" />
             </div>
             <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">Updating Route</h3>
-            <p className="text-gray-600">Optimizing your route with new settings...</p>
+            <p className="text-gray-600 dark:text-gray-300">Optimizing your route with new settings...</p>
             <div className="mt-6 flex justify-center gap-1">
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+              <div className="w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
             </div>
           </div>
         </div>
       )}
       {!showOnlyRouteList && settings && (
-        <div className="bg-white rounded-lg shadow-md p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 transition-colors duration-200">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Route Planning Settings</h3>
             <div className="flex gap-2">
@@ -1342,23 +1479,23 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <p className="text-gray-600">Max Facilities/Day</p>
+              <p className="text-gray-600 dark:text-gray-400">Max Facilities/Day</p>
               <p className="font-semibold text-gray-900 dark:text-white">
                 {settings.use_facilities_constraint ? settings.max_facilities_per_day : 'Unlimited'}
               </p>
             </div>
             <div>
-              <p className="text-gray-600">Max Hours/Day</p>
+              <p className="text-gray-600 dark:text-gray-400">Max Hours/Day</p>
               <p className="font-semibold text-gray-900 dark:text-white">
                 {settings.use_hours_constraint ? `${settings.max_hours_per_day}h` : 'Unlimited'}
               </p>
             </div>
             <div>
-              <p className="text-gray-600">Default Visit Duration</p>
+              <p className="text-gray-600 dark:text-gray-400">Default Visit Duration</p>
               <p className="font-semibold text-gray-900 dark:text-white">{settings.default_visit_duration_minutes} mins</p>
             </div>
             <div>
-              <p className="text-gray-600">Start Time</p>
+              <p className="text-gray-600 dark:text-gray-400">Start Time</p>
               <p className="font-semibold text-gray-900 dark:text-white">{formatTimeTo12Hour(settings.start_time || '08:00')}</p>
             </div>
           </div>
@@ -1366,20 +1503,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       )}
 
       {listSelectionMode && selectedFacilityNames.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg p-4 flex items-center justify-between transition-colors duration-200">
           <div className="flex items-center gap-4">
-            <p className="text-sm font-medium text-blue-900">
+            <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
               {selectedFacilityNames.size} facilit{selectedFacilityNames.size === 1 ? 'y' : 'ies'} selected
             </p>
             <select
               value={bulkReassignTargetDay}
               onChange={(e) => setBulkReassignTargetDay(parseInt(e.target.value))}
-              className="px-3 py-1 border border-blue-300 rounded-md text-sm"
+              className="px-3 py-1 border border-blue-300 dark:border-blue-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               {result.routes.map(r => (
-                <option key={r.day} value={r.day}>Move to Day {r.day}</option>
+                <option key={r.day} value={r.day} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to Day {r.day}</option>
               ))}
-              <option value={result.routes.length + 1}>Move to New Day {result.routes.length + 1}</option>
+              <option value={result.routes.length + 1} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to New Day {result.routes.length + 1}</option>
             </select>
             <button
               onClick={handleBulkReassign}
@@ -1396,6 +1533,83 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         </div>
       )}
+
+      {/* Survey Type Selector */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(() => {
+              const counts = getSurveyTypeCounts();
+              return (
+                <>
+                  <button
+                    onClick={() => setSurveyType('all')}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                  >
+                    All Facilities
+                  </button>
+                  <button
+                    onClick={() => setSurveyType('spcc_inspection')}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    SPCC Inspections
+                    {counts.inspectionCount > 0 && (
+                      <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                        }`}>
+                        {counts.inspectionCount}
+                      </span>
+                    )}
+                    {counts.inspectionPastDueCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title="Past due">
+                        {counts.inspectionPastDueCount} due
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setSurveyType('spcc_plan')}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                  >
+                    <FileCheck className="w-4 h-4" />
+                    SPCC Plans
+                    {counts.planCount > 0 && (
+                      <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                        }`}>
+                        {counts.planCount}
+                      </span>
+                    )}
+                    {counts.planPastDueCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title="Past due / expired">
+                        {counts.planPastDueCount} due
+                      </span>
+                    )}
+                  </button>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+        {surveyType !== 'all' && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+            {surveyType === 'spcc_inspection'
+              ? 'Showing facilities that need their yearly SPCC inspection.'
+              : 'Showing facilities that need an SPCC plan (no plan, overdue, or expiring).'}
+          </p>
+        )}
+      </div>
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-2">
@@ -1451,7 +1665,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         {result.routes.map((route) => (
           <div
             key={route.day}
-            className="bg-white rounded-lg shadow-md overflow-hidden"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"
             onDragOver={handleDragOver}
             onDrop={() => handleDrop(route.day)}
           >
@@ -1472,7 +1686,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <div className="flex items-center gap-4 text-sm">
                   <span className="flex items-center gap-1">
                     <MapPin className="w-4 h-4" />
-                    {route.facilities.filter(f => !shouldHideFacility(f.name)).length} stops
+                    {route.facilities.filter(f => !shouldHideFacility(f.name) && matchesSurveyTypeFilter(f.name)).length} stops
                   </span>
                   <span className="flex items-center gap-1">
                     <TrendingUp className="w-4 h-4" />
@@ -1574,8 +1788,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             {!collapsedDays.has(route.day) && (
               <div className="p-6">
                 {route.facilities.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                     <p className="text-sm">No facilities assigned to this day</p>
                     <p className="text-xs mt-1">Drag facilities here or use the selection tool to assign them</p>
                   </div>
@@ -1586,9 +1800,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       if (segment.from === 'Home Base' || segment.to === 'Home Base') {
                         return true;
                       }
-                      // Filter based on visibility settings
+                      // Filter based on visibility settings and survey type
                       const facilityName = segment.to;
-                      return !shouldHideFacility(facilityName);
+                      return !shouldHideFacility(facilityName) && matchesSurveyTypeFilter(facilityName);
                     }).map((segment, index) => {
                       const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
                       const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
@@ -1597,7 +1811,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       return (
                         <div
                           key={index}
-                          className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50' : ''}`}
+                          className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                           draggable={!isHomeBaseSegment}
                           onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
                           onClick={() => {
@@ -1653,7 +1867,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-600 mt-1">
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                                   <span className="inline-flex items-center gap-1">
                                     <TrendingUp className="w-3 h-3" />
                                     {segment.distance.toFixed(1)} mi
@@ -1666,9 +1880,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                 </p>
                               </div>
                               <div className="text-right text-sm">
-                                <p className="text-gray-600">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
+                                <p className="text-gray-600 dark:text-gray-400">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
                                 {segment.to !== 'Home Base' && (
-                                  <p className="text-gray-600">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
+                                  <p className="text-gray-600 dark:text-gray-400">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
                                 )}
                               </div>
                             </div>
@@ -1684,7 +1898,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         ))}
 
         {removedFacilities.length > 0 && (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden mt-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden mt-4 transition-colors duration-200">
             <div
               className="relative px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 text-white cursor-pointer hover:from-gray-600 hover:to-gray-700 transition-colors"
               onClick={() => setRemovedCollapsed(!removedCollapsed)}
@@ -1723,21 +1937,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   {removedFacilities.map((facility, index) => (
                     <div
                       key={index}
-                      className="p-4 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-all"
+                      className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500 transition-all"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3 flex-1">
-                          <XIcon className="w-5 h-5 text-gray-600 flex-shrink-0" />
+                          <XIcon className="w-5 h-5 text-gray-600 dark:text-gray-400 flex-shrink-0" />
                           <div className="flex-1">
                             <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               {facility.latitude.toFixed(6)}, {facility.longitude.toFixed(6)}
                             </div>
                           </div>
                         </div>
                         <button
                           onClick={() => handleRestoreRemovedFacility(facility.id)}
-                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors flex items-center gap-1"
+                          className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-md text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors flex items-center gap-1"
                         >
                           <Undo2 className="w-3 h-3" />
                           Restore
@@ -1752,7 +1966,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         )}
 
         {getCompletedFacilities().length > 0 && (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden mt-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden mt-4 transition-colors duration-200">
             <div
               className="relative px-6 py-4 bg-gradient-to-r from-green-500 to-green-600 text-white cursor-pointer hover:from-green-600 hover:to-green-700 transition-colors"
               onClick={() => setCompletedCollapsed(!completedCollapsed)}
@@ -1787,8 +2001,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <div
                         key={index}
                         className={`p-4 border rounded-lg transition-all ${isSelected
-                          ? 'border-blue-500 bg-blue-50 shadow-md'
-                          : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-md'
+                          : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
                         onClick={() => handleFacilityClick(facility.name)}
                       >
@@ -1800,7 +2014,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                   e.stopPropagation();
                                   handleFacilityClick(facility.name);
                                 }}
-                                className="text-blue-600 hover:text-blue-700"
+                                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                               >
                                 {isSelected ? (
                                   <CheckSquare className="w-5 h-5" />
@@ -1809,11 +2023,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                 )}
                               </button>
                             )}
-                            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
                             <div className="flex-1">
                               <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
                               {inspection && (
-                                <div className="text-xs text-gray-500 mt-1">
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                   Inspected: {new Date(inspection.conducted_at).toLocaleDateString()}
                                 </div>
                               )}
@@ -1824,7 +2038,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                               e.stopPropagation();
                               setSelectedFacility(facility);
                             }}
-                            className="px-3 py-1.5 bg-green-100 text-green-700 rounded-md text-xs font-medium hover:bg-green-200 transition-colors flex items-center gap-1"
+                            className="px-3 py-1.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-md text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/70 transition-colors flex items-center gap-1"
                           >
                             <FileText className="w-3 h-3" />
                             View Details
@@ -1869,12 +2083,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           }}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full my-8 transition-colors duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6 border-b border-gray-200">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">Update Route Settings</h3>
-              <p className="text-sm text-gray-600 mt-1">
+              <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                 Adjust route optimization constraints. Visit duration and time settings are managed in Settings → Route Planning.
               </p>
             </div>
@@ -1907,7 +2121,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         max_facilities_per_day: parseInt(e.target.value) || 8,
                       })}
                       disabled={!tempSettings.use_facilities_constraint}
-                      className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 dark:disabled:bg-gray-600"
                     />
                   </div>
                 </div>
@@ -1939,13 +2153,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         max_hours_per_day: parseFloat(e.target.value) || 8,
                       })}
                       disabled={!tempSettings.use_hours_constraint}
-                      className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 dark:disabled:bg-gray-600"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="border-t pt-4">
+              <div className="border-t dark:border-gray-700 pt-4">
                 <button
                   onClick={() => setShowAdvanced(!showAdvanced)}
                   className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 dark:text-gray-200 hover:text-blue-600 transition-colors"
@@ -1976,9 +2190,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           ...tempSettings,
                           clustering_tightness: parseFloat(e.target.value),
                         })}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer"
                       />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
                         <span>Looser</span>
                         <span>Balanced</span>
                         <span>Tighter</span>
@@ -2005,9 +2219,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           ...tempSettings,
                           cluster_balance_weight: parseFloat(e.target.value),
                         })}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer"
                       />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
                         <span>Geography</span>
                         <span>Balanced</span>
                         <span>Even Days</span>
@@ -2017,7 +2231,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 )}
               </div>
 
-              <div className="border-t pt-4">
+              <div className="border-t dark:border-gray-700 pt-4">
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
@@ -2027,7 +2241,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   />
                   <div>
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Exclude Completed Facilities from Route Optimization</span>
-                    <p className="text-xs text-gray-600 mt-0.5">
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
                       Remove facilities with valid inspections from route planning. They will still be visible on the map and can be toggled on/off for viewing.
                     </p>
                   </div>
@@ -2035,7 +2249,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
             </div>
 
-            <div className="p-6 border-t border-gray-200 flex gap-3">
+            <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
               <button
                 onClick={() => {
                   setShowRefreshOptions(false);
@@ -2073,16 +2287,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           onClick={() => setShowExportPopup(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-md w-full"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full transition-colors duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 border-b flex items-center justify-between">
+            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Routes</h3>
               <button
                 onClick={() => setShowExportPopup(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
               >
-                <Undo2 className="w-5 h-5 text-gray-500" />
+                <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
             </div>
             <div className="p-4">
@@ -2125,7 +2339,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           onClick={() => setShowSaveRoutePopup(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Save Current Route</h3>
@@ -2134,7 +2348,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               value={saveName}
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="Enter route name (optional)"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
                   const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
@@ -2146,7 +2360,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 }
               }}
             />
-            <p className="text-xs text-gray-500 mb-4">Leave empty to use a timestamped name</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Leave empty to use a timestamped name</p>
             <div className="flex gap-3">
               <button
                 onClick={() => {
@@ -2182,16 +2396,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           onClick={() => setShowLoadRoutePopup(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full transition-colors duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 border-b flex items-center justify-between">
+            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">Load Saved Route</h3>
               <button
                 onClick={() => setShowLoadRoutePopup(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
               >
-                <Undo2 className="w-5 h-5 text-gray-500" />
+                <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
             </div>
             <div className="p-4">

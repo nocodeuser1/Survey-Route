@@ -85,7 +85,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>('all');
-  const [sortField, setSortField] = useState<'name' | 'day' | 'status' | 'nearest'>('name');
+  const [sortField, setSortField] = useState<'name' | 'day' | 'status' | 'nearest' | 'spcc_plan_due'>('name');
   const [sortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
@@ -371,6 +371,26 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return R * c;
   };
 
+  // Helper function to calculate SPCC plan due date for sorting
+  const getSPCCPlanDueDate = (facility: Facility): Date | null => {
+    // If no plan exists, check first prod date for initial plan due date
+    if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
+      if (facility.first_prod_date) {
+        const firstProd = new Date(facility.first_prod_date);
+        const sixMonthsLater = new Date(firstProd);
+        sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
+        return sixMonthsLater;
+      }
+      return null; // No due date if no plan and no first prod date
+    }
+
+    // Calculate renewal date (5 years from PE stamp date)
+    const peStampDate = new Date(facility.spcc_pe_stamp_date);
+    const renewalDate = new Date(peStampDate);
+    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+    return renewalDate;
+  };
+
   const getFilteredAndSortedFacilities = () => {
     let filtered = facilities.filter(facility => {
       const matchesSearch = !searchQuery ||
@@ -409,6 +429,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const distA = calculateDistance(currentLocation.lat, currentLocation.lng, Number(a.latitude), Number(a.longitude));
         const distB = calculateDistance(currentLocation.lat, currentLocation.lng, Number(b.latitude), Number(b.longitude));
         comparison = distA - distB;
+      } else if (sortField === 'spcc_plan_due') {
+        const dateA = getSPCCPlanDueDate(a);
+        const dateB = getSPCCPlanDueDate(b);
+        // Facilities with no due date go to the end
+        if (!dateA && !dateB) comparison = 0;
+        else if (!dateA) comparison = 1;
+        else if (!dateB) comparison = -1;
+        else comparison = dateA.getTime() - dateB.getTime();
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -1042,7 +1070,56 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       case 'visit_duration':
         return `${facility.visit_duration_minutes} mins`;
       case 'spcc_status':
-        return <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />;
+        // Show enhanced SPCC plan status with due date indicator
+        const planDueDate = getSPCCPlanDueDate(facility);
+        const hasPlan = facility.spcc_plan_url && facility.spcc_pe_stamp_date;
+
+        if (hasPlan) {
+          // Check renewal status
+          const today = new Date();
+          const daysUntilRenewal = planDueDate ? Math.ceil((planDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+          if (planDueDate && today > planDueDate) {
+            return (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium" title={`Plan expired on ${planDueDate.toLocaleDateString()}`}>
+                Plan Expired
+              </span>
+            );
+          } else if (daysUntilRenewal <= 90) {
+            return (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium" title={`Renewal due ${planDueDate?.toLocaleDateString()}`}>
+                Expires in {daysUntilRenewal}d
+              </span>
+            );
+          } else {
+            return <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />;
+          }
+        } else if (facility.first_prod_date && planDueDate) {
+          // No plan but has first prod date - check initial plan due date
+          const today = new Date();
+          const daysUntilDue = Math.ceil((planDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+          if (today > planDueDate) {
+            return (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium" title={`Initial plan was due ${planDueDate.toLocaleDateString()}`}>
+                Overdue
+              </span>
+            );
+          } else if (daysUntilDue <= 30) {
+            return (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium" title={`Initial plan due ${planDueDate.toLocaleDateString()}`}>
+                Due in {daysUntilDue}d
+              </span>
+            );
+          } else {
+            return (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium" title={`Initial plan due ${planDueDate.toLocaleDateString()}`}>
+                Pending
+              </span>
+            );
+          }
+        }
+        return <span className="text-gray-400 text-xs">No Plan</span>;
       case 'inspection_status':
         return getVerificationIcon(facility);
       case 'matched_facility_name':
@@ -1571,6 +1648,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <option value="day">Sort by Day</option>
                   <option value="status">Sort by Status</option>
                   <option value="nearest">Sort by Nearest to Me</option>
+                  <option value="spcc_plan_due">Sort by SPCC Plan Due Date</option>
                 </select>
               </div>
             )}
