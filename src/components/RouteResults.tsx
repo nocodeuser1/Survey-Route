@@ -493,6 +493,18 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const facility = getFacilityForStop(facilityName);
     if (!facility) return false;
 
+    // When SPCC Plans filter is active, never hide facilities that need plan attention
+    // This overrides the "hide completed" behavior because a facility can have
+    // a completed inspection but still need SPCC plan work
+    if (surveyType === 'spcc_plan') {
+      // If the facility needs SPCC plan attention, always show it
+      if (facilityNeedsSPCCPlan(facility)) {
+        return false;
+      }
+      // If filtering by SPCC plans and facility doesn't need one, hide it
+      return true;
+    }
+
     const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted } = completedVisibility;
 
     // If nothing is hidden, show all

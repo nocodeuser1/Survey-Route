@@ -564,7 +564,34 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const isCompleted = completedFacilityNames.has(facility.name);
           const isManuallyRemoved = latestFacilityData?.day_assignment === -2;
           const isSold = latestFacilityData?.status === 'sold';
-          const shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved)) || isSold;
+
+          // Check if facility needs SPCC plan (for surveyType === 'spcc_plan' handling)
+          const needsSPCCPlan = (() => {
+            if (!latestFacilityData) return false;
+            if (!latestFacilityData.spcc_plan_url || !latestFacilityData.spcc_pe_stamp_date) {
+              // No plan exists - needs attention (missing, pending, or overdue initial)
+              return true;
+            }
+            // Check if plan is expired or expiring (5 years from PE stamp)
+            const peStampDate = new Date(latestFacilityData.spcc_pe_stamp_date);
+            const renewalDate = new Date(peStampDate);
+            renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+            const today = new Date();
+            const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            // Needs attention if expired or expiring within 90 days
+            return daysUntilExpire <= 90;
+          })();
+
+          // When SPCC Plans filter is active, bypass normal hide logic
+          // Show facilities that need plan attention regardless of inspection status
+          let shouldBeHidden: boolean;
+          if (surveyType === 'spcc_plan') {
+            // If facility needs plan attention, always show it
+            // If it doesn't need attention, hide it (not relevant to this filter)
+            shouldBeHidden = !needsSPCCPlan || isSold;
+          } else {
+            shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved)) || isSold;
+          }
 
           if (!shouldBeHidden) {
             bounds.extend([currentLat, currentLng]);
