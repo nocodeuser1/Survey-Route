@@ -150,6 +150,7 @@ function App() {
   const [activeSettingsTab, setActiveSettingsTab] = useState('route-planning');
   const [isInspectionFormActive, setIsInspectionFormActive] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>('all');
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(() => {
     // Initialize as loading if we're starting on route-planning view
     const savedView = localStorage.getItem('currentView');
@@ -2530,6 +2531,7 @@ function App() {
                         onInspectionFormActiveChange={setIsInspectionFormActive}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
+                        surveyType={surveyType}
                       />
                     </div>
                   )}
@@ -2591,6 +2593,8 @@ function App() {
                         setIsFullScreenMap(true);
                       }}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
+                      surveyType={surveyType}
+                      onSurveyTypeChange={setSurveyType}
                     />
                   )}
 
@@ -2673,6 +2677,7 @@ function App() {
                             onLocationTrackingChange={setLocationTracking}
                             triggerFitBounds={triggerFitBounds}
                             onEditFacility={handleEditFacility}
+                            surveyType={surveyType}
                           />
                         </div>
                       </div>

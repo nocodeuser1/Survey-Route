@@ -44,16 +44,26 @@ interface RouteResultsProps {
   onToggleHideCompleted?: () => void;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onApplyWithTimeRefresh?: () => Promise<void>;
+  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
+  onSurveyTypeChange?: (type: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
 }
 
 // Survey type for route planning filtering
 type SurveyType = 'all' | 'spcc_inspection' | 'spcc_plan';
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, onToggleHideCompleted, onShowOnMap, onApplyWithTimeRefresh }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, onToggleHideCompleted, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [internalShowRefreshOptions, setInternalShowRefreshOptions] = useState(false);
-  const [surveyType, setSurveyType] = useState<SurveyType>('all');
+  const [internalSurveyType, setInternalSurveyType] = useState<SurveyType>('all');
+  const surveyType = externalSurveyType !== undefined ? externalSurveyType : internalSurveyType;
+  const setSurveyType = (type: SurveyType) => {
+    if (onSurveyTypeChange) {
+      onSurveyTypeChange(type);
+    } else {
+      setInternalSurveyType(type);
+    }
+  };
 
   const showRefreshOptions = externalShowRefreshOptions !== undefined ? externalShowRefreshOptions : internalShowRefreshOptions;
   const setShowRefreshOptions = onShowRefreshOptions || setInternalShowRefreshOptions;

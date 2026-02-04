@@ -45,6 +45,7 @@ interface RouteMapProps {
   onEditFacility?: (facility: Facility) => void;
   locationTracking?: boolean;
   onLocationTrackingChange?: (enabled: boolean) => void;
+  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
 }
 
 const COLORS = [
@@ -74,7 +75,7 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all' }: RouteMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
@@ -590,7 +591,22 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // Determine if valid completion exists (inspection or completion type)
           const isInternalCompletion = completionType === 'internal';
           const isExternalCompletion = completionType === 'external';
-          const hasAnyValidCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+          const hasAnyValidInspectionCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+
+          // SPCC Plan status calculation (for surveyType === 'spcc_plan')
+          let hasValidSPCCPlan = false;
+          if (latestFacilityData) {
+            // Plan is valid if it has a URL and PE stamp date, and is not expired (5 years)
+            if (latestFacilityData.spcc_plan_url && latestFacilityData.spcc_pe_stamp_date) {
+              const peStampDate = new Date(latestFacilityData.spcc_pe_stamp_date);
+              const renewalDate = new Date(peStampDate);
+              renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+              hasValidSPCCPlan = new Date() <= renewalDate;
+            }
+          }
+
+          // Use appropriate completion status based on surveyType
+          const hasAnyValidCompletion = surveyType === 'spcc_plan' ? hasValidSPCCPlan : hasAnyValidInspectionCompletion;
 
           // Debug logging for specific facilities the user mentioned
           if (facility.name.includes('11-2') || facility.name.includes('11-21')) {
@@ -1539,7 +1555,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
     }
-  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, triggerFitBounds]);
+  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, triggerFitBounds, surveyType]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {
