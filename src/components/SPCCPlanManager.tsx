@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { FileText, Calendar, AlertTriangle, CheckCircle, Upload, Clock, Download } from 'lucide-react';
+import { FileText, Calendar, AlertTriangle, Upload, Download, Link, Check } from 'lucide-react';
 import { Facility } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import SPCCPlanUploadModal from './SPCCPlanUploadModal';
+import SPCCStatusBadge from './SPCCStatusBadge';
+import { getSPCCPlanStatus } from '../utils/spccStatus';
 
 interface SPCCPlanManagerProps {
     facility: Facility;
@@ -12,50 +14,17 @@ interface SPCCPlanManagerProps {
 export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanManagerProps) {
     const { darkMode } = useDarkMode();
     const [showUploadModal, setShowUploadModal] = useState(false);
+    const [linkCopied, setLinkCopied] = useState(false);
 
-    // Compliance Logic
-    const getComplianceStatus = () => {
-        // 1. Check if plan exists
-        if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
-            // Check First Prod Date
-            if (facility.first_prod_date) {
-                const firstProd = new Date(facility.first_prod_date);
-                const sixMonthsLater = new Date(firstProd.setMonth(firstProd.getMonth() + 6));
-                const today = new Date();
+    const status = getSPCCPlanStatus(facility);
 
-                if (today > sixMonthsLater) {
-                    return { status: 'overdue', message: 'Initial plan overdue' };
-                }
-
-                const daysUntilDue = Math.ceil((sixMonthsLater.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                if (daysUntilDue <= 30) {
-                    return { status: 'warning', message: `Initial plan due in ${daysUntilDue} days` };
-                }
-
-                return { status: 'pending', message: 'Plan needed within 6 months of First Prod' };
-            }
-            return { status: 'missing', message: 'No plan on file' };
-        }
-
-        // 2. Check Renewal (5 years)
-        const peStampDate = new Date(facility.spcc_pe_stamp_date);
-        const renewalDate = new Date(peStampDate);
-        renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-        const today = new Date();
-
-        if (today > renewalDate) {
-            return { status: 'expired', message: 'Plan expired (5 years)' };
-        }
-
-        const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysUntilExpire <= 90) { // 3 month warning
-            return { status: 'expiring', message: `Expires in ${daysUntilExpire} days` };
-        }
-
-        return { status: 'valid', message: 'Plan Active' };
+    const copyViewerLink = () => {
+        const url = `${window.location.origin}/spcc-plan/${facility.id}`;
+        navigator.clipboard.writeText(url).then(() => {
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+        });
     };
-
-    const status = getComplianceStatus();
 
     return (
         <div className={`rounded-xl border p-4 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
@@ -66,7 +35,7 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                     <FileText className="w-5 h-5 text-blue-500" />
                     SPCC Plan Status
                 </h3>
-                <StatusBadge status={status} />
+                <SPCCStatusBadge facility={facility} showMessage />
             </div>
 
             <div className="space-y-4">
@@ -88,22 +57,43 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                                         <Calendar className="w-3 h-3" />
                                         Stamped: {new Date(facility.spcc_pe_stamp_date!).toLocaleDateString()}
                                     </span>
+                                    {status.renewalDate && (
+                                        <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'
+                                            }`}>
+                                            <Calendar className="w-3 h-3" />
+                                            Renewal: {status.renewalDate.toLocaleDateString()}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
 
-                        <a
-                            href={facility.spcc_plan_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`p-2 rounded-lg transition-colors ${darkMode
-                                    ? 'hover:bg-gray-600 text-gray-300 hover:text-white'
-                                    : 'hover:bg-gray-200 text-gray-600 hover:text-gray-900'
-                                }`}
-                            title="Download Plan"
-                        >
-                            <Download className="w-5 h-5" />
-                        </a>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={copyViewerLink}
+                                className={`p-2 rounded-lg transition-colors ${linkCopied
+                                        ? 'text-green-500'
+                                        : darkMode
+                                            ? 'hover:bg-gray-600 text-gray-300 hover:text-white'
+                                            : 'hover:bg-gray-200 text-gray-600 hover:text-gray-900'
+                                    }`}
+                                title={linkCopied ? 'Link copied!' : 'Copy viewer link (for QR code)'}
+                            >
+                                {linkCopied ? <Check className="w-5 h-5" /> : <Link className="w-5 h-5" />}
+                            </button>
+                            <a
+                                href={facility.spcc_plan_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`p-2 rounded-lg transition-colors ${darkMode
+                                        ? 'hover:bg-gray-600 text-gray-300 hover:text-white'
+                                        : 'hover:bg-gray-200 text-gray-600 hover:text-gray-900'
+                                    }`}
+                                title="Download Plan"
+                            >
+                                <Download className="w-5 h-5" />
+                            </a>
+                        </div>
                     </div>
                 ) : (
                     <div className={`text-center py-6 border-2 border-dashed rounded-lg ${darkMode ? 'border-gray-700' : 'border-gray-200'
@@ -125,8 +115,8 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                     {facility.spcc_plan_url ? 'Upload New Version' : 'Upload SPCC Plan'}
                 </button>
 
-                {/* Compliance Info Box */}
-                {(status.status === 'overdue' || status.status === 'expired') && (
+                {/* Compliance Alert Box */}
+                {status.isUrgent && !status.isCompliant && (
                     <div className={`p-3 rounded-lg flex items-start gap-3 mt-2 ${darkMode ? 'bg-red-900/30 text-red-200' : 'bg-red-50 text-red-700'
                         }`}>
                         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -144,48 +134,8 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                 facility={facility}
                 onUploadComplete={() => {
                     if (onPlanUpdate) onPlanUpdate();
-                    // Optional: trigger refresh
                 }}
             />
         </div>
-    );
-}
-
-function StatusBadge({ status }: { status: { status: string; message: string } }) {
-    const { darkMode } = useDarkMode();
-
-    let colors = darkMode
-        ? 'bg-gray-700 text-gray-300'
-        : 'bg-gray-100 text-gray-600';
-    let Icon = Clock;
-
-    switch (status.status) {
-        case 'valid':
-            colors = darkMode
-                ? 'bg-green-900/30 text-green-400'
-                : 'bg-green-100 text-green-700';
-            Icon = CheckCircle;
-            break;
-        case 'warning':
-        case 'expiring':
-            colors = darkMode
-                ? 'bg-amber-900/30 text-amber-400'
-                : 'bg-amber-50 text-amber-700';
-            Icon = AlertTriangle;
-            break;
-        case 'overdue':
-        case 'expired':
-            colors = darkMode
-                ? 'bg-red-900/30 text-red-400'
-                : 'bg-red-50 text-red-700';
-            Icon = AlertTriangle;
-            break;
-    }
-
-    return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${colors}`}>
-            <Icon className="w-3.5 h-3.5" />
-            {status.message}
-        </span>
     );
 }

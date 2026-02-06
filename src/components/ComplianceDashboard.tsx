@@ -113,7 +113,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
       ).length;
 
       const spccInitialPending = spccData?.filter(s => s.compliance_status === 'initial_due').length || 0;
-      const spccRenewalsDue = spccData?.filter(s => s.compliance_status === 'renewal_due').length || 0;
+      const spccRenewalsDue = spccData?.filter(s => s.compliance_status === 'renewal_due' || s.compliance_status === 'expiring').length || 0;
       const inspectionsDue = facilitiesWithCompliance.filter(fc => fc.inspectionStatus === 'due_soon' || fc.inspectionStatus === 'overdue').length;
 
       setStats({
@@ -432,6 +432,12 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                             {fc.spccCompliance.compliance_status === 'renewal_due' && 'Renewal Due'}
                             {fc.spccCompliance.compliance_status === 'renewal_complete' && 'Renewal Complete'}
                             {fc.spccCompliance.compliance_status === 'overdue' && 'Overdue'}
+                            {fc.spccCompliance.compliance_status === 'expiring' && 'Expiring'}
+                            {fc.spccCompliance.pe_stamp_date && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                PE Stamp: {new Date(fc.spccCompliance.pe_stamp_date).toLocaleDateString()}
+                              </div>
+                            )}
                           </>
                         ) : (
                           'No IP Date'

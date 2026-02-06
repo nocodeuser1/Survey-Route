@@ -74,12 +74,13 @@ export default function SPCCPlanUploadModal({ isOpen, onClose, facility, onUploa
                 .getPublicUrl(fileName);
 
             // 3. Update Facility Record
+            // Note: spcc_pe_stamp_date is used for SPCC PLAN tracking
+            // spcc_inspection_date is separate and used for SPCC INSPECTION tracking
             const { error: updateError } = await supabase
                 .from('facilities')
                 .update({
                     spcc_plan_url: publicUrl,
                     spcc_pe_stamp_date: peStampDate,
-                    spcc_status: 'active' // Optional: Update status if needed logic implies it
                 })
                 .eq('id', facility.id);
 

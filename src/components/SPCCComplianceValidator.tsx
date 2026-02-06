@@ -72,7 +72,7 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
       const initialDueDate = new Date(ipDate);
       initialDueDate.setMonth(initialDueDate.getMonth() + 6);
 
-      const spccCompletedDate = facility.spcc_completed_date ? parseDate(facility.spcc_completed_date) : null;
+      const spccCompletedDate = facility.spcc_inspection_date ? parseDate(facility.spcc_inspection_date) : null;
 
       if (!spccCompletedDate) {
         const daysUntilInitialDue = Math.floor((initialDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));

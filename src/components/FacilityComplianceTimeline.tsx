@@ -137,13 +137,13 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
       date: compliance.initial_spcc_due_date,
       label: 'Initial SPCC Due',
       icon: <Clock className="w-4 h-4" />,
-      color: compliance.initial_spcc_completed_date ? 'text-gray-400' : 'text-yellow-500',
+      color: compliance.initial_spcc_inspection_date ? 'text-gray-400' : 'text-yellow-500',
     });
   }
 
-  if (compliance.initial_spcc_completed_date) {
+  if (compliance.initial_spcc_inspection_date) {
     timelineEvents.push({
-      date: compliance.initial_spcc_completed_date,
+      date: compliance.initial_spcc_inspection_date,
       label: 'Initial SPCC Completed',
       icon: <CheckCircle className="w-4 h-4" />,
       color: 'text-green-500',

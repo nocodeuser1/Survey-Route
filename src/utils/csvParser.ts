@@ -26,7 +26,7 @@ export interface ParsedFacility {
   // Date fields
   first_prod_date?: string;
   spcc_due_date?: string;
-  spcc_completed_date?: string;
+  spcc_inspection_date?: string;
 }
 
 export interface ColumnMapping {
@@ -51,7 +51,7 @@ export interface ColumnMapping {
   long_well_sheet?: string | null;
   first_prod_date?: string | null;
   spcc_due_date?: string | null;
-  spcc_completed_date?: string | null;
+  spcc_inspection_date?: string | null;
 }
 
 export interface ParseResult {
@@ -116,7 +116,7 @@ const spccDueDateVariations = [
 ];
 
 const spccCompletedVariations = [
-  'spcc completed date', 'spcc_completed_date', 'spcc complete date',
+  'spcc completed date', 'spcc_inspection_date', 'spcc complete date',
   'completed date', 'spcc completion'
 ];
 
@@ -163,7 +163,7 @@ export function detectColumns(headers: string[]): ColumnMapping {
     long_well_sheet: findColumn(headers, longWellSheetVariations),
     first_prod_date: findColumn(headers, firstProdVariations),
     spcc_due_date: findColumn(headers, spccDueDateVariations),
-    spcc_completed_date: findColumn(headers, spccCompletedVariations),
+    spcc_inspection_date: findColumn(headers, spccCompletedVariations),
   };
 }
 
@@ -297,8 +297,8 @@ export function parseCSV(file: File): Promise<ParseResult> {
             facility.spcc_due_date = row[columnMapping.spcc_due_date]?.trim();
           }
 
-          if (columnMapping.spcc_completed_date && row[columnMapping.spcc_completed_date]) {
-            facility.spcc_completed_date = row[columnMapping.spcc_completed_date]?.trim();
+          if (columnMapping.spcc_inspection_date && row[columnMapping.spcc_inspection_date]) {
+            facility.spcc_inspection_date = row[columnMapping.spcc_inspection_date]?.trim();
           }
 
           facilities.push(facility);

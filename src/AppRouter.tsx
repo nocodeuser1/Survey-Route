@@ -11,6 +11,7 @@ import AgencyDashboard from './pages/AgencyDashboard';
 import AcceptInvitePage from './pages/AcceptInvitePage';
 import SignatureSetupPage from './pages/SignatureSetupPage';
 import UnsubscribePage from './pages/UnsubscribePage';
+import SPCCPlanViewerPage from './pages/SPCCPlanViewerPage';
 import App from './App';
 import LoadingScreen from './components/LoadingScreen';
 
@@ -105,6 +106,7 @@ export default function AppRouter() {
               <Route path="/agency-signup" element={<AgencySignupPage />} />
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/unsubscribe" element={<UnsubscribePage />} />
+              <Route path="/spcc-plan/:facilityId" element={<SPCCPlanViewerPage />} />
               <Route
                 path="/setup-signature"
                 element={

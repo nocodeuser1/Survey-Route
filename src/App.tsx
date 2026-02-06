@@ -383,6 +383,35 @@ function App() {
     };
   }, [currentAccount?.id, isInspectionFormActive, navigationMode]);
 
+  // Real-time subscription for facility changes (SPCC plan uploads, status updates)
+  useEffect(() => {
+    if (!currentAccount?.id) return;
+
+    const facilitiesChannel = supabase
+      .channel('facilities-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'facilities',
+          filter: `account_id=eq.${currentAccount.id}`,
+        },
+        (payload) => {
+          console.log('[App] Real-time facility change:', payload.new.id);
+          setFacilities(prev =>
+            prev.map(f => f.id === payload.new.id ? { ...f, ...payload.new as Facility } : f)
+          );
+          setRouteVersion(prev => prev + 1);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(facilitiesChannel);
+    };
+  }, [currentAccount?.id]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       const now = Date.now();

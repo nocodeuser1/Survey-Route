@@ -9,6 +9,7 @@ import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import NavigationPopup from './NavigationPopup';
 import FacilityDetailModal from './FacilityDetailModal';
+import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SpeedDisplay from './SpeedDisplay';
 
@@ -148,6 +149,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
   const [surveyFacility, setSurveyFacility] = useState<Facility | null>(null);
+  const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
   const [addFacilityCoords, setAddFacilityCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -157,6 +159,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [addFacilityError, setAddFacilityError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; facility: Facility } | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const surveyTypeRef = useRef(surveyType);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -185,6 +188,20 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
   const [isTogglingNavMode, setIsTogglingNavMode] = useState(false);
   const navModeToggleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Keep surveyType ref in sync for DOM event listeners
+  useEffect(() => {
+    surveyTypeRef.current = surveyType;
+  }, [surveyType]);
+
+  // Route facility click based on current surveyType
+  const openFacilityModal = (facility: Facility) => {
+    if (surveyTypeRef.current === 'spcc_plan') {
+      setSpccPlanDetailFacility(facility);
+    } else {
+      setSurveyFacility(facility);
+    }
+  };
 
   // Sync search visibility with parent component
   useEffect(() => {
@@ -838,7 +855,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Get full facility data including SPCC completion status
             const fullFacility = facilities.find(f => f.name === facility.name);
-            const spccCompletedDate = fullFacility?.spcc_completed_date;
+            const spccCompletedDate = fullFacility?.spcc_inspection_date;
             const spccBadgeHtml = spccCompletedDate
               ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 10px; font-weight: 600; margin-left: 6px;">
                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -1090,7 +1107,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   console.log('[RouteMap] - Matched facility:', facilityForThisMarker?.name, facilityForThisMarker?.id);
 
                   if (facilityForThisMarker) {
-                    setSurveyFacility(facilityForThisMarker);
+                    openFacilityModal(facilityForThisMarker);
                   } else {
                     alert('Could not find facility data. Please refresh the page.');
                   }
@@ -1119,8 +1136,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   console.log('[RouteMap] - Facility inspections count:', facilityInspections.length);
 
                   if (facilityForThisMarker) {
-                    // If facility has existing inspections, show the inspections list modal
-                    if (facilityInspections.length > 0) {
+                    // In SPCC plan mode, always open the plan modal
+                    if (surveyTypeRef.current === 'spcc_plan') {
+                      openFacilityModal(facilityForThisMarker);
+                    } else if (facilityInspections.length > 0) {
+                      // If facility has existing inspections, show the inspections list modal
                       setInspectionsListFacility(facilityForThisMarker);
                     } else {
                       // No existing inspections, open the survey form directly
@@ -1402,8 +1422,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 console.log('[RouteMap] Non-route survey button clicked!');
                 console.log('[RouteMap] - Facility inspections count:', facilityInspections.length);
 
-                // If facility has existing inspections, show the inspections list modal
-                if (facilityInspections.length > 0) {
+                if (surveyTypeRef.current === 'spcc_plan') {
+                  openFacilityModal(facility);
+                } else if (facilityInspections.length > 0) {
+                  // If facility has existing inspections, show the inspections list modal
                   setInspectionsListFacility(facility);
                 } else {
                   // No existing inspections, open the survey form directly
@@ -1504,9 +1526,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 <div style="font-size: 12px; color: #6B7280; margin-bottom: 4px;">
                   <strong>Status:</strong> Externally Completed
                 </div>
-                ${facility.spcc_completed_date ? `
+                ${facility.spcc_inspection_date ? `
                   <div style="font-size: 12px; color: #6B7280; margin-bottom: 4px;">
-                    <strong>Completed:</strong> ${new Date(facility.spcc_completed_date).toLocaleDateString()}
+                    <strong>Completed:</strong> ${new Date(facility.spcc_inspection_date).toLocaleDateString()}
                   </div>
                 ` : ''}
                 <div style="font-size: 11px; color: #9CA3AF; margin-top: 8px; padding-top: 8px; border-top: 1px solid #E5E7EB;">
@@ -3321,6 +3343,19 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         />
       )}
 
+      {spccPlanDetailFacility && (
+        <SPCCPlanDetailModal
+          facility={spccPlanDetailFacility}
+          onClose={() => setSpccPlanDetailFacility(null)}
+          onFacilitiesChange={() => {
+            if (onFacilitiesChange) onFacilitiesChange();
+          }}
+          onViewInspectionDetails={() => {
+            setSurveyFacility(spccPlanDetailFacility);
+          }}
+        />
+      )}
+
       {/* Inspection History List Modal */}
       {inspectionsListFacility && userId && (
         <FacilityInspectionsManager
@@ -3523,7 +3558,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 if (fullFacility) {
                   // Open facility detail modal after a short delay
                   setTimeout(() => {
-                    setSurveyFacility(fullFacility);
+                    openFacilityModal(fullFacility);
                   }, 800);
                 }
               }

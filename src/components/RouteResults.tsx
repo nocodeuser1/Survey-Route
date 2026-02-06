@@ -5,7 +5,10 @@ import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../se
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { UserSettings, Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
+import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import { isInspectionValid } from '../utils/inspectionUtils';
+import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
+import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
 import InspectionReportExport from './InspectionReportExport';
 import SavedRoutesManager from './SavedRoutesManager';
@@ -54,6 +57,7 @@ type SurveyType = 'all' | 'spcc_inspection' | 'spcc_plan';
 export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, onToggleHideCompleted, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
+  const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [internalShowRefreshOptions, setInternalShowRefreshOptions] = useState(false);
   const [internalSurveyType, setInternalSurveyType] = useState<SurveyType>('all');
   const surveyType = externalSurveyType !== undefined ? externalSurveyType : internalSurveyType;
@@ -546,64 +550,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const handleFacilityClick = (facilityName: string) => {
     const facility = getFacilityForStop(facilityName);
     if (facility) {
-      setSelectedFacility(facility);
-    }
-  };
-
-  // SPCC Plan Status Helper Functions
-  const getSPCCPlanStatus = (facility: Facility): { status: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'pending'; message: string; dueDate?: Date } => {
-    // Check if plan exists
-    if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
-      // Check First Prod Date for initial plan requirement
-      if (facility.first_prod_date) {
-        const firstProd = new Date(facility.first_prod_date);
-        const sixMonthsLater = new Date(firstProd);
-        sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
-        const today = new Date();
-
-        if (today > sixMonthsLater) {
-          return { status: 'overdue', message: 'Initial plan overdue', dueDate: sixMonthsLater };
-        }
-
-        const daysUntilDue = Math.ceil((sixMonthsLater.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysUntilDue <= 30) {
-          return { status: 'warning', message: `Initial plan due in ${daysUntilDue} days`, dueDate: sixMonthsLater };
-        }
-
-        return { status: 'pending', message: 'Plan needed within 6 months of First Prod', dueDate: sixMonthsLater };
+      if (surveyType === 'spcc_plan') {
+        setSpccPlanDetailFacility(facility);
+      } else {
+        setSelectedFacility(facility);
       }
-      return { status: 'missing', message: 'No plan on file' };
     }
-
-    // Check Renewal (5 years from PE stamp date)
-    const peStampDate = new Date(facility.spcc_pe_stamp_date);
-    const renewalDate = new Date(peStampDate);
-    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-    const today = new Date();
-
-    if (today > renewalDate) {
-      return { status: 'expired', message: 'Plan expired (5 years)', dueDate: renewalDate };
-    }
-
-    const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysUntilExpire <= 90) {
-      return { status: 'expiring', message: `Expires in ${daysUntilExpire} days`, dueDate: renewalDate };
-    }
-
-    return { status: 'valid', message: 'Plan Active', dueDate: renewalDate };
-  };
-
-  // Check if facility needs an SPCC Plan (for filtering)
-  const facilityNeedsSPCCPlan = (facility: Facility): boolean => {
-    const planStatus = getSPCCPlanStatus(facility);
-    return ['missing', 'overdue', 'warning', 'expiring', 'expired'].includes(planStatus.status);
   };
 
   // Check if facility needs an SPCC Inspection (for filtering)
   const facilityNeedsSPCCInspection = (facility: Facility): boolean => {
     // Check for valid completion type
-    if (facility.spcc_completion_type && facility.spcc_completed_date) {
-      const completedDate = new Date(facility.spcc_completed_date);
+    if (facility.spcc_completion_type && facility.spcc_inspection_date) {
+      const completedDate = new Date(facility.spcc_inspection_date);
       const oneYearFromCompletion = new Date(completedDate);
       oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
       if (new Date() <= oneYearFromCompletion) {
@@ -662,7 +621,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         planCount++;
         if (isInRoute) planInRouteCount++;
         const status = getSPCCPlanStatus(f);
-        if (status.status === 'overdue' || status.status === 'expired') {
+        if (status.status === 'initial_overdue' || status.status === 'expired') {
           planPastDueCount++;
         }
       }
@@ -671,7 +630,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         if (isInRoute) inspectionInRouteCount++;
         // Check if inspection is past due (no valid inspection at all)
         const inspection = inspections.get(f.id);
-        if (!inspection && !f.spcc_completed_date) {
+        if (!inspection && !f.spcc_inspection_date) {
           // No inspection ever - check if facility has been active > 1 year (past due)
           if (f.first_prod_date) {
             const firstProd = new Date(f.first_prod_date);
@@ -683,8 +642,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           }
         } else if (inspection && !isInspectionValid(inspection)) {
           inspectionPastDueCount++;
-        } else if (f.spcc_completed_date) {
-          const completedDate = new Date(f.spcc_completed_date);
+        } else if (f.spcc_inspection_date) {
+          const completedDate = new Date(f.spcc_inspection_date);
           const oneYearFromCompletion = new Date(completedDate);
           oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
           if (new Date() > oneYearFromCompletion) {
@@ -1898,25 +1857,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                   {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
                                     const facility = getFacilityForStop(segment.to);
                                     if (!facility) return null;
-                                    const status = getSPCCPlanStatus(facility);
-                                    const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
-                                      missing: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '⚠️ No Plan' },
-                                      overdue: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '🔴 Initial Overdue' },
-                                      expired: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: '🔴 Plan Expired' },
-                                      warning: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-400', label: '🟠 Initial Due Soon' },
-                                      expiring: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-400', label: '🟠 Expiring Soon' },
-                                      valid: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400', label: '✅ Valid' },
-                                      pending: { bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-600 dark:text-gray-300', label: '⏳ Pending' },
-                                    };
-                                    const config = statusConfig[status.status] || statusConfig.pending;
-                                    return (
-                                      <span
-                                        className={`px-2 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text}`}
-                                        title={status.message + (status.dueDate ? ` (${status.dueDate.toLocaleDateString()})` : '')}
-                                      >
-                                        {config.label}
-                                      </span>
-                                    );
+                                    return <SPCCStatusBadge facility={facility} showMessage />;
                                   })()}
                                   {/* Standard inspection icons - show when not filtering by spcc_plan */}
                                   {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
@@ -2137,6 +2078,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           allInspections={Array.from(inspections.values())}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
+          }}
+        />
+      )}
+
+      {spccPlanDetailFacility && (
+        <SPCCPlanDetailModal
+          facility={spccPlanDetailFacility}
+          onClose={() => setSpccPlanDetailFacility(null)}
+          onFacilitiesChange={() => {
+            loadInspections();
+            if (onFacilitiesUpdated) onFacilitiesUpdated();
+          }}
+          onViewInspectionDetails={() => {
+            setSelectedFacility(spccPlanDetailFacility);
           }}
         />
       )}

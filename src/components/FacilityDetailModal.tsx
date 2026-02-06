@@ -5,8 +5,7 @@ import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
-import SPCCCompletedBadge from './SPCCCompletedBadge';
-import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
+import SPCCStatusBadge from './SPCCStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
@@ -200,7 +199,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
         .from('facilities')
         .update({
           spcc_completion_type: completionType,
-          spcc_completed_date: completionType ? new Date().toISOString() : null
+          spcc_inspection_date: completionType ? new Date().toISOString() : null
         })
         .eq('id', facility.id);
 
@@ -208,7 +207,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
 
       // Update the local facility object
       facility.spcc_completion_type = completionType;
-      facility.spcc_completed_date = completionType ? new Date().toISOString() : null;
+      facility.spcc_inspection_date = completionType ? new Date().toISOString() : null;
 
       // Force re-render by closing and reopening
       onClose();
@@ -287,11 +286,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl font-bold">{facility.name}</h2>
-                {facility.spcc_completion_type === 'external' ? (
-                  <SPCCExternalCompletionBadge completedDate={facility.spcc_completed_date} />
-                ) : (
-                  <SPCCCompletedBadge completedDate={facility.spcc_completed_date} />
-                )}
+                <SPCCStatusBadge facility={facility} showMessage />
                 {facility.status === 'sold' && (
                   <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300">
                     <DollarSign className="w-3 h-3" />
@@ -490,7 +485,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
             </div>
           ) : (
             <div className="space-y-4">
-              {facility.spcc_completion_type === 'internal' && facility.spcc_completed_date && inspections.length === 0 && (
+              {facility.spcc_completion_type === 'internal' && facility.spcc_inspection_date && inspections.length === 0 && (
                 <div className="border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 transition-colors">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -507,10 +502,10 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       </p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
-                        Completed on {new Date(facility.spcc_completed_date).toLocaleDateString()}
+                        Completed on {new Date(facility.spcc_inspection_date).toLocaleDateString()}
                       </p>
-                      {facility.spcc_completed_date && (() => {
-                        const completedDate = new Date(facility.spcc_completed_date);
+                      {facility.spcc_inspection_date && (() => {
+                        const completedDate = new Date(facility.spcc_inspection_date);
                         const expirationDate = new Date(completedDate);
                         expirationDate.setFullYear(expirationDate.getFullYear() + 1);
                         const now = new Date();
@@ -539,7 +534,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                   </div>
                 </div>
               )}
-              {facility.spcc_completion_type === 'external' && facility.spcc_completed_date && (
+              {facility.spcc_completion_type === 'external' && facility.spcc_inspection_date && (
                 <div className="border-2 border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 transition-colors">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -556,10 +551,10 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       </p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
-                        Completed on {new Date(facility.spcc_completed_date).toLocaleDateString()}
+                        Completed on {new Date(facility.spcc_inspection_date).toLocaleDateString()}
                       </p>
-                      {facility.spcc_completed_date && (() => {
-                        const completedDate = new Date(facility.spcc_completed_date);
+                      {facility.spcc_inspection_date && (() => {
+                        const completedDate = new Date(facility.spcc_inspection_date);
                         const expirationDate = new Date(completedDate);
                         expirationDate.setFullYear(expirationDate.getFullYear() + 1);
                         const now = new Date();

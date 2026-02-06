@@ -52,7 +52,7 @@ export interface Facility {
   // Date fields
   first_prod_date?: string | null;
   spcc_due_date?: string | null;
-  spcc_completed_date?: string | null;
+  spcc_inspection_date?: string | null;
   // Completion type tracking
   spcc_completion_type?: 'internal' | 'external' | null;
   spcc_plan_url?: string | null;
@@ -66,6 +66,7 @@ export interface Facility {
   day?: number;
   status?: 'active' | 'sold';
   sold_at?: string | null;
+  notes?: string | null;
 }
 
 export interface HomeBase {
@@ -322,13 +323,15 @@ export interface SPCCComplianceTracking {
   account_id: string;
   initial_production_date?: string | null;
   initial_spcc_due_date?: string | null;
-  initial_spcc_completed_date?: string | null;
+  initial_spcc_inspection_date?: string | null;
   renewal_cycle_number: number;
   current_renewal_due_date?: string | null;
   current_renewal_completed_date?: string | null;
   is_compliant: boolean;
-  compliance_status: 'not_started' | 'initial_due' | 'initial_complete' | 'renewal_due' | 'renewal_complete' | 'overdue';
+  compliance_status: 'not_started' | 'initial_due' | 'initial_complete' | 'renewal_due' | 'renewal_complete' | 'overdue' | 'expiring';
   days_until_due?: number | null;
+  pe_stamp_date?: string | null;
+  plan_url?: string | null;
   notification_sent_at?: string | null;
   notes?: string | null;
   created_at: string;

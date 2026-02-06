@@ -180,7 +180,7 @@ export default function InspectionsOverviewModal({
 
             {/* Modal */}
             <div className={`relative w-[95%] max-w-6xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden ${darkMode ? 'bg-gray-900' : 'bg-white'
-                }`}>
+                }`} onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
                 <div className={`flex items-center justify-between px-6 py-4 border-b ${darkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'
                     }`}>

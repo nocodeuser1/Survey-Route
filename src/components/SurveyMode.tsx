@@ -7,7 +7,8 @@ import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
-import SPCCCompletedBadge from './SPCCCompletedBadge';
+import SPCCPlanDetailModal from './SPCCPlanDetailModal';
+import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
@@ -66,6 +67,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   });
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [managingInspectionsFacility, setManagingInspectionsFacility] = useState<Facility | null>(null);
+  const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
@@ -518,8 +520,8 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
   function getInspectionStatus(facility: Facility): 'completed' | 'incomplete' | 'expired' | 'draft' {
     // Check for internal or external completion
-    if (facility.spcc_completion_type && facility.spcc_completed_date) {
-      const spccDate = new Date(facility.spcc_completed_date);
+    if (facility.spcc_completion_type && facility.spcc_inspection_date) {
+      const spccDate = new Date(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();
@@ -542,9 +544,9 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
     if (validInspections.length > 0) return 'completed';
 
-    // Check if SPCC is expired based on spcc_completed_date
-    if (facility.spcc_completed_date) {
-      const spccDate = new Date(facility.spcc_completed_date);
+    // Check if SPCC is expired based on spcc_inspection_date
+    if (facility.spcc_inspection_date) {
+      const spccDate = new Date(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();
@@ -1048,7 +1050,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                             </span>
                           )}
 
-                          <SPCCCompletedBadge completedDate={facility.spcc_completed_date} className="text-[10px]" />
+                          <SPCCStatusBadge facility={facility} className="text-[10px]" />
 
                           {latestInspection && (
                             <span className="text-[10px] text-gray-500">
@@ -1074,21 +1076,25 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  console.log('[SurveyMode] Starting inspection', {
-                                    facilityId: facility.id,
-                                    facilityName: facility.name,
-                                    userId,
-                                    accountId,
-                                    teamNumber,
-                                    currentStatus: status,
-                                    timestamp: new Date().toISOString()
-                                  });
-                                  setInspectingFacility(facility);
+                                  if (viewMode === 'plans') {
+                                    setSpccPlanDetailFacility(facility);
+                                  } else {
+                                    console.log('[SurveyMode] Starting inspection', {
+                                      facilityId: facility.id,
+                                      facilityName: facility.name,
+                                      userId,
+                                      accountId,
+                                      teamNumber,
+                                      currentStatus: status,
+                                      timestamp: new Date().toISOString()
+                                    });
+                                    setInspectingFacility(facility);
+                                  }
                                 }}
-                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium"
+                                className={`flex items-center justify-center gap-1.5 px-3 py-2 text-white rounded-lg transition-colors text-xs font-medium ${viewMode === 'plans' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
                               >
                                 <FileText className="w-3.5 h-3.5" />
-                                {status === 'completed' ? 'Re-inspect' : 'Inspect'}
+                                {viewMode === 'plans' ? 'SPCC Plan' : status === 'completed' ? 'Re-inspect' : 'Inspect'}
                               </button>
                             </div>
 
@@ -1208,6 +1214,20 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
             console.log('[SurveyMode] Editing draft inspection', inspection.id);
             setManagingInspectionsFacility(null);
             setInspectingFacility(managingInspectionsFacility);
+          }}
+        />
+      )}
+
+      {spccPlanDetailFacility && (
+        <SPCCPlanDetailModal
+          facility={spccPlanDetailFacility}
+          onClose={() => setSpccPlanDetailFacility(null)}
+          onFacilitiesChange={() => {
+            loadInspections();
+            if (onFacilitiesChange) onFacilitiesChange();
+          }}
+          onViewInspectionDetails={() => {
+            setInspectingFacility(spccPlanDetailFacility);
           }}
         />
       )}
