@@ -605,6 +605,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     let inspectionPastDueCount = 0;
     let planInRouteCount = 0;
     let inspectionInRouteCount = 0;
+    let planPastDueInRouteCount = 0;
+    let inspectionPastDueInRouteCount = 0;
 
     // Get all facility names that are in the current route
     const facilitiesInRoute = new Set<string>();
@@ -623,12 +625,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         const status = getSPCCPlanStatus(f);
         if (status.status === 'initial_overdue' || status.status === 'expired') {
           planPastDueCount++;
+          if (isInRoute) planPastDueInRouteCount++;
         }
       }
       if (facilityNeedsSPCCInspection(f)) {
         inspectionCount++;
         if (isInRoute) inspectionInRouteCount++;
-        // Check if inspection is past due (no valid inspection at all)
+        // Check if inspection is past due
+        let isPastDue = false;
         const inspection = inspections.get(f.id);
         if (!inspection && !f.spcc_inspection_date) {
           // No inspection ever - check if facility has been active > 1 year (past due)
@@ -637,18 +641,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             const oneYearLater = new Date(firstProd);
             oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
             if (new Date() > oneYearLater) {
-              inspectionPastDueCount++;
+              isPastDue = true;
             }
           }
         } else if (inspection && !isInspectionValid(inspection)) {
-          inspectionPastDueCount++;
+          isPastDue = true;
         } else if (f.spcc_inspection_date) {
           const completedDate = new Date(f.spcc_inspection_date);
           const oneYearFromCompletion = new Date(completedDate);
           oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
           if (new Date() > oneYearFromCompletion) {
-            inspectionPastDueCount++;
+            isPastDue = true;
           }
+        }
+        if (isPastDue) {
+          inspectionPastDueCount++;
+          if (isInRoute) inspectionPastDueInRouteCount++;
         }
       }
     });
@@ -659,7 +667,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       planPastDueCount,
       inspectionPastDueCount,
       planInRouteCount,
-      inspectionInRouteCount
+      inspectionInRouteCount,
+      planPastDueInRouteCount,
+      inspectionPastDueInRouteCount
     };
   };
 
@@ -1572,9 +1582,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         {counts.inspectionInRouteCount}
                       </span>
                     )}
-                    {counts.inspectionPastDueCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueCount} past due`}>
-                        {counts.inspectionPastDueCount} overdue
+                    {counts.inspectionPastDueInRouteCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueInRouteCount} overdue in route (${counts.inspectionPastDueCount} total overdue)`}>
+                        {counts.inspectionPastDueInRouteCount} overdue
                       </span>
                     )}
                   </button>
@@ -1593,9 +1603,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         {counts.planInRouteCount}
                       </span>
                     )}
-                    {counts.planPastDueCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueCount} past due / expired`}>
-                        {counts.planPastDueCount} overdue
+                    {counts.planPastDueInRouteCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueInRouteCount} overdue in route (${counts.planPastDueCount} total overdue)`}>
+                        {counts.planPastDueInRouteCount} overdue
                       </span>
                     )}
                   </button>
@@ -1604,13 +1614,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             })()}
           </div>
         </div>
-        {surveyType !== 'all' && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-            {surveyType === 'spcc_inspection'
-              ? `Showing ${getSurveyTypeCounts().inspectionInRouteCount} of ${getSurveyTypeCounts().inspectionCount} facilities that need their yearly SPCC inspection (only those in current route).`
-              : `Showing ${getSurveyTypeCounts().planInRouteCount} of ${getSurveyTypeCounts().planCount} facilities needing SPCC plan attention (missing, overdue, expiring, or expired).`}
-          </p>
-        )}
+        {surveyType !== 'all' && (() => {
+          const c = getSurveyTypeCounts();
+          return (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {surveyType === 'spcc_inspection'
+                ? `Showing ${c.inspectionInRouteCount} of ${c.inspectionCount} facilities needing yearly SPCC inspection (${c.inspectionPastDueInRouteCount} overdue in route, ${c.inspectionPastDueCount} overdue total).`
+                : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
+            </p>
+          );
+        })()}
       </div>
 
       <div className="flex items-center justify-between mb-4">
@@ -1851,7 +1864,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       }`}
                                     onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
                                   >
-                                    {segment.to === 'Home Base' ? `${segment.from} → Home Base` : segment.to}
+                                    {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
                                   </p>
                                   {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
                                   {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
