@@ -1597,9 +1597,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           {counts.inspectionInRouteCount}
                         </span>
                       )}
-                      {counts.inspectionPastDueInRouteCount > 0 && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueInRouteCount} overdue in route (${counts.inspectionPastDueCount} total overdue)`}>
-                          {counts.inspectionPastDueInRouteCount} overdue
+                      {counts.inspectionPastDueCount > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueCount} overdue total`}>
+                          {counts.inspectionPastDueCount} overdue
                         </span>
                       )}
                     </button>
@@ -1618,9 +1618,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           {counts.planInRouteCount}
                         </span>
                       )}
-                      {counts.planPastDueInRouteCount > 0 && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueInRouteCount} overdue in route (${counts.planPastDueCount} total overdue)`}>
-                          {counts.planPastDueInRouteCount} overdue
+                      {counts.planPastDueCount > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueCount} overdue total`}>
+                          {counts.planPastDueCount} overdue
                         </span>
                       )}
                     </button>

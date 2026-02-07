@@ -2561,20 +2561,21 @@ function App() {
                     });
 
                     let planInRouteCount = 0;
-                    let planPastDueInRouteCount = 0;
+                    let planPastDueCount = 0;
                     let inspectionInRouteCount = 0;
-                    let inspectionPastDueInRouteCount = 0;
+                    let inspectionPastDueCount = 0;
 
                     nonSoldFacilities.forEach(f => {
                       const isInRoute = facilitiesInRoute.has(f.name);
-                      if (facilityNeedsSPCCPlan(f)) {
-                        if (isInRoute) {
-                          planInRouteCount++;
-                          const s = getSPCCPlanStatus(f);
-                          if (s.status === 'initial_overdue' || s.status === 'expired') planPastDueInRouteCount++;
-                        }
+                      // SPCC Plan counts
+                      const s = getSPCCPlanStatus(f);
+                      if (s.status === 'initial_overdue' || s.status === 'expired') {
+                        planPastDueCount++;
                       }
-                      // Check if needs inspection
+                      if (facilityNeedsSPCCPlan(f) && isInRoute) {
+                        planInRouteCount++;
+                      }
+                      // SPCC Inspection counts
                       let needsInspection = true;
                       if (f.spcc_completion_type && f.spcc_inspection_date) {
                         const cd = new Date(f.spcc_inspection_date);
@@ -2586,25 +2587,27 @@ function App() {
                         const insp = inspectionsMap.get(f.id);
                         if (isInspectionValid(insp)) needsInspection = false;
                       }
-                      if (needsInspection && isInRoute) {
-                        inspectionInRouteCount++;
+                      if (needsInspection) {
+                        if (isInRoute) inspectionInRouteCount++;
                         // Check if past due
                         const insp = inspectionsMap.get(f.id);
+                        let isPastDue = false;
                         if (!insp && !f.spcc_inspection_date) {
                           if (f.first_prod_date) {
                             const fp = new Date(f.first_prod_date);
                             const oneYearLater = new Date(fp);
                             oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-                            if (new Date() > oneYearLater) inspectionPastDueInRouteCount++;
+                            if (new Date() > oneYearLater) isPastDue = true;
                           }
                         } else if (insp && !isInspectionValid(insp)) {
-                          inspectionPastDueInRouteCount++;
+                          isPastDue = true;
                         } else if (f.spcc_inspection_date) {
                           const cd = new Date(f.spcc_inspection_date);
                           const oneYear = new Date(cd);
                           oneYear.setFullYear(oneYear.getFullYear() + 1);
-                          if (new Date() > oneYear) inspectionPastDueInRouteCount++;
+                          if (new Date() > oneYear) isPastDue = true;
                         }
+                        if (isPastDue) inspectionPastDueCount++;
                       }
                     });
 
@@ -2639,9 +2642,9 @@ function App() {
                                   {inspectionInRouteCount}
                                 </span>
                               )}
-                              {inspectionPastDueInRouteCount > 0 && (
+                              {inspectionPastDueCount > 0 && (
                                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
-                                  {inspectionPastDueInRouteCount} overdue
+                                  {inspectionPastDueCount} overdue
                                 </span>
                               )}
                             </button>
@@ -2659,9 +2662,9 @@ function App() {
                                   {planInRouteCount}
                                 </span>
                               )}
-                              {planPastDueInRouteCount > 0 && (
+                              {planPastDueCount > 0 && (
                                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
-                                  {planPastDueInRouteCount} overdue
+                                  {planPastDueCount} overdue
                                 </span>
                               )}
                             </button>
