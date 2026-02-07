@@ -15,6 +15,7 @@ import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import { isInspectionValid } from '../utils/inspectionUtils';
+import { getSPCCPlanStatus } from '../utils/spccStatus';
 import { ParseResult } from '../utils/csvParser';
 
 interface FacilitiesManagerProps {
@@ -453,15 +454,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const getFacilityPlanStatus = (facility: Facility): 'overdue' | 'current' => {
-    const today = new Date();
-    const dueDate = getSPCCPlanDueDate(facility);
-    const hasPlan = facility.spcc_plan_url && facility.spcc_pe_stamp_date;
-    if (hasPlan && dueDate) {
-      return today > dueDate ? 'overdue' : 'current';
-    } else if (facility.first_prod_date && dueDate) {
-      return today > dueDate ? 'overdue' : 'current';
+    const { status } = getSPCCPlanStatus(facility);
+    // Only truly overdue statuses: initial_overdue (past 6-month deadline) and expired (past 5-year renewal)
+    if (status === 'initial_overdue' || status === 'expired') {
+      return 'overdue';
     }
-    return 'overdue';
+    return 'current';
   };
 
   const getFilteredAndSortedFacilities = () => {
@@ -1570,17 +1568,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </div>
               {/* Inline stat badges - plan mode only */}
               {spccMode === 'plan' && !isLoading && (() => {
-                const today = new Date();
                 let oc = 0;
                 let cc = 0;
                 facilities.filter(f => f.status !== 'sold').forEach(facility => {
-                  const dueDate = getSPCCPlanDueDate(facility);
-                  const hasPlan = facility.spcc_plan_url && facility.spcc_pe_stamp_date;
-                  if (hasPlan && dueDate) {
-                    if (today > dueDate) oc++; else cc++;
-                  } else if (facility.first_prod_date && dueDate) {
-                    if (today > dueDate) oc++; else cc++;
-                  } else { oc++; }
+                  const planStatus = getFacilityPlanStatus(facility);
+                  if (planStatus === 'overdue') oc++; else cc++;
                 });
                 return (
                   <div className="hidden sm:flex items-center gap-1.5 ml-1">

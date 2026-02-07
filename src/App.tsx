@@ -247,6 +247,24 @@ function App() {
     });
   }, [accountLoading, currentAccount]);
 
+  // Auto-hide completed facilities on map when switching to a specific survey type
+  useEffect(() => {
+    if (surveyType === 'spcc_inspection' || surveyType === 'spcc_plan') {
+      setCompletedVisibility({
+        hideAllCompleted: true,
+        hideInternallyCompleted: true,
+        hideExternallyCompleted: true,
+      });
+    } else {
+      // "All Facilities" mode - restore visibility
+      setCompletedVisibility({
+        hideAllCompleted: false,
+        hideInternallyCompleted: false,
+        hideExternallyCompleted: false,
+      });
+    }
+  }, [surveyType]);
+
   useEffect(() => {
     const handleNavigateToSettings = () => {
       setActiveSettingsTab('route-planning');
@@ -2489,7 +2507,7 @@ function App() {
                   />
 
                   <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
                       <div className="flex items-center gap-2 mb-2">
                         <Calendar className="w-4 h-4 md:w-5 md:h-5 text-blue-600 dark:text-blue-400" />
                         <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Days / Time</h3>
@@ -2503,7 +2521,7 @@ function App() {
                       </p>
                     </div>
 
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
                       <div className="flex items-center gap-2 mb-2">
                         <MapPin className="w-4 h-4 md:w-5 md:h-5 text-green-600 dark:text-green-400" />
                         <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Facilities</h3>
@@ -2511,7 +2529,7 @@ function App() {
                       <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{visibleFacilityCount}</p>
                     </div>
 
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
                       <div className="flex items-center gap-2 mb-2">
                         <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-orange-600 dark:text-orange-400" />
                         <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Miles</h3>
@@ -2521,7 +2539,7 @@ function App() {
                       </p>
                     </div>
 
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 md:p-4 transition-colors duration-200">
+                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
                       <div className="flex items-center gap-2 mb-2">
                         <Clock className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
                         <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Drive Time</h3>

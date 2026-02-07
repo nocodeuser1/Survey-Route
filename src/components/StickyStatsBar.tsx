@@ -53,7 +53,7 @@ export default function StickyStatsBar({
         }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 px-4 py-2 transition-colors duration-200 ${isVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+        <div className={`bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 px-4 py-2 transition-colors duration-200 ${isVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
           <div className="flex items-center justify-around gap-4 text-xs sm:text-sm">
             <div className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
