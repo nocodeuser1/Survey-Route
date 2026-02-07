@@ -3111,6 +3111,21 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 </button>
               </div>
             )}
+            {onToggleHideCompleted && (
+              <div className="relative">
+                <button
+                  onClick={onToggleHideCompleted}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${hideCompletedFacilities
+                    ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    }`}
+                  title="Adjust completed facilities visibility"
+                >
+                  {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <span className="hidden sm:inline">Visibility</span>
+                </button>
+              </div>
+            )}
             <div className="relative">
               <button
                 onClick={async () => {
@@ -3170,21 +3185,6 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 >
                   <Search className="w-4 h-4" />
                   <span className="hidden sm:inline">Search</span>
-                </button>
-              </div>
-            )}
-            {onToggleHideCompleted && !isFullScreen && (
-              <div className="relative">
-                <button
-                  onClick={onToggleHideCompleted}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${hideCompletedFacilities
-                    ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
-                    }`}
-                  title="Adjust completed facilities visibility"
-                >
-                  {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  <span className="hidden sm:inline">Visibility</span>
                 </button>
               </div>
             )}

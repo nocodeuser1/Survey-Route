@@ -538,7 +538,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const getCompletedFacilities = (): Facility[] => {
     return facilities.filter(f => {
       const inspection = inspections.get(f.id);
-      return inspection && inspection.status === 'completed';
+      if (!inspection || inspection.status !== 'completed') return false;
+
+      // When in SPCC plan mode, don't show facilities that need plan attention
+      // in the completed section - they belong in the day routes
+      if (surveyType === 'spcc_plan' && facilityNeedsSPCCPlan(f)) {
+        return false;
+      }
+
+      // When in SPCC inspection mode, don't show facilities that need inspection
+      // in the completed section - they belong in the day routes
+      if (surveyType === 'spcc_inspection' && facilityNeedsSPCCInspection(f)) {
+        return false;
+      }
+
+      return true;
     });
   };
 
@@ -1546,85 +1560,87 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
 
-      {/* Survey Type Selector */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
+      {/* Survey Type Selector - hidden when rendered above map via App.tsx */}
+      {!showOnlyRouteList && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(() => {
+                const counts = getSurveyTypeCounts();
+                return (
+                  <>
+                    <button
+                      onClick={() => setSurveyType('all')}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        }`}
+                    >
+                      All Facilities
+                    </button>
+                    <button
+                      onClick={() => setSurveyType('spcc_inspection')}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        }`}
+                    >
+                      <FileText className="w-4 h-4" />
+                      SPCC Inspections
+                      {counts.inspectionInRouteCount > 0 && (
+                        <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                          }`} title={`${counts.inspectionInRouteCount} in current route, ${counts.inspectionCount} total need inspection`}>
+                          {counts.inspectionInRouteCount}
+                        </span>
+                      )}
+                      {counts.inspectionPastDueInRouteCount > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueInRouteCount} overdue in route (${counts.inspectionPastDueCount} total overdue)`}>
+                          {counts.inspectionPastDueInRouteCount} overdue
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setSurveyType('spcc_plan')}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        }`}
+                    >
+                      <FileCheck className="w-4 h-4" />
+                      SPCC Plans
+                      {counts.planInRouteCount > 0 && (
+                        <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                          }`} title={`${counts.planInRouteCount} in current route, ${counts.planCount} total facilities need attention`}>
+                          {counts.planInRouteCount}
+                        </span>
+                      )}
+                      {counts.planPastDueInRouteCount > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueInRouteCount} overdue in route (${counts.planPastDueCount} total overdue)`}>
+                          {counts.planPastDueInRouteCount} overdue
+                        </span>
+                      )}
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {(() => {
-              const counts = getSurveyTypeCounts();
-              return (
-                <>
-                  <button
-                    onClick={() => setSurveyType('all')}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                  >
-                    All Facilities
-                  </button>
-                  <button
-                    onClick={() => setSurveyType('spcc_inspection')}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                  >
-                    <FileText className="w-4 h-4" />
-                    SPCC Inspections
-                    {counts.inspectionInRouteCount > 0 && (
-                      <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                        }`} title={`${counts.inspectionInRouteCount} in current route, ${counts.inspectionCount} total need inspection`}>
-                        {counts.inspectionInRouteCount}
-                      </span>
-                    )}
-                    {counts.inspectionPastDueInRouteCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueInRouteCount} overdue in route (${counts.inspectionPastDueCount} total overdue)`}>
-                        {counts.inspectionPastDueInRouteCount} overdue
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setSurveyType('spcc_plan')}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                  >
-                    <FileCheck className="w-4 h-4" />
-                    SPCC Plans
-                    {counts.planInRouteCount > 0 && (
-                      <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                        }`} title={`${counts.planInRouteCount} in current route, ${counts.planCount} total facilities need attention`}>
-                        {counts.planInRouteCount}
-                      </span>
-                    )}
-                    {counts.planPastDueInRouteCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueInRouteCount} overdue in route (${counts.planPastDueCount} total overdue)`}>
-                        {counts.planPastDueInRouteCount} overdue
-                      </span>
-                    )}
-                  </button>
-                </>
-              );
-            })()}
-          </div>
+          {surveyType !== 'all' && (() => {
+            const c = getSurveyTypeCounts();
+            return (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                {surveyType === 'spcc_inspection'
+                  ? `Showing ${c.inspectionInRouteCount} of ${c.inspectionCount} facilities needing yearly SPCC inspection (${c.inspectionPastDueInRouteCount} overdue in route, ${c.inspectionPastDueCount} overdue total).`
+                  : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
+              </p>
+            );
+          })()}
         </div>
-        {surveyType !== 'all' && (() => {
-          const c = getSurveyTypeCounts();
-          return (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {surveyType === 'spcc_inspection'
-                ? `Showing ${c.inspectionInRouteCount} of ${c.inspectionCount} facilities needing yearly SPCC inspection (${c.inspectionPastDueInRouteCount} overdue in route, ${c.inspectionPastDueCount} overdue total).`
-                : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
-            </p>
-          );
-        })()}
-      </div>
+      )}
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-2">

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu } from 'lucide-react';
+import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList } from 'lucide-react';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
 import HomeBaseConfig from './components/HomeBaseConfig';
 import MultiHomeBaseConfig from './components/MultiHomeBaseConfig';
@@ -30,6 +30,7 @@ import { useAccount } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
 import { useNavigate } from 'react-router-dom';
 import { isInspectionValid } from './utils/inspectionUtils';
+import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -2531,6 +2532,127 @@ function App() {
                     </div>
                   </div>
 
+                  {/* Survey Type Selector - above the map */}
+                  {!isFullScreenMap && filteredOptimizationResult && (() => {
+                    // Compute counts for badges
+                    const inspectionsMap = new Map(inspections.map(i => [i.facility_id, i]));
+                    const nonSoldFacilities = filteredFacilities.filter(f => f.status !== 'sold');
+                    const facilitiesInRoute = new Set<string>();
+                    filteredOptimizationResult.routes.forEach(route => {
+                      route.facilities.forEach(f => facilitiesInRoute.add(f.name));
+                    });
+
+                    let planInRouteCount = 0;
+                    let planPastDueInRouteCount = 0;
+                    let inspectionInRouteCount = 0;
+                    let inspectionPastDueInRouteCount = 0;
+
+                    nonSoldFacilities.forEach(f => {
+                      const isInRoute = facilitiesInRoute.has(f.name);
+                      if (facilityNeedsSPCCPlan(f)) {
+                        if (isInRoute) {
+                          planInRouteCount++;
+                          const s = getSPCCPlanStatus(f);
+                          if (s.status === 'initial_overdue' || s.status === 'expired') planPastDueInRouteCount++;
+                        }
+                      }
+                      // Check if needs inspection
+                      let needsInspection = true;
+                      if (f.spcc_completion_type && f.spcc_inspection_date) {
+                        const cd = new Date(f.spcc_inspection_date);
+                        const oneYear = new Date(cd);
+                        oneYear.setFullYear(oneYear.getFullYear() + 1);
+                        if (new Date() <= oneYear) needsInspection = false;
+                      }
+                      if (needsInspection) {
+                        const insp = inspectionsMap.get(f.id);
+                        if (isInspectionValid(insp)) needsInspection = false;
+                      }
+                      if (needsInspection && isInRoute) {
+                        inspectionInRouteCount++;
+                        // Check if past due
+                        const insp = inspectionsMap.get(f.id);
+                        if (!insp && !f.spcc_inspection_date) {
+                          if (f.first_prod_date) {
+                            const fp = new Date(f.first_prod_date);
+                            const oneYearLater = new Date(fp);
+                            oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+                            if (new Date() > oneYearLater) inspectionPastDueInRouteCount++;
+                          }
+                        } else if (insp && !isInspectionValid(insp)) {
+                          inspectionPastDueInRouteCount++;
+                        } else if (f.spcc_inspection_date) {
+                          const cd = new Date(f.spcc_inspection_date);
+                          const oneYear = new Date(cd);
+                          oneYear.setFullYear(oneYear.getFullYear() + 1);
+                          if (new Date() > oneYear) inspectionPastDueInRouteCount++;
+                        }
+                      }
+                    });
+
+                    return (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => setSurveyType('all')}
+                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                }`}
+                            >
+                              All Facilities
+                            </button>
+                            <button
+                              onClick={() => setSurveyType('spcc_inspection')}
+                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                }`}
+                            >
+                              <FileText className="w-4 h-4" />
+                              SPCC Inspections
+                              {inspectionInRouteCount > 0 && (
+                                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                  {inspectionInRouteCount}
+                                </span>
+                              )}
+                              {inspectionPastDueInRouteCount > 0 && (
+                                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                  {inspectionPastDueInRouteCount} overdue
+                                </span>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setSurveyType('spcc_plan')}
+                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                }`}
+                            >
+                              <FileCheck className="w-4 h-4" />
+                              SPCC Plans
+                              {planInRouteCount > 0 && (
+                                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                  {planInRouteCount}
+                                </span>
+                              )}
+                              {planPastDueInRouteCount > 0 && (
+                                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                  {planPastDueInRouteCount} overdue
+                                </span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {!isFullScreenMap && (
                     <div className="relative">
                       <button
@@ -2561,6 +2683,7 @@ function App() {
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
                         surveyType={surveyType}
+                        onToggleHideCompleted={() => setShowVisibilityModal(true)}
                       />
                     </div>
                   )}
