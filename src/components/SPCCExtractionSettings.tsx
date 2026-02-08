@@ -354,11 +354,8 @@ export default function SPCCExtractionSettings({ accountId, authUserId }: SPCCEx
     try {
       const { error } = await supabase
         .from('user_settings')
-        .upsert({
-          user_id: authUserId,
-          account_id: accountId,
-          spcc_extraction_config: config,
-        }, { onConflict: 'user_id' });
+        .update({ spcc_extraction_config: config })
+        .eq('account_id', accountId);
 
       if (error) throw error;
       setSavedConfig(config);
