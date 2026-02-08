@@ -18,6 +18,7 @@ import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
+import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 
 interface FacilitiesManagerProps {
@@ -243,7 +244,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // Compute recertification due date (PE stamp date + 5 years)
   const computeRecertificationDueDate = (facility: Facility | null): string => {
     if (!facility?.spcc_pe_stamp_date) return '';
-    const peDate = new Date(facility.spcc_pe_stamp_date);
+    const peDate = parseLocalDate(facility.spcc_pe_stamp_date);
     if (isNaN(peDate.getTime())) return '';
     const dueDate = new Date(peDate);
     dueDate.setFullYear(dueDate.getFullYear() + 5);
@@ -436,6 +437,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   }, [sortColumn, currentLocation]);
 
+  // Close edit modal on Escape key
+  useEffect(() => {
+    if (!mobileEditingFacility) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileEditingFacility(null);
+        setMobileEditFormData({} as Record<ColumnId, string>);
+        setError(null);
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [mobileEditingFacility]);
 
   const loadInspections = async () => {
     try {
@@ -466,7 +480,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const getVerificationIcon = (facility: Facility) => {
     // Check for completion type first (internal or external)
     if (facility.spcc_completion_type === 'internal' && facility.spcc_inspection_date) {
-      const completedDate = new Date(facility.spcc_inspection_date);
+      const completedDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromCompletion = new Date(completedDate);
       oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
       const now = new Date();
@@ -476,7 +490,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
       return <SPCCInspectionBadge />;
     } else if (facility.spcc_completion_type === 'external' && facility.spcc_inspection_date) {
-      const completedDate = new Date(facility.spcc_inspection_date);
+      const completedDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromCompletion = new Date(completedDate);
       oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
       const now = new Date();
@@ -500,7 +514,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' => {
     // Check for internal or external completion
     if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const spccDate = new Date(facility.spcc_inspection_date);
+      const spccDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();
@@ -529,7 +543,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const hasCompletionType = facility.spcc_completion_type && facility.spcc_inspection_date;
 
       if (hasCompletionType) {
-        const completedDate = new Date(facility.spcc_inspection_date!);
+        const completedDate = parseLocalDate(facility.spcc_inspection_date!);
         const oneYearFromCompletion = new Date(completedDate);
         oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
         return new Date() <= oneYearFromCompletion;
@@ -545,7 +559,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
     if (selectedReportType === 'spcc_inspection_external') {
       if (!facility.spcc_completion_type || !facility.spcc_inspection_date) return false;
-      const completedDate = new Date(facility.spcc_inspection_date);
+      const completedDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromCompletion = new Date(completedDate);
       oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
       return new Date() <= oneYearFromCompletion;
@@ -576,7 +590,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // If no plan exists, check first prod date for initial plan due date
     if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
       if (facility.first_prod_date) {
-        const firstProd = new Date(facility.first_prod_date);
+        const firstProd = parseLocalDate(facility.first_prod_date);
         const sixMonthsLater = new Date(firstProd);
         sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
         return sixMonthsLater;
@@ -585,7 +599,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     // Calculate renewal date (5 years from PE stamp date)
-    const peStampDate = new Date(facility.spcc_pe_stamp_date);
+    const peStampDate = parseLocalDate(facility.spcc_pe_stamp_date);
     const renewalDate = new Date(peStampDate);
     renewalDate.setFullYear(renewalDate.getFullYear() + 5);
     return renewalDate;
@@ -643,9 +657,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           case 'longitude':
             return Number(facility.longitude) || 0;
           case 'spcc_status': {
-            // Sort by SPCC plan due date
-            const dueDate = getSPCCPlanDueDate(facility);
-            return dueDate ? dueDate.getTime() : Number.MAX_SAFE_INTEGER;
+            // Group by status severity, then by days within each group
+            const result = getSPCCPlanStatus(facility);
+            const statusOrder: Record<string, number> = {
+              initial_overdue: 0,
+              expired: 1,
+              initial_due: 2,
+              expiring: 3,
+              renewal_due: 3,
+              no_plan: 4,
+              valid: 5,
+              recertified: 6,
+              no_ip_date: 7,
+            };
+            const group = statusOrder[result.status] ?? 8;
+            // Encode group in the high bits, days in the low bits
+            // For overdue/expired (groups 0-1), sort by most overdue first (most negative daysUntilDue)
+            // For others, sort by soonest due first
+            const days = result.daysUntilDue ?? Number.MAX_SAFE_INTEGER;
+            return group * 1e10 + days;
           }
           case 'inspection_status': {
             const status = getInspectionStatus(facility);
@@ -685,21 +715,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           case 'long_well_sheet':
             return Number(facility.long_well_sheet) || 0;
           case 'first_prod_date':
-            return facility.first_prod_date ? new Date(facility.first_prod_date).getTime() : 0;
+            return facility.first_prod_date ? parseLocalDate(facility.first_prod_date).getTime() : 0;
           case 'spcc_due_date':
-            return facility.spcc_due_date ? new Date(facility.spcc_due_date).getTime() : 0;
+            return facility.spcc_due_date ? parseLocalDate(facility.spcc_due_date).getTime() : 0;
           case 'spcc_inspection_date':
-            return facility.spcc_inspection_date ? new Date(facility.spcc_inspection_date).getTime() : 0;
+            return facility.spcc_inspection_date ? parseLocalDate(facility.spcc_inspection_date).getTime() : 0;
           case 'spcc_pe_stamp_date':
-            return facility.spcc_pe_stamp_date ? new Date(facility.spcc_pe_stamp_date).getTime() : 0;
+            return facility.spcc_pe_stamp_date ? parseLocalDate(facility.spcc_pe_stamp_date).getTime() : 0;
           case 'field_visit_date':
-            return facility.field_visit_date ? new Date(facility.field_visit_date).getTime() : 0;
+            return facility.field_visit_date ? parseLocalDate(facility.field_visit_date).getTime() : 0;
           case 'initial_inspection_completed':
-            return facility.initial_inspection_completed ? new Date(facility.initial_inspection_completed).getTime() : 0;
+            return facility.initial_inspection_completed ? parseLocalDate(facility.initial_inspection_completed).getTime() : 0;
           case 'company_signature_date':
-            return facility.company_signature_date ? new Date(facility.company_signature_date).getTime() : 0;
+            return facility.company_signature_date ? parseLocalDate(facility.company_signature_date).getTime() : 0;
           case 'recertified_date':
-            return facility.recertified_date ? new Date(facility.recertified_date).getTime() : 0;
+            return facility.recertified_date ? parseLocalDate(facility.recertified_date).getTime() : 0;
           case 'recertification_due_date': {
             const due = computeRecertificationDueDate(facility);
             return due ? new Date(due).getTime() : 0;
@@ -1280,7 +1310,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             if (facility.spcc_inspection_date) return 'Completed';
             if (facility.spcc_external_completion) return 'External';
             if (facility.spcc_due_date) {
-              const dueDate = new Date(facility.spcc_due_date);
+              const dueDate = parseLocalDate(facility.spcc_due_date);
               const today = new Date();
               const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
               if (daysDiff < 0) return 'Overdue';
@@ -1294,7 +1324,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
           } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' || columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' || columnId === 'company_signature_date' || columnId === 'recertified_date') {
             const value = facility[columnId as keyof Facility];
-            return value ? new Date(value as string).toLocaleDateString() : '';
+            return value ? formatDate(value as string) : '';
           } else if (columnId === 'visit_duration') {
             return `${facility.visit_duration_minutes}`;
           } else if (columnId === 'recertification_due_date') {
@@ -1752,9 +1782,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               <button
                 type="button"
                 onClick={toggleHideEmpty}
-                className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${hideEmptyFields ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${hideEmptyFields ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
               >
-                <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${hideEmptyFields ? 'translate-x-4' : 'translate-x-0'}`} />
+                <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${hideEmptyFields ? 'translate-x-5' : 'translate-x-0'}`} />
               </button>
             </div>
 
@@ -1907,9 +1937,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         <button
                           type="button"
                           onClick={() => setMobileEditFormData({ ...mobileEditFormData, photos_taken: mobileEditFormData.photos_taken === 'true' ? 'false' : 'true' })}
-                          className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                         >
-                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'translate-x-4' : 'translate-x-0'}`} />
+                          <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'translate-x-5' : 'translate-x-0'}`} />
                         </button>
                       </div>
                     )}
