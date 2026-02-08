@@ -298,6 +298,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   // Reload column order and visibility when report type or spccMode changes
   const isFirstRender = useRef(true);
+  const userChangedMode = useRef(false);
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -325,13 +326,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
     }
 
-    // Set default sort based on mode
-    if (spccMode === 'plan') {
-      setSortColumn('spcc_due_date');
-      setSortDirection('asc');
-    } else {
-      setSortColumn('name');
-      setSortDirection('asc');
+    // Only reset sort to mode defaults when the user explicitly switches modes,
+    // not when selectedReportType loads from Supabase on mount
+    if (userChangedMode.current) {
+      if (spccMode === 'plan') {
+        setSortColumn('spcc_due_date');
+        setSortDirection('asc');
+      } else {
+        setSortColumn('name');
+        setSortDirection('asc');
+      }
+      userChangedMode.current = false;
     }
   }, [selectedReportType, spccMode]);
 
@@ -401,6 +406,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [initialFacilityToEdit]);
 
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
+    userChangedMode.current = true;
     setSelectedReportType(reportType);
 
     try {
@@ -2353,7 +2359,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             {/* SPCC Mode Toggle */}
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 flex-shrink-0">
               <button
-                onClick={() => setSpccMode('plan')}
+                onClick={() => { userChangedMode.current = true; setSpccMode('plan'); }}
                 className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'plan'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
@@ -2362,7 +2368,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 Plans
               </button>
               <button
-                onClick={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
+                onClick={() => { userChangedMode.current = true; setSpccMode('inspection'); setSpccPlanFilter('all'); }}
                 className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'inspection'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
