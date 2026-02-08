@@ -1,6 +1,21 @@
 import { useState, useRef } from 'react';
 import { Upload, Trash2, AlertTriangle, Database, FileDown, CheckCircle, XCircle } from 'lucide-react';
-import { supabase, Facility, Inspection, RoutePlan, InspectionPhoto } from '../lib/supabase';
+import {
+  supabase,
+  Facility,
+  Inspection,
+  RoutePlan,
+  InspectionPhoto,
+  UserSettings,
+  HomeBase,
+  TeamMember,
+  UserSignature,
+  TeamSignature,
+  InspectionEdit,
+  FacilityInspectionSchedule,
+  SPCCComplianceTracking,
+  NotificationPreferences,
+} from '../lib/supabase';
 import JSZip from 'jszip';
 
 interface DataBackupProps {
@@ -17,6 +32,15 @@ interface BackupData {
   inspections: Inspection[];
   inspectionPhotos: (InspectionPhoto & { original_inspection_id?: string })[];
   routePlans: RoutePlan[];
+  userSettings?: UserSettings[];
+  homeBases?: HomeBase[];
+  teamMembers?: TeamMember[];
+  userSignatures?: UserSignature[];
+  teamSignatures?: TeamSignature[];
+  inspectionEdits?: InspectionEdit[];
+  facilityInspectionSchedules?: FacilityInspectionSchedule[];
+  spccComplianceTracking?: SPCCComplianceTracking[];
+  notificationPreferences?: NotificationPreferences[];
 }
 
 export default function DataBackup({ accountId, facilities, onFacilitiesChange }: DataBackupProps) {
@@ -34,7 +58,9 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
     setExportProgress({ current: 0, total: 0, stage: 'Preparing export...' });
 
     try {
-      setExportProgress({ current: 0, total: 4, stage: 'Fetching inspections...' });
+      const totalStages = 13;
+
+      setExportProgress({ current: 0, total: totalStages, stage: 'Fetching inspections...' });
       const { data: inspectionsData } = await supabase
         .from('inspections')
         .select('*')
@@ -42,7 +68,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
 
       const inspectionIds = (inspectionsData || []).map(i => i.id);
 
-      setExportProgress({ current: 1, total: 4, stage: 'Fetching inspection photos metadata...' });
+      setExportProgress({ current: 1, total: totalStages, stage: 'Fetching inspection photos metadata...' });
       let photosData: InspectionPhoto[] = [];
       if (inspectionIds.length > 0) {
         const { data } = await supabase
@@ -52,29 +78,96 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
         photosData = data || [];
       }
 
-      setExportProgress({ current: 2, total: 4, stage: 'Fetching route plans...' });
+      setExportProgress({ current: 2, total: totalStages, stage: 'Fetching route plans...' });
       const { data: routePlansData } = await supabase
         .from('route_plans')
         .select('*')
         .eq('account_id', accountId);
 
+      setExportProgress({ current: 3, total: totalStages, stage: 'Fetching user settings...' });
+      const { data: userSettingsData } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 4, total: totalStages, stage: 'Fetching home bases...' });
+      const { data: homeBasesData } = await supabase
+        .from('home_base')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 5, total: totalStages, stage: 'Fetching team members...' });
+      const { data: teamMembersData } = await supabase
+        .from('team_members')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 6, total: totalStages, stage: 'Fetching signatures...' });
+      const { data: userSignaturesData } = await supabase
+        .from('user_signatures')
+        .select('*')
+        .eq('account_id', accountId);
+
+      const { data: teamSignaturesData } = await supabase
+        .from('team_signatures')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 7, total: totalStages, stage: 'Fetching inspection edits...' });
+      let inspectionEditsData: InspectionEdit[] = [];
+      if (inspectionIds.length > 0) {
+        const { data } = await supabase
+          .from('inspection_edits')
+          .select('*')
+          .in('inspection_id', inspectionIds);
+        inspectionEditsData = data || [];
+      }
+
+      setExportProgress({ current: 8, total: totalStages, stage: 'Fetching facility schedules...' });
+      const { data: facilitySchedulesData } = await supabase
+        .from('facility_inspection_schedules')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 9, total: totalStages, stage: 'Fetching SPCC compliance...' });
+      const { data: spccTrackingData } = await supabase
+        .from('spcc_compliance_tracking')
+        .select('*')
+        .eq('account_id', accountId);
+
+      setExportProgress({ current: 10, total: totalStages, stage: 'Fetching notification preferences...' });
+      const { data: notificationPrefsData } = await supabase
+        .from('notification_preferences')
+        .select('*')
+        .eq('account_id', accountId);
+
       const backupData: BackupData = {
-        version: '2.0.0',
+        version: '3.0.0',
         exportDate: new Date().toISOString(),
         accountId,
         facilities,
         inspections: inspectionsData || [],
         inspectionPhotos: photosData.map(p => ({ ...p, original_inspection_id: p.inspection_id })),
-        routePlans: routePlansData || []
+        routePlans: routePlansData || [],
+        userSettings: userSettingsData || [],
+        homeBases: homeBasesData || [],
+        teamMembers: teamMembersData || [],
+        userSignatures: userSignaturesData || [],
+        teamSignatures: teamSignaturesData || [],
+        inspectionEdits: inspectionEditsData,
+        facilityInspectionSchedules: facilitySchedulesData || [],
+        spccComplianceTracking: spccTrackingData || [],
+        notificationPreferences: notificationPrefsData || [],
       };
 
-      setExportProgress({ current: 3, total: 4, stage: 'Creating backup archive...' });
+      setExportProgress({ current: 11, total: totalStages, stage: 'Creating backup archive...' });
       const zip = new JSZip();
 
       zip.file('backup.json', JSON.stringify(backupData, null, 2));
 
+      // Download inspection photos
       if (photosData && photosData.length > 0) {
-        setExportProgress({ current: 0, total: photosData.length, stage: 'Downloading photos...' });
+        setExportProgress({ current: 0, total: photosData.length, stage: 'Downloading inspection photos...' });
         let completedPhotos = 0;
 
         const photoPromises = photosData.map(async (photo) => {
@@ -96,14 +189,44 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
             console.error('Error processing photo:', err);
           } finally {
             completedPhotos++;
-            setExportProgress({ current: completedPhotos, total: photosData.length, stage: 'Downloading photos...' });
+            setExportProgress({ current: completedPhotos, total: photosData.length, stage: 'Downloading inspection photos...' });
           }
         });
 
         await Promise.all(photoPromises);
       }
 
-      setExportProgress({ current: 4, total: 4, stage: 'Generating zip file...' });
+      // Download SPCC plan PDFs from storage
+      const facilitiesWithSpcc = facilities.filter(f => f.spcc_plan_url);
+      if (facilitiesWithSpcc.length > 0) {
+        setExportProgress({ current: 0, total: facilitiesWithSpcc.length, stage: 'Downloading SPCC plan PDFs...' });
+        let completedSpcc = 0;
+
+        const spccPromises = facilitiesWithSpcc.map(async (facility) => {
+          try {
+            const storagePath = facility.spcc_plan_url!.replace(/^.*\/spcc-plans\//, '');
+
+            const { data: blob, error } = await supabase.storage
+              .from('spcc-plans')
+              .download(storagePath);
+
+            if (!error && blob) {
+              zip.file(`spcc-plans/${storagePath}`, blob);
+            } else {
+              console.warn(`Failed to download SPCC plan: ${storagePath}`, error);
+            }
+          } catch (err) {
+            console.error('Error processing SPCC plan:', err);
+          } finally {
+            completedSpcc++;
+            setExportProgress({ current: completedSpcc, total: facilitiesWithSpcc.length, stage: 'Downloading SPCC plan PDFs...' });
+          }
+        });
+
+        await Promise.all(spccPromises);
+      }
+
+      setExportProgress({ current: totalStages, total: totalStages, stage: 'Generating zip file...' });
       const zipBlob = await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
@@ -119,7 +242,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      alert(`Successfully exported backup with:\n- ${facilities.length} facilities\n- ${inspectionsData?.length || 0} inspections\n- ${photosData?.length || 0} inspection photos (files included)\n- ${routePlansData?.length || 0} saved routes\n\nBackup includes actual photo files for easy migration!`);
+      alert(`Successfully exported backup with:\n- ${facilities.length} facilities\n- ${inspectionsData?.length || 0} inspections\n- ${photosData?.length || 0} inspection photos (files included)\n- ${routePlansData?.length || 0} saved routes\n- ${userSettingsData?.length || 0} user settings\n- ${homeBasesData?.length || 0} home bases\n- ${teamMembersData?.length || 0} team members\n- ${(userSignaturesData?.length || 0) + (teamSignaturesData?.length || 0)} signatures\n- ${inspectionEditsData.length} inspection edits\n- ${facilitySchedulesData?.length || 0} facility schedules\n- ${spccTrackingData?.length || 0} SPCC compliance records\n- ${notificationPrefsData?.length || 0} notification preferences\n- ${facilitiesWithSpcc.length} SPCC plan PDFs\n\nBackup includes all account data for complete restoration!`);
     } catch (error) {
       console.error('Error exporting backup:', error);
       alert('Failed to export backup. Please try again.');
@@ -177,7 +300,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
       for (let i = 0; i < backupData.facilities.length; i++) {
         const facility = backupData.facilities[i];
         const oldId = facility.id;
-        const { id, created_at, updated_at, ...facilityData } = facility;
+        const { id, created_at, updated_at: _facilityUpdatedAt, ...facilityData } = facility as any;
 
         const { data: existingFacility } = await supabase
           .from('facilities')
@@ -295,7 +418,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
         setRestoreProgress({ current: 0, total: backupData.routePlans.length, stage: 'Restoring route plans...' });
         for (let i = 0; i < backupData.routePlans.length; i++) {
           const route = backupData.routePlans[i];
-          const { id, created_at, updated_at, ...routeData } = route;
+          const { id, created_at, updated_at: _routeUpdatedAt, ...routeData } = route as any;
 
           if (routeData.facility_ids && Array.isArray(routeData.facility_ids)) {
             routeData.facility_ids = routeData.facility_ids
@@ -314,6 +437,245 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
         }
       }
 
+      // Restore user settings (upsert by account_id)
+      let restoredSettings = 0;
+      if (backupData.userSettings && backupData.userSettings.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.userSettings.length, stage: 'Restoring user settings...' });
+        for (let i = 0; i < backupData.userSettings.length; i++) {
+          const setting = backupData.userSettings[i];
+          const { id, created_at, updated_at, ...settingData } = setting as any;
+          const { error } = await supabase
+            .from('user_settings')
+            .upsert({ ...settingData, account_id: accountId }, { onConflict: 'account_id' });
+          if (error) {
+            console.error('Error upserting user setting:', error);
+          } else {
+            restoredSettings++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.userSettings.length, stage: 'Restoring user settings...' });
+        }
+      }
+
+      // Restore home bases
+      let restoredHomeBases = 0;
+      if (backupData.homeBases && backupData.homeBases.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.homeBases.length, stage: 'Restoring home bases...' });
+        for (let i = 0; i < backupData.homeBases.length; i++) {
+          const homeBase = backupData.homeBases[i];
+          const { id, created_at, updated_at, ...homeBaseData } = homeBase as any;
+          const { error } = await supabase
+            .from('home_base')
+            .insert({ ...homeBaseData, account_id: accountId });
+          if (error) {
+            console.error('Error inserting home base:', error);
+          } else {
+            restoredHomeBases++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.homeBases.length, stage: 'Restoring home bases...' });
+        }
+      }
+
+      // Restore team members
+      let restoredTeamMembers = 0;
+      if (backupData.teamMembers && backupData.teamMembers.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.teamMembers.length, stage: 'Restoring team members...' });
+        for (let i = 0; i < backupData.teamMembers.length; i++) {
+          const member = backupData.teamMembers[i];
+          const { id, created_at, updated_at, ...memberData } = member as any;
+          const { error } = await supabase
+            .from('team_members')
+            .insert({ ...memberData, account_id: accountId });
+          if (error) {
+            console.error('Error inserting team member:', error);
+          } else {
+            restoredTeamMembers++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.teamMembers.length, stage: 'Restoring team members...' });
+        }
+      }
+
+      // Restore user signatures
+      let restoredUserSignatures = 0;
+      if (backupData.userSignatures && backupData.userSignatures.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.userSignatures.length, stage: 'Restoring user signatures...' });
+        for (let i = 0; i < backupData.userSignatures.length; i++) {
+          const sig = backupData.userSignatures[i];
+          const { id, created_at, updated_at, ...sigData } = sig;
+          const { error } = await supabase
+            .from('user_signatures')
+            .insert({ ...sigData, account_id: accountId });
+          if (error) {
+            console.error('Error inserting user signature:', error);
+          } else {
+            restoredUserSignatures++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.userSignatures.length, stage: 'Restoring user signatures...' });
+        }
+      }
+
+      // Restore team signatures
+      let restoredTeamSignatures = 0;
+      if (backupData.teamSignatures && backupData.teamSignatures.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.teamSignatures.length, stage: 'Restoring team signatures...' });
+        for (let i = 0; i < backupData.teamSignatures.length; i++) {
+          const sig = backupData.teamSignatures[i];
+          const { id, created_at, updated_at, ...sigData } = sig;
+          const { error } = await supabase
+            .from('team_signatures')
+            .insert({ ...sigData, account_id: accountId });
+          if (error) {
+            console.error('Error inserting team signature:', error);
+          } else {
+            restoredTeamSignatures++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.teamSignatures.length, stage: 'Restoring team signatures...' });
+        }
+      }
+
+      // Restore facility inspection schedules (needs facility ID remapping)
+      let restoredSchedules = 0;
+      if (backupData.facilityInspectionSchedules && backupData.facilityInspectionSchedules.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.facilityInspectionSchedules.length, stage: 'Restoring facility schedules...' });
+        for (let i = 0; i < backupData.facilityInspectionSchedules.length; i++) {
+          const schedule = backupData.facilityInspectionSchedules[i];
+          const newFacilityId = facilityIdMap.get(schedule.facility_id);
+          if (!newFacilityId) {
+            console.warn('Skipping facility schedule - facility not found:', schedule.facility_id);
+            setRestoreProgress({ current: i + 1, total: backupData.facilityInspectionSchedules.length, stage: 'Restoring facility schedules...' });
+            continue;
+          }
+          const { id, created_at, updated_at, ...scheduleData } = schedule;
+          const { error } = await supabase
+            .from('facility_inspection_schedules')
+            .insert({ ...scheduleData, facility_id: newFacilityId, account_id: accountId });
+          if (error) {
+            console.error('Error inserting facility schedule:', error);
+          } else {
+            restoredSchedules++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.facilityInspectionSchedules.length, stage: 'Restoring facility schedules...' });
+        }
+      }
+
+      // Restore SPCC compliance tracking (needs facility ID remapping)
+      let restoredSpccTracking = 0;
+      if (backupData.spccComplianceTracking && backupData.spccComplianceTracking.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.spccComplianceTracking.length, stage: 'Restoring SPCC compliance...' });
+        for (let i = 0; i < backupData.spccComplianceTracking.length; i++) {
+          const tracking = backupData.spccComplianceTracking[i];
+          const newFacilityId = facilityIdMap.get(tracking.facility_id);
+          if (!newFacilityId) {
+            console.warn('Skipping SPCC tracking - facility not found:', tracking.facility_id);
+            setRestoreProgress({ current: i + 1, total: backupData.spccComplianceTracking.length, stage: 'Restoring SPCC compliance...' });
+            continue;
+          }
+          const { id, created_at, updated_at, ...trackingData } = tracking;
+          const { error } = await supabase
+            .from('spcc_compliance_tracking')
+            .insert({ ...trackingData, facility_id: newFacilityId, account_id: accountId });
+          if (error) {
+            console.error('Error inserting SPCC tracking:', error);
+          } else {
+            restoredSpccTracking++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.spccComplianceTracking.length, stage: 'Restoring SPCC compliance...' });
+        }
+      }
+
+      // Restore inspection edits (needs inspection ID remapping)
+      let restoredEdits = 0;
+      if (backupData.inspectionEdits && backupData.inspectionEdits.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.inspectionEdits.length, stage: 'Restoring inspection edits...' });
+        for (let i = 0; i < backupData.inspectionEdits.length; i++) {
+          const edit = backupData.inspectionEdits[i];
+          const newInspectionId = inspectionIdMap.get(edit.inspection_id);
+          if (!newInspectionId) {
+            console.warn('Skipping inspection edit - inspection not found:', edit.inspection_id);
+            setRestoreProgress({ current: i + 1, total: backupData.inspectionEdits.length, stage: 'Restoring inspection edits...' });
+            continue;
+          }
+          const { id, created_at, ...editData } = edit;
+          const { error } = await supabase
+            .from('inspection_edits')
+            .insert({ ...editData, inspection_id: newInspectionId });
+          if (error) {
+            console.error('Error inserting inspection edit:', error);
+          } else {
+            restoredEdits++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.inspectionEdits.length, stage: 'Restoring inspection edits...' });
+        }
+      }
+
+      // Restore notification preferences
+      let restoredNotifPrefs = 0;
+      if (backupData.notificationPreferences && backupData.notificationPreferences.length > 0) {
+        setRestoreProgress({ current: 0, total: backupData.notificationPreferences.length, stage: 'Restoring notification preferences...' });
+        for (let i = 0; i < backupData.notificationPreferences.length; i++) {
+          const pref = backupData.notificationPreferences[i];
+          const { id, created_at, updated_at, ...prefData } = pref;
+          const { error } = await supabase
+            .from('notification_preferences')
+            .insert({ ...prefData, account_id: accountId });
+          if (error) {
+            console.error('Error inserting notification preference:', error);
+          } else {
+            restoredNotifPrefs++;
+          }
+          setRestoreProgress({ current: i + 1, total: backupData.notificationPreferences.length, stage: 'Restoring notification preferences...' });
+        }
+      }
+
+      // Restore SPCC plan PDFs from zip
+      let restoredSpccPlans = 0;
+      const spccPlanFiles = Object.keys(zip.files).filter(f => f.startsWith('spcc-plans/') && !zip.files[f].dir);
+      if (spccPlanFiles.length > 0) {
+        setRestoreProgress({ current: 0, total: spccPlanFiles.length, stage: 'Restoring SPCC plan PDFs...' });
+
+        for (let i = 0; i < spccPlanFiles.length; i++) {
+          const filePath = spccPlanFiles[i];
+          try {
+            const pdfFile = zip.file(filePath);
+            if (pdfFile) {
+              const pdfBlob = await pdfFile.async('blob');
+              // Extract the original facility ID from path like spcc-plans/{facilityId}/spcc-plan-{timestamp}.pdf
+              const pathParts = filePath.replace('spcc-plans/', '').split('/');
+              const oldFacilityId = pathParts[0];
+              const newFacilityId = facilityIdMap.get(oldFacilityId);
+
+              if (newFacilityId) {
+                const fileName = pathParts.slice(1).join('/');
+                const newStoragePath = `${newFacilityId}/${fileName}`;
+
+                const { error: uploadError } = await supabase.storage
+                  .from('spcc-plans')
+                  .upload(newStoragePath, pdfBlob, { contentType: 'application/pdf' });
+
+                if (!uploadError) {
+                  const { data: { publicUrl } } = supabase.storage
+                    .from('spcc-plans')
+                    .getPublicUrl(newStoragePath);
+
+                  await supabase
+                    .from('facilities')
+                    .update({ spcc_plan_url: publicUrl })
+                    .eq('id', newFacilityId);
+
+                  restoredSpccPlans++;
+                } else {
+                  console.error('Error uploading SPCC plan:', uploadError);
+                }
+              } else {
+                console.warn('Skipping SPCC plan - facility not found:', oldFacilityId);
+              }
+            }
+          } catch (err) {
+            console.error('Error processing SPCC plan:', err);
+          }
+          setRestoreProgress({ current: i + 1, total: spccPlanFiles.length, stage: 'Restoring SPCC plan PDFs...' });
+        }
+      }
+
       const restoredFacilities = facilityIdMap.size;
       const restoredInspections = inspectionIdMap.size;
       const restoredPhotos = backupData.inspectionPhotos?.length || 0;
@@ -321,7 +683,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
 
       setRestoreResult({
         success: true,
-        message: `Successfully restored:\n- ${restoredFacilities} facilities\n- ${restoredInspections} inspections\n- ${restoredPhotos} photos\n- ${restoredRoutes} saved routes`
+        message: `Successfully restored:\n- ${restoredFacilities} facilities\n- ${restoredInspections} inspections\n- ${restoredPhotos} photos\n- ${restoredRoutes} saved routes\n- ${restoredSettings} user settings\n- ${restoredHomeBases} home bases\n- ${restoredTeamMembers} team members\n- ${restoredUserSignatures + restoredTeamSignatures} signatures\n- ${restoredEdits} inspection edits\n- ${restoredSchedules} facility schedules\n- ${restoredSpccTracking} SPCC compliance records\n- ${restoredNotifPrefs} notification preferences\n- ${restoredSpccPlans} SPCC plan PDFs`
       });
 
       onFacilitiesChange();
@@ -348,7 +710,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
           Data Backup & Export
         </h3>
         <p className="text-gray-600 dark:text-gray-300 mb-6">
-          Export a complete backup of your facilities, inspections, photos, and routes. This backup file can be used to restore your data.
+          Export a complete backup of all your account data including facilities, inspections, photos, routes, settings, team members, signatures, schedules, and SPCC plans. This backup file can be used to fully restore your data.
         </p>
 
         <div className="space-y-4">
@@ -398,12 +760,20 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
               </p>
               <ul className="text-sm text-blue-700 dark:text-blue-400 mt-2 ml-4 list-disc">
                 <li>{facilities.length} facilities with coordinates and details</li>
-                <li>All inspection records and responses</li>
+                <li>All inspection records, responses, and edit history</li>
                 <li>All inspection photo files (downloaded from storage)</li>
                 <li>Saved route plans and settings</li>
+                <li>User settings and SPCC extraction configuration</li>
+                <li>Home base locations</li>
+                <li>Team members with signatures</li>
+                <li>User and team signatures</li>
+                <li>Facility inspection schedules</li>
+                <li>SPCC compliance tracking records</li>
+                <li>SPCC plan PDF files (downloaded from storage)</li>
+                <li>Notification preferences</li>
               </ul>
               <p className="text-xs text-blue-600 dark:text-blue-400 mt-3">
-                <strong>Note:</strong> The backup includes actual photo files downloaded from Supabase storage, making it perfect for migrating to a new Supabase instance. The zip contains a backup.json file and a photos/ folder with all images.
+                <strong>Note:</strong> The backup includes actual photo and PDF files downloaded from storage, making it perfect for migrating to a new instance or fully restoring after data loss. The zip contains a backup.json file, a photos/ folder, and a spcc-plans/ folder.
               </p>
             </div>
           )}
@@ -416,7 +786,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
           Restore from Backup
         </h3>
         <p className="text-gray-600 dark:text-gray-300 mb-6">
-          Upload a backup file (.zip) to restore your facilities, inspections, photos, and routes. This will add the backup data to your current account.
+          Upload a backup file (.zip) to restore all your account data including facilities, inspections, photos, routes, settings, team members, signatures, schedules, and SPCC plans. This will add the backup data to your current account.
         </p>
 
         <div className="space-y-4">
@@ -504,7 +874,8 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
             <ul className="text-sm text-yellow-700 dark:text-yellow-400 mt-2 ml-4 list-disc">
               <li>The restore process will add data to your current account</li>
               <li>Duplicate facilities (same name and coordinates) will be skipped</li>
-              <li>Photos will be re-uploaded to storage and linked to new inspections</li>
+              <li>Photos and SPCC plan PDFs will be re-uploaded to storage</li>
+              <li>Settings, signatures, schedules, and preferences will be restored</li>
               <li>This may take several minutes for large backups</li>
             </ul>
           </div>
@@ -517,7 +888,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
           Danger Zone
         </h3>
         <p className="text-gray-600 dark:text-gray-300 mb-6">
-          Permanently delete all facilities, inspections, and associated data. This action cannot be undone.
+          Permanently delete all facilities, inspections, and associated data including schedules, compliance records, and SPCC plans. This action cannot be undone.
         </p>
 
         {!showClearAllWarning ? (
@@ -542,9 +913,10 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
                 </p>
                 <ul className="text-sm text-red-700 dark:text-red-400 ml-4 list-disc mb-3">
                   <li>All {facilities.length} facilities</li>
-                  <li>All inspection records and responses</li>
-                  <li>All inspection photos</li>
+                  <li>All inspection records, responses, and edit history</li>
+                  <li>All inspection photos and SPCC plan PDFs</li>
                   <li>All saved route plans</li>
+                  <li>All facility schedules and SPCC compliance records</li>
                 </ul>
                 <p className="text-sm font-semibold text-red-800 dark:text-red-300 bg-red-100 dark:bg-red-900/50 p-2 rounded">
                   ⚠️ RECOMMENDED: Export a backup first before deleting!
