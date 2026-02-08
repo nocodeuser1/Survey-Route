@@ -20,6 +20,7 @@ import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
+import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -112,6 +113,8 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 };
 
 export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false }: FacilitiesManagerProps) {
+  const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
+
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
 
@@ -121,8 +124,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>('all');
-  const [sortColumn, setSortColumn] = useState<ColumnId | null>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortColumn, setSortColumn] = useState<ColumnId | null>((facPrefs.sort_column as ColumnId) || 'name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(facPrefs.sort_direction);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
@@ -133,7 +136,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [spccMode, setSpccMode] = useState<'plan' | 'inspection'>('plan');
 
   // Load column order and visibility per report type + spccMode combination
-  const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}`;
+  const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`;
+  const getColumnsKey = () => `${selectedReportType}_${spccMode}`;
 
   // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
   const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
@@ -141,18 +145,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return missing.length > 0 ? [...saved, ...missing] : saved;
   };
 
-  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() => {
-    const saved = localStorage.getItem(getStorageKey('column_order'));
-    return saved ? mergeColumnOrder(JSON.parse(saved)) : ALL_COLUMNS_ORDER;
-  });
-  const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
-    const saved = localStorage.getItem(getStorageKey('visible_columns'));
-    if (saved) return JSON.parse(saved);
-    // First time in this mode - apply smart defaults
+  const getDefaultVisibleColumns = (mode: string): ColumnId[] => {
     const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
     const inspectionColumns: ColumnId[] = ['inspection_status'];
     let cols = [...DEFAULT_VISIBLE_COLUMNS];
-    if (spccMode === 'plan') {
+    if (mode === 'plan') {
       planColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
       cols = cols.filter(col => !inspectionColumns.includes(col));
     } else {
@@ -160,6 +157,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       cols = cols.filter(col => !planColumns.includes(col));
     }
     return cols;
+  };
+
+  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() => {
+    const prefsCols = facPrefs.columns[getColumnsKey()];
+    if (prefsCols?.order) return mergeColumnOrder(prefsCols.order as ColumnId[]);
+    const saved = localStorage.getItem(getStorageKey('column_order'));
+    return saved ? mergeColumnOrder(JSON.parse(saved)) : ALL_COLUMNS_ORDER;
+  });
+  const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
+    const prefsCols = facPrefs.columns[getColumnsKey()];
+    if (prefsCols?.visible) return prefsCols.visible as ColumnId[];
+    const saved = localStorage.getItem(getStorageKey('visible_columns'));
+    if (saved) return JSON.parse(saved);
+    return getDefaultVisibleColumns(spccMode);
   });
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
@@ -174,9 +185,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [mobileEditFormData, setMobileEditFormData] = useState<Record<ColumnId, string>>({} as Record<ColumnId, string>);
   const [showWellSection, setShowWellSection] = useState(false);
   const [showWells2to6, setShowWells2to6] = useState(false);
-  const [hideEmptyFields, setHideEmptyFields] = useState(() => {
-    return localStorage.getItem('facilities_hide_empty_fields') === 'true';
-  });
+  const [hideEmptyFields, setHideEmptyFields] = useState(facPrefs.hide_empty_fields);
   const [showFilters, setShowFilters] = useState(false);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
@@ -272,7 +281,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const toggleHideEmpty = () => {
     const newVal = !hideEmptyFields;
     setHideEmptyFields(newVal);
-    localStorage.setItem('facilities_hide_empty_fields', String(newVal));
+    updateFacPrefs({ hide_empty_fields: newVal });
   };
 
   // Whether a section should be visible (always show if toggle is off, or if section has data)
@@ -294,25 +303,28 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       isFirstRender.current = false;
       return;
     }
-    const savedOrder = localStorage.getItem(getStorageKey('column_order'));
-    const savedVisible = localStorage.getItem(getStorageKey('visible_columns'));
-    setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : ALL_COLUMNS_ORDER);
-    if (savedVisible) {
-      setVisibleColumns(JSON.parse(savedVisible));
+    const colsKey = `${selectedReportType}_${spccMode}`;
+    const prefsCols = facPrefs.columns[colsKey];
+
+    // Try preferences first, then localStorage fallback
+    if (prefsCols?.order) {
+      setColumnOrder(mergeColumnOrder(prefsCols.order as ColumnId[]));
     } else {
-      // First time in this mode combination - apply smart defaults
-      const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
-      const inspectionColumns: ColumnId[] = ['inspection_status'];
-      let cols = [...DEFAULT_VISIBLE_COLUMNS];
-      if (spccMode === 'plan') {
-        planColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
-        cols = cols.filter(col => !inspectionColumns.includes(col));
-      } else {
-        inspectionColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
-        cols = cols.filter(col => !planColumns.includes(col));
-      }
-      setVisibleColumns(cols);
+      const savedOrder = localStorage.getItem(getStorageKey('column_order'));
+      setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : ALL_COLUMNS_ORDER);
     }
+
+    if (prefsCols?.visible) {
+      setVisibleColumns(prefsCols.visible as ColumnId[]);
+    } else {
+      const savedVisible = localStorage.getItem(getStorageKey('visible_columns'));
+      if (savedVisible) {
+        setVisibleColumns(JSON.parse(savedVisible));
+      } else {
+        setVisibleColumns(getDefaultVisibleColumns(spccMode));
+      }
+    }
+
     // Set default sort based on mode
     if (spccMode === 'plan') {
       setSortColumn('spcc_due_date');
@@ -436,6 +448,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
     }
   }, [sortColumn, currentLocation]);
+
+  // Persist sort preferences
+  useEffect(() => {
+    updateFacPrefs({ sort_column: sortColumn, sort_direction: sortDirection });
+  }, [sortColumn, sortDirection]);
 
   // Close edit modal on Escape key
   useEffect(() => {
@@ -1383,6 +1400,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setColumnOrder(draftColumnOrder);
     localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(draftVisibleColumns));
     localStorage.setItem(getStorageKey('column_order'), JSON.stringify(draftColumnOrder));
+    updateFacPrefs({
+      columns: {
+        ...facPrefs.columns,
+        [getColumnsKey()]: {
+          visible: draftVisibleColumns,
+          order: draftColumnOrder,
+        },
+      },
+    });
     setShowColumnSelector(false);
   };
 
@@ -3007,6 +3033,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onViewInspectionDetails={() => {
               setSelectedFacility(spccPlanDetailFacility);
             }}
+            onViewFacilityDetails={() => {
+              handleEdit(spccPlanDetailFacility);
+            }}
           />
         )
       }
@@ -3025,6 +3054,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               canClone={false}
               userId={userId}
               accountId={accountId}
+              onViewFacilityDetails={() => {
+                handleEdit(viewingFacility);
+              }}
+              onViewSPCCPlan={() => {
+                setSpccPlanDetailFacility(viewingFacility);
+              }}
             />
           );
         })()

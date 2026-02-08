@@ -12,6 +12,7 @@ interface SPCCPlanDetailModalProps {
   onClose: () => void;
   onFacilitiesChange: () => void;
   onViewInspectionDetails?: () => void;
+  onViewFacilityDetails?: () => void;
 }
 
 const statusIconMap = {
@@ -93,7 +94,7 @@ function formatDateDisplay(isoDate: string): string {
   return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
 }
 
-export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onViewInspectionDetails }: SPCCPlanDetailModalProps) {
+export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onViewInspectionDetails, onViewFacilityDetails }: SPCCPlanDetailModalProps) {
   const { darkMode } = useDarkMode();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -708,6 +709,22 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               <Upload className="w-4 h-4" />
               {facility.spcc_plan_url ? 'Upload New Plan Version' : 'Attach SPCC Plan'}
             </button>
+
+            {onViewFacilityDetails && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onViewFacilityDetails();
+                }}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-colors text-sm ${darkMode
+                  ? 'bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'
+                  }`}
+              >
+                <Edit2 className="w-4 h-4" />
+                Facility Details
+              </button>
+            )}
 
             {onViewInspectionDetails && (
               <button

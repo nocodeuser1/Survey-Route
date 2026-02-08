@@ -158,6 +158,15 @@ export interface UserSettings {
       multi_line?: boolean;
     };
   } | null;
+  facilities_ui_preferences?: {
+    sort_column?: string | null;
+    sort_direction?: 'asc' | 'desc';
+    hide_empty_fields?: boolean;
+    columns?: Record<string, {
+      visible?: string[];
+      order?: string[];
+    }>;
+  } | null;
   updated_at: string;
 }
 
@@ -252,6 +261,7 @@ export interface Account {
   account_name: string;
   company_name?: string;
   logo_url?: string;
+  timezone?: string;
   created_by: string | null;
   status: string;
   created_at: string;

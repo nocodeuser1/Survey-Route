@@ -1,4 +1,4 @@
-import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon } from 'lucide-react';
+import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck } from 'lucide-react';
 import { Inspection, Facility, InspectionTemplate, InspectionPhoto, supabase } from '../lib/supabase';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
@@ -78,9 +78,11 @@ interface InspectionViewerProps {
   canClone?: boolean;
   userId?: string;
   accountId?: string;
+  onViewSPCCPlan?: () => void;
+  onViewFacilityDetails?: () => void;
 }
 
-export default function InspectionViewer({ inspection, facility, onClose, onClone, canClone = true, userId, accountId }: InspectionViewerProps) {
+export default function InspectionViewer({ inspection, facility, onClose, onClone, canClone = true, userId, accountId, onViewSPCCPlan, onViewFacilityDetails }: InspectionViewerProps) {
   const [template, setTemplate] = useState<InspectionTemplate | null>(null);
   const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
   const [hideReportTimestamps, setHideReportTimestamps] = useState(false);
@@ -835,6 +837,35 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
             ))}
           </div>
         </div>
+
+        {(onViewFacilityDetails || onViewSPCCPlan) && !isEditMode && (
+          <div className="border-t border-gray-200 dark:border-gray-700 px-6 py-3 flex gap-2">
+            {onViewFacilityDetails && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onViewFacilityDetails();
+                }}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                Facility Details
+              </button>
+            )}
+            {onViewSPCCPlan && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onViewSPCCPlan();
+                }}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                SPCC Plan
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {selectedPhoto && (
