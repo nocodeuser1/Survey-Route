@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, AlertTriangle, Clock, TrendingUp, FileText, Calendar, Filter, Search, ExternalLink } from 'lucide-react';
 import { supabase, Facility, SPCCComplianceTracking } from '../lib/supabase';
+import { formatDate, parseLocalDate } from '../utils/dateUtils';
+import { formatDayCount } from '../utils/spccStatus';
 
 interface ComplianceDashboardProps {
   accountId: string;
@@ -73,7 +75,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
         let inspectionDaysUntilDue: number | undefined;
 
         if (facility.next_inspection_due) {
-          const dueDate = new Date(facility.next_inspection_due);
+          const dueDate = parseLocalDate(facility.next_inspection_due);
           const today = new Date();
           const diffDays = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -418,7 +420,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                       <div className="font-medium text-gray-900 dark:text-gray-100">{fc.facility.name}</div>
                       {fc.facility.first_prod_date && (
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          IP Date: {new Date(fc.facility.first_prod_date).toLocaleDateString()}
+                          IP Date: {formatDate(fc.facility.first_prod_date)}
                         </div>
                       )}
                     </td>
@@ -435,7 +437,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                             {fc.spccCompliance.compliance_status === 'expiring' && 'Expiring'}
                             {fc.spccCompliance.pe_stamp_date && (
                               <div className="text-xs text-gray-500 dark:text-gray-400">
-                                PE Stamp: {new Date(fc.spccCompliance.pe_stamp_date).toLocaleDateString()}
+                                PE Stamp: {formatDate(fc.spccCompliance.pe_stamp_date)}
                               </div>
                             )}
                           </>
@@ -448,7 +450,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                       <div className="text-sm text-gray-900 dark:text-gray-100">
                         {fc.facility.last_inspection_date ? (
                           <>
-                            Last: {new Date(fc.facility.last_inspection_date).toLocaleDateString()}
+                            Last: {formatDate(fc.facility.last_inspection_date)}
                           </>
                         ) : (
                           'None'
@@ -459,12 +461,12 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                       <div className="text-sm text-gray-900 dark:text-gray-100">
                         {fc.spccCompliance?.current_renewal_due_date || fc.facility.next_inspection_due ? (
                           <>
-                            {new Date(
+                            {formatDate(
                               fc.spccCompliance?.current_renewal_due_date || fc.facility.next_inspection_due!
-                            ).toLocaleDateString()}
+                            )}
                             {fc.daysUntilDue !== undefined && (
                               <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {fc.daysUntilDue < 0 ? `${Math.abs(fc.daysUntilDue)} days overdue` : `${fc.daysUntilDue} days`}
+                                {fc.daysUntilDue < 0 ? `${formatDayCount(fc.daysUntilDue)} overdue` : formatDayCount(fc.daysUntilDue)}
                               </div>
                             )}
                           </>

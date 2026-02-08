@@ -1,6 +1,6 @@
 import { CheckCircle, Clock, AlertTriangle, FileText } from 'lucide-react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getStatusBadgeConfig, type SPCCStatusFacility } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getStatusBadgeConfig, formatDayCount, type SPCCStatusFacility } from '../utils/spccStatus';
 
 interface SPCCStatusBadgeProps {
   facility: SPCCStatusFacility;
@@ -35,7 +35,7 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
       <span>{config.label}</span>
       {showMessage && result.daysUntilDue !== null && result.status !== 'valid' && result.status !== 'recertified' && result.status !== 'no_plan' && result.status !== 'no_ip_date' && (
         <span className="opacity-75">
-          ({result.daysUntilDue > 0 ? `${result.daysUntilDue}d` : `${Math.abs(result.daysUntilDue)}d ago`})
+          ({result.daysUntilDue > 0 ? formatDayCount(result.daysUntilDue) : `${formatDayCount(result.daysUntilDue)} ago`})
         </span>
       )}
     </span>

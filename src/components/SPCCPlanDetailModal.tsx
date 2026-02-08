@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getStatusBadgeConfig, type SPCCPlanStatus } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus } from '../utils/spccStatus';
+import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import SPCCPlanUploadModal from './SPCCPlanUploadModal';
 
 interface SPCCPlanDetailModalProps {
@@ -252,8 +253,8 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-red-400/80' : 'text-red-700'}`}>
                   {status.status === 'expired'
-                    ? `The SPCC plan expired ${Math.abs(status.daysUntilDue!)} days ago. A renewed plan with a new PE stamp is required.`
-                    : `The initial SPCC plan was due ${Math.abs(status.daysUntilDue!)} days ago (6 months after IP date).`
+                    ? `The SPCC plan expired ${formatDayCount(status.daysUntilDue!)} ago. A renewed plan with a new PE stamp is required.`
+                    : `The initial SPCC plan was due ${formatDayCount(status.daysUntilDue!)} ago (6 months after IP date).`
                   }
                 </p>
               </div>
@@ -272,7 +273,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   {status.status === 'expiring' ? 'Renewal Coming Up' : 'Initial Plan Due Soon'}
                 </p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-amber-400/80' : 'text-amber-700'}`}>
-                  {status.daysUntilDue} days remaining until {status.status === 'expiring' ? '5-year renewal' : 'initial plan deadline'}.
+                  {formatDayCount(status.daysUntilDue!)} remaining until {status.status === 'expiring' ? '5-year renewal' : 'initial plan deadline'}.
                 </p>
               </div>
             </div>
@@ -340,7 +341,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                           : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
                           }`}>
                           {effectiveDate
-                            ? new Date(effectiveDate).toLocaleDateString()
+                            ? formatDate(effectiveDate)
                             : 'Not set'
                           }
                         </span>
@@ -411,7 +412,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                           : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
                           }`}>
                           {effectiveDate
-                            ? new Date(effectiveDate).toLocaleDateString()
+                            ? formatDate(effectiveDate)
                             : 'Not set'
                           }
                         </span>
@@ -441,10 +442,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       ? (darkMode ? 'text-amber-400' : 'text-amber-600')
                       : (darkMode ? 'text-white' : 'text-gray-900')
                     }`}>
-                    {status.renewalDate.toLocaleDateString()}
+                    {status.renewalDate.toLocaleDateString('en-US')}
                     {status.daysUntilDue !== null && (
                       <span className="ml-1.5 opacity-75 text-xs">
-                        ({status.daysUntilDue > 0 ? `${status.daysUntilDue}d remaining` : `${Math.abs(status.daysUntilDue)}d overdue`})
+                        ({status.daysUntilDue > 0 ? `${formatDayCount(status.daysUntilDue)} remaining` : `${formatDayCount(status.daysUntilDue)} overdue`})
                       </span>
                     )}
                   </span>
@@ -469,7 +470,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Initial Inspection</span>
                     </div>
                     <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {new Date(facility.initial_inspection_completed).toLocaleDateString()}
+                      {formatDate(facility.initial_inspection_completed)}
                     </span>
                   </div>
                 )}
@@ -480,7 +481,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Company Signature</span>
                     </div>
                     <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {new Date(facility.company_signature_date).toLocaleDateString()}
+                      {formatDate(facility.company_signature_date)}
                     </span>
                   </div>
                 )}
@@ -491,14 +492,14 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertified</span>
                     </div>
                     <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {new Date(facility.recertified_date).toLocaleDateString()}
+                      {formatDate(facility.recertified_date)}
                     </span>
                   </div>
                 )}
                 {(() => {
                   const peDate = facility.spcc_pe_stamp_date || savedPeDate;
                   if (!peDate) return null;
-                  const d = new Date(peDate);
+                  const d = parseLocalDate(peDate);
                   if (isNaN(d.getTime())) return null;
                   const due = new Date(d);
                   due.setFullYear(due.getFullYear() + 5);
@@ -516,7 +517,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                             ? (darkMode ? 'text-amber-400' : 'text-amber-600')
                             : (darkMode ? 'text-white' : 'text-gray-900')
                       }`}>
-                        {due.toLocaleDateString()}
+                        {due.toLocaleDateString('en-US')}
                       </span>
                     </div>
                   );
@@ -541,7 +542,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Field Visit</span>
                     </div>
                     <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {new Date(facility.field_visit_date).toLocaleDateString()}
+                      {formatDate(facility.field_visit_date)}
                     </span>
                   </div>
                 )}
@@ -653,7 +654,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       </p>
                       {(facility.spcc_pe_stamp_date || savedPeDate) && (
                         <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          PE Stamped: {new Date((facility.spcc_pe_stamp_date || savedPeDate)!).toLocaleDateString()}
+                          PE Stamped: {formatDate((facility.spcc_pe_stamp_date || savedPeDate)!)}
                         </p>
                       )}
                     </div>
