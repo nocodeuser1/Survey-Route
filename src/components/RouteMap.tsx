@@ -655,23 +655,6 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const isExcluded = latestFacilityData?.day_assignment === -1;
           const isSold = latestFacilityData?.status === 'sold';
 
-          // Check if facility needs SPCC plan (for surveyType === 'spcc_plan' handling)
-          const needsSPCCPlan = (() => {
-            if (!latestFacilityData) return false;
-            if (!latestFacilityData.spcc_plan_url || !latestFacilityData.spcc_pe_stamp_date) {
-              // No plan exists - needs attention (missing, pending, or overdue initial)
-              return true;
-            }
-            // Check if plan is expired or expiring (5 years from PE stamp)
-            const peStampDate = new Date(latestFacilityData.spcc_pe_stamp_date);
-            const renewalDate = new Date(peStampDate);
-            renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-            const today = new Date();
-            const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            // Needs attention if expired or expiring within 90 days
-            return daysUntilExpire <= 90;
-          })();
-
           // When SPCC Plans filter is active, bypass normal hide logic
           // Show facilities that need plan attention regardless of inspection status
           let shouldBeHidden: boolean;
@@ -679,9 +662,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             // Excluded (day_assignment=-1) or sold facilities are always hidden
             shouldBeHidden = true;
           } else if (surveyType === 'spcc_plan') {
-            // If facility needs plan attention, always show it
-            // If it doesn't need attention, hide it (not relevant to this filter)
-            shouldBeHidden = !needsSPCCPlan;
+            // In SPCC plan mode, respect the Plan Visibility filter (completedFacilityNames)
+            if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) {
+              shouldBeHidden = true;
+            } else {
+              shouldBeHidden = isManuallyRemoved;
+            }
           } else {
             shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved));
           }
@@ -713,59 +699,49 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const isExternalCompletion = completionType === 'external';
           const hasAnyValidInspectionCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
 
-          // SPCC Plan status calculation (for surveyType === 'spcc_plan')
+          // SPCC Plan status calculation using shared utility
           let hasValidSPCCPlan = false;
-          let spccPlanStatus: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'pending' = 'missing';
+          let spccPlanStatus: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'recertified' | 'pending' = 'missing';
           let spccPlanStatusColor = '#EF4444'; // Default red for problems
 
           if (latestFacilityData) {
-            // Check if plan exists
-            if (!latestFacilityData.spcc_plan_url || !latestFacilityData.spcc_pe_stamp_date) {
-              // Check First Prod Date for initial plan requirement
-              if (latestFacilityData.first_prod_date) {
-                const firstProd = new Date(latestFacilityData.first_prod_date);
-                const sixMonthsLater = new Date(firstProd);
-                sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
-                const today = new Date();
-
-                if (today > sixMonthsLater) {
-                  spccPlanStatus = 'overdue';
-                  spccPlanStatusColor = '#EF4444'; // Red
-                } else {
-                  const daysUntilDue = Math.ceil((sixMonthsLater.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                  if (daysUntilDue <= 30) {
-                    spccPlanStatus = 'warning';
-                    spccPlanStatusColor = '#F97316'; // Orange
-                  } else {
-                    spccPlanStatus = 'pending';
-                    spccPlanStatusColor = '#6B7280'; // Gray
-                  }
-                }
-              } else {
-                spccPlanStatus = 'missing';
-                spccPlanStatusColor = '#EF4444'; // Red
-              }
-            } else {
-              // Check Renewal (5 years from PE stamp date)
-              const peStampDate = new Date(latestFacilityData.spcc_pe_stamp_date);
-              const renewalDate = new Date(peStampDate);
-              renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-              const today = new Date();
-
-              if (today > renewalDate) {
+            const planResult = getSPCCPlanStatus(latestFacilityData);
+            switch (planResult.status) {
+              case 'valid':
+                spccPlanStatus = 'valid';
+                spccPlanStatusColor = '#22C55E';
+                hasValidSPCCPlan = true;
+                break;
+              case 'recertified':
+                spccPlanStatus = 'recertified';
+                spccPlanStatusColor = '#22C55E';
+                hasValidSPCCPlan = true;
+                break;
+              case 'expiring':
+              case 'renewal_due':
+                spccPlanStatus = 'expiring';
+                spccPlanStatusColor = '#F97316';
+                break;
+              case 'expired':
                 spccPlanStatus = 'expired';
-                spccPlanStatusColor = '#EF4444'; // Red
-              } else {
-                const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                if (daysUntilExpire <= 90) {
-                  spccPlanStatus = 'expiring';
-                  spccPlanStatusColor = '#F97316'; // Orange
-                } else {
-                  spccPlanStatus = 'valid';
-                  spccPlanStatusColor = '#22C55E'; // Green
-                  hasValidSPCCPlan = true;
-                }
-              }
+                spccPlanStatusColor = '#EF4444';
+                break;
+              case 'initial_due':
+                spccPlanStatus = 'warning';
+                spccPlanStatusColor = '#F97316';
+                break;
+              case 'initial_overdue':
+                spccPlanStatus = 'overdue';
+                spccPlanStatusColor = '#EF4444';
+                break;
+              case 'no_plan':
+                spccPlanStatus = 'pending';
+                spccPlanStatusColor = '#6B7280';
+                break;
+              case 'no_ip_date':
+                spccPlanStatus = 'missing';
+                spccPlanStatusColor = '#EF4444';
+                break;
             }
           }
 
@@ -943,6 +919,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               if (planStatus) {
                 const statusColors: Record<string, { bg: string; text: string }> = {
                   valid: { bg: '#D1FAE5', text: '#065F46' },
+                  recertified: { bg: '#D1FAE5', text: '#065F46' },
                   expiring: { bg: '#FEF3C7', text: '#92400E' },
                   renewal_due: { bg: '#FEF3C7', text: '#92400E' },
                   expired: { bg: '#FEE2E2', text: '#991B1B' },
@@ -953,6 +930,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 };
                 const statusIcons: Record<string, string> = {
                   valid: '<polyline points="20 6 9 17 4 12"></polyline>',
+                  recertified: '<polyline points="20 6 9 17 4 12"></polyline>',
                   expiring: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
                   renewal_due: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
                   expired: '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>',
@@ -963,6 +941,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 };
                 const statusLabels: Record<string, string> = {
                   valid: 'Plan Valid',
+                  recertified: 'Recertified',
                   expiring: 'Expiring',
                   renewal_due: 'Renewal Due',
                   expired: 'Expired',
@@ -1443,6 +1422,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // Skip if already shown in route
           if (facilitiesInRoutes.has(facility.name)) return;
 
+          // Skip if facility should be hidden by Plan Visibility filter
+          if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) return;
+
           // Use a unique negative index for non-route facilities to avoid conflicts
           const facilityIndex = -(idx + 1);
           currentFacilityIndexes.add(facilityIndex);
@@ -1535,6 +1517,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const planStatus = getSPCCPlanStatus(facility);
             const statusColors: Record<string, { bg: string; text: string }> = {
               valid: { bg: '#D1FAE5', text: '#065F46' },
+              recertified: { bg: '#D1FAE5', text: '#065F46' },
               expiring: { bg: '#FEF3C7', text: '#92400E' },
               renewal_due: { bg: '#FEF3C7', text: '#92400E' },
               expired: { bg: '#FEE2E2', text: '#991B1B' },
@@ -1545,6 +1528,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             };
             const statusLabels: Record<string, string> = {
               valid: 'Plan Valid',
+              recertified: 'Recertified',
               expiring: 'Expiring',
               renewal_due: 'Renewal Due',
               expired: 'Expired',

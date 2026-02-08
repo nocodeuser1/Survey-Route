@@ -10,6 +10,7 @@ import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import SPCCPlanManager from './SPCCPlanManager';
+import BulkSPCCUploadModal from './BulkSPCCUploadModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import CompletionTypeModal from './CompletionTypeModal';
 import SoldFacilitiesModal from './SoldFacilitiesModal';
@@ -183,6 +184,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [isMarkingSold, setIsMarkingSold] = useState(false);
   const [showInspectionOverview, setShowInspectionOverview] = useState(false);
   const [showSPCCPlanManager, setShowSPCCPlanManager] = useState(false);
+  const [showBulkSPCCUpload, setShowBulkSPCCUpload] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
@@ -2441,6 +2443,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <Upload className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Import</span>
                 </button>
+                {spccMode === 'plan' && (
+                  <button
+                    onClick={() => setShowBulkSPCCUpload(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                    title="Bulk Upload SPCC Plans"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Bulk PDFs</span>
+                  </button>
+                )}
               </div>
 
               {facilities.length > 0 && (
@@ -2607,7 +2619,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   : 'bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600'
                   }`}>
                   <tr>
-                    <th className={`px-4 py-3 text-left border-r transition-colors ${isHeaderSticky ? 'border-gray-200/50 dark:border-gray-600/50' : 'border-gray-300 dark:border-gray-600'
+                    <th className={`px-3 py-1.5 text-left border-r transition-colors ${isHeaderSticky ? 'border-gray-200/50 dark:border-gray-600/50' : 'border-gray-300 dark:border-gray-600'
                       }`}>
                       {selectedFacilityIds.size > 0 ? (
                         <button
@@ -2636,7 +2648,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     {visibleColumns.map(columnId => (
                       <th
                         key={columnId}
-                        className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors select-none"
+                        className="px-2 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors select-none"
                         onClick={() => {
                           if (sortColumn === columnId) {
                             setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -2660,7 +2672,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         </div>
                       </th>
                     ))}
-                    <th className={`px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky
+                    <th className={`px-6 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky
                       ? 'bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.1)]'
                       : 'bg-gray-50 dark:bg-gray-700'
                       }`}>
@@ -2678,7 +2690,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         key={facility.id}
                         className={`group relative ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass} ${isBeingDeleted ? 'opacity-50 pointer-events-none' : ''}`}
                       >
-                        <td className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 relative">
+                        <td className="px-3 py-1.5 border-r border-gray-200 dark:border-gray-600 relative">
                           {isBeingDeleted && (
                             <div className="absolute inset-0 flex items-center justify-center z-10">
                               <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
@@ -2729,7 +2741,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         {visibleColumns.map(columnId => (
                           <td
                             key={columnId}
-                            className={`px-2 py-2 text-sm text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
+                            className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
                               }`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
@@ -2739,17 +2751,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             {renderCellContent(facility, columnId, false)}
                           </td>
                         ))}
-                        <td className={`px-1 py-2 whitespace-nowrap text-sm sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
-                          <div className="flex gap-1.5 items-center justify-center">
+                        <td className={`px-1 py-1 whitespace-nowrap text-xs sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
+                          <div className="flex gap-1 items-center justify-center">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleEdit(facility);
                               }}
-                              className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-200 hover:scale-110"
                               title="Edit"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
+                              <Edit2 className="w-3 h-3" />
                             </button>
                             <button
                               onClick={(e) => {
@@ -2757,20 +2769,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                 setManagingFacility(facility);
                                 setShowSPCCPlanManager(true);
                               }}
-                              className="p-1.5 rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
                               title="Manage SPCC Plan"
                             >
-                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <ShieldCheck className="w-3 h-3" />
                             </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDelete(facility.id);
                               }}
-                              className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
                               title="Delete"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
                         </td>
@@ -3109,6 +3121,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </div>
         )
       }
+      {/* Bulk SPCC Upload Modal */}
+      {showBulkSPCCUpload && (
+        <BulkSPCCUploadModal
+          isOpen={showBulkSPCCUpload}
+          onClose={() => setShowBulkSPCCUpload(false)}
+          facilities={facilities}
+          accountId={accountId}
+          onUploadComplete={() => {
+            setShowBulkSPCCUpload(false);
+            onFacilitiesChange();
+          }}
+        />
+      )}
       {/* Column Visibility Modal */}
       {showColumnSelector && (() => {
         const searchLower = columnSearch.toLowerCase();

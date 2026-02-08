@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ClipboardList, FileCheck, Eye } from 'lucide-react';
+import { X, ClipboardList, FileCheck, Eye, RefreshCw } from 'lucide-react';
 
 export interface CompletedVisibility {
   // Inspection-related
@@ -16,6 +16,7 @@ interface CompletedFacilitiesVisibilityModalProps {
   surveyType: 'all' | 'spcc_inspection' | 'spcc_plan';
   onClose: () => void;
   onApply: (visibility: CompletedVisibility) => void;
+  onApplyAndRefreshRoute?: (visibility: CompletedVisibility) => void;
 }
 
 export default function CompletedFacilitiesVisibilityModal({
@@ -23,11 +24,19 @@ export default function CompletedFacilitiesVisibilityModal({
   surveyType,
   onClose,
   onApply,
+  onApplyAndRefreshRoute,
 }: CompletedFacilitiesVisibilityModalProps) {
   const [localVisibility, setLocalVisibility] = useState(visibility);
 
   const handleApply = () => {
     onApply(localVisibility);
+    onClose();
+  };
+
+  const handleApplyAndRefresh = () => {
+    if (onApplyAndRefreshRoute) {
+      onApplyAndRefreshRoute(localVisibility);
+    }
     onClose();
   };
 
@@ -61,7 +70,7 @@ export default function CompletedFacilitiesVisibilityModal({
       ? 'Hide completed inspections from the map so you can focus on remaining work.'
       : surveyType === 'spcc_plan'
         ? 'Hide facilities with current SPCC plans from the map so you can focus on those needing attention.'
-        : 'Choose which completed facilities to hide from the map view. This does not affect route optimization.';
+        : 'Choose which completed facilities to hide from the map view.';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000] p-4">
@@ -247,28 +256,39 @@ export default function CompletedFacilitiesVisibilityModal({
           )}
         </div>
 
-        <div className="flex gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
-          {hasAnyHidden && (
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+          <div className="flex gap-3">
+            {hasAnyHidden && (
+              <button
+                onClick={handleReset}
+                className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+              >
+                Reset
+              </button>
+            )}
+            <div className="flex-1" />
             <button
-              onClick={handleReset}
-              className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors font-medium"
             >
-              Reset
+              Cancel
+            </button>
+            <button
+              onClick={handleApply}
+              className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Apply
+            </button>
+          </div>
+          {onApplyAndRefreshRoute && (
+            <button
+              onClick={handleApplyAndRefresh}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Apply & Refresh Route
             </button>
           )}
-          <div className="flex-1" />
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleApply}
-            className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            Apply
-          </button>
         </div>
       </div>
     </div>

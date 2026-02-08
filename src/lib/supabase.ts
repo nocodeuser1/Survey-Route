@@ -140,6 +140,24 @@ export interface UserSettings {
   return_by_time?: string;
   inspection_visit_duration_minutes?: number;
   plan_visit_duration_minutes?: number;
+  spcc_extraction_config?: {
+    facility_name: {
+      page: number;
+      anchor_text: string;
+      anchor_region: { x: number; y: number; width: number; height: number };
+      value_offset: { dx: number; dy: number };
+      value_size: { width: number; height: number };
+      multi_line?: boolean;
+    };
+    pe_stamp_date: {
+      page: number;
+      anchor_text: string;
+      anchor_region: { x: number; y: number; width: number; height: number };
+      value_offset: { dx: number; dy: number };
+      value_size: { width: number; height: number };
+      multi_line?: boolean;
+    };
+  } | null;
   updated_at: string;
 }
 

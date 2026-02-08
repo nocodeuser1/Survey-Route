@@ -82,8 +82,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   });
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [tempSettings, setTempSettings] = useState<UserSettings | null>(null);
-  const [excludeCompleted, setExcludeCompleted] = useState(false);
-  const [excludeCompletedType, setExcludeCompletedType] = useState<'inspection' | 'plan' | 'both'>('inspection');
   const [showAdvanced, setShowAdvanced] = useState(true);
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showSaveRoutePopup, setShowSaveRoutePopup] = useState(false);
@@ -98,7 +96,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   useEffect(() => {
     loadInspections();
-    checkExcludedFacilities();
+    setExcludedCount(facilities.filter(f => f.day_assignment === -1).length);
     checkRemovedFacilities();
   }, [facilities]);
 
@@ -113,9 +111,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
         return_by_time: settings.return_by_time ?? '',
       });
-      // Load the exclude completed settings from the saved settings
-      setExcludeCompleted(settings.exclude_completed_facilities ?? false);
-      setExcludeCompletedType(settings.exclude_completed_type ?? 'inspection');
     }
   }, [showRefreshOptions, settings, accountId]);
 
@@ -138,11 +133,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       };
     }
   }, [showRefreshOptions]);
-
-  const checkExcludedFacilities = () => {
-    const excluded = facilities.filter(f => f.day_assignment === -1).length;
-    setExcludedCount(excluded);
-  };
 
   const checkRemovedFacilities = () => {
     const removed = facilities.filter(f => f.day_assignment === -2);
@@ -185,51 +175,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
   };
 
-  const handleExcludeCompleted = async () => {
-    try {
-      let facilitiesToExclude: Facility[];
-
-      const excludeInspections = excludeCompletedType === 'inspection' || excludeCompletedType === 'both';
-      const excludePlans = excludeCompletedType === 'plan' || excludeCompletedType === 'both';
-
-      facilitiesToExclude = facilities.filter(f => {
-        if (excludeInspections) {
-          const inspection = inspections.get(f.id);
-          const hasValidInspection = inspection && isInspectionValid(inspection);
-          const isExternallyCompleted = f.spcc_completion_type === 'external';
-          if (hasValidInspection || isExternallyCompleted) return true;
-        }
-        if (excludePlans) {
-          const planStatus = getSPCCPlanStatus(f);
-          if (planStatus.status === 'valid' || planStatus.status === 'recertified') return true;
-        }
-        return false;
-      });
-
-      if (facilitiesToExclude.length === 0) {
-        return;
-      }
-
-      // Mark facilities as excluded with day_assignment = -1
-      // Batch updates to avoid URL length limits with many facility IDs
-      const batchSize = 50;
-      for (let i = 0; i < facilitiesToExclude.length; i += batchSize) {
-        const batch = facilitiesToExclude.slice(i, i + batchSize);
-        const { error } = await supabase
-          .from('facilities')
-          .update({ day_assignment: -1 })
-          .in('id', batch.map(f => f.id));
-
-        if (error) throw error;
-      }
-
-      if (onFacilitiesUpdated) onFacilitiesUpdated();
-    } catch (err) {
-      console.error('Error excluding completed facilities:', err);
-      alert(`Failed to exclude completed facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  };
-
   const handleRefreshWithSettings = async () => {
     if (!tempSettings) {
       console.warn('No temp settings available');
@@ -244,7 +189,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     // Close modal IMMEDIATELY so loading state shows right away
     setShowRefreshOptions(false);
-    setExcludeCompleted(false);
     setShowAdvanced(false);
 
     // Use setTimeout to ensure modal closes before async operations
@@ -278,8 +222,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             map_preference: tempSettings.map_preference || 'google',
             include_google_earth: tempSettings.include_google_earth || false,
             location_permission_granted: tempSettings.location_permission_granted || false,
-            exclude_completed_facilities: excludeCompleted,
-            exclude_completed_type: excludeCompletedType,
             lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
             max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
             return_by_time: tempSettings.return_by_time || null,
@@ -374,22 +316,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
           onUpdateResult(updatedResult);
           setShowRefreshOptions(false);
-          setExcludeCompleted(false);
           setShowAdvanced(false);
           return;
-        }
-
-        // Exclude completed facilities if requested
-        if (excludeCompleted) {
-          console.log('Excluding completed facilities...');
-          await handleExcludeCompleted();
-
-          // Wait for facilities to be reloaded after exclusion
-          if (onFacilitiesUpdated) {
-            console.log('Waiting for facilities to reload...');
-            await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for DB to update
-            await onFacilitiesUpdated();
-          }
         }
 
         console.log('Triggering route regeneration with new settings...');
@@ -411,7 +339,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     // Close modal IMMEDIATELY so loading state shows right away
     setShowRefreshOptions(false);
-    setExcludeCompleted(false);
     setShowAdvanced(false);
 
     // Use setTimeout to ensure modal closes before async operations
@@ -437,8 +364,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             map_preference: tempSettings.map_preference || 'google',
             include_google_earth: tempSettings.include_google_earth || false,
             location_permission_granted: tempSettings.location_permission_granted || false,
-            exclude_completed_facilities: excludeCompleted,
-            exclude_completed_type: excludeCompletedType,
             lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
             max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
             return_by_time: tempSettings.return_by_time || null,
@@ -1190,7 +1115,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 overflow-y-auto"
             onClick={() => {
               setShowRefreshOptions(false);
-              setExcludeCompleted(false);
               setShowAdvanced(false);
             }}
           >
@@ -1324,18 +1248,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         Lunch / Break Time (minutes)
                       </label>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Added at the midpoint of each day's route</p>
-                      <input
-                        type="number"
-                        min="0"
-                        max="120"
-                        step="5"
-                        value={tempSettings.lunch_break_minutes ?? 0}
-                        onChange={(e) => setTempSettings({
-                          ...tempSettings,
-                          lunch_break_minutes: parseInt(e.target.value) || 0,
-                        })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
+                      <div className="relative mt-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="120"
+                          step="5"
+                          value={tempSettings.lunch_break_minutes ?? 0}
+                          onChange={(e) => setTempSettings({
+                            ...tempSettings,
+                            lunch_break_minutes: parseInt(e.target.value) || 0,
+                          })}
+                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        {(tempSettings.lunch_break_minutes ?? 0) > 0 && (
+                          <button
+                            onClick={() => setTempSettings({ ...tempSettings, lunch_break_minutes: 0 })}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            title="Clear"
+                          >
+                            <XIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1346,18 +1281,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         Max Drive Time Per Day (minutes)
                       </label>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Limits cumulative driving time per day. 0 = no limit.</p>
-                      <input
-                        type="number"
-                        min="0"
-                        max="720"
-                        step="15"
-                        value={tempSettings.max_drive_time_minutes ?? 0}
-                        onChange={(e) => setTempSettings({
-                          ...tempSettings,
-                          max_drive_time_minutes: parseInt(e.target.value) || 0,
-                        })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
+                      <div className="relative mt-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="720"
+                          step="15"
+                          value={tempSettings.max_drive_time_minutes ?? 0}
+                          onChange={(e) => setTempSettings({
+                            ...tempSettings,
+                            max_drive_time_minutes: parseInt(e.target.value) || 0,
+                          })}
+                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        {(tempSettings.max_drive_time_minutes ?? 0) > 0 && (
+                          <button
+                            onClick={() => setTempSettings({ ...tempSettings, max_drive_time_minutes: 0 })}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            title="Clear"
+                          >
+                            <XIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1368,15 +1314,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         Return to Home Base By
                       </label>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
-                      <input
-                        type="time"
-                        value={tempSettings.return_by_time ?? ''}
-                        onChange={(e) => setTempSettings({
-                          ...tempSettings,
-                          return_by_time: e.target.value || '',
-                        })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
+                      <div className="relative mt-2">
+                        <input
+                          type="time"
+                          value={tempSettings.return_by_time ?? ''}
+                          onChange={(e) => setTempSettings({
+                            ...tempSettings,
+                            return_by_time: e.target.value || '',
+                          })}
+                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        {(tempSettings.return_by_time ?? '') !== '' && (
+                          <button
+                            onClick={() => setTempSettings({ ...tempSettings, return_by_time: '' })}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            title="Clear"
+                          >
+                            <XIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1492,68 +1449,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   )}
                 </div>
 
-                <div className="border-t pt-4">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">Exclude Completed Facilities from Route Optimization</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    Selected facilities will be removed from route planning but remain visible on the map.
-                  </p>
-                  <div className="space-y-2.5 ml-1">
-                    <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both')}
-                        onChange={(e) => {
-                          const inspChecked = e.target.checked;
-                          const planChecked = excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both');
-                          if (inspChecked && planChecked) setExcludeCompletedType('both');
-                          else if (inspChecked) setExcludeCompletedType('inspection');
-                          else if (planChecked) setExcludeCompletedType('plan');
-                          else { setExcludeCompleted(false); }
-                          if (inspChecked) setExcludeCompleted(true);
-                        }}
-                        className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Inspection Completed</span>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          Facilities with valid SPCC inspections within the last year
-                        </p>
-                      </div>
-                    </label>
-
-                    <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both')}
-                        onChange={(e) => {
-                          const planChecked = e.target.checked;
-                          const inspChecked = excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both');
-                          if (inspChecked && planChecked) setExcludeCompletedType('both');
-                          else if (planChecked) setExcludeCompletedType('plan');
-                          else if (inspChecked) setExcludeCompletedType('inspection');
-                          else { setExcludeCompleted(false); }
-                          if (planChecked) setExcludeCompleted(true);
-                        }}
-                        className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Plan Completed (Up to date)</span>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          Facilities with current SPCC plans not due for renewal
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
               </div>
 
               <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
                 <button
                   onClick={() => {
                     setShowRefreshOptions(false);
-                    // Reset to saved settings value
-                    setExcludeCompleted(settings?.exclude_completed_facilities ?? false);
-                    setExcludeCompletedType(settings?.exclude_completed_type ?? 'inspection');
                     setShowAdvanced(false);
                   }}
                   className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -2376,7 +2277,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[2000] p-4 overflow-y-auto"
           onClick={() => {
             setShowRefreshOptions(false);
-            setExcludeCompleted(false);
             setShowAdvanced(false);
           }}
         >
@@ -2468,18 +2368,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       Lunch / Break Time (minutes)
                     </label>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Added at the midpoint of each day's route</p>
-                    <input
-                      type="number"
-                      min="0"
-                      max="120"
-                      step="5"
-                      value={tempSettings.lunch_break_minutes ?? 0}
-                      onChange={(e) => setTempSettings({
-                        ...tempSettings,
-                        lunch_break_minutes: parseInt(e.target.value) || 0,
-                      })}
-                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                    <div className="relative mt-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="120"
+                        step="5"
+                        value={tempSettings.lunch_break_minutes ?? 0}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          lunch_break_minutes: parseInt(e.target.value) || 0,
+                        })}
+                        className="w-full px-4 py-2 pr-8 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      {(tempSettings.lunch_break_minutes ?? 0) > 0 && (
+                        <button
+                          onClick={() => setTempSettings({ ...tempSettings, lunch_break_minutes: 0 })}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          title="Clear"
+                        >
+                          <XIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -2490,18 +2401,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       Max Drive Time Per Day (minutes)
                     </label>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Limits cumulative driving time per day. 0 = no limit.</p>
-                    <input
-                      type="number"
-                      min="0"
-                      max="720"
-                      step="15"
-                      value={tempSettings.max_drive_time_minutes ?? 0}
-                      onChange={(e) => setTempSettings({
-                        ...tempSettings,
-                        max_drive_time_minutes: parseInt(e.target.value) || 0,
-                      })}
-                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                    <div className="relative mt-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="720"
+                        step="15"
+                        value={tempSettings.max_drive_time_minutes ?? 0}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          max_drive_time_minutes: parseInt(e.target.value) || 0,
+                        })}
+                        className="w-full px-4 py-2 pr-8 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      {(tempSettings.max_drive_time_minutes ?? 0) > 0 && (
+                        <button
+                          onClick={() => setTempSettings({ ...tempSettings, max_drive_time_minutes: 0 })}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          title="Clear"
+                        >
+                          <XIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -2512,15 +2434,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       Return to Home Base By
                     </label>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
-                    <input
-                      type="time"
-                      value={tempSettings.return_by_time ?? ''}
-                      onChange={(e) => setTempSettings({
-                        ...tempSettings,
-                        return_by_time: e.target.value || '',
-                      })}
-                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                    <div className="relative mt-2">
+                      <input
+                        type="time"
+                        value={tempSettings.return_by_time ?? ''}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          return_by_time: e.target.value || '',
+                        })}
+                        className="w-full px-4 py-2 pr-8 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      {(tempSettings.return_by_time ?? '') !== '' && (
+                        <button
+                          onClick={() => setTempSettings({ ...tempSettings, return_by_time: '' })}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          title="Clear"
+                        >
+                          <XIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2636,68 +2569,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 )}
               </div>
 
-              <div className="border-t dark:border-gray-700 pt-4">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">Exclude Completed Facilities from Route Optimization</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  Selected facilities will be removed from route planning but remain visible on the map.
-                </p>
-                <div className="space-y-2.5 ml-1">
-                  <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both')}
-                      onChange={(e) => {
-                        const inspChecked = e.target.checked;
-                        const planChecked = excludeCompletedType === 'plan' || excludeCompletedType === 'both';
-                        if (inspChecked && planChecked) setExcludeCompletedType('both');
-                        else if (inspChecked) setExcludeCompletedType('inspection');
-                        else if (planChecked) setExcludeCompletedType('plan');
-                        else { setExcludeCompleted(false); }
-                        if (inspChecked && !excludeCompleted) setExcludeCompleted(true);
-                      }}
-                      className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Inspection Completed</span>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Facilities with valid SPCC inspections within the last year
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both')}
-                      onChange={(e) => {
-                        const planChecked = e.target.checked;
-                        const inspChecked = excludeCompletedType === 'inspection' || excludeCompletedType === 'both';
-                        if (inspChecked && planChecked) setExcludeCompletedType('both');
-                        else if (planChecked) setExcludeCompletedType('plan');
-                        else if (inspChecked) setExcludeCompletedType('inspection');
-                        else { setExcludeCompleted(false); }
-                        if (planChecked && !excludeCompleted) setExcludeCompleted(true);
-                      }}
-                      className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Plan Completed (Up to date)</span>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Facilities with current SPCC plans not due for renewal
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              </div>
             </div>
 
             <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
               <button
                 onClick={() => {
                   setShowRefreshOptions(false);
-                  // Reset to saved settings value
-                  setExcludeCompleted(settings?.exclude_completed_facilities ?? false);
-                  setExcludeCompletedType(settings?.exclude_completed_type ?? 'inspection');
                   setShowAdvanced(false);
                 }}
                 className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"

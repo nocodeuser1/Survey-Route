@@ -19,6 +19,7 @@ import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
+import SPCCExtractionSettings from './components/SPCCExtractionSettings';
 import CompletedFacilitiesVisibilityModal, { CompletedVisibility } from './components/CompletedFacilitiesVisibilityModal';
 import HomeBaseModal from './components/HomeBaseModal';
 import LoadingScreen from './components/LoadingScreen';
@@ -147,12 +148,19 @@ function App() {
   const [triggerFitBounds, setTriggerFitBounds] = useState(0);
   const [deletedFacilities, setDeletedFacilities] = useState<Array<{ name: string; day: number }>>([]);
   const [showDeletedAlert, setShowDeletedAlert] = useState(false);
-  const [completedVisibility, setCompletedVisibility] = useState<CompletedVisibility>({
-    hideAllCompleted: false,
-    hideInternallyCompleted: false,
-    hideExternallyCompleted: false,
-    hideValidPlans: false,
-    hideExpiringPlans: false,
+  const [completedVisibility, setCompletedVisibility] = useState<CompletedVisibility>(() => {
+    // Load saved visibility for the default survey type ('all')
+    const saved = localStorage.getItem('facilityVisibility_all');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    return {
+      hideAllCompleted: false,
+      hideInternallyCompleted: false,
+      hideExternallyCompleted: false,
+      hideValidPlans: false,
+      hideExpiringPlans: false,
+    };
   });
   const [navigationMode, setNavigationMode] = useState(false);
   const [locationTracking, setLocationTracking] = useState(false);
@@ -299,8 +307,16 @@ function App() {
     });
   }, [accountLoading, currentAccount]);
 
-  // Auto-hide completed facilities on map when switching to a specific survey type
+  // Load saved visibility settings when switching survey type, with sensible defaults for first use
   useEffect(() => {
+    const saved = localStorage.getItem(`facilityVisibility_${surveyType}`);
+    if (saved) {
+      try {
+        setCompletedVisibility(JSON.parse(saved));
+        return;
+      } catch {}
+    }
+    // First-time defaults per survey type
     if (surveyType === 'spcc_inspection') {
       setCompletedVisibility({
         hideAllCompleted: true,
@@ -318,7 +334,6 @@ function App() {
         hideExpiringPlans: false,
       });
     } else {
-      // "All Facilities" mode - restore visibility
       setCompletedVisibility({
         hideAllCompleted: false,
         hideInternallyCompleted: false,
@@ -1007,17 +1022,14 @@ function App() {
       // Filter out excluded and manually removed facilities (day_assignment === -1 or -2)
       let activeFacilities = facilities.filter(isActiveFacility);
 
-      // Handle exclusion of completed facilities based on settings
+      // Exclude facilities based on current visibility settings (driven by the visibility modal)
       const completedFacilityIds = new Set<string>();
       let excludeCount = 0;
-      const excludeType = settings.exclude_completed_type ?? 'inspection';
+      const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
-      if (settings.exclude_completed_facilities) {
-        const excludeInspections = excludeType === 'inspection' || excludeType === 'both';
-        const excludePlans = excludeType === 'plan' || excludeType === 'both';
-
-        if (excludeInspections && currentAccount) {
-          // Exclude facilities with completed SPCC inspections
+      // Inspection-based exclusions
+      if (hideAllCompleted || hideInternallyCompleted || hideExternallyCompleted) {
+        if (currentAccount) {
           const { data: completedInspections } = await supabase
             .from('inspections')
             .select('*')
@@ -1032,29 +1044,57 @@ function App() {
             }
           });
 
-          latestInspectionsByFacility.forEach((inspection, facilityId) => {
-            if (isInspectionValid(inspection)) {
-              completedFacilityIds.add(facilityId);
+          if (hideAllCompleted) {
+            latestInspectionsByFacility.forEach((inspection, facilityId) => {
+              if (isInspectionValid(inspection)) {
+                completedFacilityIds.add(facilityId);
+              }
+            });
+            activeFacilities.forEach(facility => {
+              if (facility.spcc_completion_type === 'internal' || facility.spcc_completion_type === 'external') {
+                completedFacilityIds.add(facility.id);
+              }
+            });
+          } else {
+            if (hideInternallyCompleted) {
+              latestInspectionsByFacility.forEach((inspection, facilityId) => {
+                if (isInspectionValid(inspection)) {
+                  completedFacilityIds.add(facilityId);
+                }
+              });
+              activeFacilities.forEach(facility => {
+                if (facility.spcc_completion_type === 'internal') {
+                  completedFacilityIds.add(facility.id);
+                }
+              });
             }
-          });
-
-          // Add facilities with internal/external completion
-          activeFacilities.forEach(facility => {
-            if (facility.spcc_completion_type === 'internal' || facility.spcc_completion_type === 'external') {
-              completedFacilityIds.add(facility.id);
+            if (hideExternallyCompleted) {
+              activeFacilities.forEach(facility => {
+                if (facility.spcc_completion_type === 'external') {
+                  completedFacilityIds.add(facility.id);
+                }
+              });
             }
-          });
+          }
         }
+      }
 
-        if (excludePlans) {
-          // Exclude facilities with valid/current SPCC plans (not due for renewal)
-          activeFacilities.forEach(facility => {
-            const planStatus = getSPCCPlanStatus(facility);
-            if (planStatus.status === 'valid' || planStatus.status === 'recertified') {
-              completedFacilityIds.add(facility.id);
-            }
-          });
-        }
+      // Plan-based exclusions
+      if (hideValidPlans) {
+        activeFacilities.forEach(facility => {
+          const planStatus = getSPCCPlanStatus(facility);
+          if (planStatus.status === 'valid' || planStatus.status === 'recertified') {
+            completedFacilityIds.add(facility.id);
+          }
+        });
+      }
+      if (hideExpiringPlans) {
+        activeFacilities.forEach(facility => {
+          const planStatus = getSPCCPlanStatus(facility);
+          if (planStatus.status === 'expiring' || planStatus.status === 'renewal_due') {
+            completedFacilityIds.add(facility.id);
+          }
+        });
       }
 
       // Apply exclusions
@@ -1063,11 +1103,8 @@ function App() {
         const facilitiesBeforeFilter = activeFacilities.length;
         facilitiesForRouting = activeFacilities.filter(f => !completedFacilityIds.has(f.id));
         excludeCount = facilitiesBeforeFilter - facilitiesForRouting.length;
-        console.log(`Excluded ${excludeCount} completed facilities from route calculation (type: ${excludeType})`);
+        console.log(`Excluded ${excludeCount} facilities from route based on visibility settings`);
       }
-
-      // Don't auto-adjust visibility - let the user control it via the visibility modal
-      // The visibility state should persist across route generations
 
       if (facilitiesForRouting.length === 0) {
         setError('No active facilities to route. Please restore excluded facilities or upload new ones.');
@@ -1362,25 +1399,7 @@ function App() {
       localStorage.setItem('currentView', 'route-planning');
       setCurrentView('route-planning');
 
-      // Update visibility state to match exclude settings
-      if (settings.exclude_completed_facilities) {
-        console.log('[Route Generation] Updating visibility state to match exclusion settings', {
-          exclude_completed_facilities: settings.exclude_completed_facilities,
-          exclude_completed_type: settings.exclude_completed_type,
-        });
-        setCompletedVisibility({
-          hideAllCompleted: true,
-          hideInternallyCompleted: true,
-          hideExternallyCompleted: true,
-        });
-      } else {
-        // If no exclusions, reset visibility to show all
-        setCompletedVisibility({
-          hideAllCompleted: false,
-          hideInternallyCompleted: false,
-          hideExternallyCompleted: false,
-        });
-      }
+      // Preserve user's visibility settings across route updates - don't reset them
 
       await supabase
         .from('route_plans')
@@ -3386,6 +3405,17 @@ function App() {
                         />
                       ),
                     }] : []),
+                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                      id: 'spcc-extraction',
+                      label: 'SPCC Extraction',
+                      icon: getSettingsIcon('spcc-extraction'),
+                      content: (
+                        <SPCCExtractionSettings
+                          accountId={currentAccount.id}
+                          authUserId={user?.id || ''}
+                        />
+                      ),
+                    }] : []),
                     {
                       id: 'security',
                       label: 'Security',
@@ -3434,6 +3464,24 @@ function App() {
           onClose={() => setShowVisibilityModal(false)}
           onApply={(newVisibility) => {
             setCompletedVisibility(newVisibility);
+            localStorage.setItem(`facilityVisibility_${surveyType}`, JSON.stringify(newVisibility));
+          }}
+          onApplyAndRefreshRoute={async (newVisibility) => {
+            setCompletedVisibility(newVisibility);
+            localStorage.setItem(`facilityVisibility_${surveyType}`, JSON.stringify(newVisibility));
+            // Trigger route regeneration with latest settings
+            if (currentAccount) {
+              const { data: latestSettings } = await supabase
+                .from('user_settings')
+                .select('*')
+                .eq('account_id', currentAccount.id)
+                .maybeSingle();
+              if (latestSettings) {
+                handleGenerateRoutes(latestSettings);
+              } else if (lastUsedSettings) {
+                handleGenerateRoutes(lastUsedSettings);
+              }
+            }
           }}
         />
       )}
