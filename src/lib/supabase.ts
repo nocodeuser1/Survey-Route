@@ -166,6 +166,10 @@ export interface UserSettings {
       visible?: string[];
       order?: string[];
     }>;
+    search_query?: string;
+    status_filter?: string;
+    spcc_plan_filter?: string;
+    show_sold_facilities?: boolean;
   } | null;
   updated_at: string;
 }

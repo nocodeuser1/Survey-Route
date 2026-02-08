@@ -6,6 +6,10 @@ export interface FacilitiesPreferences {
   sort_direction: 'asc' | 'desc';
   hide_empty_fields: boolean;
   columns: Record<string, { visible: string[]; order: string[] }>;
+  search_query: string;
+  status_filter: string;
+  spcc_plan_filter: string;
+  show_sold_facilities: boolean;
 }
 
 const DEFAULT_PREFS: FacilitiesPreferences = {
@@ -13,6 +17,10 @@ const DEFAULT_PREFS: FacilitiesPreferences = {
   sort_direction: 'asc',
   hide_empty_fields: false,
   columns: {},
+  search_query: '',
+  status_filter: 'all',
+  spcc_plan_filter: 'all',
+  show_sold_facilities: false,
 };
 
 const CACHE_KEY = (accountId: string) => `facilities_prefs_${accountId}`;

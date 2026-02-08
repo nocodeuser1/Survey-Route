@@ -122,8 +122,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showAddForm, setShowAddForm] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>('all');
+  const [searchQuery, setSearchQuery] = useState(facPrefs.search_query || '');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>((facPrefs.status_filter as 'all' | 'inspected' | 'pending' | 'expired') || 'all');
   const [sortColumn, setSortColumn] = useState<ColumnId | null>((facPrefs.sort_column as ColumnId) || 'name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(facPrefs.sort_direction);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
@@ -189,7 +189,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showFilters, setShowFilters] = useState(false);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
-  const [showSoldFacilities, setShowSoldFacilities] = useState(false);
+  const [showSoldFacilities, setShowSoldFacilities] = useState(facPrefs.show_sold_facilities);
   const [showSoldModal, setShowSoldModal] = useState(false);
   const [isMarkingSold, setIsMarkingSold] = useState(false);
   const [showInspectionOverview, setShowInspectionOverview] = useState(false);
@@ -201,7 +201,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [notesValue, setNotesValue] = useState('');
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
-  const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>('all');
+  const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
   const [isImporting, setIsImporting] = useState(false);
   const [importResults, setImportResults] = useState<{
     updatedCount: number;
@@ -459,6 +459,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   useEffect(() => {
     updateFacPrefs({ sort_column: sortColumn, sort_direction: sortDirection });
   }, [sortColumn, sortDirection]);
+
+  // Persist filter preferences
+  useEffect(() => {
+    updateFacPrefs({
+      search_query: searchQuery,
+      status_filter: statusFilter,
+      spcc_plan_filter: spccPlanFilter,
+      show_sold_facilities: showSoldFacilities,
+    });
+  }, [searchQuery, statusFilter, spccPlanFilter, showSoldFacilities]);
 
   // Close edit modal on Escape key
   useEffect(() => {
