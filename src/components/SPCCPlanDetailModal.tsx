@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
@@ -99,10 +99,29 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
   const [saving, setSaving] = useState(false);
+  const [savedIpDate, setSavedIpDate] = useState<string | null>(null);
+  const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
   const ipDatePickerRef = useRef<HTMLInputElement>(null);
   const peDatePickerRef = useRef<HTMLInputElement>(null);
 
-  const status = getSPCCPlanStatus(facility);
+  // Sync local state when facility prop updates from parent refetch
+  useEffect(() => {
+    setIpDateValue(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
+    setSavedIpDate(null);
+  }, [facility.first_prod_date]);
+
+  useEffect(() => {
+    setPeDateValue(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
+    setSavedPeDate(null);
+  }, [facility.spcc_pe_stamp_date]);
+
+  // Use optimistic values so status/badge update immediately after save
+  const effectiveFacility = {
+    ...facility,
+    first_prod_date: facility.first_prod_date || savedIpDate || undefined,
+    spcc_pe_stamp_date: facility.spcc_pe_stamp_date || savedPeDate || undefined,
+  };
+  const status = getSPCCPlanStatus(effectiveFacility);
   const badgeConfig = getStatusBadgeConfig(status.status);
   const StatusIcon = statusIconMap[badgeConfig.icon];
 
@@ -124,6 +143,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
         .update({ first_prod_date: isoDate })
         .eq('id', facility.id);
       if (error) throw error;
+      setSavedIpDate(isoDate);
       setEditingIpDate(false);
       onFacilitiesChange();
     } catch (err) {
@@ -143,6 +163,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
         .update({ spcc_pe_stamp_date: isoDate })
         .eq('id', facility.id);
       if (error) throw error;
+      setSavedPeDate(isoDate);
       setEditingPeDate(false);
       onFacilitiesChange();
     } catch (err) {
@@ -309,15 +330,20 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${facility.first_prod_date
-                      ? (darkMode ? 'text-white' : 'text-gray-900')
-                      : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
-                      }`}>
-                      {facility.first_prod_date
-                        ? new Date(facility.first_prod_date).toLocaleDateString()
-                        : 'Not set'
-                      }
-                    </span>
+                    {(() => {
+                      const effectiveDate = facility.first_prod_date || savedIpDate;
+                      return (
+                        <span className={`text-sm font-medium ${effectiveDate
+                          ? (darkMode ? 'text-white' : 'text-gray-900')
+                          : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
+                          }`}>
+                          {effectiveDate
+                            ? new Date(effectiveDate).toLocaleDateString()
+                            : 'Not set'
+                          }
+                        </span>
+                      );
+                    })()}
                     <button
                       onClick={() => setEditingIpDate(true)}
                       className={`p-1 rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
@@ -375,15 +401,20 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${facility.spcc_pe_stamp_date
-                      ? (darkMode ? 'text-white' : 'text-gray-900')
-                      : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
-                      }`}>
-                      {facility.spcc_pe_stamp_date
-                        ? new Date(facility.spcc_pe_stamp_date).toLocaleDateString()
-                        : 'Not set'
-                      }
-                    </span>
+                    {(() => {
+                      const effectiveDate = facility.spcc_pe_stamp_date || savedPeDate;
+                      return (
+                        <span className={`text-sm font-medium ${effectiveDate
+                          ? (darkMode ? 'text-white' : 'text-gray-900')
+                          : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
+                          }`}>
+                          {effectiveDate
+                            ? new Date(effectiveDate).toLocaleDateString()
+                            : 'Not set'
+                          }
+                        </span>
+                      );
+                    })()}
                     <button
                       onClick={() => setEditingPeDate(true)}
                       className={`p-1 rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
@@ -438,9 +469,9 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       <p className={`font-medium text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                         SPCC Plan on File
                       </p>
-                      {facility.spcc_pe_stamp_date && (
+                      {(facility.spcc_pe_stamp_date || savedPeDate) && (
                         <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          PE Stamped: {new Date(facility.spcc_pe_stamp_date).toLocaleDateString()}
+                          PE Stamped: {new Date((facility.spcc_pe_stamp_date || savedPeDate)!).toLocaleDateString()}
                         </p>
                       )}
                     </div>
