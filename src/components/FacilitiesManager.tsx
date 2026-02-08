@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
+import * as XLSX from 'xlsx';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
 import CSVUpload from './CSVUpload';
@@ -16,7 +17,7 @@ import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
-import { ParseResult } from '../utils/csvParser';
+import { ParseResult, ParsedFacility } from '../utils/csvParser';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -32,31 +33,63 @@ interface FacilitiesManagerProps {
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
-type ColumnId = 'name' | 'latitude' | 'longitude' | 'visit_duration' | 'spcc_status' | 'inspection_status' | 'notes' |
+type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' |
+  'spcc_status' | 'inspection_status' | 'notes' |
+  'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
+  'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
+  'berm_depth_inches' | 'berm_length' | 'berm_width' |
+  'initial_inspection_completed' | 'company_signature_date' | 'recertified_date' | 'recertification_due_date' |
+  'day_assignment' | 'team_assignment' | 'status' | 'created_at' |
   'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' |
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'api_numbers_combined' |
-  'lat_well_sheet' | 'long_well_sheet' | 'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date';
+  'lat_well_sheet' | 'long_well_sheet';
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'visit_duration', 'spcc_status', 'inspection_status', 'notes'];
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
-  'name', 'latitude', 'longitude', 'visit_duration', 'spcc_status', 'inspection_status', 'notes',
-  'matched_facility_name', 'well_name_1', 'well_name_2', 'well_name_3', 'well_name_4', 'well_name_5', 'well_name_6',
-  'well_api_1', 'well_api_2', 'well_api_3', 'well_api_4', 'well_api_5', 'well_api_6', 'api_numbers_combined',
-  'lat_well_sheet', 'long_well_sheet', 'first_prod_date', 'spcc_due_date', 'spcc_inspection_date'
+  'name', 'address', 'latitude', 'longitude', 'visit_duration', 'county',
+  'status', 'day_assignment', 'team_assignment',
+  'spcc_status', 'inspection_status', 'notes',
+  'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
+  'photos_taken', 'field_visit_date', 'estimated_oil_per_day',
+  'berm_depth_inches', 'berm_length', 'berm_width',
+  'initial_inspection_completed', 'company_signature_date', 'recertified_date', 'recertification_due_date',
+  'matched_facility_name', 'api_numbers_combined',
+  'well_name_1', 'well_api_1', 'well_name_2', 'well_api_2', 'well_name_3', 'well_api_3',
+  'well_name_4', 'well_api_4', 'well_name_5', 'well_api_5', 'well_name_6', 'well_api_6',
+  'lat_well_sheet', 'long_well_sheet',
+  'created_at',
 ];
-
-
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   name: 'Facility Name',
+  address: 'Address',
   latitude: 'Latitude',
   longitude: 'Longitude',
   visit_duration: 'Visit Duration',
+  county: 'County',
+  status: 'Status',
+  day_assignment: 'Day Assignment',
+  team_assignment: 'Team Assignment',
   spcc_status: 'SPCC Status',
   inspection_status: 'SPCC Inspection',
   notes: 'Notes',
+  first_prod_date: 'First Prod',
+  spcc_due_date: 'SPCC Due',
+  spcc_pe_stamp_date: 'PE Stamp Date',
+  spcc_inspection_date: 'SPCC Inspection Date',
+  spcc_completion_type: 'Completion Type',
+  photos_taken: 'Photos Taken',
+  field_visit_date: 'Field Visit',
+  estimated_oil_per_day: 'Est. Oil/Day (bbl)',
+  berm_depth_inches: 'Berm Depth (in)',
+  berm_length: 'Berm Length',
+  berm_width: 'Berm Width',
+  initial_inspection_completed: 'Initial Inspection',
+  company_signature_date: 'Company Signature',
+  recertified_date: 'Recertified',
+  recertification_due_date: 'Recert. Due Date',
   matched_facility_name: 'Matched Name',
   well_name_1: 'Well 1',
   well_name_2: 'Well 2',
@@ -73,9 +106,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   api_numbers_combined: 'Combined API',
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
-  first_prod_date: 'First Prod',
-  spcc_due_date: 'SPCC Due',
-  spcc_inspection_date: 'SPCC Inspection Date',
+  created_at: 'Date Added',
 };
 
 export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false }: FacilitiesManagerProps) {
@@ -102,9 +133,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // Load column order and visibility per report type + spccMode combination
   const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}`;
 
+  // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
+  const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
+    const missing = ALL_COLUMNS_ORDER.filter(id => !saved.includes(id));
+    return missing.length > 0 ? [...saved, ...missing] : saved;
+  };
+
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() => {
     const saved = localStorage.getItem(getStorageKey('column_order'));
-    return saved ? JSON.parse(saved) : ALL_COLUMNS_ORDER;
+    return saved ? mergeColumnOrder(JSON.parse(saved)) : ALL_COLUMNS_ORDER;
   });
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
     const saved = localStorage.getItem(getStorageKey('visible_columns'));
@@ -123,6 +160,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return cols;
   });
   const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const [columnSearch, setColumnSearch] = useState('');
+  const [draftVisibleColumns, setDraftVisibleColumns] = useState<ColumnId[]>([]);
+  const [draftColumnOrder, setDraftColumnOrder] = useState<ColumnId[]>([]);
   const [showExportColumnSelector, setShowExportColumnSelector] = useState(false);
   const [exportColumnOrder, setExportColumnOrder] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
   const [exportVisibleColumns, setExportVisibleColumns] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
@@ -130,6 +170,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
   const [mobileEditingFacility, setMobileEditingFacility] = useState<Facility | null>(null);
   const [mobileEditFormData, setMobileEditFormData] = useState<Record<ColumnId, string>>({} as Record<ColumnId, string>);
+  const [showWellSection, setShowWellSection] = useState(false);
+  const [showWells2to6, setShowWells2to6] = useState(false);
+  const [hideEmptyFields, setHideEmptyFields] = useState(() => {
+    return localStorage.getItem('facilities_hide_empty_fields') === 'true';
+  });
   const [showFilters, setShowFilters] = useState(false);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
@@ -145,8 +190,99 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>('all');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResults, setImportResults] = useState<{
+    updatedCount: number;
+    insertedCount: number;
+    unmatchedRows: ParsedFacility[];
+    warnings: string[];
+    isUpdateOnly: boolean;
+  } | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Lock body scroll when edit modal is open
+  useEffect(() => {
+    if (mobileEditingFacility) {
+      const scrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.overflow = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [mobileEditingFacility]);
+
+  // Parse pasted date in mm/dd/yy or mm/dd/yyyy format into YYYY-MM-DD
+  const handleDatePaste = (field: ColumnId) => (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text').trim();
+    const match = pasted.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+    if (match) {
+      e.preventDefault();
+      const month = match[1].padStart(2, '0');
+      const day = match[2].padStart(2, '0');
+      let year = match[3];
+      if (year.length === 2) {
+        const num = parseInt(year);
+        year = (num > 50 ? '19' : '20') + year;
+      }
+      setMobileEditFormData(prev => ({ ...prev, [field]: `${year}-${month}-${day}` }));
+    }
+  };
+
+  // Compute recertification due date (PE stamp date + 5 years)
+  const computeRecertificationDueDate = (facility: Facility | null): string => {
+    if (!facility?.spcc_pe_stamp_date) return '';
+    const peDate = new Date(facility.spcc_pe_stamp_date);
+    if (isNaN(peDate.getTime())) return '';
+    const dueDate = new Date(peDate);
+    dueDate.setFullYear(dueDate.getFullYear() + 5);
+    return dueDate.toISOString().split('T')[0];
+  };
+
+  // Check if a form field has data (for hide-empty toggle)
+  const fieldHasData = (fieldId: ColumnId): boolean => {
+    if (fieldId === 'recertification_due_date') {
+      return !!computeRecertificationDueDate(mobileEditingFacility);
+    }
+    if (fieldId === 'photos_taken') {
+      return mobileEditFormData[fieldId] === 'true';
+    }
+    const val = mobileEditFormData[fieldId];
+    return val !== undefined && val !== null && val !== '';
+  };
+
+  // Check if any field in a section has data
+  const sectionHasData = (fieldIds: ColumnId[]): boolean => {
+    return fieldIds.some(id => fieldHasData(id));
+  };
+
+  // Persist hide-empty toggle to localStorage
+  const toggleHideEmpty = () => {
+    const newVal = !hideEmptyFields;
+    setHideEmptyFields(newVal);
+    localStorage.setItem('facilities_hide_empty_fields', String(newVal));
+  };
+
+  // Whether a section should be visible (always show if toggle is off, or if section has data)
+  const isSectionVisible = (fieldIds: ColumnId[], alwaysShow = false): boolean => {
+    if (alwaysShow || !hideEmptyFields) return true;
+    return sectionHasData(fieldIds);
+  };
+
+  // Whether a field should be visible (required fields always show)
+  const isFieldVisible = (fieldId: ColumnId, required = false): boolean => {
+    if (required || !hideEmptyFields) return true;
+    return fieldHasData(fieldId);
+  };
 
   // Reload column order and visibility when report type or spccMode changes
   const isFirstRender = useRef(true);
@@ -157,7 +293,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
     const savedOrder = localStorage.getItem(getStorageKey('column_order'));
     const savedVisible = localStorage.getItem(getStorageKey('visible_columns'));
-    setColumnOrder(savedOrder ? JSON.parse(savedOrder) : ALL_COLUMNS_ORDER);
+    setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : ALL_COLUMNS_ORDER);
     if (savedVisible) {
       setVisibleColumns(JSON.parse(savedVisible));
     } else {
@@ -504,8 +640,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return Number(facility.latitude) || 0;
           case 'longitude':
             return Number(facility.longitude) || 0;
-          case 'visit_duration':
-            return facility.visit_duration_minutes || 0;
           case 'spcc_status': {
             // Sort by SPCC plan due date
             const dueDate = getSPCCPlanDueDate(facility);
@@ -554,6 +688,48 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.spcc_due_date ? new Date(facility.spcc_due_date).getTime() : 0;
           case 'spcc_inspection_date':
             return facility.spcc_inspection_date ? new Date(facility.spcc_inspection_date).getTime() : 0;
+          case 'spcc_pe_stamp_date':
+            return facility.spcc_pe_stamp_date ? new Date(facility.spcc_pe_stamp_date).getTime() : 0;
+          case 'field_visit_date':
+            return facility.field_visit_date ? new Date(facility.field_visit_date).getTime() : 0;
+          case 'initial_inspection_completed':
+            return facility.initial_inspection_completed ? new Date(facility.initial_inspection_completed).getTime() : 0;
+          case 'company_signature_date':
+            return facility.company_signature_date ? new Date(facility.company_signature_date).getTime() : 0;
+          case 'recertified_date':
+            return facility.recertified_date ? new Date(facility.recertified_date).getTime() : 0;
+          case 'recertification_due_date': {
+            const due = computeRecertificationDueDate(facility);
+            return due ? new Date(due).getTime() : 0;
+          }
+          case 'created_at':
+            return facility.created_at ? new Date(facility.created_at).getTime() : 0;
+          case 'address':
+            return facility.address || '';
+          case 'county':
+            return facility.county || '';
+          case 'visit_duration':
+            return facility.visit_duration_minutes || 0;
+          case 'photos_taken':
+            return facility.photos_taken ? 1 : 0;
+          case 'estimated_oil_per_day':
+            return facility.estimated_oil_per_day ?? 0;
+          case 'berm_depth_inches':
+            return facility.berm_depth_inches ?? 0;
+          case 'berm_length':
+            return facility.berm_length ?? 0;
+          case 'berm_width':
+            return facility.berm_width ?? 0;
+          case 'spcc_completion_type':
+            return facility.spcc_completion_type || '';
+          case 'day_assignment':
+            return facility.day_assignment ?? Number.MAX_SAFE_INTEGER;
+          case 'team_assignment':
+            return facility.team_assignment ?? Number.MAX_SAFE_INTEGER;
+          case 'status':
+            return facility.status || 'active';
+          case 'notes':
+            return facility.notes || '';
           default:
             return '';
         }
@@ -607,8 +783,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     formData.first_prod_date = facility.first_prod_date || '';
     formData.spcc_due_date = facility.spcc_due_date || '';
     formData.spcc_inspection_date = facility.spcc_inspection_date || '';
+    formData.county = facility.county || '';
+    formData.photos_taken = facility.photos_taken ? 'true' : 'false';
+    formData.field_visit_date = facility.field_visit_date || '';
+    formData.estimated_oil_per_day = facility.estimated_oil_per_day != null ? String(facility.estimated_oil_per_day) : '';
+    formData.berm_depth_inches = facility.berm_depth_inches != null ? String(facility.berm_depth_inches) : '';
+    formData.berm_length = facility.berm_length != null ? String(facility.berm_length) : '';
+    formData.berm_width = facility.berm_width != null ? String(facility.berm_width) : '';
+    formData.initial_inspection_completed = facility.initial_inspection_completed || '';
+    formData.company_signature_date = facility.company_signature_date || '';
+    formData.recertified_date = facility.recertified_date || '';
+    formData.recertification_due_date = computeRecertificationDueDate(facility);
 
     setMobileEditFormData(formData);
+
+    // Auto-expand well section if any well data exists
+    const hasWellData = [formData.well_name_1, formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
+      formData.well_api_1, formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6,
+      formData.matched_facility_name, formData.api_numbers_combined].some(v => v && v.trim());
+    setShowWellSection(hasWellData);
+
+    // Auto-expand wells 2-6 if any have data
+    const hasWells2to6 = [formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
+      formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6].some(v => v && v.trim());
+    setShowWells2to6(hasWells2to6);
   };
 
   const handleSaveMobileEdit = async () => {
@@ -652,6 +850,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         ? parseFloat(mobileEditFormData.long_well_sheet)
         : null;
 
+      // Parse new numeric fields safely
+      const estimatedOil = mobileEditFormData.estimated_oil_per_day?.trim()
+        ? parseFloat(mobileEditFormData.estimated_oil_per_day) : null;
+      const bermDepth = mobileEditFormData.berm_depth_inches?.trim()
+        ? parseFloat(mobileEditFormData.berm_depth_inches) : null;
+      const bermLength = mobileEditFormData.berm_length?.trim()
+        ? parseFloat(mobileEditFormData.berm_length) : null;
+      const bermWidth = mobileEditFormData.berm_width?.trim()
+        ? parseFloat(mobileEditFormData.berm_width) : null;
+
       const { error: updateError } = await supabase
         .from('facilities')
         .update({
@@ -659,6 +867,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           latitude: lat,
           longitude: lng,
           visit_duration_minutes: visitDuration,
+          county: mobileEditFormData.county?.trim() || null,
+          photos_taken: mobileEditFormData.photos_taken === 'true',
+          field_visit_date: mobileEditFormData.field_visit_date?.trim() || null,
+          estimated_oil_per_day: estimatedOil,
+          berm_depth_inches: bermDepth,
+          berm_length: bermLength,
+          berm_width: bermWidth,
+          initial_inspection_completed: mobileEditFormData.initial_inspection_completed?.trim() || null,
+          company_signature_date: mobileEditFormData.company_signature_date?.trim() || null,
+          recertified_date: mobileEditFormData.recertified_date?.trim() || null,
           matched_facility_name: mobileEditFormData.matched_facility_name?.trim() || null,
           well_name_1: mobileEditFormData.well_name_1?.trim() || null,
           well_name_2: mobileEditFormData.well_name_2?.trim() || null,
@@ -783,15 +1001,66 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   };
 
+  const buildDetailFields = (parsedFacility: ParsedFacility) => {
+    const d: any = {};
+    if (parsedFacility.matched_facility_name !== undefined) d.matched_facility_name = parsedFacility.matched_facility_name || null;
+    for (let i = 1; i <= 6; i++) {
+      const wn = `well_name_${i}` as keyof ParsedFacility;
+      const wa = `well_api_${i}` as keyof ParsedFacility;
+      if (parsedFacility[wn] !== undefined) d[wn] = parsedFacility[wn] || null;
+      if (parsedFacility[wa] !== undefined) d[wa] = parsedFacility[wa] || null;
+    }
+    if (parsedFacility.api_numbers_combined !== undefined) d.api_numbers_combined = parsedFacility.api_numbers_combined || null;
+    if (parsedFacility.lat_well_sheet !== undefined) d.lat_well_sheet = parsedFacility.lat_well_sheet ?? null;
+    if (parsedFacility.long_well_sheet !== undefined) d.long_well_sheet = parsedFacility.long_well_sheet ?? null;
+    if (parsedFacility.first_prod_date !== undefined) d.first_prod_date = parsedFacility.first_prod_date || null;
+    if (parsedFacility.spcc_due_date !== undefined) d.spcc_due_date = parsedFacility.spcc_due_date || null;
+    if (parsedFacility.spcc_inspection_date !== undefined) d.spcc_inspection_date = parsedFacility.spcc_inspection_date || null;
+    if (parsedFacility.photos_taken !== undefined) d.photos_taken = parsedFacility.photos_taken ?? false;
+    if (parsedFacility.field_visit_date !== undefined) d.field_visit_date = parsedFacility.field_visit_date || null;
+    if (parsedFacility.estimated_oil_per_day !== undefined) d.estimated_oil_per_day = parsedFacility.estimated_oil_per_day ?? null;
+    if (parsedFacility.berm_depth_inches !== undefined) d.berm_depth_inches = parsedFacility.berm_depth_inches ?? null;
+    if (parsedFacility.berm_length !== undefined) d.berm_length = parsedFacility.berm_length ?? null;
+    if (parsedFacility.berm_width !== undefined) d.berm_width = parsedFacility.berm_width ?? null;
+    if (parsedFacility.initial_inspection_completed !== undefined) d.initial_inspection_completed = parsedFacility.initial_inspection_completed || null;
+    if (parsedFacility.company_signature_date !== undefined) d.company_signature_date = parsedFacility.company_signature_date || null;
+    if (parsedFacility.recertified_date !== undefined) d.recertified_date = parsedFacility.recertified_date || null;
+    if (parsedFacility.county !== undefined) d.county = parsedFacility.county || null;
+    if (parsedFacility.spcc_pe_stamp_date !== undefined) d.spcc_pe_stamp_date = parsedFacility.spcc_pe_stamp_date || null;
+    return d;
+  };
+
+  const downloadUnmatchedXlsx = (rows: ParsedFacility[]) => {
+    const exportRows = rows.map(r => ({
+      'Well Name': r.name,
+      'County': r.county || '',
+      'First Prod': r.first_prod_date || '',
+      'Photos Taken': r.photos_taken ? 'Yes' : '',
+      'Field Visit': r.field_visit_date || '',
+      'Estimated Oil BOPD': r.estimated_oil_per_day ?? '',
+      'PE Stamp Due Date': r.spcc_due_date || '',
+      'Berm Depth / Height (Inches)': r.berm_depth_inches ?? '',
+      'Berm Length': r.berm_length ?? '',
+      'Berm Width': r.berm_width ?? '',
+      'Initial Inspection Completed': r.initial_inspection_completed || '',
+      'PE Stamp Date': r.spcc_pe_stamp_date || '',
+      'Company Signature Date': r.company_signature_date || '',
+      'Recertified Date': r.recertified_date || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Unmatched');
+    XLSX.writeFile(wb, 'unmatched_facilities.xlsx');
+  };
+
   const handleCSVParsed = async (result: ParseResult) => {
-    // Check for critical errors (missing columns, etc.)
     if (result.errors.length > 0) {
       setError(result.errors.join('\n'));
       return;
     }
 
     if (result.data.length === 0) {
-      setError('No valid facilities found in CSV');
+      setError('No valid facilities found in file');
       return;
     }
 
@@ -801,6 +1070,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     setError(null);
+    setIsImporting(true);
 
     const { data: settingsData } = await supabase
       .from('user_settings')
@@ -812,7 +1082,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const batchId = facilities[0]?.upload_batch_id || crypto.randomUUID();
 
     try {
-      // Fetch existing facilities for duplicate detection
       const { data: existingFacilities, error: fetchError } = await supabase
         .from('facilities')
         .select('*')
@@ -822,71 +1091,67 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
       let updatedCount = 0;
       let insertedCount = 0;
-      const facilitiesToInsert = [];
+      const facilitiesToInsert: any[] = [];
+      const unmatchedRows: ParsedFacility[] = [];
 
       for (const parsedFacility of result.data) {
-        // Check for duplicate by name or coordinates
-        const duplicate = existingFacilities?.find(existing => {
-          const nameMatch = existing.name.toLowerCase() === parsedFacility.name.toLowerCase();
-          const latMatch = Math.abs(existing.latitude - parsedFacility.latitude) < 0.0001;
-          const lngMatch = Math.abs(existing.longitude - parsedFacility.longitude) < 0.0001;
-          const coordMatch = latMatch && lngMatch;
-          return nameMatch || coordMatch;
-        });
+        const detailFields = buildDetailFields(parsedFacility);
 
-        const facilityData: any = {
-          name: parsedFacility.name,
-          latitude: parsedFacility.latitude,
-          longitude: parsedFacility.longitude,
-          visit_duration_minutes: defaultVisitDuration,
-          upload_batch_id: batchId,
-          // Include all optional fields
-          matched_facility_name: parsedFacility.matched_facility_name || null,
-          well_name_1: parsedFacility.well_name_1 || null,
-          well_name_2: parsedFacility.well_name_2 || null,
-          well_name_3: parsedFacility.well_name_3 || null,
-          well_name_4: parsedFacility.well_name_4 || null,
-          well_name_5: parsedFacility.well_name_5 || null,
-          well_name_6: parsedFacility.well_name_6 || null,
-          well_api_1: parsedFacility.well_api_1 || null,
-          well_api_2: parsedFacility.well_api_2 || null,
-          well_api_3: parsedFacility.well_api_3 || null,
-          well_api_4: parsedFacility.well_api_4 || null,
-          well_api_5: parsedFacility.well_api_5 || null,
-          well_api_6: parsedFacility.well_api_6 || null,
-          api_numbers_combined: parsedFacility.api_numbers_combined || null,
-          lat_well_sheet: parsedFacility.lat_well_sheet || null,
-          long_well_sheet: parsedFacility.long_well_sheet || null,
-          first_prod_date: parsedFacility.first_prod_date || null,
-          spcc_due_date: parsedFacility.spcc_due_date || null,
-          spcc_inspection_date: parsedFacility.spcc_inspection_date || null,
-        };
-
-        if (duplicate) {
-          // Update existing facility
-          const { error: updateError } = await supabase
-            .from('facilities')
-            .update(facilityData)
-            .eq('id', duplicate.id);
-
-          if (updateError) throw updateError;
-          updatedCount++;
-        } else {
-          // Prepare for insert
-          facilitiesToInsert.push({
-            user_id: DEMO_USER_ID,
-            account_id: accountId,
-            ...facilityData,
+        if (result.isUpdateOnly) {
+          const nameLower = parsedFacility.name.toLowerCase();
+          const match = existingFacilities?.find(existing => {
+            const existingLower = existing.name.toLowerCase();
+            return existingLower === nameLower || existingLower.includes(nameLower) || nameLower.includes(existingLower);
           });
+
+          if (match) {
+            const { error: updateError } = await supabase
+              .from('facilities')
+              .update(detailFields)
+              .eq('id', match.id);
+            if (updateError) throw updateError;
+            updatedCount++;
+          } else {
+            unmatchedRows.push(parsedFacility);
+          }
+        } else {
+          const duplicate = existingFacilities?.find(existing => {
+            const nameMatch = existing.name.toLowerCase() === parsedFacility.name.toLowerCase();
+            const latMatch = parsedFacility.latitude != null && Math.abs(existing.latitude - parsedFacility.latitude) < 0.0001;
+            const lngMatch = parsedFacility.longitude != null && Math.abs(existing.longitude - parsedFacility.longitude) < 0.0001;
+            return nameMatch || (latMatch && lngMatch);
+          });
+
+          const facilityData: any = {
+            name: parsedFacility.name,
+            latitude: parsedFacility.latitude,
+            longitude: parsedFacility.longitude,
+            visit_duration_minutes: defaultVisitDuration,
+            upload_batch_id: batchId,
+            ...detailFields,
+          };
+
+          if (duplicate) {
+            const { error: updateError } = await supabase
+              .from('facilities')
+              .update(facilityData)
+              .eq('id', duplicate.id);
+            if (updateError) throw updateError;
+            updatedCount++;
+          } else {
+            facilitiesToInsert.push({
+              user_id: DEMO_USER_ID,
+              account_id: accountId,
+              ...facilityData,
+            });
+          }
         }
       }
 
-      // Bulk insert new facilities
       if (facilitiesToInsert.length > 0) {
         const { error: insertError } = await supabase
           .from('facilities')
           .insert(facilitiesToInsert);
-
         if (insertError) throw insertError;
         insertedCount = facilitiesToInsert.length;
       }
@@ -894,18 +1159,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       setShowUpload(false);
       onFacilitiesChange();
 
-      // Show summary of import including warnings
-      let summaryMsg = `Import complete: ${insertedCount} new facilities added, ${updatedCount} existing facilities updated.`;
-      if (result.warnings.length > 0) {
-        summaryMsg += `\n\n⚠️ ${result.warnings.length} row(s) were skipped:\n${result.warnings.slice(0, 10).join('\n')}`;
-        if (result.warnings.length > 10) {
-          summaryMsg += `\n...and ${result.warnings.length - 10} more`;
-        }
-      }
-      alert(summaryMsg);
+      // Show results modal instead of alert
+      setImportResults({
+        updatedCount,
+        insertedCount,
+        unmatchedRows,
+        warnings: result.warnings,
+        isUpdateOnly: result.isUpdateOnly,
+      });
     } catch (err: any) {
       console.error('Error saving facilities:', err);
       setError(`Failed to save facilities: ${err.message || JSON.stringify(err)}`);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -1024,13 +1290,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             const inspection = inspections.get(facility.id);
             if (!inspection) return 'Pending';
             return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
+          } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' || columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' || columnId === 'company_signature_date' || columnId === 'recertified_date') {
+            const value = facility[columnId as keyof Facility];
+            return value ? new Date(value as string).toLocaleDateString() : '';
           } else if (columnId === 'visit_duration') {
-            return facility.visit_duration_minutes?.toString() || '30';
-          } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date') {
-            const value = facility[columnId];
-            return value ? new Date(value).toLocaleDateString() : '';
+            return `${facility.visit_duration_minutes}`;
+          } else if (columnId === 'recertification_due_date') {
+            return computeRecertificationDueDate(facility) || '';
+          } else if (columnId === 'spcc_completion_type') {
+            return facility.spcc_completion_type || '';
+          } else if (columnId === 'photos_taken') {
+            return facility.photos_taken ? 'Yes' : 'No';
+          } else if (columnId === 'day_assignment') {
+            return facility.day_assignment != null ? String(facility.day_assignment) : '';
+          } else if (columnId === 'team_assignment') {
+            return facility.team_assignment != null ? String(facility.team_assignment) : '';
+          } else if (columnId === 'status') {
+            return facility.status || 'active';
+          } else if (columnId === 'created_at') {
+            return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '';
           } else {
-            const value = facility[columnId];
+            const value = facility[columnId as keyof Facility];
             return value?.toString() || '';
           }
         });
@@ -1057,32 +1337,47 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setShowExportColumnSelector(false);
   };
 
+  // Open column modal: snapshot current state into drafts
+  const openColumnSelector = () => {
+    setDraftVisibleColumns([...visibleColumns]);
+    setDraftColumnOrder([...columnOrder]);
+    setColumnSearch('');
+    setShowColumnSelector(true);
+  };
+
+  // Apply draft → real state + persist
+  const applyColumnChanges = () => {
+    setVisibleColumns(draftVisibleColumns);
+    setColumnOrder(draftColumnOrder);
+    localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(draftVisibleColumns));
+    localStorage.setItem(getStorageKey('column_order'), JSON.stringify(draftColumnOrder));
+    setShowColumnSelector(false);
+  };
+
+  // Cancel: just close, drafts are discarded
+  const cancelColumnChanges = () => {
+    setShowColumnSelector(false);
+  };
+
+  // --- Draft manipulation functions (used only inside the modal) ---
+
   const toggleColumn = (columnId: ColumnId) => {
-    setVisibleColumns((prev: ColumnId[]) => {
-      let newColumns: ColumnId[];
+    setDraftVisibleColumns(prev => {
       if (prev.includes(columnId)) {
-        // Remove column
-        newColumns = prev.filter(id => id !== columnId);
+        return prev.filter(id => id !== columnId);
       } else {
-        // Add column in the correct order based on columnOrder
-        newColumns = columnOrder.filter(id => prev.includes(id) || id === columnId);
+        return draftColumnOrder.filter(id => prev.includes(id) || id === columnId);
       }
-      localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(newColumns));
-      return newColumns;
     });
   };
 
   const showAllColumns = () => {
-    // Show all columns in the current order
-    setVisibleColumns([...columnOrder]);
-    localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(columnOrder));
+    setDraftVisibleColumns([...draftColumnOrder]);
   };
 
   const resetColumns = () => {
-    setColumnOrder(ALL_COLUMNS_ORDER);
-    setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
-    localStorage.setItem(getStorageKey('column_order'), JSON.stringify(ALL_COLUMNS_ORDER));
-    localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(DEFAULT_VISIBLE_COLUMNS));
+    setDraftColumnOrder(ALL_COLUMNS_ORDER);
+    setDraftVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
   };
 
   const handleDragStart = (columnId: ColumnId) => {
@@ -1093,27 +1388,40 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     e.preventDefault();
     if (!draggedColumn || draggedColumn === targetColumnId) return;
 
-    const newOrder = [...columnOrder];
-    const draggedIndex = newOrder.indexOf(draggedColumn);
-    const targetIndex = newOrder.indexOf(targetColumnId);
-
-    newOrder.splice(draggedIndex, 1);
-    newOrder.splice(targetIndex, 0, draggedColumn);
-
-    setColumnOrder(newOrder);
-
-    // Update visible columns to match new order
-    setVisibleColumns((prev: ColumnId[]) => {
-      const newVisible = newOrder.filter(id => prev.includes(id));
-      localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(newVisible));
-      return newVisible;
+    setDraftColumnOrder(prev => {
+      const newOrder = [...prev];
+      const draggedIndex = newOrder.indexOf(draggedColumn);
+      const targetIndex = newOrder.indexOf(targetColumnId);
+      newOrder.splice(draggedIndex, 1);
+      newOrder.splice(targetIndex, 0, draggedColumn);
+      return newOrder;
     });
 
-    localStorage.setItem(getStorageKey('column_order'), JSON.stringify(newOrder));
+    setDraftVisibleColumns(prev => {
+      const idx = prev.indexOf(draggedColumn);
+      const targetIdx = prev.indexOf(targetColumnId);
+      if (idx === -1 || targetIdx === -1) return prev;
+      const newVisible = [...prev];
+      newVisible.splice(idx, 1);
+      newVisible.splice(targetIdx, 0, draggedColumn);
+      return newVisible;
+    });
   };
 
   const handleDragEnd = () => {
     setDraggedColumn(null);
+  };
+
+  const moveVisibleColumn = (columnId: ColumnId, direction: 'up' | 'down') => {
+    setDraftVisibleColumns(prev => {
+      const idx = prev.indexOf(columnId);
+      if (idx === -1) return prev;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const newVisible = [...prev];
+      [newVisible[idx], newVisible[targetIdx]] = [newVisible[targetIdx], newVisible[idx]];
+      return newVisible;
+    });
   };
 
   const toggleExportColumn = (columnId: ColumnId) => {
@@ -1224,15 +1532,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               className="form-input w-full px-2 py-1 text-sm"
             />
           );
-        case 'visit_duration':
-          return (
-            <input
-              type="number"
-              value={editForm.visitDuration}
-              onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
-              className="form-input w-full px-2 py-1 text-sm"
-            />
-          );
         default:
           return renderCellContent(facility, columnId, false);
       }
@@ -1250,8 +1549,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return Number(facility.latitude).toFixed(6);
       case 'longitude':
         return Number(facility.longitude).toFixed(6);
-      case 'visit_duration':
-        return `${facility.visit_duration_minutes} mins`;
       case 'spcc_status':
         return <SPCCStatusBadge facility={facility} showMessage />;
       case 'inspection_status':
@@ -1292,8 +1589,49 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.first_prod_date || '-';
       case 'spcc_due_date':
         return facility.spcc_due_date || '-';
+      case 'spcc_pe_stamp_date':
+        return facility.spcc_pe_stamp_date || '-';
       case 'spcc_inspection_date':
         return facility.spcc_inspection_date || '-';
+      case 'spcc_completion_type':
+        if (!facility.spcc_completion_type) return '-';
+        return facility.spcc_completion_type === 'internal' ? 'Internal' : 'External';
+      case 'address':
+        return facility.address || '-';
+      case 'county':
+        return facility.county || '-';
+      case 'visit_duration':
+        return `${facility.visit_duration_minutes} min`;
+      case 'photos_taken':
+        return facility.photos_taken ? 'Yes' : 'No';
+      case 'field_visit_date':
+        return facility.field_visit_date || '-';
+      case 'estimated_oil_per_day':
+        return facility.estimated_oil_per_day != null ? String(facility.estimated_oil_per_day) : '-';
+      case 'berm_depth_inches':
+        return facility.berm_depth_inches != null ? String(facility.berm_depth_inches) : '-';
+      case 'berm_length':
+        return facility.berm_length != null ? String(facility.berm_length) : '-';
+      case 'berm_width':
+        return facility.berm_width != null ? String(facility.berm_width) : '-';
+      case 'initial_inspection_completed':
+        return facility.initial_inspection_completed || '-';
+      case 'company_signature_date':
+        return facility.company_signature_date || '-';
+      case 'recertified_date':
+        return facility.recertified_date || '-';
+      case 'recertification_due_date':
+        return computeRecertificationDueDate(facility) || '-';
+      case 'day_assignment':
+        return facility.day_assignment != null ? `Day ${facility.day_assignment}` : '-';
+      case 'team_assignment':
+        return facility.team_assignment != null ? `Team ${facility.team_assignment}` : '-';
+      case 'status':
+        return facility.status === 'sold'
+          ? <span className="text-orange-600 dark:text-orange-400 font-medium">Sold</span>
+          : <span className="text-green-600 dark:text-green-400 font-medium">Active</span>;
+      case 'created_at':
+        return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '-';
       case 'notes':
         if (editingNotesId === facility.id) {
           return (
@@ -1368,187 +1706,539 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         </div>
       )}
 
-      {/* Edit Modal - Full-Screen on Mobile, Popup on Desktop */}
+      {/* Edit Facility Modal */}
       {mobileEditingFacility && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 overflow-y-auto animate-in fade-in duration-200">
-          <div className="min-h-full flex items-center justify-center p-4 sm:p-0">
-            <div className="bg-white dark:bg-gray-800 w-full sm:max-w-3xl sm:rounded-xl sm:shadow-2xl overflow-hidden flex flex-col my-8 sm:my-0 animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-5 flex items-center justify-between shadow-lg flex-shrink-0 sticky top-0 z-10">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/10 rounded-lg">
-                    <Edit2 className="w-5 h-5" />
-                  </div>
-                  <h2 className="text-xl font-bold">Edit Facility</h2>
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-[10000] p-0 sm:p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setMobileEditingFacility(null);
+              setMobileEditFormData({} as Record<ColumnId, string>);
+              setError(null);
+            }
+          }}
+        >
+          <div className="bg-white/80 dark:bg-gray-900/75 backdrop-blur-3xl backdrop-saturate-[1.8] w-full sm:max-w-2xl sm:rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] border border-white/70 dark:border-white/[0.15] max-h-screen sm:max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-white/30 dark:border-white/10 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/15 dark:bg-blue-400/15 flex items-center justify-center shrink-0">
+                  <Edit2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleSaveMobileEdit}
-                    className="px-5 py-2.5 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 active:scale-95 transition-all shadow-md hover:shadow-lg"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Save className="w-4 h-4" />
-                      <span>Save</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setMobileEditingFacility(null);
-                      setMobileEditFormData({} as Record<ColumnId, string>);
-                    }}
-                    className="px-5 py-2.5 border-2 border-white/30 text-white rounded-lg font-semibold hover:bg-white/10 active:scale-95 transition-all"
-                  >
-                    <div className="flex items-center gap-2">
-                      <X className="w-4 h-4" />
-                      <span>Cancel</span>
-                    </div>
-                  </button>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                    {mobileEditFormData.name || 'Edit Facility'}
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Edit facility details</p>
                 </div>
               </div>
+              <button
+                onClick={() => {
+                  setMobileEditingFacility(null);
+                  setMobileEditFormData({} as Record<ColumnId, string>);
+                  setError(null);
+                }}
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-white/40 dark:hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 max-h-[calc(100vh-200px)] sm:max-h-[600px] overflow-y-auto">
-                {error && (
-                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4 text-red-700 dark:text-red-300 shadow-sm animate-in slide-in-from-top-2 duration-200">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                      <p className="whitespace-pre-line font-medium">{error}</p>
+            {/* Toggle bar */}
+            <div className="flex items-center justify-between px-5 sm:px-6 py-2 border-b border-white/20 dark:border-white/5 shrink-0 bg-white/30 dark:bg-white/[0.03]">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Show only fields with data</span>
+              <button
+                type="button"
+                onClick={toggleHideEmpty}
+                className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${hideEmptyFields ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${hideEmptyFields ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="overflow-y-auto flex-1 px-5 sm:px-6 py-5 space-y-6">
+              {/* Error */}
+              {error && (
+                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-red-500/10 dark:bg-red-500/10 border border-red-300/40 dark:border-red-500/20">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-700 dark:text-red-300 whitespace-pre-line">{error}</p>
+                </div>
+              )}
+
+              {/* Section 1: Location & Basics — always visible */}
+              <section>
+                <div className="flex items-center gap-2 mb-3">
+                  <MapPin className="w-4 h-4 text-gray-400" />
+                  <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Location & Basics</h3>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Facility Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={mobileEditFormData.name || ''}
+                      onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, name: e.target.value })}
+                      className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                      placeholder="Enter facility name"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Latitude <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={mobileEditFormData.latitude || ''}
+                        onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, latitude: e.target.value })}
+                        step="any"
+                        className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                        placeholder="34.956025"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Longitude <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={mobileEditFormData.longitude || ''}
+                        onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, longitude: e.target.value })}
+                        step="any"
+                        className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                        placeholder="-97.832028"
+                      />
+                    </div>
+                    {isFieldVisible('visit_duration') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Visit Duration (min)</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.visit_duration || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, visit_duration: e.target.value })}
+                          min="1"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          placeholder="30"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {isFieldVisible('county') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">County</label>
+                      <input
+                        type="text"
+                        value={mobileEditFormData.county || ''}
+                        onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, county: e.target.value })}
+                        className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        placeholder="County"
+                      />
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* Section 2: SPCC Dates */}
+              {isSectionVisible(['first_prod_date', 'spcc_due_date', 'spcc_inspection_date']) && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">SPCC Dates</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {isFieldVisible('first_prod_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Production</label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.first_prod_date || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, first_prod_date: e.target.value })}
+                          onPaste={handleDatePaste('first_prod_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('spcc_due_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          SPCC Due <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Optional</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.spcc_due_date || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, spcc_due_date: e.target.value })}
+                          onPaste={handleDatePaste('spcc_due_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('spcc_inspection_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inspection Date</label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.spcc_inspection_date || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, spcc_inspection_date: e.target.value })}
+                          onPaste={handleDatePaste('spcc_inspection_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Section 3: Field Operations */}
+              {isSectionVisible(['photos_taken', 'field_visit_date', 'estimated_oil_per_day']) && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <ClipboardList className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Field Operations</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {isFieldVisible('photos_taken') && (
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Photos Taken</label>
+                        <button
+                          type="button"
+                          onClick={() => setMobileEditFormData({ ...mobileEditFormData, photos_taken: mobileEditFormData.photos_taken === 'true' ? 'false' : 'true' })}
+                          className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        >
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {isFieldVisible('field_visit_date') && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Field Visit Date</label>
+                          <input
+                            type="date"
+                            value={mobileEditFormData.field_visit_date || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, field_visit_date: e.target.value })}
+                            onPaste={handleDatePaste('field_visit_date')}
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          />
+                        </div>
+                      )}
+                      {isFieldVisible('estimated_oil_per_day') && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Est. Oil/Day (bbl)</label>
+                          <input
+                            type="number"
+                            value={mobileEditFormData.estimated_oil_per_day || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, estimated_oil_per_day: e.target.value })}
+                            step="any"
+                            min="0"
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                            placeholder="0"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
+                </section>
+              )}
 
-                {/* Render fields in column order, only for visible columns with section grouping */}
-                {(() => {
-                  const visibleCols = columnOrder.filter(colId => visibleColumns.includes(colId));
-                  let lastSection = '';
-
-                  return visibleCols.map((columnId) => {
-                    // Skip status columns as they're read-only
-                    if (columnId === 'spcc_status' || columnId === 'inspection_status') {
-                      return null;
-                    }
-
-                    const label = COLUMN_LABELS[columnId];
-                    const value = mobileEditFormData[columnId] || '';
-
-                    // Determine input type based on field
-                    let inputType = 'text';
-                    if (columnId === 'latitude' || columnId === 'longitude' ||
-                      columnId === 'lat_well_sheet' || columnId === 'long_well_sheet') {
-                      inputType = 'number';
-                    } else if (columnId.includes('date')) {
-                      inputType = 'date';
-                    } else if (columnId === 'visit_duration') {
-                      inputType = 'number';
-                    }
-
-                    // Determine section for grouping
-                    let currentSection = '';
-                    if (['name', 'latitude', 'longitude', 'visit_duration'].includes(columnId)) {
-                      currentSection = 'basic';
-                    } else if (columnId.includes('well_') || columnId === 'matched_facility_name' || columnId === 'api_numbers_combined') {
-                      currentSection = 'well';
-                    } else if (columnId.includes('date')) {
-                      currentSection = 'date';
-                    } else if (['lat_well_sheet', 'long_well_sheet'].includes(columnId)) {
-                      currentSection = 'coords';
-                    }
-
-                    // Render section header if we're starting a new section
-                    const sectionHeader = currentSection !== lastSection && currentSection ? (
-                      <div className="pt-4 pb-2 border-t-2 border-gray-200 dark:border-gray-700 mt-6 first:mt-0 first:pt-0 first:border-0">
-                        <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                          {currentSection === 'basic' && (
-                            <>
-                              <MapPin className="w-4 h-4" />
-                              <span>Basic Information</span>
-                            </>
-                          )}
-                          {currentSection === 'well' && (
-                            <>
-                              <FileText className="w-4 h-4" />
-                              <span>Well Information</span>
-                            </>
-                          )}
-                          {currentSection === 'date' && (
-                            <>
-                              <CheckCircle className="w-4 h-4" />
-                              <span>SPCC Dates</span>
-                            </>
-                          )}
-                          {currentSection === 'coords' && (
-                            <>
-                              <MapPin className="w-4 h-4" />
-                              <span>Well Sheet Coordinates</span>
-                            </>
-                          )}
-                        </h3>
+              {/* Section 4: Berm Measurements */}
+              {isSectionVisible(['berm_depth_inches', 'berm_length', 'berm_width']) && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Database className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Berm Measurements</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {isFieldVisible('berm_depth_inches') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Depth (in)</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.berm_depth_inches || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, berm_depth_inches: e.target.value })}
+                          step="any"
+                          min="0"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          placeholder="0"
+                        />
                       </div>
-                    ) : null;
+                    )}
+                    {isFieldVisible('berm_length') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Length</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.berm_length || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, berm_length: e.target.value })}
+                          step="any"
+                          min="0"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          placeholder="0"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('berm_width') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Width</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.berm_width || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, berm_width: e.target.value })}
+                          step="any"
+                          min="0"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                          placeholder="0"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
 
-                    lastSection = currentSection;
+              {/* Section 5: Compliance */}
+              {isSectionVisible(['initial_inspection_completed', 'company_signature_date', 'recertified_date', 'recertification_due_date']) && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <ShieldCheck className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Compliance</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {isFieldVisible('initial_inspection_completed') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Initial Inspection</label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.initial_inspection_completed || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, initial_inspection_completed: e.target.value })}
+                          onPaste={handleDatePaste('initial_inspection_completed')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('company_signature_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company Signature</label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.company_signature_date || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, company_signature_date: e.target.value })}
+                          onPaste={handleDatePaste('company_signature_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('recertified_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recertified</label>
+                        <input
+                          type="date"
+                          value={mobileEditFormData.recertified_date || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, recertified_date: e.target.value })}
+                          onPaste={handleDatePaste('recertified_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('recertification_due_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Recert. Due Date <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Auto</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={computeRecertificationDueDate(mobileEditingFacility)}
+                          readOnly
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-gray-100/60 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
 
-                    return (
-                      <div key={columnId}>
-                        {sectionHeader}
-                        <div className="space-y-2 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                            {label}
-                            {['name', 'latitude', 'longitude'].includes(columnId) && (
-                              <span className="text-red-500 ml-1">*</span>
-                            )}
-                          </label>
-                          {columnId === 'visit_duration' ? (
-                            <input
-                              type="number"
-                              value={value}
-                              onChange={(e) => setMobileEditFormData({
-                                ...mobileEditFormData,
-                                [columnId]: e.target.value
-                              })}
-                              min="1"
-                              step="1"
-                              className="form-input w-full px-4 py-3 text-base"
-                              placeholder="Minutes"
-                            />
-                          ) : inputType === 'number' ? (
-                            <input
-                              type="number"
-                              value={value}
-                              onChange={(e) => setMobileEditFormData({
-                                ...mobileEditFormData,
-                                [columnId]: e.target.value
-                              })}
-                              step="any"
-                              className="form-input w-full px-4 py-3 text-base"
-                              placeholder={label}
-                            />
-                          ) : inputType === 'date' ? (
-                            <input
-                              type="date"
-                              value={value}
-                              onChange={(e) => setMobileEditFormData({
-                                ...mobileEditFormData,
-                                [columnId]: e.target.value
-                              })}
-                              className="form-input w-full px-4 py-3 text-base"
-                            />
-                          ) : (
-                            <input
-                              type="text"
-                              value={value}
-                              onChange={(e) => setMobileEditFormData({
-                                ...mobileEditFormData,
-                                [columnId]: e.target.value
-                              })}
-                              className="form-input w-full px-4 py-3 text-base"
-                              placeholder={label}
-                            />
-                          )}
+              {/* Section 6: Well Sheet Coordinates */}
+              {isSectionVisible(['lat_well_sheet', 'long_well_sheet']) && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Well Sheet Coordinates</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {isFieldVisible('lat_well_sheet') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Latitude (Sheet)</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.lat_well_sheet || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, lat_well_sheet: e.target.value })}
+                          step="any"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                          placeholder="Latitude"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('long_well_sheet') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Longitude (Sheet)</label>
+                        <input
+                          type="number"
+                          value={mobileEditFormData.long_well_sheet || ''}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, long_well_sheet: e.target.value })}
+                          step="any"
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                          placeholder="Longitude"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Section 7: Well Information - Collapsible */}
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setShowWellSection(!showWellSection)}
+                  className="flex items-center justify-between w-full group mb-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Well Information</h3>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors">
+                    <span>{showWellSection ? 'Hide' : 'Show'}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showWellSection ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
+                <div
+                  className="grid transition-all duration-300 ease-out"
+                  style={{
+                    gridTemplateRows: showWellSection ? '1fr' : '0fr',
+                    opacity: showWellSection ? 1 : 0,
+                  }}
+                >
+                  <div className="overflow-hidden min-h-0">
+                    <div className="space-y-3">
+                      {/* Matched Name + Combined API */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Matched Name</label>
+                          <input
+                            type="text"
+                            value={mobileEditFormData.matched_facility_name || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, matched_facility_name: e.target.value })}
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                            placeholder="Matched facility name"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Combined API</label>
+                          <input
+                            type="text"
+                            value={mobileEditFormData.api_numbers_combined || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, api_numbers_combined: e.target.value })}
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                            placeholder="Combined API numbers"
+                          />
                         </div>
                       </div>
-                    );
-                  });
-                })()}
-              </div>
+
+                      {/* Well 1 - always visible */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Well 1</label>
+                          <input
+                            type="text"
+                            value={mobileEditFormData.well_name_1 || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, well_name_1: e.target.value })}
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                            placeholder="Well name 1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">API 1</label>
+                          <input
+                            type="text"
+                            value={mobileEditFormData.well_api_1 || ''}
+                            onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, well_api_1: e.target.value })}
+                            className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                            placeholder="API number 1"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Wells 2-6 behind secondary expander */}
+                      <button
+                        type="button"
+                        onClick={() => setShowWells2to6(!showWells2to6)}
+                        className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors py-1"
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showWells2to6 ? 'rotate-180' : ''}`} />
+                        <span>{showWells2to6 ? 'Hide Wells 2-6' : 'Show Wells 2-6'}</span>
+                      </button>
+                      <div
+                        className="grid transition-all duration-300 ease-out"
+                        style={{
+                          gridTemplateRows: showWells2to6 ? '1fr' : '0fr',
+                          opacity: showWells2to6 ? 1 : 0,
+                        }}
+                      >
+                        <div className="overflow-hidden min-h-0">
+                          <div className="space-y-3">
+                            {([2, 3, 4, 5, 6] as const).map(n => (
+                              <div key={n} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Well {n}</label>
+                                  <input
+                                    type="text"
+                                    value={(mobileEditFormData as any)[`well_name_${n}`] || ''}
+                                    onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, [`well_name_${n}`]: e.target.value })}
+                                    className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                                    placeholder={`Well name ${n}`}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">API {n}</label>
+                                  <input
+                                    type="text"
+                                    value={(mobileEditFormData as any)[`well_api_${n}`] || ''}
+                                    onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, [`well_api_${n}`]: e.target.value })}
+                                    className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors font-mono"
+                                    placeholder={`API number ${n}`}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 sm:px-6 py-4 border-t border-white/30 dark:border-white/10 shrink-0 flex gap-3">
+              <button
+                onClick={() => {
+                  setMobileEditingFacility(null);
+                  setMobileEditFormData({} as Record<ColumnId, string>);
+                  setError(null);
+                }}
+                className="flex-1 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white/50 dark:bg-white/10 rounded-lg hover:bg-white/70 dark:hover:bg-white/15 border border-white/50 dark:border-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveMobileEdit}
+                className="flex-1 py-2.5 text-sm font-medium bg-blue-600/90 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center gap-2 shadow-[0_2px_12px_rgba(59,130,246,0.3)]"
+              >
+                <Save className="w-4 h-4" />
+                Save Changes
+              </button>
             </div>
           </div>
         </div>
@@ -1611,7 +2301,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                   }`}
               >
-                Plan
+                Plans
               </button>
               <button
                 onClick={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
@@ -1620,7 +2310,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                   }`}
               >
-                Inspection
+                Inspections
               </button>
             </div>
           </div>
@@ -1713,7 +2403,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           <option value="name">Sort by Name</option>
                           <option value="latitude">Sort by Latitude</option>
                           <option value="longitude">Sort by Longitude</option>
-                          <option value="visit_duration">Sort by Visit Duration</option>
                           <option value="spcc_status">Sort by SPCC Status</option>
                           <option value="inspection_status">Sort by Inspection Status</option>
                         </select>
@@ -1722,70 +2411,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   )}
                 </div>
 
-                <div className="relative">
-                  <button
-                    onClick={() => setShowColumnSelector(!showColumnSelector)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium ${showColumnSelector
-                      ? 'bg-gray-200 text-gray-800 dark:bg-gray-500 dark:text-white'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200'
-                      }`}
-                    title="Column Visibility"
-                  >
-                    <Columns className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Columns</span>
-                  </button>
-                  {showColumnSelector && (
-                    <>
-                      <div
-                        className="fixed inset-0 bg-black/50 sm:bg-transparent z-40"
-                        onClick={() => setShowColumnSelector(false)}
-                      />
-                      <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-auto sm:right-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 max-h-[80vh] sm:max-h-96 flex flex-col transition-colors duration-200">
-                        <div className="p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 flex-shrink-0 transition-colors duration-200">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Column Visibility</h3>
-                            <button
-                              onClick={() => setShowColumnSelector(false)}
-                              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-100"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="p-3 overflow-y-auto flex-1">
-                          {columnOrder.map((columnId) => (
-                            <div
-                              key={columnId}
-                              data-column-id={columnId}
-                              className={`flex items-center gap-2 p-2 rounded transition-colors ${draggedColumn === columnId
-                                ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                                }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={visibleColumns.includes(columnId)}
-                                onChange={() => toggleColumn(columnId)}
-                                className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
-                              <div
-                                draggable
-                                onDragStart={() => handleDragStart(columnId)}
-                                onDragOver={(e) => handleDragOver(e, columnId)}
-                                onDragEnd={handleDragEnd}
-                                className="grip-handle cursor-move touch-none p-1"
-                              >
-                                <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <button
+                  onClick={openColumnSelector}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
+                  title="Column Visibility"
+                >
+                  <Columns className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Columns</span>
+                </button>
               </div>
 
               <div className="h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
@@ -1936,14 +2569,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     placeholder="Longitude"
                     value={editForm.longitude}
                     onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                    className="form-input"
-                    required
-                  />
-                  <input
-                    type="number"
-                    placeholder="Visit Duration (mins)"
-                    value={editForm.visitDuration}
-                    onChange={(e) => setEditForm({ ...editForm, visitDuration: parseInt(e.target.value) || 30 })}
                     className="form-input"
                     required
                   />
@@ -2270,25 +2895,40 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         showUpload && (
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setShowUpload(false)}
+            onClick={() => !isImporting && setShowUpload(false)}
           >
             <div
               className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-6 transition-colors duration-200"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Import Facilities from CSV</h3>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Import Facilities</h3>
                 <button
-                  onClick={() => setShowUpload(false)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  onClick={() => !isImporting && setShowUpload(false)}
+                  disabled={isImporting}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-50"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <p className="text-gray-600 dark:text-gray-300 mb-4">
-                Upload a CSV file containing your facilities. The file should have columns for facility name, latitude, and longitude.
-              </p>
-              <CSVUpload onDataParsed={handleCSVParsed} />
+              {isImporting ? (
+                <div className="flex flex-col items-center py-12">
+                  <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                  <p className="text-lg font-medium text-gray-700 dark:text-gray-200 mb-1">
+                    Importing facilities...
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Matching and updating records in the database
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-gray-600 dark:text-gray-300 mb-4">
+                    Upload a CSV or Excel file containing your facilities.
+                  </p>
+                  <CSVUpload onDataParsed={handleCSVParsed} />
+                </>
+              )}
             </div>
           </div>
         )
@@ -2469,6 +3109,345 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </div>
         )
       }
+      {/* Column Visibility Modal */}
+      {showColumnSelector && (() => {
+        const searchLower = columnSearch.toLowerCase();
+        const filteredVisible = draftVisibleColumns.filter(id =>
+          COLUMN_LABELS[id].toLowerCase().includes(searchLower)
+        );
+        const hiddenColumns = draftColumnOrder.filter(id => !draftVisibleColumns.includes(id));
+        const filteredHidden = hiddenColumns.filter(id =>
+          COLUMN_LABELS[id].toLowerCase().includes(searchLower)
+        );
+        const hasChanges = JSON.stringify(draftVisibleColumns) !== JSON.stringify(visibleColumns)
+          || JSON.stringify(draftColumnOrder) !== JSON.stringify(columnOrder);
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+            onClick={cancelColumnChanges}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+                    <Columns className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Columns</h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {draftVisibleColumns.length} of {draftColumnOrder.length} visible
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={cancelColumnChanges}
+                  className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={columnSearch}
+                    onChange={(e) => setColumnSearch(e.target.value)}
+                    placeholder="Search fields..."
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={showAllColumns}
+                    className="text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                  >
+                    Show All
+                  </button>
+                  <button
+                    onClick={resetColumns}
+                    className="text-xs px-2 py-1 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                  >
+                    Reset Defaults
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {/* Visible columns section */}
+                {filteredVisible.length > 0 && (
+                  <div className="px-5 pt-3 pb-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Eye className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Visible ({filteredVisible.length})
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {filteredVisible.map((columnId, idx) => (
+                        <div
+                          key={columnId}
+                          draggable={!columnSearch}
+                          onDragStart={() => handleDragStart(columnId)}
+                          onDragOver={(e) => handleDragOver(e, columnId)}
+                          onDragEnd={handleDragEnd}
+                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${
+                            draggedColumn === columnId
+                              ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                          }`}
+                        >
+                          <button
+                            onClick={() => toggleColumn(columnId)}
+                            className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center shrink-0 hover:bg-blue-700 transition-colors"
+                            title="Hide column"
+                          >
+                            <CheckCircle className="w-3 h-3 text-white" />
+                          </button>
+                          <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">
+                            {COLUMN_LABELS[columnId]}
+                          </span>
+                          {!columnSearch && (
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => moveVisibleColumn(columnId, 'up')}
+                                disabled={idx === 0}
+                                className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Move up"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => moveVisibleColumn(columnId, 'down')}
+                                disabled={idx === filteredVisible.length - 1}
+                                className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Move down"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                              <div className="cursor-grab active:cursor-grabbing p-0.5 text-gray-400">
+                                <GripVertical className="w-3 h-3" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Divider */}
+                {filteredVisible.length > 0 && filteredHidden.length > 0 && (
+                  <div className="mx-5 border-t border-gray-200 dark:border-gray-700" />
+                )}
+
+                {/* Hidden columns section */}
+                {filteredHidden.length > 0 && (
+                  <div className="px-5 pt-3 pb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <EyeOff className="w-3.5 h-3.5 text-gray-400" />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Hidden ({filteredHidden.length})
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {filteredHidden.map((columnId) => (
+                        <div
+                          key={columnId}
+                          className="flex items-center gap-2 px-2 py-0.5 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <button
+                            onClick={() => toggleColumn(columnId)}
+                            className="w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-500 flex items-center justify-center shrink-0 hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                            title="Show column"
+                          >
+                          </button>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">
+                            {COLUMN_LABELS[columnId]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No results */}
+                {filteredVisible.length === 0 && filteredHidden.length === 0 && columnSearch && (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No fields matching "{columnSearch}"
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 shrink-0 flex gap-3">
+                <button
+                  onClick={cancelColumnChanges}
+                  className="flex-1 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={applyColumnChanges}
+                  disabled={!hasChanges}
+                  className="flex-1 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Import Results Modal */}
+      {importResults && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+          onClick={() => setImportResults(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Import Results
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  {importResults.isUpdateOnly ? 'Data update import' : 'Full facility import'}
+                </p>
+              </div>
+              <button
+                onClick={() => setImportResults(null)}
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Summary stats */}
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <div className="flex gap-4">
+                {importResults.updatedCount > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+                    <CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                      {importResults.updatedCount} updated
+                    </span>
+                  </div>
+                )}
+                {importResults.insertedCount > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/30 rounded-lg">
+                    <Plus className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                      {importResults.insertedCount} added
+                    </span>
+                  </div>
+                )}
+                {importResults.unmatchedRows.length > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/30 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                      {importResults.unmatchedRows.length} unmatched
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
+              {importResults.warnings.length > 0 && (
+                <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
+                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-1">Warnings</p>
+                  {importResults.warnings.map((w, i) => (
+                    <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{w}</p>
+                  ))}
+                </div>
+              )}
+
+              {importResults.unmatchedRows.length > 0 ? (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Unmatched Rows ({importResults.unmatchedRows.length})
+                    </p>
+                    <button
+                      onClick={() => downloadUnmatchedXlsx(importResults.unmatchedRows)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      Download .xlsx
+                    </button>
+                  </div>
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-gray-700/50">
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">#</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Facility Name</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">County</th>
+                          <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">First Prod</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                        {importResults.unmatchedRows.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                            <td className="px-3 py-2 text-gray-400 dark:text-gray-500 tabular-nums">{idx + 1}</td>
+                            <td className="px-3 py-2 text-gray-900 dark:text-white font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{row.county || '—'}</td>
+                            <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{row.first_prod_date || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center py-8 text-center">
+                  <CheckCircle className="w-12 h-12 text-green-500 mb-3" />
+                  <p className="text-lg font-medium text-gray-900 dark:text-white">All rows matched!</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Every row in the file was successfully matched to an existing facility.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0 flex justify-end gap-3">
+              {importResults.unmatchedRows.length > 0 && (
+                <button
+                  onClick={() => downloadUnmatchedXlsx(importResults.unmatchedRows)}
+                  className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Download Unmatched
+                </button>
+              )}
+              <button
+                onClick={() => setImportResults(null)}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 }

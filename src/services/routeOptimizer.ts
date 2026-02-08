@@ -51,6 +51,9 @@ export interface OptimizationConstraints {
   clusteringTightness?: number;
   clusterBalanceWeight?: number;
   defaultVisitDuration?: number;
+  lunchBreakMinutes?: number;
+  maxDriveTimeMinutes?: number;
+  returnByTime?: string;
 }
 
 function nearestNeighborTSP(
@@ -182,13 +185,16 @@ export function calculateDayRoute(
   sequence: number[],
   distanceMatrix: DistanceMatrix,
   homeIndex: number,
-  startTime: string
+  startTime: string,
+  lunchBreakMinutes: number = 0
 ): DailyRoute {
   const segments: RouteSegment[] = [];
   let totalMiles = 0;
   let totalDriveTime = 0;
   let totalVisitTime = 0;
   let currentTime = startTime;
+  const lunchAfterFacility = lunchBreakMinutes > 0 ? Math.floor(sequence.length / 2) : -1;
+  let lunchAdded = false;
 
   const driveToFirst = distanceMatrix.distances[homeIndex][sequence[0]] || 0;
   const driveTimeToFirst = distanceMatrix.durations[homeIndex][sequence[0]] || 0;
@@ -215,6 +221,12 @@ export function calculateDayRoute(
   currentTime = addMinutesToTime(currentTime, firstFacility.visitDuration || 0);
 
   for (let i = 0; i < sequence.length - 1; i++) {
+    // Insert lunch break after midpoint facility
+    if (!lunchAdded && lunchBreakMinutes > 0 && i === lunchAfterFacility) {
+      currentTime = addMinutesToTime(currentTime, lunchBreakMinutes);
+      lunchAdded = true;
+    }
+
     const from = sequence[i];
     const to = sequence[i + 1];
     const distance = distanceMatrix.distances[from][to] || 0;
@@ -271,7 +283,7 @@ export function calculateDayRoute(
     totalMiles,
     totalDriveTime,
     totalVisitTime,
-    totalTime: totalDriveTime + totalVisitTime,
+    totalTime: totalDriveTime + totalVisitTime + (lunchAdded ? lunchBreakMinutes : 0),
     startTime,
     endTime: currentTime,
     lastFacilityDepartureTime: currentTime,
@@ -473,9 +485,13 @@ export function optimizeRoutes(
     id: idx + 1,
   }));
 
+  const lunchBreak = constraints.lunchBreakMinutes || 0;
+  const maxDriveTime = constraints.maxDriveTimeMinutes || 0;
+  const returnByTime = constraints.returnByTime || '';
+
   // Adjust k based on clustering tightness - tighter clustering = more clusters for better grouping
-  const clusteringTightness = constraints.clusteringTightness ?? 0.5;
-  const clusterBalanceWeight = constraints.clusterBalanceWeight ?? 0.5;
+  const clusteringTightness = constraints.clusteringTightness ?? 0.75;
+  const clusterBalanceWeight = constraints.clusterBalanceWeight ?? 0.35;
 
   const baseK = findOptimalClusters(geoPoints, maxFacilitiesPerDay);
   // Higher tightness creates more clusters, preventing distant facilities from being grouped
@@ -568,7 +584,8 @@ export function optimizeRoutes(
       fullClusterRoute,
       distanceMatrix,
       homeIndex,
-      constraints.startTime
+      constraints.startTime,
+      lunchBreak
     );
 
     const exceedsTime = constraints.useHoursConstraint &&
@@ -579,7 +596,13 @@ export function optimizeRoutes(
       constraints.maxFacilitiesPerDay &&
       fullClusterRoute.length > constraints.maxFacilitiesPerDay;
 
-    if (!exceedsTime && !exceedsFacilities) {
+    const exceedsDriveTime = maxDriveTime > 0 &&
+      fullRoute.totalDriveTime > maxDriveTime;
+
+    const exceedsReturnBy = returnByTime &&
+      fullRoute.endTime > returnByTime;
+
+    if (!exceedsTime && !exceedsFacilities && !exceedsDriveTime && !exceedsReturnBy) {
       // Entire cluster fits in one day - perfect!
       const optimizedRoute = optimizeRouteOrder(distanceMatrix.distances, fullClusterRoute, homeIndex);
       const dayRoute = calculateDayRoute(
@@ -587,7 +610,8 @@ export function optimizeRoutes(
         optimizedRoute,
         distanceMatrix,
         homeIndex,
-        constraints.startTime
+        constraints.startTime,
+        lunchBreak
       );
       dayRoute.day = dayNumber;
       routes.push(dayRoute);
@@ -612,7 +636,8 @@ export function optimizeRoutes(
             testRoute,
             distanceMatrix,
             homeIndex,
-            constraints.startTime
+            constraints.startTime,
+            lunchBreak
           );
 
           const wouldExceedTime = constraints.useHoursConstraint &&
@@ -623,7 +648,13 @@ export function optimizeRoutes(
             constraints.maxFacilitiesPerDay &&
             testRoute.length >= constraints.maxFacilitiesPerDay;
 
-          if (wouldExceedTime || wouldExceedFacilities) {
+          const wouldExceedDriveTime = maxDriveTime > 0 &&
+            testDayRoute.totalDriveTime > maxDriveTime;
+
+          const wouldExceedReturnBy = returnByTime &&
+            testDayRoute.endTime > returnByTime;
+
+          if (wouldExceedTime || wouldExceedFacilities || wouldExceedDriveTime || wouldExceedReturnBy) {
             break; // Stop adding to this day
           }
 
@@ -637,7 +668,8 @@ export function optimizeRoutes(
           optimizedRoute,
           distanceMatrix,
           homeIndex,
-          constraints.startTime
+          constraints.startTime,
+          lunchBreak
         );
         dayRoute.day = dayNumber;
         routes.push(dayRoute);
@@ -694,7 +726,8 @@ export function optimizeRoutes(
         optimizedSequence,
         distanceMatrix,
         homeIndex,
-        constraints.startTime
+        constraints.startTime,
+        lunchBreak
       );
 
       dayRoute.day = dayNumber;

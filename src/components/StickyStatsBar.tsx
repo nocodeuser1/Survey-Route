@@ -49,39 +49,39 @@ export default function StickyStatsBar({
 
   return (
     <div
-      className={`fixed top-[105px] left-0 right-0 z-50 transition-all duration-300 pointer-events-none ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
+      className={`fixed top-[60px] left-0 right-0 z-50 transition-all duration-300 pointer-events-none ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
         }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className={`bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 px-4 py-2 transition-colors duration-200 ${isVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
-          <div className="flex items-center justify-around gap-4 text-xs sm:text-sm">
-            <div className="flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+        <div className={`bg-white/35 dark:bg-gray-900/30 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.08)] border border-white/40 dark:border-white/[0.08] px-4 py-3 transition-colors duration-200 ${isVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+          <div className="flex items-center justify-around gap-4 text-sm sm:text-base">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               <div className="flex flex-col">
                 <span className="font-semibold text-gray-900 dark:text-white">{totalDays} days</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-[13px] text-gray-500 dark:text-gray-400">
                   {Math.floor(totalTime / 60)}h {Math.round(totalTime % 60)}m total
                 </span>
               </div>
             </div>
-            <div className="w-px h-6 bg-gray-300 dark:bg-gray-600"></div>
-            <div className="flex items-center gap-1.5">
-              <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
+            <div className="w-px h-7 bg-gray-300 dark:bg-gray-600"></div>
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-green-600 dark:text-green-400" />
               <span className="font-semibold text-gray-900 dark:text-white">{totalFacilities}</span>
               <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">facilities</span>
             </div>
-            <div className="w-px h-6 bg-gray-300 dark:bg-gray-600"></div>
-            <div className="flex items-center gap-1.5">
-              <TrendingUp className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+            <div className="w-px h-7 bg-gray-300 dark:bg-gray-600"></div>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-orange-600 dark:text-orange-400" />
               <span className="font-semibold text-gray-900 dark:text-white">{totalMiles.toFixed(1)}</span>
               <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">mi</span>
             </div>
-            <div className="w-px h-6 bg-gray-300 dark:bg-gray-600"></div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+            <div className="w-px h-7 bg-gray-300 dark:bg-gray-600"></div>
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               <div className="flex flex-col">
                 <span className="font-semibold text-gray-900 dark:text-white">{Math.floor(totalDriveTime / 60)}h {Math.round(totalDriveTime % 60)}m</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">drive time</span>
+                <span className="text-[13px] text-gray-500 dark:text-gray-400">drive / {Math.floor(totalVisitTime / 60)}h {Math.round(totalVisitTime % 60)}m visits</span>
               </div>
             </div>
           </div>

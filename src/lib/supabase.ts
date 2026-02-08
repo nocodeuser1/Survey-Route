@@ -57,6 +57,17 @@ export interface Facility {
   spcc_completion_type?: 'internal' | 'external' | null;
   spcc_plan_url?: string | null;
   spcc_pe_stamp_date?: string | null;
+  // Detail fields
+  photos_taken?: boolean;
+  field_visit_date?: string | null;
+  estimated_oil_per_day?: number | null;
+  berm_depth_inches?: number | null;
+  berm_length?: number | null;
+  berm_width?: number | null;
+  initial_inspection_completed?: string | null;
+  company_signature_date?: string | null;
+  recertified_date?: string | null;
+  county?: string | null;
   // Inspection tracking
   inspection_frequency_days?: number;
   last_inspection_date?: string | null;
@@ -114,6 +125,7 @@ export interface UserSettings {
   sunset_offset_minutes?: number;
   auto_refresh_route?: boolean;
   exclude_completed_facilities?: boolean;
+  exclude_completed_type?: 'inspection' | 'plan' | 'both';
   exclude_externally_completed?: boolean;
   selected_report_type?: 'none' | 'spcc_plan' | 'spcc_inspection';
   navigation_mode_enabled?: boolean;
@@ -123,6 +135,11 @@ export interface UserSettings {
   map_rotation_sensitivity?: number;
   team_count?: number;
   hide_report_timestamps?: boolean;
+  lunch_break_minutes?: number;
+  max_drive_time_minutes?: number;
+  return_by_time?: string;
+  inspection_visit_duration_minutes?: number;
+  plan_visit_duration_minutes?: number;
   updated_at: string;
 }
 

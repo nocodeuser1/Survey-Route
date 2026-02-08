@@ -18,18 +18,20 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
     max_facilities_per_day: 8,
     max_hours_per_day: 8,
     default_visit_duration_minutes: 30,
-    use_facilities_constraint: true,
+    use_facilities_constraint: false,
     use_hours_constraint: true,
     map_preference: 'google',
     include_google_earth: false,
     location_permission_granted: false,
-    clustering_tightness: 0.5,
-    cluster_balance_weight: 0.5,
+    clustering_tightness: 0.75,
+    cluster_balance_weight: 0.35,
     start_time: '08:00',
     speed_unit: 'mph',
     map_rotation_sensitivity: 0.7,
     navigation_mode_enabled: false,
     team_count: 1,
+    inspection_visit_duration_minutes: 30,
+    plan_visit_duration_minutes: 60,
     updated_at: '',
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -54,8 +56,8 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
         setSettings({
           ...data,
           max_hours_per_day: Number(data.max_hours_per_day),
-          clustering_tightness: data.clustering_tightness ?? 0.5,
-          cluster_balance_weight: data.cluster_balance_weight ?? 0.5,
+          clustering_tightness: data.clustering_tightness ?? 0.75,
+          cluster_balance_weight: data.cluster_balance_weight ?? 0.35,
           start_time: data.start_time ?? '08:00',
           speed_unit: data.speed_unit ?? 'mph',
           map_rotation_sensitivity: data.map_rotation_sensitivity ?? 0.7,
@@ -69,12 +71,12 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
           max_facilities_per_day: 8,
           max_hours_per_day: 8,
           default_visit_duration_minutes: 30,
-          use_facilities_constraint: true,
+          use_facilities_constraint: false,
           use_hours_constraint: true,
           map_preference: 'google' as 'google' | 'apple',
           include_google_earth: false,
-          clustering_tightness: 0.5,
-          cluster_balance_weight: 0.5,
+          clustering_tightness: 0.75,
+          cluster_balance_weight: 0.35,
           start_time: '08:00',
           team_count: 1,
         };
@@ -126,6 +128,8 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
         start_time: settings.start_time,
         sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
         auto_refresh_route: settings.auto_refresh_route ?? false,
+        inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
+        plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'account_id',
@@ -225,8 +229,55 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
             className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Applied to newly imported facilities
+            Applied to newly imported facilities and used in "All Facilities" mode
           </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+              <Clock className="inline w-4 h-4 mr-1" />
+              SPCC Inspection Duration (min)
+            </label>
+            <input
+              type="number"
+              min="5"
+              max="480"
+              value={settings.inspection_visit_duration_minutes ?? 30}
+              onChange={(e) => {
+                setSettings({
+                  ...settings,
+                  inspection_visit_duration_minutes: parseInt(e.target.value) || 30,
+                });
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Onsite time per facility in SPCC Inspections mode
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+              <Clock className="inline w-4 h-4 mr-1" />
+              SPCC Plan Duration (min)
+            </label>
+            <input
+              type="number"
+              min="5"
+              max="480"
+              value={settings.plan_visit_duration_minutes ?? 60}
+              onChange={(e) => {
+                setSettings({
+                  ...settings,
+                  plan_visit_duration_minutes: parseInt(e.target.value) || 60,
+                });
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Onsite time per facility in SPCC Plans mode
+            </p>
+          </div>
         </div>
 
         <div>
@@ -383,6 +434,7 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
                   <Clock className="inline w-4 h-4 mr-1" />
                   Maximum Hours Per Day
                 </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Total drive time + visit time combined</p>
                 <input
                   type="number"
                   min="1"
@@ -426,14 +478,14 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  Geographic Clustering Tightness: {((settings.clustering_tightness ?? 0.5) * 100).toFixed(0)}%
+                  Geographic Clustering Tightness: {((settings.clustering_tightness ?? 0.75) * 100).toFixed(0)}%
                 </label>
                 <input
                   type="range"
                   min="0"
                   max="1"
                   step="0.1"
-                  value={settings.clustering_tightness ?? 0.5}
+                  value={settings.clustering_tightness ?? 0.75}
                   onChange={(e) =>
                     setSettings({
                       ...settings,
@@ -454,14 +506,14 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  Cluster Balance Weight: {((settings.cluster_balance_weight ?? 0.5) * 100).toFixed(0)}%
+                  Cluster Balance Weight: {((settings.cluster_balance_weight ?? 0.35) * 100).toFixed(0)}%
                 </label>
                 <input
                   type="range"
                   min="0"
                   max="1"
                   step="0.1"
-                  value={settings.cluster_balance_weight ?? 0.5}
+                  value={settings.cluster_balance_weight ?? 0.35}
                   onChange={(e) =>
                     setSettings({
                       ...settings,
@@ -499,7 +551,7 @@ export default function RouteSettings({ accountId, authUserId, onVisitDurationCh
                     onClick={() =>
                       setSettings({
                         ...settings,
-                        clustering_tightness: 0.5,
+                        clustering_tightness: 0.65,
                         cluster_balance_weight: 0.5,
                       })
                     }

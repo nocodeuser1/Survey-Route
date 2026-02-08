@@ -85,9 +85,10 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         if (photos && photos.length > 0) {
           setLoadingProgress({ current: 0, total: photos.length });
           const photoMap = new Map<string, InspectionPhoto[]>();
+          let completedCount = 0;
 
-          // Load all photos in parallel instead of sequentially
-          const photoPromises = photos.map(async (photo, index) => {
+          // Load all photos in parallel
+          const photoPromises = photos.map(async (photo) => {
             try {
               let imageDataUrl = photo.photo_url;
 
@@ -112,16 +113,18 @@ export default function InspectionReportExport({ facilities, userId, accountId }
                 }
               }
 
-              setLoadingProgress(prev => ({ ...prev, current: index + 1 }));
+              completedCount++;
+              setLoadingProgress(prev => ({ ...prev, current: completedCount }));
               return { ...photo, photo_url: imageDataUrl };
             } catch (err) {
               console.error('[InspectionReportExport] Error processing photo:', err);
-              setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
+              completedCount++;
+              setLoadingProgress(prev => ({ ...prev, current: completedCount }));
               return { ...photo, photo_url: photo.photo_url };
             }
           });
 
-          // Wait for all photos to load in parallel
+          // Wait for all photos to load
           const loadedPhotos = await Promise.all(photoPromises);
 
           // Build the photo map

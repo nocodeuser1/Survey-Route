@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList } from 'lucide-react';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
-import HomeBaseConfig from './components/HomeBaseConfig';
-import MultiHomeBaseConfig from './components/MultiHomeBaseConfig';
 import FacilitiesManager from './components/FacilitiesManager';
 import RoutePlanningControls from './components/RoutePlanningControls';
 import RouteResults from './components/RouteResults';
@@ -21,7 +19,8 @@ import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
-import CompletedFacilitiesVisibilityModal from './components/CompletedFacilitiesVisibilityModal';
+import CompletedFacilitiesVisibilityModal, { CompletedVisibility } from './components/CompletedFacilitiesVisibilityModal';
+import HomeBaseModal from './components/HomeBaseModal';
 import LoadingScreen from './components/LoadingScreen';
 import { calculateDistanceMatrix } from './services/osrm';
 import { optimizeRoutes, OptimizationResult, FacilityWithIndex, optimizeRouteOrder, calculateDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
@@ -31,6 +30,7 @@ import { useDarkMode } from './contexts/DarkModeContext';
 import { useNavigate } from 'react-router-dom';
 import { isInspectionValid } from './utils/inspectionUtils';
 import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
+import { haversineDistance } from './utils/geoClustering';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -39,6 +39,17 @@ type View = 'facilities' | 'configure' | 'route-planning' | 'survey' | 'settings
 
 const isActiveFacility = (facility: Facility): boolean => {
   return facility.day_assignment !== -1 && facility.day_assignment !== -2 && facility.status !== 'sold';
+};
+
+// Returns the appropriate visit duration based on the active survey type
+const getVisitDuration = (
+  facility: Facility | undefined,
+  settings: UserSettings,
+  surveyType: 'all' | 'spcc_inspection' | 'spcc_plan'
+): number => {
+  if (surveyType === 'spcc_inspection') return settings.inspection_visit_duration_minutes ?? 30;
+  if (surveyType === 'spcc_plan') return settings.plan_visit_duration_minutes ?? 60;
+  return facility?.visit_duration_minutes || settings.default_visit_duration_minutes;
 };
 
 // Helper function to filter optimization result by team and renumber days
@@ -136,10 +147,12 @@ function App() {
   const [triggerFitBounds, setTriggerFitBounds] = useState(0);
   const [deletedFacilities, setDeletedFacilities] = useState<Array<{ name: string; day: number }>>([]);
   const [showDeletedAlert, setShowDeletedAlert] = useState(false);
-  const [completedVisibility, setCompletedVisibility] = useState({
+  const [completedVisibility, setCompletedVisibility] = useState<CompletedVisibility>({
     hideAllCompleted: false,
     hideInternallyCompleted: false,
     hideExternallyCompleted: false,
+    hideValidPlans: false,
+    hideExpiringPlans: false,
   });
   const [navigationMode, setNavigationMode] = useState(false);
   const [locationTracking, setLocationTracking] = useState(false);
@@ -148,6 +161,7 @@ function App() {
   const [showMapSearch, setShowMapSearch] = useState(false);
   const [triggerMapLocation, setTriggerMapLocation] = useState(0);
   const [showVisibilityModal, setShowVisibilityModal] = useState(false);
+  const [showHomeBaseModal, setShowHomeBaseModal] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState('route-planning');
   const [isInspectionFormActive, setIsInspectionFormActive] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -163,67 +177,105 @@ function App() {
     return localStorage.getItem('signatureDeferred') === 'true';
   });
 
-  // Calculate visible facility count based on completedVisibility settings
+  // Calculate visible facility count based on completedVisibility settings and surveyType
   const visibleFacilityCount = useMemo(() => {
     if (!optimizationResult) {
       return 0;
     }
 
-    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted } = completedVisibility;
+    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
-    // If nothing is hidden, return total
-    if (!hideAllCompleted && !hideInternallyCompleted && !hideExternallyCompleted) {
-      return optimizationResult.totalFacilities;
-    }
+    // Helper: check if a facility needs SPCC inspection
+    const facilityNeedsInspection = (facility: Facility): boolean => {
+      if (facility.spcc_completion_type && facility.spcc_inspection_date) {
+        const completedDate = new Date(facility.spcc_inspection_date);
+        const oneYearFromCompletion = new Date(completedDate);
+        oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
+        if (new Date() <= oneYearFromCompletion) return false;
+      }
+      const insp = inspections.find(i => i.facility_id === facility.id);
+      if (isInspectionValid(insp)) return false;
+      return true;
+    };
 
     // Collect facility IDs to hide based on visibility settings
     const hiddenFacilityIds = new Set<string>();
 
-    if (hideAllCompleted) {
-      // Add facilities with valid inspections
-      inspections
-        .filter(insp => isInspectionValid(insp))
-        .forEach(insp => hiddenFacilityIds.add(insp.facility_id));
-
-      // Add facilities with internal completion
-      facilities
-        .filter(f => f.spcc_completion_type === 'internal')
-        .forEach(f => hiddenFacilityIds.add(f.id));
-
-      // Add facilities with external completion
-      facilities
-        .filter(f => f.spcc_completion_type === 'external')
-        .forEach(f => hiddenFacilityIds.add(f.id));
-    } else {
-      // Granular hiding - only hide specific types
-      if (hideInternallyCompleted) {
-        // Add ONLY facilities with internal completion
+    // Only apply visibility-based hiding in 'all' mode
+    // In specific modes, the survey type filter handles what's shown
+    if (surveyType === 'all') {
+      // Inspection-based hiding
+      if (hideAllCompleted) {
+        inspections
+          .filter(insp => isInspectionValid(insp))
+          .forEach(insp => hiddenFacilityIds.add(insp.facility_id));
         facilities
           .filter(f => f.spcc_completion_type === 'internal')
           .forEach(f => hiddenFacilityIds.add(f.id));
-      }
-
-      if (hideExternallyCompleted) {
-        // Add ONLY facilities with external completion
         facilities
           .filter(f => f.spcc_completion_type === 'external')
           .forEach(f => hiddenFacilityIds.add(f.id));
+      } else {
+        if (hideInternallyCompleted) {
+          // Facilities with valid inspections from inspections table
+          inspections
+            .filter(insp => isInspectionValid(insp))
+            .forEach(insp => hiddenFacilityIds.add(insp.facility_id));
+          // Facilities with spcc_completion_type === 'internal'
+          facilities
+            .filter(f => f.spcc_completion_type === 'internal')
+            .forEach(f => hiddenFacilityIds.add(f.id));
+          // Facilities with a valid spcc_inspection_date (within last year)
+          const oneYearAgo = new Date();
+          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+          facilities
+            .filter(f => f.spcc_inspection_date && new Date(f.spcc_inspection_date) >= oneYearAgo)
+            .forEach(f => hiddenFacilityIds.add(f.id));
+        }
+        if (hideExternallyCompleted) {
+          facilities
+            .filter(f => f.spcc_completion_type === 'external')
+            .forEach(f => hiddenFacilityIds.add(f.id));
+        }
+      }
+
+      // Plan-based hiding
+      if (hideValidPlans || hideExpiringPlans) {
+        facilities.forEach(f => {
+          const planStatus = getSPCCPlanStatus(f);
+          if (hideValidPlans && planStatus.status === 'valid') {
+            hiddenFacilityIds.add(f.id);
+          }
+          if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
+            hiddenFacilityIds.add(f.id);
+          }
+        });
       }
     }
 
-    // Count facilities in routes that are not hidden
+    // Count facilities in routes that match the current mode
     let visibleCount = 0;
     optimizationResult.routes.forEach(route => {
       route.facilities.forEach(facility => {
         const facilityData = facilities.find(f => f.name === facility.name);
-        if (facilityData && !hiddenFacilityIds.has(facilityData.id)) {
-          visibleCount++;
-        }
+        if (!facilityData) return;
+
+        // Skip excluded/removed facilities
+        if (facilityData.day_assignment === -1 || facilityData.day_assignment === -2) return;
+
+        // Apply visibility hiding (only populated in 'all' mode)
+        if (hiddenFacilityIds.has(facilityData.id)) return;
+
+        // Apply survey type filter
+        if (surveyType === 'spcc_inspection' && !facilityNeedsInspection(facilityData)) return;
+        if (surveyType === 'spcc_plan' && !facilityNeedsSPCCPlan(facilityData)) return;
+
+        visibleCount++;
       });
     });
 
     return visibleCount;
-  }, [optimizationResult, completedVisibility, inspections, facilities]);
+  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType]);
 
   // Apply team filtering to optimization results and facilities
   // Default to team 1 if user has no assignment
@@ -249,11 +301,21 @@ function App() {
 
   // Auto-hide completed facilities on map when switching to a specific survey type
   useEffect(() => {
-    if (surveyType === 'spcc_inspection' || surveyType === 'spcc_plan') {
+    if (surveyType === 'spcc_inspection') {
       setCompletedVisibility({
         hideAllCompleted: true,
         hideInternallyCompleted: true,
         hideExternallyCompleted: true,
+        hideValidPlans: false,
+        hideExpiringPlans: false,
+      });
+    } else if (surveyType === 'spcc_plan') {
+      setCompletedVisibility({
+        hideAllCompleted: false,
+        hideInternallyCompleted: false,
+        hideExternallyCompleted: false,
+        hideValidPlans: true,
+        hideExpiringPlans: false,
       });
     } else {
       // "All Facilities" mode - restore visibility
@@ -261,9 +323,49 @@ function App() {
         hideAllCompleted: false,
         hideInternallyCompleted: false,
         hideExternallyCompleted: false,
+        hideValidPlans: false,
+        hideExpiringPlans: false,
       });
     }
   }, [surveyType]);
+
+  // Recalculate route times when surveyType changes (different modes have different onsite durations)
+  useEffect(() => {
+    if (!optimizationResult || !lastUsedSettings) return;
+
+    const updatedRoutes = optimizationResult.routes.map(route => {
+      const routeWithUpdatedDurations = {
+        ...route,
+        facilities: route.facilities.map(f => {
+          const facilityRecord = facilities.find(fac => fac.name === f.name);
+          return {
+            ...f,
+            visitDuration: getVisitDuration(facilityRecord, lastUsedSettings, surveyType),
+          };
+        }),
+      };
+      return recalculateRouteTimes(routeWithUpdatedDurations);
+    });
+
+    const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
+    const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
+
+    setOptimizationResult({
+      ...optimizationResult,
+      routes: updatedRoutes,
+      totalDriveTime,
+      totalVisitTime,
+      totalTime: totalDriveTime + totalVisitTime,
+    });
+  }, [surveyType, lastUsedSettings]);
+
+  // Redirect legacy 'configure' view to route-planning + modal
+  useEffect(() => {
+    if (currentView === 'configure') {
+      setCurrentView('route-planning');
+      setShowHomeBaseModal(true);
+    }
+  }, [currentView]);
 
   useEffect(() => {
     const handleNavigateToSettings = () => {
@@ -908,65 +1010,60 @@ function App() {
       // Handle exclusion of completed facilities based on settings
       const completedFacilityIds = new Set<string>();
       let excludeCount = 0;
+      const excludeType = settings.exclude_completed_type ?? 'inspection';
 
       if (settings.exclude_completed_facilities) {
-        const { data: completedInspections } = await supabase
-          .from('inspections')
-          .select('*')
-          .eq('account_id', currentAccount.id)
-          .eq('status', 'completed')
-          .order('conducted_at', { ascending: false });
+        const excludeInspections = excludeType === 'inspection' || excludeType === 'both';
+        const excludePlans = excludeType === 'plan' || excludeType === 'both';
 
-        // Group inspections by facility_id and get the most recent one for each
-        const latestInspectionsByFacility = new Map<string, Inspection>();
-        (completedInspections || []).forEach(inspection => {
-          if (!latestInspectionsByFacility.has(inspection.facility_id)) {
-            latestInspectionsByFacility.set(inspection.facility_id, inspection);
-          }
-        });
+        if (excludeInspections && currentAccount) {
+          // Exclude facilities with completed SPCC inspections
+          const { data: completedInspections } = await supabase
+            .from('inspections')
+            .select('*')
+            .eq('account_id', currentAccount.id)
+            .eq('status', 'completed')
+            .order('conducted_at', { ascending: false });
 
-        // Add facilities with valid inspections
-        latestInspectionsByFacility.forEach((inspection, facilityId) => {
-          if (isInspectionValid(inspection)) {
-            completedFacilityIds.add(facilityId);
-          }
-        });
+          const latestInspectionsByFacility = new Map<string, Inspection>();
+          (completedInspections || []).forEach(inspection => {
+            if (!latestInspectionsByFacility.has(inspection.facility_id)) {
+              latestInspectionsByFacility.set(inspection.facility_id, inspection);
+            }
+          });
 
-        // Add facilities with internal completion (manually marked complete without inspection)
-        activeFacilities.forEach(facility => {
-          if (facility.spcc_completion_type === 'internal') {
-            completedFacilityIds.add(facility.id);
-          }
-        });
+          latestInspectionsByFacility.forEach((inspection, facilityId) => {
+            if (isInspectionValid(inspection)) {
+              completedFacilityIds.add(facilityId);
+            }
+          });
+
+          // Add facilities with internal/external completion
+          activeFacilities.forEach(facility => {
+            if (facility.spcc_completion_type === 'internal' || facility.spcc_completion_type === 'external') {
+              completedFacilityIds.add(facility.id);
+            }
+          });
+        }
+
+        if (excludePlans) {
+          // Exclude facilities with valid/current SPCC plans (not due for renewal)
+          activeFacilities.forEach(facility => {
+            const planStatus = getSPCCPlanStatus(facility);
+            if (planStatus.status === 'valid') {
+              completedFacilityIds.add(facility.id);
+            }
+          });
+        }
       }
 
-      // Separate externally completed facilities - they won't be in route optimization
-      // but will still be available for map display (visibility controlled by user)
-      const externallyCompletedIds = new Set<string>();
-      if (settings.exclude_externally_completed) {
-        activeFacilities.forEach(facility => {
-          if (facility.spcc_completion_type === 'external') {
-            externallyCompletedIds.add(facility.id);
-          }
-        });
-      }
-
-      // Apply exclusions for internally completed facilities only
+      // Apply exclusions
       let facilitiesForRouting = activeFacilities;
       if (completedFacilityIds.size > 0) {
         const facilitiesBeforeFilter = activeFacilities.length;
         facilitiesForRouting = activeFacilities.filter(f => !completedFacilityIds.has(f.id));
         excludeCount = facilitiesBeforeFilter - facilitiesForRouting.length;
-        console.log(`Excluded ${excludeCount} internally completed facilities from route calculation`);
-      }
-
-      // Also exclude externally completed from routing
-      if (externallyCompletedIds.size > 0) {
-        const beforeExternal = facilitiesForRouting.length;
-        facilitiesForRouting = facilitiesForRouting.filter(f => !externallyCompletedIds.has(f.id));
-        const externallyExcluded = beforeExternal - facilitiesForRouting.length;
-        console.log(`Excluded ${externallyExcluded} externally completed facilities from route calculation`);
-        excludeCount += externallyExcluded;
+        console.log(`Excluded ${excludeCount} completed facilities from route calculation (type: ${excludeType})`);
       }
 
       // Don't auto-adjust visibility - let the user control it via the visibility modal
@@ -978,48 +1075,139 @@ function App() {
         return;
       }
 
-      const locations = [
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-        ...facilitiesForRouting.map((f) => ({
-          latitude: Number(f.latitude),
-          longitude: Number(f.longitude),
-        })),
-      ];
-
-      const distanceMatrix = await calculateDistanceMatrix(locations);
-
-      const facilitiesWithIndex: FacilityWithIndex[] = facilitiesForRouting.map((f, idx) => ({
-        index: idx + 1,
-        name: f.name,
-        latitude: Number(f.latitude),
-        longitude: Number(f.longitude),
-        // Use facility-specific duration if set, otherwise use default from settings
-        visitDuration: f.visit_duration_minutes || settings.default_visit_duration_minutes,
-      }));
-
       const constraints = {
         maxFacilitiesPerDay: settings.max_facilities_per_day,
         maxHoursPerDay: settings.max_hours_per_day,
         useFacilitiesConstraint: settings.use_facilities_constraint,
         useHoursConstraint: settings.use_hours_constraint,
         startTime: settings.start_time || '08:00',
-        clusteringTightness: settings.clustering_tightness ?? 0.5,
-        clusterBalanceWeight: settings.cluster_balance_weight ?? 0.5,
+        clusteringTightness: settings.clustering_tightness ?? 0.75,
+        clusterBalanceWeight: settings.cluster_balance_weight ?? 0.35,
+        lunchBreakMinutes: settings.lunch_break_minutes || 0,
+        maxDriveTimeMinutes: settings.max_drive_time_minutes || 0,
+        returnByTime: settings.return_by_time || '',
       };
 
       console.log('Generating routes with constraints:', constraints);
       console.log('Using default visit duration:', settings.default_visit_duration_minutes, 'minutes');
-      console.log('Sample facility visit durations:', facilitiesWithIndex.slice(0, 3).map(f => ({ name: f.name, visitDuration: f.visitDuration })));
 
-      const result = optimizeRoutes(
-        facilitiesWithIndex,
-        distanceMatrix,
-        constraints,
-        {
-          latitude: Number(homeBase.latitude),
-          longitude: Number(homeBase.longitude),
+      const currentTeamCount = settings.team_count || 1;
+      const teamHomeBases = homeBases
+        .filter(hb => hb.team_number <= currentTeamCount)
+        .sort((a, b) => a.team_number - b.team_number);
+
+      // Per-team optimization: when multiple teams have their own home bases,
+      // pre-assign facilities to nearest team and optimize each team separately
+      const usePerTeamOptimization = currentTeamCount > 1 && teamHomeBases.length >= currentTeamCount;
+
+      let result: OptimizationResult;
+
+      if (usePerTeamOptimization) {
+        console.log(`Per-team optimization: ${currentTeamCount} teams with individual home bases`);
+
+        // Pre-assign each facility to the nearest team's home base
+        const teamFacilities = new Map<number, Facility[]>();
+        for (let t = 1; t <= currentTeamCount; t++) teamFacilities.set(t, []);
+
+        for (const facility of facilitiesForRouting) {
+          let nearestTeam = 1;
+          let minDist = Infinity;
+          for (const hb of teamHomeBases) {
+            const dist = haversineDistance(
+              Number(facility.latitude), Number(facility.longitude),
+              hb.latitude, hb.longitude
+            );
+            if (dist < minDist) {
+              minDist = dist;
+              nearestTeam = hb.team_number;
+            }
+          }
+          teamFacilities.get(nearestTeam)!.push(facility);
         }
-      );
+
+        console.log('Facility distribution by team:', Array.from(teamFacilities.entries()).map(
+          ([team, facs]) => `Team ${team}: ${facs.length} facilities`
+        ));
+
+        // Optimize each team separately with their own home base
+        const allRoutes: DailyRoute[] = [];
+        let globalDayNumber = 1;
+
+        for (let t = 1; t <= currentTeamCount; t++) {
+          const teamFacs = teamFacilities.get(t) || [];
+          if (teamFacs.length === 0) continue;
+
+          const teamHB = teamHomeBases.find(hb => hb.team_number === t)!;
+          const teamLocations = [
+            { latitude: teamHB.latitude, longitude: teamHB.longitude },
+            ...teamFacs.map(f => ({ latitude: Number(f.latitude), longitude: Number(f.longitude) })),
+          ];
+
+          const teamDistMatrix = await calculateDistanceMatrix(teamLocations);
+          const teamFacilitiesWithIndex: FacilityWithIndex[] = teamFacs.map((f, idx) => ({
+            index: idx + 1,
+            name: f.name,
+            latitude: Number(f.latitude),
+            longitude: Number(f.longitude),
+            visitDuration: getVisitDuration(f, settings, surveyType),
+          }));
+
+          const teamResult = optimizeRoutes(
+            teamFacilitiesWithIndex,
+            teamDistMatrix,
+            constraints,
+            { latitude: teamHB.latitude, longitude: teamHB.longitude }
+          );
+
+          console.log(`Team ${t} optimization: ${teamResult.totalDays} days, ${teamResult.totalFacilities} facilities`);
+
+          // Assign global day numbers and add routes
+          for (const route of teamResult.routes) {
+            route.day = globalDayNumber++;
+            allRoutes.push(route);
+          }
+        }
+
+        // Build combined result
+        result = {
+          routes: allRoutes,
+          totalDays: allRoutes.length,
+          totalMiles: allRoutes.reduce((sum, r) => sum + r.totalMiles, 0),
+          totalFacilities: allRoutes.reduce((sum, r) => sum + r.facilities.length, 0),
+          totalDriveTime: allRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
+          totalVisitTime: allRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
+          totalTime: allRoutes.reduce((sum, r) => sum + r.totalTime, 0),
+        };
+      } else {
+        // Single-team or fallback: single optimization pass
+        const locations = [
+          { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
+          ...facilitiesForRouting.map((f) => ({
+            latitude: Number(f.latitude),
+            longitude: Number(f.longitude),
+          })),
+        ];
+
+        const distanceMatrix = await calculateDistanceMatrix(locations);
+
+        const facilitiesWithIndex: FacilityWithIndex[] = facilitiesForRouting.map((f, idx) => ({
+          index: idx + 1,
+          name: f.name,
+          latitude: Number(f.latitude),
+          longitude: Number(f.longitude),
+          visitDuration: getVisitDuration(f, settings, surveyType),
+        }));
+
+        result = optimizeRoutes(
+          facilitiesWithIndex,
+          distanceMatrix,
+          constraints,
+          {
+            latitude: Number(homeBase.latitude),
+            longitude: Number(homeBase.longitude),
+          }
+        );
+      }
 
       console.log('Route generation complete:', {
         totalDays: result.totalDays,
@@ -1027,6 +1215,7 @@ function App() {
         totalTime: result.totalTime,
         totalDriveTime: result.totalDriveTime,
         totalVisitTime: result.totalVisitTime,
+        perTeam: usePerTeamOptimization,
         routeBreakdown: result.routes.map(r => ({
           day: r.day,
           facilities: r.facilities.length,
@@ -1037,21 +1226,85 @@ function App() {
       });
 
       // Distribute days across teams and update facility assignments
-      const currentTeamCount = settings.team_count || 1;
       if (currentTeamCount > 1) {
         console.log(`Distributing ${result.totalDays} days across ${currentTeamCount} teams`);
 
-        // Calculate how many days each team should get
-        const daysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
-
-        // Create a map of day -> team assignment
         const dayToTeamMap = new Map<number, number>();
-        for (let day = 1; day <= result.totalDays; day++) {
-          const teamNumber = Math.ceil(day / daysPerTeam);
-          dayToTeamMap.set(day, Math.min(teamNumber, currentTeamCount));
-        }
 
-        console.log('Day to team distribution:', Array.from(dayToTeamMap.entries()));
+        if (usePerTeamOptimization) {
+          // Per-team optimization was used: determine team from facility's pre-assignment
+          // Each route's facilities were pre-assigned to a specific team by nearest home base
+          for (const route of result.routes) {
+            if (route.facilities.length === 0) continue;
+            // Find which team this route's facilities belong to
+            const sampleFac = route.facilities[0];
+            let nearestTeam = 1;
+            let minDist = Infinity;
+            for (const hb of teamHomeBases) {
+              const dist = haversineDistance(sampleFac.latitude, sampleFac.longitude, hb.latitude, hb.longitude);
+              if (dist < minDist) { minDist = dist; nearestTeam = hb.team_number; }
+            }
+            dayToTeamMap.set(route.day, nearestTeam);
+          }
+          console.log('Per-team optimization team distribution:', Array.from(dayToTeamMap.entries()));
+        } else if (teamHomeBases.length >= currentTeamCount) {
+          // Single-pass optimization with home-base-aware day assignment
+          const maxDaysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
+          const teamDayCounts = new Map<number, number>();
+          for (let t = 1; t <= currentTeamCount; t++) teamDayCounts.set(t, 0);
+
+          // For each route, calculate distance to each team's home base
+          const routeDistances = result.routes.map(route => {
+            const lats = route.facilities.map(f => f.latitude);
+            const lngs = route.facilities.map(f => f.longitude);
+            const centroidLat = lats.reduce((s, v) => s + v, 0) / lats.length;
+            const centroidLng = lngs.reduce((s, v) => s + v, 0) / lngs.length;
+            const distances = teamHomeBases.map(hb => ({
+              team: hb.team_number,
+              dist: haversineDistance(centroidLat, centroidLng, hb.latitude, hb.longitude),
+            }));
+            return { day: route.day, distances: distances.sort((a, b) => a.dist - b.dist) };
+          });
+
+          // Sort by distance spread (most constrained first)
+          routeDistances.sort((a, b) => {
+            const spreadA = a.distances.length > 1 ? a.distances[1].dist - a.distances[0].dist : Infinity;
+            const spreadB = b.distances.length > 1 ? b.distances[1].dist - b.distances[0].dist : Infinity;
+            return spreadA - spreadB;
+          });
+
+          // Greedy assignment to nearest team with capacity
+          for (const rd of routeDistances) {
+            let assigned = false;
+            for (const { team } of rd.distances) {
+              const count = teamDayCounts.get(team) || 0;
+              if (count < maxDaysPerTeam) {
+                dayToTeamMap.set(rd.day, team);
+                teamDayCounts.set(team, count + 1);
+                assigned = true;
+                break;
+              }
+            }
+            if (!assigned) {
+              let minTeam = 1;
+              let minCount = Infinity;
+              teamDayCounts.forEach((count, team) => {
+                if (count < minCount) { minCount = count; minTeam = team; }
+              });
+              dayToTeamMap.set(rd.day, minTeam);
+              teamDayCounts.set(minTeam, (teamDayCounts.get(minTeam) || 0) + 1);
+            }
+          }
+          console.log('Home-base-aware team distribution:', Array.from(dayToTeamMap.entries()));
+        } else {
+          // Fallback: sequential distribution if not enough home bases configured
+          const daysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
+          for (let day = 1; day <= result.totalDays; day++) {
+            const teamNumber = Math.ceil(day / daysPerTeam);
+            dayToTeamMap.set(day, Math.min(teamNumber, currentTeamCount));
+          }
+          console.log('Sequential team distribution (not enough home bases):', Array.from(dayToTeamMap.entries()));
+        }
 
         // Update facility team assignments in database
         const updatePromises: Promise<any>[] = [];
@@ -1110,15 +1363,15 @@ function App() {
       setCurrentView('route-planning');
 
       // Update visibility state to match exclude settings
-      if (settings.exclude_completed_facilities || settings.exclude_externally_completed) {
+      if (settings.exclude_completed_facilities) {
         console.log('[Route Generation] Updating visibility state to match exclusion settings', {
           exclude_completed_facilities: settings.exclude_completed_facilities,
-          exclude_externally_completed: settings.exclude_externally_completed,
+          exclude_completed_type: settings.exclude_completed_type,
         });
         setCompletedVisibility({
-          hideAllCompleted: settings.exclude_completed_facilities || false,
-          hideInternallyCompleted: false,
-          hideExternallyCompleted: settings.exclude_externally_completed || false,
+          hideAllCompleted: true,
+          hideInternallyCompleted: true,
+          hideExternallyCompleted: true,
         });
       } else {
         // If no exclusions, reset visibility to show all
@@ -1199,10 +1452,9 @@ function App() {
           startTime: latestSettings.start_time || route.startTime,
           facilities: route.facilities.map(f => {
             const facilityRecord = facilities.find(fac => fac.name === f.name);
-            // Use facility-specific duration if set, otherwise use default from settings
             return {
               ...f,
-              visitDuration: facilityRecord?.visit_duration_minutes || latestSettings.default_visit_duration_minutes
+              visitDuration: getVisitDuration(facilityRecord, latestSettings as UserSettings, surveyType)
             };
           })
         };
@@ -2333,41 +2585,7 @@ function App() {
           </div>
         )}
 
-        {currentView === 'configure' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Number of Teams
-                </label>
-                <select
-                  value={teamCount}
-                  onChange={(e) => setTeamCount(parseInt(e.target.value))}
-                  className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="1">1 Team (Single Home Base)</option>
-                  <option value="2">2 Teams</option>
-                  <option value="3">3 Teams</option>
-                  <option value="4">4 Teams</option>
-                </select>
-              </div>
-              {teamCount === 1 ? (
-                <HomeBaseConfig
-                  userId={user?.authUserId || ''}
-                  accountId={currentAccount.id}
-                  onSaved={() => loadData()}
-                />
-              ) : (
-                <MultiHomeBaseConfig
-                  userId={user?.authUserId || ''}
-                  accountId={currentAccount.id}
-                  teamCount={teamCount}
-                  onSaved={() => loadData()}
-                />
-              )}
-            </div>
-          </div>
-        )}
+        {/* Legacy configure view handled by useEffect redirect */}
 
         {currentView === 'route-planning' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -2382,23 +2600,25 @@ function App() {
                     disabled={!homeBase || facilities.length === 0}
                     lastUsedSettings={lastUsedSettings}
                   />
-                  <div className="bg-white rounded-lg shadow-md p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Home className="w-5 h-5 text-green-600" />
-                      <h2 className="text-xl font-semibold text-gray-800">Current Home Base</h2>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-gray-700">{homeBase.address}</p>
-                      <p className="text-sm text-gray-600">
-                        {Number(homeBase.latitude).toFixed(6)}, {Number(homeBase.longitude).toFixed(6)}
-                      </p>
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 transition-colors">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
+                          <Home className="w-4 h-4 text-green-600 dark:text-green-400" />
+                        </div>
+                        <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Home Base</h2>
+                      </div>
                       <button
-                        onClick={() => setCurrentView('configure')}
-                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                        onClick={() => setShowHomeBaseModal(true)}
+                        className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium transition-colors"
                       >
-                        Change Home Base
+                        Change
                       </button>
                     </div>
+                    <p className="text-gray-700 dark:text-gray-300 text-sm">{homeBase.address}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {Number(homeBase.latitude).toFixed(5)}, {Number(homeBase.longitude).toFixed(5)}
+                    </p>
                   </div>
                 </div>
               )}
@@ -2416,15 +2636,21 @@ function App() {
               )}
 
               {!homeBase && !isLoadingRoutes && !optimizationResult && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <p className="text-yellow-800">
-                    Please configure your home base before generating routes.
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 text-center transition-colors">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center mx-auto mb-4">
+                    <Home className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+                    Set Your Home Base
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                    Routes start and end at your home base. Set it up to get started.
                   </p>
                   <button
-                    onClick={() => setCurrentView('configure')}
-                    className="mt-2 text-yellow-700 hover:text-yellow-900 underline font-medium"
+                    onClick={() => setShowHomeBaseModal(true)}
+                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
                   >
-                    Go to Home Base Configuration
+                    Configure Home Base
                   </button>
                 </div>
               )}
@@ -2465,7 +2691,7 @@ function App() {
                     onSaveCurrentRoute={handleSaveCurrentRoute}
                     onLoadRoute={handleLoadRoute}
                     currentRouteId={currentRouteId || undefined}
-                    onConfigureHomeBase={() => setCurrentView('configure')}
+                    onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                     homeBase={homeBase || undefined}
                     onUpdateResult={(newResult) => {
                       setOptimizationResult(newResult);
@@ -2554,10 +2780,13 @@ function App() {
                   {!isFullScreenMap && filteredOptimizationResult && (() => {
                     // Compute counts for badges
                     const inspectionsMap = new Map(inspections.map(i => [i.facility_id, i]));
-                    const nonSoldFacilities = filteredFacilities.filter(f => f.status !== 'sold');
+                    const activeFacilities = filteredFacilities.filter(f => f.status !== 'sold' && f.day_assignment !== -1);
                     const facilitiesInRoute = new Set<string>();
+                    const excludedNames = new Set(filteredFacilities.filter(f => f.day_assignment === -1).map(f => f.name));
                     filteredOptimizationResult.routes.forEach(route => {
-                      route.facilities.forEach(f => facilitiesInRoute.add(f.name));
+                      route.facilities.forEach(f => {
+                        if (!excludedNames.has(f.name)) facilitiesInRoute.add(f.name);
+                      });
                     });
 
                     let planInRouteCount = 0;
@@ -2565,7 +2794,7 @@ function App() {
                     let inspectionInRouteCount = 0;
                     let inspectionPastDueCount = 0;
 
-                    nonSoldFacilities.forEach(f => {
+                    activeFacilities.forEach(f => {
                       const isInRoute = facilitiesInRoute.has(f.name);
                       // SPCC Plan counts
                       const s = getSPCCPlanStatus(f);
@@ -2628,46 +2857,96 @@ function App() {
                             >
                               All Facilities
                             </button>
-                            <button
-                              onClick={() => setSurveyType('spcc_inspection')}
-                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                }`}
-                            >
-                              <FileText className="w-4 h-4" />
-                              SPCC Inspections
-                              {inspectionInRouteCount > 0 && (
-                                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
-                                  {inspectionInRouteCount}
-                                </span>
-                              )}
-                              {inspectionPastDueCount > 0 && (
-                                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
-                                  {inspectionPastDueCount} overdue
-                                </span>
-                              )}
-                            </button>
-                            <button
-                              onClick={() => setSurveyType('spcc_plan')}
-                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                }`}
-                            >
-                              <FileCheck className="w-4 h-4" />
-                              SPCC Plans
-                              {planInRouteCount > 0 && (
-                                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
-                                  {planInRouteCount}
-                                </span>
-                              )}
-                              {planPastDueCount > 0 && (
-                                <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
-                                  {planPastDueCount} overdue
-                                </span>
-                              )}
-                            </button>
+                            <div className="relative group/inspection">
+                              <button
+                                onClick={() => setSurveyType('spcc_inspection')}
+                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                  }`}
+                              >
+                                <FileText className="w-4 h-4" />
+                                SPCC Inspections
+                                {inspectionInRouteCount > 0 && (
+                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                    {inspectionInRouteCount}
+                                  </span>
+                                )}
+                                {inspectionPastDueCount > 0 && (
+                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                    {inspectionPastDueCount} overdue
+                                  </span>
+                                )}
+                              </button>
+                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 opacity-0 pointer-events-none group-hover/inspection:opacity-100 transition-opacity duration-200 z-[9999]">
+                                <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-l border-t border-white/50 dark:border-white/10" />
+                                  <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Inspections</div>
+                                  <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
+                                    {inspectionInRouteCount > 0 && (
+                                      <div className="flex items-start gap-2">
+                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span><strong>{inspectionInRouteCount}</strong> needing inspection are in this route</span>
+                                      </div>
+                                    )}
+                                    {inspectionPastDueCount > 0 && (
+                                      <div className="flex items-start gap-2">
+                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
+                                        <span><strong>{inspectionPastDueCount}</strong> overdue — last inspected over 1 year ago or never</span>
+                                      </div>
+                                    )}
+                                    {inspectionInRouteCount === 0 && inspectionPastDueCount === 0 && (
+                                      <span>Filter to facilities needing yearly SPCC inspection</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="relative group/plan">
+                              <button
+                                onClick={() => setSurveyType('spcc_plan')}
+                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                  }`}
+                              >
+                                <FileCheck className="w-4 h-4" />
+                                SPCC Plans
+                                {planInRouteCount > 0 && (
+                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                    {planInRouteCount}
+                                  </span>
+                                )}
+                                {planPastDueCount > 0 && (
+                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                    {planPastDueCount} overdue
+                                  </span>
+                                )}
+                              </button>
+                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 opacity-0 pointer-events-none group-hover/plan:opacity-100 transition-opacity duration-200 z-[9999]">
+                                <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-l border-t border-white/50 dark:border-white/10" />
+                                  <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Plans</div>
+                                  <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
+                                    {planInRouteCount > 0 && (
+                                      <div className="flex items-start gap-2">
+                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span><strong>{planInRouteCount}</strong> needing attention are in this route</span>
+                                      </div>
+                                    )}
+                                    {planPastDueCount > 0 && (
+                                      <div className="flex items-start gap-2">
+                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
+                                        <span><strong>{planPastDueCount}</strong> overdue — expired or missed filing deadline</span>
+                                      </div>
+                                    )}
+                                    {planInRouteCount === 0 && planPastDueCount === 0 && (
+                                      <span>Filter to facilities needing SPCC plan attention</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2719,7 +2998,7 @@ function App() {
                       onSaveCurrentRoute={handleSaveCurrentRoute}
                       onLoadRoute={handleLoadRoute}
                       currentRouteId={currentRouteId || undefined}
-                      onConfigureHomeBase={() => setCurrentView('configure')}
+                      onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                       showRefreshOptions={showRefreshOptions}
                       onShowRefreshOptions={setShowRefreshOptions}
                       homeBase={homeBase || undefined}
@@ -2728,7 +3007,6 @@ function App() {
                         setRouteVersion(prev => prev + 1);
                       }}
                       completedVisibility={completedVisibility}
-                      onToggleHideCompleted={() => setShowVisibilityModal(true)}
                       onRefresh={async () => {
                         console.log('RouteResults onRefresh called');
                         setTriggerFitBounds(prev => prev + 1);
@@ -2816,7 +3094,7 @@ function App() {
 
                         <div className="h-full w-full">
                           <RouteMap
-                            key={`route-map-fullscreen-${routeVersion}-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}`}
+                            key={`route-map-fullscreen-${routeVersion}-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
                             result={filteredOptimizationResult}
                             homeBase={homeBase}
                             isFullScreen={true}
@@ -2865,13 +3143,13 @@ function App() {
                         </button>
                         <button
                           onClick={() => setShowVisibilityModal(true)}
-                          className={`p-2 rounded-lg transition-colors shadow-lg border ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
+                          className={`p-2 rounded-lg transition-colors shadow-lg border ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans
                             ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                             }`}
                           title="Adjust completed facilities visibility"
                         >
-                          {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                          {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                         </button>
                       </div>
 
@@ -3152,10 +3430,22 @@ function App() {
       {showVisibilityModal && (
         <CompletedFacilitiesVisibilityModal
           visibility={completedVisibility}
+          surveyType={surveyType}
           onClose={() => setShowVisibilityModal(false)}
           onApply={(newVisibility) => {
             setCompletedVisibility(newVisibility);
           }}
+        />
+      )}
+
+      {showHomeBaseModal && currentAccount && (
+        <HomeBaseModal
+          userId={user?.authUserId || ''}
+          accountId={currentAccount.id}
+          teamCount={teamCount}
+          onTeamCountChange={setTeamCount}
+          onSaved={() => loadData()}
+          onClose={() => setShowHomeBaseModal(false)}
         />
       )}
     </div>

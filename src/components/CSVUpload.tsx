@@ -1,10 +1,12 @@
 import { useState, useRef } from 'react';
 import { Upload, AlertCircle, CheckCircle } from 'lucide-react';
-import { parseCSV, ParseResult } from '../utils/csvParser';
+import { parseCSV, parseExcelFile, ParseResult } from '../utils/csvParser';
 
 interface CSVUploadProps {
   onDataParsed: (data: ParseResult) => void;
 }
+
+const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 
 export default function CSVUpload({ onDataParsed }: CSVUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -13,8 +15,9 @@ export default function CSVUpload({ onDataParsed }: CSVUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
-    if (!file.name.endsWith('.csv')) {
-      alert('Please upload a CSV file');
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      alert('Please upload a CSV or Excel (.xlsx) file');
       return;
     }
 
@@ -22,11 +25,12 @@ export default function CSVUpload({ onDataParsed }: CSVUploadProps) {
     setFileName(file.name);
 
     try {
-      const result = await parseCSV(file);
+      const isExcel = ext === '.xlsx' || ext === '.xls';
+      const result = isExcel ? await parseExcelFile(file) : await parseCSV(file);
       onDataParsed(result);
     } catch (error) {
-      console.error('Error parsing CSV:', error);
-      alert('Failed to parse CSV file');
+      console.error('Error parsing file:', error);
+      alert('Failed to parse file');
     } finally {
       setIsProcessing(false);
     }
@@ -77,7 +81,7 @@ export default function CSVUpload({ onDataParsed }: CSVUploadProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.xlsx,.xls"
         onChange={handleFileSelect}
         className="hidden"
       />
@@ -91,10 +95,10 @@ export default function CSVUpload({ onDataParsed }: CSVUploadProps) {
         <div className="flex flex-col items-center">
           <Upload className="w-12 h-12 text-gray-400 mb-4" />
           <p className="text-lg font-medium text-gray-700 dark:text-gray-200 mb-2">
-            Drop your CSV file here or click to browse
+            Drop your CSV or Excel file here or click to browse
           </p>
           <p className="text-sm text-gray-500">
-            Required columns: Facility Name, Latitude, Longitude
+            Supports .csv and .xlsx files
           </p>
           <p className="text-xs text-gray-400 mt-1">
             Maximum 500 facilities per upload

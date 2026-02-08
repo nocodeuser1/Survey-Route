@@ -65,7 +65,7 @@ export function kMeansClustering(
   points: GeoPoint[],
   k: number,
   maxIterations: number = 50,
-  tightness: number = 0.5
+  tightness: number = 0.75
 ): Cluster[] {
   if (points.length === 0) return [];
   if (points.length <= k) {
@@ -193,7 +193,7 @@ export function balanceClusters(
   clusters: Cluster[],
   maxPointsPerCluster: number,
   homeBase: GeoPoint,
-  balanceWeight: number = 0.5
+  balanceWeight: number = 0.35
 ): Cluster[] {
   const overloadedClusters = clusters.filter(
     (c) => c.points.length > maxPointsPerCluster

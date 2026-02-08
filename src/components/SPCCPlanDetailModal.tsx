@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
@@ -66,15 +66,41 @@ function getStatusRingColor(status: SPCCPlanStatus, darkMode: boolean): string {
   }
 }
 
+/** Parse mm/dd/yy or mm/dd/yyyy into YYYY-MM-DD, returns null if invalid */
+function parseDateInput(input: string): string | null {
+  const trimmed = input.trim();
+  // Accept mm/dd/yy or mm/dd/yyyy with / or - separators
+  const match = trimmed.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+  if (!match) return null;
+  const month = parseInt(match[1], 10);
+  const day = parseInt(match[2], 10);
+  let year = parseInt(match[3], 10);
+  if (year < 100) year += 2000; // 2-digit year: 25 -> 2025
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Convert YYYY-MM-DD to mm/dd/yy for display */
+function formatDateDisplay(isoDate: string): string {
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return isoDate;
+  const year = parseInt(match[1], 10) % 100;
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
+}
+
 export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onViewInspectionDetails }: SPCCPlanDetailModalProps) {
   const { darkMode } = useDarkMode();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [editingIpDate, setEditingIpDate] = useState(false);
-  const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date || '');
+  const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
-  const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date || '');
+  const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
   const [saving, setSaving] = useState(false);
+  const ipDatePickerRef = useRef<HTMLInputElement>(null);
+  const peDatePickerRef = useRef<HTMLInputElement>(null);
 
   const status = getSPCCPlanStatus(facility);
   const badgeConfig = getStatusBadgeConfig(status.status);
@@ -89,11 +115,13 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   };
 
   const handleSaveIpDate = async () => {
+    const isoDate = ipDateValue ? parseDateInput(ipDateValue) : null;
+    if (ipDateValue && !isoDate) return; // invalid format, don't save
     setSaving(true);
     try {
       const { error } = await supabase
         .from('facilities')
-        .update({ first_prod_date: ipDateValue || null })
+        .update({ first_prod_date: isoDate })
         .eq('id', facility.id);
       if (error) throw error;
       setEditingIpDate(false);
@@ -106,11 +134,13 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   };
 
   const handleSavePeDate = async () => {
+    const isoDate = peDateValue ? parseDateInput(peDateValue) : null;
+    if (peDateValue && !isoDate) return; // invalid format, don't save
     setSaving(true);
     try {
       const { error } = await supabase
         .from('facilities')
-        .update({ spcc_pe_stamp_date: peDateValue || null })
+        .update({ spcc_pe_stamp_date: isoDate })
         .eq('id', facility.id);
       if (error) throw error;
       setEditingPeDate(false);
@@ -241,24 +271,37 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingIpDate ? (
                   <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={ipDateValue}
-                      onChange={(e) => setIpDateValue(e.target.value)}
-                      className={`text-sm px-2 py-1 rounded border ${darkMode
-                        ? 'bg-gray-700 border-gray-600 text-white'
-                        : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="mm/dd/yy"
+                        value={ipDateValue}
+                        onChange={(e) => setIpDateValue(e.target.value)}
+                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
+                          ? 'bg-gray-700 border-gray-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-900'
+                          } ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
+                        autoFocus
+                      />
+                      <input
+                        ref={ipDatePickerRef}
+                        type="date"
+                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                        tabIndex={-1}
+                        onChange={(e) => {
+                          if (e.target.value) setIpDateValue(formatDateDisplay(e.target.value));
+                        }}
+                      />
+                    </div>
                     <button
                       onClick={handleSaveIpDate}
-                      disabled={saving}
+                      disabled={saving || (!!ipDateValue && !parseDateInput(ipDateValue))}
                       className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                     >
                       Save
                     </button>
                     <button
-                      onClick={() => { setEditingIpDate(false); setIpDateValue(facility.first_prod_date || ''); }}
+                      onClick={() => { setEditingIpDate(false); setIpDateValue(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : ''); }}
                       className={`px-2 py-1 text-xs rounded ${darkMode ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                     >
                       Cancel
@@ -294,24 +337,37 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingPeDate ? (
                   <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={peDateValue}
-                      onChange={(e) => setPeDateValue(e.target.value)}
-                      className={`text-sm px-2 py-1 rounded border ${darkMode
-                        ? 'bg-gray-700 border-gray-600 text-white'
-                        : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="mm/dd/yy"
+                        value={peDateValue}
+                        onChange={(e) => setPeDateValue(e.target.value)}
+                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
+                          ? 'bg-gray-700 border-gray-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-900'
+                          } ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
+                        autoFocus
+                      />
+                      <input
+                        ref={peDatePickerRef}
+                        type="date"
+                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                        tabIndex={-1}
+                        onChange={(e) => {
+                          if (e.target.value) setPeDateValue(formatDateDisplay(e.target.value));
+                        }}
+                      />
+                    </div>
                     <button
                       onClick={handleSavePeDate}
-                      disabled={saving}
+                      disabled={saving || (!!peDateValue && !parseDateInput(peDateValue))}
                       className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                     >
                       Save
                     </button>
                     <button
-                      onClick={() => { setEditingPeDate(false); setPeDateValue(facility.spcc_pe_stamp_date || ''); }}
+                      onClick={() => { setEditingPeDate(false); setPeDateValue(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : ''); }}
                       className={`px-2 py-1 text-xs rounded ${darkMode ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                     >
                       Cancel

@@ -25,7 +25,7 @@ export default function RoutePlanningControls({
     max_facilities_per_day: 8,
     max_hours_per_day: 8,
     default_visit_duration_minutes: 30,
-    use_facilities_constraint: true,
+    use_facilities_constraint: false,
     use_hours_constraint: true,
     updated_at: '',
   });
@@ -61,7 +61,7 @@ export default function RoutePlanningControls({
           max_facilities_per_day: 8,
           max_hours_per_day: 8,
           default_visit_duration_minutes: 30,
-          use_facilities_constraint: true,
+          use_facilities_constraint: false,
           use_hours_constraint: true,
         };
 

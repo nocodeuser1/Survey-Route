@@ -7,6 +7,7 @@ import { HomeBase, supabase, UserSettings, Inspection, Facility } from '../lib/s
 import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { isInspectionValid } from '../utils/inspectionUtils';
+import { getSPCCPlanStatus } from '../utils/spccStatus';
 import NavigationPopup from './NavigationPopup';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
@@ -29,6 +30,8 @@ interface RouteMapProps {
     hideAllCompleted: boolean;
     hideInternallyCompleted: boolean;
     hideExternallyCompleted: boolean;
+    hideValidPlans: boolean;
+    hideExpiringPlans: boolean;
   };
   facilities?: Facility[];
   userId?: string;
@@ -76,48 +79,59 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all' }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all' }: RouteMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapWrapperRef = useRef<HTMLDivElement>(null);
+  const [isMapActive, setIsMapActive] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
 
   // Memoize completed facilities calculation to avoid recalculating on every render
   const completedFacilityNames = useMemo(() => {
     const completed = new Set<string>();
-    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted } = completedVisibility;
+    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
-    if (hideAllCompleted) {
-      // Add facilities with valid inspections
+    // Inspection-based hiding
+    // hideAllCompleted or hideInternallyCompleted: also check inspections table
+    // and spcc_inspection_date on the facility record (not just spcc_completion_type)
+    if (hideAllCompleted || hideInternallyCompleted) {
+      // Facilities with valid inspections from inspections table
       inspections
         .filter(i => isInspectionValid(i))
         .forEach(i => {
           const facility = facilities.find(f => f.id === i.facility_id);
           if (facility) completed.add(facility.name);
         });
-
-      // Add facilities with internal completion
+      // Facilities with spcc_completion_type === 'internal'
       facilities
         .filter(f => f.spcc_completion_type === 'internal')
         .forEach(f => completed.add(f.name));
-
-      // Add facilities with external completion
+      // Facilities with a valid spcc_inspection_date (within last year)
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      facilities
+        .filter(f => f.spcc_inspection_date && new Date(f.spcc_inspection_date) >= oneYearAgo)
+        .forEach(f => completed.add(f.name));
+    }
+    if (hideAllCompleted || hideExternallyCompleted) {
       facilities
         .filter(f => f.spcc_completion_type === 'external')
         .forEach(f => completed.add(f.name));
-    } else {
-      // Granular hiding - only hide specific types
-      if (hideInternallyCompleted) {
-        facilities
-          .filter(f => f.spcc_completion_type === 'internal')
-          .forEach(f => completed.add(f.name));
-      }
+    }
 
-      if (hideExternallyCompleted) {
-        facilities
-          .filter(f => f.spcc_completion_type === 'external')
-          .forEach(f => completed.add(f.name));
-      }
+    // Plan-based hiding
+    if (hideValidPlans || hideExpiringPlans) {
+      facilities.forEach(f => {
+        const planStatus = getSPCCPlanStatus(f);
+        if (hideValidPlans && planStatus.status === 'valid') {
+          completed.add(f.name);
+        }
+        if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
+          completed.add(f.name);
+        }
+      });
     }
 
     return completed;
@@ -135,7 +149,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   }, [facilities]);
 
   // Helper to check if any completed facilities are hidden
-  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted;
+  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans;
   const markersRef = useRef<Map<number, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
   const polylinesRef = useRef<Map<number, L.Polyline>>(new Map());
   const homeMarkerRef = useRef<L.Marker | null>(null);
@@ -275,13 +289,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         rotate: true,
         bearing: 0,
         touchRotate: false, // Disable by default, enable in navigation mode
-        rotateControl: false // Disable default rotate control
+        rotateControl: false, // Disable default rotate control
+        scrollWheelZoom: false // Disabled by default; managed by activation logic
       } as any).setView([39.8283, -98.5795], 4);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19,
       }).addTo(mapRef.current);
+
+      setMapReady(true);
 
       // Add custom North reset control (only visible when map is rotated and in navigation mode)
       const northResetControl = L.Control.extend({
@@ -461,6 +478,61 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     };
   }, []);
 
+  // Map scroll-zoom activation: block wheel events at the DOM level until user clicks the map.
+  // Previous attempts using Leaflet's scrollWheelZoom.disable() were unreliable, so we
+  // intercept the wheel event in the capture phase and stop it before Leaflet ever sees it.
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const container = map.getContainer();
+
+    // Fullscreen: always allow scroll zoom, no interception needed
+    if (isFullScreen) {
+      setIsMapActive(true);
+      return;
+    }
+
+    // Non-fullscreen: start inactive
+    let active = false;
+    setIsMapActive(false);
+
+    // Block wheel events from reaching Leaflet when inactive
+    const blockWheel = (e: WheelEvent) => {
+      if (!active) {
+        e.stopPropagation();
+        // Don't preventDefault — let the page scroll naturally
+      }
+    };
+
+    const activateMap = () => {
+      if (!active) {
+        active = true;
+        setIsMapActive(true);
+      }
+    };
+
+    const deactivateOnClickOutside = (e: MouseEvent) => {
+      if (!active) return;
+      const wrapper = mapWrapperRef.current;
+      if (wrapper && !wrapper.contains(e.target as Node)) {
+        active = false;
+        setIsMapActive(false);
+      }
+    };
+
+    // Capture phase: intercept wheel before Leaflet's handler
+    container.addEventListener('wheel', blockWheel, { capture: true, passive: true });
+    container.addEventListener('mousedown', activateMap, true);
+    document.addEventListener('mousedown', deactivateOnClickOutside);
+
+    return () => {
+      container.removeEventListener('wheel', blockWheel, true);
+      container.removeEventListener('mousedown', activateMap, true);
+      document.removeEventListener('mousedown', deactivateOnClickOutside);
+    };
+  }, [isFullScreen, mapReady]);
+
   // Center map on target coordinates when they change
   useEffect(() => {
     if (mapRef.current && targetCoords) {
@@ -580,6 +652,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // This is VIEW-ONLY logic - does not affect route assignments or data
           const isCompleted = completedFacilityNames.has(facility.name);
           const isManuallyRemoved = latestFacilityData?.day_assignment === -2;
+          const isExcluded = latestFacilityData?.day_assignment === -1;
           const isSold = latestFacilityData?.status === 'sold';
 
           // Check if facility needs SPCC plan (for surveyType === 'spcc_plan' handling)
@@ -602,12 +675,15 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // When SPCC Plans filter is active, bypass normal hide logic
           // Show facilities that need plan attention regardless of inspection status
           let shouldBeHidden: boolean;
-          if (surveyType === 'spcc_plan') {
+          if (isExcluded || isSold) {
+            // Excluded (day_assignment=-1) or sold facilities are always hidden
+            shouldBeHidden = true;
+          } else if (surveyType === 'spcc_plan') {
             // If facility needs plan attention, always show it
             // If it doesn't need attention, hide it (not relevant to this filter)
-            shouldBeHidden = !needsSPCCPlan || isSold;
+            shouldBeHidden = !needsSPCCPlan;
           } else {
-            shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved)) || isSold;
+            shouldBeHidden = (hideCompletedFacilities && (isCompleted || isManuallyRemoved));
           }
 
           if (!shouldBeHidden) {
@@ -855,16 +931,119 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Get full facility data including SPCC completion status
             const fullFacility = facilities.find(f => f.name === facility.name);
-            const spccCompletedDate = fullFacility?.spcc_inspection_date;
-            const spccBadgeHtml = spccCompletedDate
-              ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 10px; font-weight: 600; margin-left: 6px;">
-                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                     <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                   </svg>
-                   SPCC Complete
-                 </span>`
-              : '';
+
+            // Build survey-type-aware badge
+            let statusBadgeHtml = '';
+            let surveyBtnLabel = facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey';
+            let surveyBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
+
+            if (surveyType === 'spcc_plan') {
+              // SPCC Plans mode - show plan status badge
+              const planStatus = fullFacility ? getSPCCPlanStatus(fullFacility) : null;
+              if (planStatus) {
+                const statusColors: Record<string, { bg: string; text: string }> = {
+                  valid: { bg: '#D1FAE5', text: '#065F46' },
+                  expiring: { bg: '#FEF3C7', text: '#92400E' },
+                  renewal_due: { bg: '#FEF3C7', text: '#92400E' },
+                  expired: { bg: '#FEE2E2', text: '#991B1B' },
+                  initial_due: { bg: '#FEF3C7', text: '#92400E' },
+                  initial_overdue: { bg: '#FEE2E2', text: '#991B1B' },
+                  no_plan: { bg: '#DBEAFE', text: '#1E40AF' },
+                  no_ip_date: { bg: '#F3F4F6', text: '#6B7280' },
+                };
+                const statusIcons: Record<string, string> = {
+                  valid: '<polyline points="20 6 9 17 4 12"></polyline>',
+                  expiring: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+                  renewal_due: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+                  expired: '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>',
+                  initial_due: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+                  initial_overdue: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+                  no_plan: '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+                  no_ip_date: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline>',
+                };
+                const statusLabels: Record<string, string> = {
+                  valid: 'Plan Valid',
+                  expiring: 'Expiring',
+                  renewal_due: 'Renewal Due',
+                  expired: 'Expired',
+                  initial_due: 'Due Soon',
+                  initial_overdue: 'Overdue',
+                  no_plan: 'Pending',
+                  no_ip_date: 'No IP Date',
+                };
+                const colors = statusColors[planStatus.status] || statusColors.no_plan;
+                const icon = statusIcons[planStatus.status] || statusIcons.no_plan;
+                const label = statusLabels[planStatus.status] || planStatus.status;
+
+                statusBadgeHtml = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: ${colors.bg}; color: ${colors.text}; border-radius: 9999px; font-size: 10px; font-weight: 600; margin-left: 6px;">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+                  ${label}
+                </span>`;
+              }
+              surveyBtnLabel = 'Plan Details';
+              surveyBtnTitle = 'View SPCC plan details';
+            } else if (surveyType === 'spcc_inspection') {
+              // SPCC Inspections mode - show inspection completion badge
+              const spccCompletedDate = fullFacility?.spcc_inspection_date;
+              if (spccCompletedDate) {
+                statusBadgeHtml = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 10px; font-weight: 600; margin-left: 6px;">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                  SPCC Complete
+                </span>`;
+              }
+            }
+            // All mode: no status badge shown
+
+            // Build SPCC plan details section for Plans mode
+            let planInfoHtml = '';
+            if (surveyType === 'spcc_plan' && fullFacility) {
+              const planStatus = getSPCCPlanStatus(fullFacility);
+              const peDate = planStatus.peStampDate
+                ? planStatus.peStampDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : null;
+              const renewalDate = planStatus.renewalDate
+                ? planStatus.renewalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : null;
+              const msgColor = planStatus.isUrgent ? (planStatus.isCompliant ? '#92400E' : '#991B1B') : '#065F46';
+
+              planInfoHtml = `
+                <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                  <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">SPCC Plan</div>
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">Status:</span>
+                      <span style="font-weight: 600; color: ${msgColor};">${planStatus.message}</span>
+                    </div>
+                    ${peDate ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6B7280;">PE Stamp:</span>
+                        <span style="font-weight: 500;">${peDate}</span>
+                      </div>
+                    ` : ''}
+                    ${renewalDate ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6B7280;">Renewal:</span>
+                        <span style="font-weight: 500;">${renewalDate}</span>
+                      </div>
+                    ` : ''}
+                    ${!planStatus.hasPlan && fullFacility.first_prod_date ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6B7280;">IP Date:</span>
+                        <span style="font-weight: 500;">${new Date(fullFacility.first_prod_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
+                    ` : ''}
+                    ${fullFacility.spcc_plan_url ? `
+                      <div style="margin-top: 2px;">
+                        <a href="${fullFacility.spcc_plan_url}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline; font-size: 10px;">View Plan Document</a>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            }
 
             // Calculate sunset time (approximate based on facility location)
             const calculateSunset = (lat: number) => {
@@ -929,7 +1108,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       style="cursor: pointer; color: #2563EB; text-decoration: underline; font-weight: 600;"
                       title="Click to view/edit facility details"
                     >${facility.name}</span>
-                    ${spccBadgeHtml}
+                    ${statusBadgeHtml}
                   </div>
                   <div style="display: flex; gap: 4px;">
                     <button
@@ -948,13 +1127,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                         justify-content: center;
                         gap: 4px;
                       "
-                      title="${facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey'}"
+                      title="${surveyBtnTitle}"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M9 11l3 3L22 4"></path>
                         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                       </svg>
-                      ${facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey'}
+                      ${surveyBtnLabel}
                     </button>
                     <button
                       id="navigate-btn-${facility.index}"
@@ -980,6 +1159,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   </div>
                 </div>
                 <div style="font-size: 11px; color: #6b7280;">Visit: ${facility.visitDuration} mins</div>
+                ${planInfoHtml}
                 <div style="font-size: 11px; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e5e7eb;">
                   <div style="font-weight: 600; margin-bottom: 2px;">Day ${route.day} Schedule:</div>
                   <div>Start: ${dayStartTime}</div>
@@ -1249,7 +1429,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // Add markers for ALL facilities (not just those in routes) when NOT hiding completed
       // This allows users to see all facilities while driving, even if they're not in the current route
       // When hideCompletedFacilities is TRUE, this block doesn't execute, so unassigned facilities are hidden
-      if (!hideCompletedFacilities) {
+      // In SPCC plan mode, always show this section since externally completed facilities
+      // (an inspection concept) are skipped from the external section and need plan-aware rendering
+      if (!hideCompletedFacilities || surveyType === 'spcc_plan') {
         // Get facility names already shown in routes
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
@@ -1272,7 +1454,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const hasCompletedInspection = isInspectionValid(latestInspection);
           const isInternalCompletion = facility.spcc_completion_type === 'internal';
           const isExternalCompletion = facility.spcc_completion_type === 'external';
-          const hasAnyValidCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+          const hasAnyValidInspectionCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+
+          // In SPCC plan mode, completion is based on plan status, not inspection status
+          let hasValidSPCCPlanForNonRoute = false;
+          if (surveyType === 'spcc_plan') {
+            const planResult = getSPCCPlanStatus(facility);
+            hasValidSPCCPlanForNonRoute = planResult.status === 'valid';
+          }
+
+          const hasAnyValidCompletion = surveyType === 'spcc_plan'
+            ? hasValidSPCCPlanForNonRoute
+            : hasAnyValidInspectionCompletion;
           const isManuallyRemoved = facility.day_assignment === -2;
 
           // Determine marker appearance
@@ -1284,7 +1477,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Determine border colors
           let completionBorderColor = '#3B82F6';
-          if (isExternalCompletion) {
+          if (surveyType === 'spcc_plan') {
+            // In plan mode, border color reflects plan status
+            completionBorderColor = hasValidSPCCPlanForNonRoute ? '#22C55E' : '#3B82F6';
+          } else if (isExternalCompletion) {
             completionBorderColor = '#EAB308';
           }
 
@@ -1297,8 +1493,20 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerSize = hasAnyValidCompletion ? 30 : 36;
           const markerAnchor = hasAnyValidCompletion ? 15 : 18;
 
-          // Gray background for unassigned/removed facilities
-          const markerBgColor = isManuallyRemoved ? '#9CA3AF' : '#6B7280';
+          // Background color: use plan status color in SPCC plan mode, gray otherwise
+          let markerBgColor = isManuallyRemoved ? '#9CA3AF' : '#6B7280';
+          if (surveyType === 'spcc_plan' && !isManuallyRemoved) {
+            const planResult = getSPCCPlanStatus(facility);
+            if (hasValidSPCCPlanForNonRoute) {
+              markerBgColor = '#22C55E'; // Green for valid plans
+            } else if (planResult.isUrgent && !planResult.isCompliant) {
+              markerBgColor = '#EF4444'; // Red for expired/overdue
+            } else if (planResult.isUrgent) {
+              markerBgColor = '#F97316'; // Orange for expiring/due soon
+            } else {
+              markerBgColor = '#6B7280'; // Gray for no plan/no IP date
+            }
+          }
           const markerOpacity = isManuallyRemoved ? '0.6' : '0.8';
 
           const markerIcon = L.divIcon({
@@ -1317,13 +1525,102 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const availableDays = result?.routes.map(r => r.day) || [];
           const isUnassigned = !isManuallyRemoved && !hasAnyValidCompletion;
 
+          // Build survey-type-aware status and buttons for non-route popup
+          let nonRouteStatusHtml = '';
+          let nonRouteBtnLabel = facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey';
+          let nonRouteBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
+          let nonRoutePlanInfoHtml = '';
+
+          if (surveyType === 'spcc_plan') {
+            const planStatus = getSPCCPlanStatus(facility);
+            const statusColors: Record<string, { bg: string; text: string }> = {
+              valid: { bg: '#D1FAE5', text: '#065F46' },
+              expiring: { bg: '#FEF3C7', text: '#92400E' },
+              renewal_due: { bg: '#FEF3C7', text: '#92400E' },
+              expired: { bg: '#FEE2E2', text: '#991B1B' },
+              initial_due: { bg: '#FEF3C7', text: '#92400E' },
+              initial_overdue: { bg: '#FEE2E2', text: '#991B1B' },
+              no_plan: { bg: '#DBEAFE', text: '#1E40AF' },
+              no_ip_date: { bg: '#F3F4F6', text: '#6B7280' },
+            };
+            const statusLabels: Record<string, string> = {
+              valid: 'Plan Valid',
+              expiring: 'Expiring',
+              renewal_due: 'Renewal Due',
+              expired: 'Expired',
+              initial_due: 'Due Soon',
+              initial_overdue: 'Overdue',
+              no_plan: 'Pending',
+              no_ip_date: 'No IP Date',
+            };
+            const colors = statusColors[planStatus.status] || statusColors.no_plan;
+            const label = statusLabels[planStatus.status] || planStatus.status;
+            nonRouteStatusHtml = `<span style="display: inline-block; padding: 2px 8px; background-color: ${colors.bg}; color: ${colors.text}; border-radius: 9999px; font-size: 11px; font-weight: 600;">${label}</span>`;
+            nonRouteBtnLabel = 'Plan Details';
+            nonRouteBtnTitle = 'View SPCC plan details';
+
+            // Plan info section
+            const peDate = planStatus.peStampDate
+              ? planStatus.peStampDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : null;
+            const renewalDate = planStatus.renewalDate
+              ? planStatus.renewalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : null;
+            const msgColor = planStatus.isUrgent ? (planStatus.isCompliant ? '#92400E' : '#991B1B') : '#065F46';
+
+            nonRoutePlanInfoHtml = `
+              <div style="font-size: 11px; margin-top: 6px; padding: 6px; background: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">SPCC Plan</div>
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #6B7280;">Status:</span>
+                    <span style="font-weight: 600; color: ${msgColor};">${planStatus.message}</span>
+                  </div>
+                  ${peDate ? `
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">PE Stamp:</span>
+                      <span style="font-weight: 500;">${peDate}</span>
+                    </div>
+                  ` : ''}
+                  ${renewalDate ? `
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">Renewal:</span>
+                      <span style="font-weight: 500;">${renewalDate}</span>
+                    </div>
+                  ` : ''}
+                  ${!planStatus.hasPlan && facility.first_prod_date ? `
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">IP Date:</span>
+                      <span style="font-weight: 500;">${new Date(facility.first_prod_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    </div>
+                  ` : ''}
+                  ${facility.spcc_plan_url ? `
+                    <div style="margin-top: 2px;">
+                      <a href="${facility.spcc_plan_url}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline; font-size: 10px;">View Plan Document</a>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          } else if (surveyType === 'spcc_inspection') {
+            if (hasAnyValidCompletion) {
+              nonRouteStatusHtml = `<span style="display: inline-block; padding: 2px 8px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 11px; font-weight: 600;">Completed</span>`;
+            } else {
+              nonRouteStatusHtml = `<span style="font-size: 12px; color: #6b7280;">${isManuallyRemoved ? 'Manually Removed' : 'Not in Current Route'}</span>`;
+            }
+          } else {
+            // All mode
+            nonRouteStatusHtml = `<span style="font-size: 12px; color: #6b7280;">${isManuallyRemoved ? 'Manually Removed' : hasAnyValidCompletion ? 'Completed' : 'Not in Current Route'}</span>`;
+          }
+
           // Simple popup for non-route facilities
           const popupContent = `
             <div style="min-width: 180px; max-width: 280px;">
               <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${facility.name}</div>
-              <div style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">
-                ${isManuallyRemoved ? 'Manually Removed' : hasAnyValidCompletion ? 'Completed' : 'Not in Current Route'}
+              <div style="margin-bottom: 8px;">
+                ${nonRouteStatusHtml}
               </div>
+              ${nonRoutePlanInfoHtml}
               ${isUnassigned && availableDays.length > 0 ? `
                 <div style="margin-bottom: 8px;">
                   <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Assign to Day:</div>
@@ -1347,13 +1644,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   <button
                     id="survey-btn-${facilityIndex}"
                     style="flex: 1; padding: 6px 8px; background-color: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 4px;"
-                    title="${facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey'}"
+                    title="${nonRouteBtnTitle}"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M9 11l3 3L22 4"></path>
                       <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                     </svg>
-                    ${facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey'}
+                    ${nonRouteBtnLabel}
                   </button>
                   <button
                     id="navigate-btn-${facilityIndex}"
@@ -1460,7 +1757,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       }
 
       // Add markers for externally completed facilities (not assigned to routes but should be visible)
-      if (facilities && facilities.length > 0) {
+      // Skip in SPCC plan mode - external completion is an inspection concept, not plan-related
+      // These facilities will be handled by the normal non-route section with plan-aware logic
+      if (surveyType !== 'spcc_plan' && facilities && facilities.length > 0) {
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
           route.facilities.forEach(f => facilitiesInRoutes.add(f.name));
@@ -1563,8 +1862,17 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           let routeCoords: L.LatLngExpression[];
 
-          // Get current coordinates for all facilities in route
-          const facilitiesWithCurrentCoords = route.facilities.map(f => {
+          // Get current coordinates for active facilities in route (exclude removed/sold and hidden completed)
+          const activeFacilities = route.facilities.filter(f => {
+            if (completedFacilityNames.has(f.name)) return false;
+            const latestData = facilities.find(facility => facility.name === f.name);
+            if (!latestData) return true;
+            return latestData.day_assignment !== -1 && latestData.day_assignment !== -2 && latestData.status !== 'sold';
+          });
+          // Skip drawing route if all facilities are hidden
+          if (activeFacilities.length === 0) continue;
+
+          const facilitiesWithCurrentCoords = activeFacilities.map(f => {
             const latestData = facilities.find(facility => facility.name === f.name);
             return {
               latitude: latestData?.latitude ?? f.latitude,
@@ -1995,14 +2303,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       maximumAge: 0,
     });
 
-    // ALWAYS set up continuous location updates to keep the blue dot current
-    // Whether we center on it or not depends on the mode settings
-    const updateInterval = 500; // 500ms for smooth, responsive tracking
+    // Set polling interval based on mode:
+    // - Navigation/drive mode: 500ms for smooth, responsive tracking
+    // - Location tracking (blue dot following): 3s is plenty
+    // - Neither active: 15s just to keep the blue dot roughly current
+    const updateInterval = navigationMode ? 500 : locationTracking ? 3000 : 15000;
     const locationInterval = setInterval(() => {
       navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-        enableHighAccuracy: true,
-        timeout: 3000,
-        maximumAge: 0,
+        enableHighAccuracy: navigationMode,
+        timeout: navigationMode ? 3000 : 10000,
+        maximumAge: navigationMode ? 0 : 5000,
       });
     }, updateInterval);
 
@@ -3283,7 +3593,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       )}
 
       <div
-        className={isFullScreen ? "w-full flex-1 relative min-h-0" : "w-full h-96 relative"}
+        ref={mapWrapperRef}
+        className={isFullScreen ? "w-full flex-1 relative min-h-0" : `w-full h-96 relative rounded-b-lg transition-shadow duration-300 ${isMapActive ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/50 animate-[map-pulse_2s_ease-in-out_infinite]' : ''}`}
         style={{
           position: 'relative',
           zIndex: 0,

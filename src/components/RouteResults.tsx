@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, FileDown, Plus, X as XIcon, CheckSquare, Square, Eye, EyeOff, ClipboardList, FileCheck } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -10,7 +10,6 @@ import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
-import InspectionReportExport from './InspectionReportExport';
 import SavedRoutesManager from './SavedRoutesManager';
 import { calculateDistanceMatrix } from '../services/osrm';
 
@@ -43,8 +42,9 @@ interface RouteResultsProps {
     hideAllCompleted: boolean;
     hideInternallyCompleted: boolean;
     hideExternallyCompleted: boolean;
+    hideValidPlans: boolean;
+    hideExpiringPlans: boolean;
   };
-  onToggleHideCompleted?: () => void;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onApplyWithTimeRefresh?: () => Promise<void>;
   surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
@@ -54,7 +54,7 @@ interface RouteResultsProps {
 // Survey type for route planning filtering
 type SurveyType = 'all' | 'spcc_inspection' | 'spcc_plan';
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false }, onToggleHideCompleted, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
@@ -83,9 +83,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [tempSettings, setTempSettings] = useState<UserSettings | null>(null);
   const [excludeCompleted, setExcludeCompleted] = useState(false);
+  const [excludeCompletedType, setExcludeCompletedType] = useState<'inspection' | 'plan' | 'both'>('inspection');
   const [showAdvanced, setShowAdvanced] = useState(true);
   const [showExportPopup, setShowExportPopup] = useState(false);
-  const [showInspectionExportPopup, setShowInspectionExportPopup] = useState(false);
   const [showSaveRoutePopup, setShowSaveRoutePopup] = useState(false);
   const [showLoadRoutePopup, setShowLoadRoutePopup] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -107,13 +107,37 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       setTempSettings({
         ...settings,
         account_id: accountId,
-        clustering_tightness: settings.clustering_tightness ?? 0.5,
-        cluster_balance_weight: settings.cluster_balance_weight ?? 0.5,
+        clustering_tightness: settings.clustering_tightness ?? 0.75,
+        cluster_balance_weight: settings.cluster_balance_weight ?? 0.35,
+        lunch_break_minutes: settings.lunch_break_minutes ?? 0,
+        max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
+        return_by_time: settings.return_by_time ?? '',
       });
-      // Load the exclude completed setting from the saved settings
+      // Load the exclude completed settings from the saved settings
       setExcludeCompleted(settings.exclude_completed_facilities ?? false);
+      setExcludeCompletedType(settings.exclude_completed_type ?? 'inspection');
     }
   }, [showRefreshOptions, settings, accountId]);
+
+  // Lock body scroll when route settings modal is open
+  useEffect(() => {
+    if (showRefreshOptions) {
+      const scrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.overflow = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [showRefreshOptions]);
 
   const checkExcludedFacilities = () => {
     const excluded = facilities.filter(f => f.day_assignment === -1).length;
@@ -137,7 +161,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onFacilitiesUpdated) onFacilitiesUpdated();
     } catch (err) {
       console.error('Error restoring removed facility:', err);
-      alert('Failed to restore facility');
+      alert(`Failed to restore facility: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -157,17 +181,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onFacilitiesUpdated) onFacilitiesUpdated();
     } catch (err) {
       console.error('Error restoring all removed facilities:', err);
-      alert('Failed to restore facilities');
+      alert(`Failed to restore facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
   const handleExcludeCompleted = async () => {
     try {
-      const facilitiesToExclude = facilities.filter(f => {
-        const inspection = inspections.get(f.id);
-        const hasValidInspection = inspection && isInspectionValid(inspection);
-        const isExternallyCompleted = f.spcc_completion_type === 'external';
-        return hasValidInspection || isExternallyCompleted;
+      let facilitiesToExclude: Facility[];
+
+      const excludeInspections = excludeCompletedType === 'inspection' || excludeCompletedType === 'both';
+      const excludePlans = excludeCompletedType === 'plan' || excludeCompletedType === 'both';
+
+      facilitiesToExclude = facilities.filter(f => {
+        if (excludeInspections) {
+          const inspection = inspections.get(f.id);
+          const hasValidInspection = inspection && isInspectionValid(inspection);
+          const isExternallyCompleted = f.spcc_completion_type === 'external';
+          if (hasValidInspection || isExternallyCompleted) return true;
+        }
+        if (excludePlans) {
+          const planStatus = getSPCCPlanStatus(f);
+          if (planStatus.status === 'valid') return true;
+        }
+        return false;
       });
 
       if (facilitiesToExclude.length === 0) {
@@ -175,17 +211,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }
 
       // Mark facilities as excluded with day_assignment = -1
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: -1 })
-        .in('id', facilitiesToExclude.map(f => f.id));
+      // Batch updates to avoid URL length limits with many facility IDs
+      const batchSize = 50;
+      for (let i = 0; i < facilitiesToExclude.length; i += batchSize) {
+        const batch = facilitiesToExclude.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from('facilities')
+          .update({ day_assignment: -1 })
+          .in('id', batch.map(f => f.id));
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       if (onFacilitiesUpdated) onFacilitiesUpdated();
     } catch (err) {
       console.error('Error excluding completed facilities:', err);
-      alert('Failed to exclude completed facilities');
+      alert(`Failed to exclude completed facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -238,6 +279,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             include_google_earth: tempSettings.include_google_earth || false,
             location_permission_granted: tempSettings.location_permission_granted || false,
             exclude_completed_facilities: excludeCompleted,
+            exclude_completed_type: excludeCompletedType,
+            lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
+            max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
+            return_by_time: tempSettings.return_by_time || null,
+            inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
+            plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'account_id',
@@ -281,7 +328,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               let departureTime = arrivalTime;
               if (segment.to !== 'Home Base') {
                 const facility = facilities.find(f => f.name === segment.to);
-                const visitDuration = facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes;
+                const visitDuration = surveyType === 'spcc_inspection'
+                  ? (tempSettings.inspection_visit_duration_minutes ?? settings?.inspection_visit_duration_minutes ?? 30)
+                  : surveyType === 'spcc_plan'
+                  ? (tempSettings.plan_visit_duration_minutes ?? settings?.plan_visit_duration_minutes ?? 60)
+                  : (facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes);
                 departureTime = addMinutesToTime(arrivalTime, visitDuration);
                 totalVisitTime += visitDuration;
               }
@@ -387,6 +438,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             include_google_earth: tempSettings.include_google_earth || false,
             location_permission_granted: tempSettings.location_permission_granted || false,
             exclude_completed_facilities: excludeCompleted,
+            exclude_completed_type: excludeCompletedType,
+            lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
+            max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
+            return_by_time: tempSettings.return_by_time || null,
+            inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
+            plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'account_id',
@@ -428,13 +485,28 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         return;
       }
 
-      // Restore by setting day_assignment back to null so they can be included in routing
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: null })
-        .in('id', excludedFacilities.map(f => f.id));
+      // Use account-level query to avoid URL length issues with many facility IDs
+      if (accountId) {
+        const { error } = await supabase
+          .from('facilities')
+          .update({ day_assignment: null })
+          .eq('account_id', accountId)
+          .eq('day_assignment', -1);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // Fallback: batch updates to avoid URL length limits
+        const batchSize = 50;
+        for (let i = 0; i < excludedFacilities.length; i += batchSize) {
+          const batch = excludedFacilities.slice(i, i + batchSize);
+          const { error } = await supabase
+            .from('facilities')
+            .update({ day_assignment: null })
+            .in('id', batch.map(f => f.id));
+
+          if (error) throw error;
+        }
+      }
 
       // Wait for facilities to reload before refreshing route
       if (onFacilitiesUpdated) {
@@ -447,7 +519,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }, 100);
     } catch (err) {
       console.error('Error restoring facilities:', err);
-      alert('Failed to restore facilities');
+      alert(`Failed to restore facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -497,39 +569,36 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const facility = getFacilityForStop(facilityName);
     if (!facility) return false;
 
-    // When SPCC Plans filter is active, never hide facilities that need plan attention
-    // This overrides the "hide completed" behavior because a facility can have
-    // a completed inspection but still need SPCC plan work
-    if (surveyType === 'spcc_plan') {
-      // If the facility needs SPCC plan attention, always show it
-      if (facilityNeedsSPCCPlan(facility)) {
-        return false;
-      }
-      // If filtering by SPCC plans and facility doesn't need one, hide it
-      return true;
-    }
-
-    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted } = completedVisibility;
+    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
     // If nothing is hidden, show all
-    if (!hideAllCompleted && !hideInternallyCompleted && !hideExternallyCompleted) {
+    if (!hideAllCompleted && !hideInternallyCompleted && !hideExternallyCompleted && !hideValidPlans && !hideExpiringPlans) {
       return false;
     }
 
-    // Check for external completion
-    if (facility.spcc_completion_type === 'external') {
-      return hideAllCompleted || hideExternallyCompleted;
+    // Inspection-based hiding (applies in All and Inspections modes)
+    if (hideAllCompleted || hideInternallyCompleted || hideExternallyCompleted) {
+      if (facility.spcc_completion_type === 'external' && (hideAllCompleted || hideExternallyCompleted)) {
+        return true;
+      }
+      if (facility.spcc_completion_type === 'internal' && (hideAllCompleted || hideInternallyCompleted)) {
+        return true;
+      }
+      const inspection = inspections.get(facility.id);
+      if (isInspectionValid(inspection) && hideAllCompleted) {
+        return true;
+      }
     }
 
-    // Check for internal completion
-    if (facility.spcc_completion_type === 'internal') {
-      return hideAllCompleted || hideInternallyCompleted;
-    }
-
-    // Check for valid inspection (only hide if hideAllCompleted is true)
-    const inspection = inspections.get(facility.id);
-    if (isInspectionValid(inspection)) {
-      return hideAllCompleted;
+    // Plan-based hiding (applies in All and Plans modes)
+    if (hideValidPlans || hideExpiringPlans) {
+      const planStatus = getSPCCPlanStatus(facility);
+      if (hideValidPlans && planStatus.status === 'valid') {
+        return true;
+      }
+      if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
+        return true;
+      }
     }
 
     return false;
@@ -537,14 +606,17 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   const getCompletedFacilities = (): Facility[] => {
     return facilities.filter(f => {
+      if (f.status === 'sold') return false;
+
+      if (surveyType === 'spcc_plan') {
+        // In SPCC Plan mode, "completed" means the facility has a valid plan
+        // (doesn't need plan attention) - inspection status is irrelevant
+        return !facilityNeedsSPCCPlan(f);
+      }
+
+      // For inspection and all modes, check inspection completion
       const inspection = inspections.get(f.id);
       if (!inspection || inspection.status !== 'completed') return false;
-
-      // When in SPCC plan mode, don't show facilities that need plan attention
-      // in the completed section - they belong in the day routes
-      if (surveyType === 'spcc_plan' && facilityNeedsSPCCPlan(f)) {
-        return false;
-      }
 
       // When in SPCC inspection mode, don't show facilities that need inspection
       // in the completed section - they belong in the day routes
@@ -609,6 +681,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
 
     return true;
+  };
+
+  // Combined filter: determines if a facility should be visible in the current mode.
+  // In specific survey modes, facilities that need attention are always shown
+  // regardless of visibility settings (which hide completed items).
+  // Visibility settings only apply in 'all' mode or to hide non-relevant facilities.
+  const isFacilityVisible = (facilityName: string): boolean => {
+    if (!matchesSurveyTypeFilter(facilityName)) return false;
+    // In specific modes, if a facility needs attention, don't let
+    // visibility settings hide it (e.g. an old external completion
+    // that still has spcc_completion_type set but needs re-inspection)
+    if (surveyType !== 'all') return true;
+    return !shouldHideFacility(facilityName);
   };
 
   // Get counts for survey type badges
@@ -1006,109 +1091,103 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
         {settings && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 transition-colors duration-200">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">Route Planning Settings</h3>
-              <div className="flex gap-1.5">
+          <div className="bg-white/90 dark:bg-gray-800/80 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200 overflow-visible relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-0.5">
                 {onConfigureHomeBase && (
-                  <button
-                    onClick={onConfigureHomeBase}
-                    className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                    title="Configure Home Base"
-                  >
-                    <Home className="w-5 h-5" />
-                  </button>
+                  <div className="relative group/tip">
+                    <button
+                      onClick={onConfigureHomeBase}
+                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                    >
+                      <Home className="w-4 h-4" />
+                    </button>
+                    <div className="absolute left-0 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
+                      <div className="font-medium">Home Base</div>
+                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Set where each team's route starts & ends</div>
+                      <div className="absolute bottom-full left-3 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
+                    </div>
+                  </div>
                 )}
                 {onLoadRoute && (
-                  <button
-                    onClick={() => {
-                      console.log('[showOnlySettings] Load Route button clicked');
-                      setShowLoadRoutePopup(true);
-                    }}
-                    className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                    title="Load Saved Route"
-                  >
-                    <FolderOpen className="w-5 h-5" />
-                  </button>
+                  <div className="relative group/tip">
+                    <button
+                      onClick={() => {
+                        console.log('[showOnlySettings] Load Route button clicked');
+                        setShowLoadRoutePopup(true);
+                      }}
+                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                    </button>
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
+                      <div className="font-medium">Load Route</div>
+                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Open a previously saved route plan</div>
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
+                    </div>
+                  </div>
                 )}
                 {onSaveCurrentRoute && (
+                  <div className="relative group/tip">
+                    <button
+                      onClick={() => {
+                        console.log('[showOnlySettings] Save Route button clicked');
+                        setShowSaveRoutePopup(true);
+                      }}
+                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
+                      <div className="font-medium">Save Route</div>
+                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Save the current route plan for later use</div>
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
+                    </div>
+                  </div>
+                )}
+                <div className="relative group/tip">
                   <button
                     onClick={() => {
-                      console.log('[showOnlySettings] Save Route button clicked');
-                      setShowSaveRoutePopup(true);
+                      console.log('[showOnlySettings] Export Routes button clicked');
+                      setShowExportPopup(true);
                     }}
-                    className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                    title="Save Current Route"
+                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
                   >
-                    <Save className="w-5 h-5" />
+                    <Download className="w-4 h-4" />
                   </button>
-                )}
-                <button
-                  onClick={() => {
-                    console.log('[showOnlySettings] Export Routes button clicked');
-                    setShowExportPopup(true);
-                  }}
-                  className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title="Export Routes to CSV"
-                >
-                  <Download className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => {
-                    console.log('[showOnlySettings] Export Inspections button clicked');
-                    setShowInspectionExportPopup(true);
-                  }}
-                  className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title="Export Inspection Reports"
-                >
-                  <FileDown className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setShowRefreshOptions(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span className="hidden sm:inline">Update Route</span>
-                </button>
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
+                    <div className="font-medium">Export Routes</div>
+                    <div className="text-gray-500 dark:text-gray-400 text-[11px]">Download route schedule as a CSV file</div>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
                 {excludedCount > 0 && (
                   <button
                     onClick={handleRestoreExcluded}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20 transition-all"
                     title={`Restore ${excludedCount} excluded facilit${excludedCount === 1 ? 'y' : 'ies'}`}
                   >
-                    <Undo2 className="w-4 h-4" />
-                    <span className="hidden sm:inline">Restore ({excludedCount})</span>
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>Restore {excludedCount}</span>
                   </button>
                 )}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-gray-600">Max Facilities/Day</p>
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {settings.use_facilities_constraint ? settings.max_facilities_per_day : 'Unlimited'}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-600">Max Hours/Day</p>
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {settings.use_hours_constraint ? `${settings.max_hours_per_day}h` : 'Unlimited'}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-600">Default Visit Duration</p>
-                <p className="font-semibold text-gray-900 dark:text-white">{settings.default_visit_duration_minutes} mins</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Start Time</p>
-                <p className="font-semibold text-gray-900 dark:text-white">{formatTimeTo12Hour(settings.start_time || '08:00')}</p>
+                <button
+                  onClick={() => setShowRefreshOptions(true)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl hover:from-blue-700 hover:to-blue-800 shadow-[0_2px_8px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.4)] transition-all active:scale-[0.98]"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Update Route</span>
+                </button>
               </div>
             </div>
           </div>
         )}
         {showRefreshOptions && tempSettings && (
           <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4 overflow-y-auto"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 overflow-y-auto"
             onClick={() => {
               setShowRefreshOptions(false);
               setExcludeCompleted(false);
@@ -1116,13 +1195,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             }}
           >
             <div
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full my-8 transition-colors duration-200"
+              className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-2xl backdrop-saturate-150 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/50 dark:border-white/[0.08] max-w-2xl w-full my-8 transition-colors duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white dark:text-white">Update Route Settings</h3>
+              <div className="p-6 border-b border-gray-200/60 dark:border-gray-700/60">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Update Route Settings</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  Adjust route optimization constraints. Visit duration and time settings are managed in Settings → Route Planning.
+                  Adjust route optimization constraints and onsite visit durations.
                 </p>
               </div>
 
@@ -1175,6 +1254,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <Clock className="inline w-4 h-4 mr-1" />
                         Maximum Hours Per Day
                       </label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Total drive time + visit time combined</p>
                       <input
                         type="number"
                         min="1"
@@ -1187,6 +1267,115 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         })}
                         disabled={!tempSettings.use_hours_constraint}
                         className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4 space-y-4">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Onsite Visit Duration</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        <Clock className="inline w-4 h-4 mr-1" />
+                        SPCC Inspection (min)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="480"
+                        value={tempSettings.inspection_visit_duration_minutes ?? 30}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          inspection_visit_duration_minutes: parseInt(e.target.value) || 30,
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Inspections mode</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        <Clock className="inline w-4 h-4 mr-1" />
+                        SPCC Plan (min)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="480"
+                        value={tempSettings.plan_visit_duration_minutes ?? 60}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          plan_visit_duration_minutes: parseInt(e.target.value) || 60,
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Plans mode</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4 space-y-4">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Workday Constraints</p>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <Clock className="inline w-4 h-4 mr-1" />
+                        Lunch / Break Time (minutes)
+                      </label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Added at the midpoint of each day's route</p>
+                      <input
+                        type="number"
+                        min="0"
+                        max="120"
+                        step="5"
+                        value={tempSettings.lunch_break_minutes ?? 0}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          lunch_break_minutes: parseInt(e.target.value) || 0,
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <Navigation className="inline w-4 h-4 mr-1" />
+                        Max Drive Time Per Day (minutes)
+                      </label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Limits cumulative driving time per day. 0 = no limit.</p>
+                      <input
+                        type="number"
+                        min="0"
+                        max="720"
+                        step="15"
+                        value={tempSettings.max_drive_time_minutes ?? 0}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          max_drive_time_minutes: parseInt(e.target.value) || 0,
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <Home className="inline w-4 h-4 mr-1" />
+                        Return to Home Base By
+                      </label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
+                      <input
+                        type="time"
+                        value={tempSettings.return_by_time ?? ''}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          return_by_time: e.target.value || '',
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
@@ -1205,7 +1394,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     <div className="mt-4 space-y-4">
                       <div>
                         <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                          <span>Geographic Clustering Tightness: {((tempSettings.clustering_tightness ?? 0.5) * 100).toFixed(0)}%</span>
+                          <span>Geographic Clustering Tightness: {((tempSettings.clustering_tightness ?? 0.75) * 100).toFixed(0)}%</span>
                           <div className="relative group">
                             <Info className="w-4 h-4 text-gray-400 cursor-help" />
                             <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
@@ -1218,7 +1407,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           min="0"
                           max="1"
                           step="0.1"
-                          value={tempSettings.clustering_tightness ?? 0.5}
+                          value={tempSettings.clustering_tightness ?? 0.75}
                           onChange={(e) => setTempSettings({
                             ...tempSettings,
                             clustering_tightness: parseFloat(e.target.value),
@@ -1234,7 +1423,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                       <div>
                         <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                          <span>Cluster Balance Weight: {((tempSettings.cluster_balance_weight ?? 0.5) * 100).toFixed(0)}%</span>
+                          <span>Cluster Balance Weight: {((tempSettings.cluster_balance_weight ?? 0.35) * 100).toFixed(0)}%</span>
                           <div className="relative group">
                             <Info className="w-4 h-4 text-gray-400 cursor-help" />
                             <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
@@ -1247,7 +1436,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           min="0"
                           max="1"
                           step="0.1"
-                          value={tempSettings.cluster_balance_weight ?? 0.5}
+                          value={tempSettings.cluster_balance_weight ?? 0.35}
                           onChange={(e) => setTempSettings({
                             ...tempSettings,
                             cluster_balance_weight: parseFloat(e.target.value),
@@ -1260,34 +1449,111 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           <span>Even Days</span>
                         </div>
                       </div>
+
+                      {(() => {
+                        const t = tempSettings.clustering_tightness ?? 0.75;
+                        const b = tempSettings.cluster_balance_weight ?? 0.35;
+                        const isPreset = (pt: number, pb: number) => Math.abs(t - pt) < 0.05 && Math.abs(b - pb) < 0.05;
+                        const activeClass = "px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors font-medium";
+                        const inactiveClass = "px-3 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-100 transition-colors";
+                        return (
+                          <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                            <p className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">Quick Presets</p>
+                            <div className="flex gap-2 flex-wrap">
+                              <button
+                                onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.8, cluster_balance_weight: 0.3 })}
+                                className={isPreset(0.8, 0.3) ? activeClass : inactiveClass}
+                              >
+                                Tight Loops
+                              </button>
+                              <button
+                                onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.65, cluster_balance_weight: 0.5 })}
+                                className={isPreset(0.65, 0.5) ? activeClass : inactiveClass}
+                              >
+                                Balanced
+                              </button>
+                              <button
+                                onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.3, cluster_balance_weight: 0.8 })}
+                                className={isPreset(0.3, 0.8) ? activeClass : inactiveClass}
+                              >
+                                Even Days
+                              </button>
+                              <button
+                                onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.9, cluster_balance_weight: 0.1 })}
+                                className={isPreset(0.9, 0.1) ? activeClass : inactiveClass}
+                              >
+                                Minimal Driving
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
 
                 <div className="border-t pt-4">
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={excludeCompleted}
-                      onChange={(e) => setExcludeCompleted(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Exclude Completed Facilities from Route Optimization</span>
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        Remove facilities with valid inspections from route planning. They will still be visible on the map and can be toggled on/off for viewing.
-                      </p>
-                    </div>
-                  </label>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">Exclude Completed Facilities from Route Optimization</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Selected facilities will be removed from route planning but remain visible on the map.
+                  </p>
+                  <div className="space-y-2.5 ml-1">
+                    <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both')}
+                        onChange={(e) => {
+                          const inspChecked = e.target.checked;
+                          const planChecked = excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both');
+                          if (inspChecked && planChecked) setExcludeCompletedType('both');
+                          else if (inspChecked) setExcludeCompletedType('inspection');
+                          else if (planChecked) setExcludeCompletedType('plan');
+                          else { setExcludeCompleted(false); }
+                          if (inspChecked) setExcludeCompleted(true);
+                        }}
+                        className="mt-0.5 w-4 h-4 text-blue-600 rounded"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Inspection Completed</span>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Facilities with valid SPCC inspections within the last year
+                        </p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both')}
+                        onChange={(e) => {
+                          const planChecked = e.target.checked;
+                          const inspChecked = excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both');
+                          if (inspChecked && planChecked) setExcludeCompletedType('both');
+                          else if (planChecked) setExcludeCompletedType('plan');
+                          else if (inspChecked) setExcludeCompletedType('inspection');
+                          else { setExcludeCompleted(false); }
+                          if (planChecked) setExcludeCompleted(true);
+                        }}
+                        className="mt-0.5 w-4 h-4 text-blue-600 rounded"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Plan Completed (Up to date)</span>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Facilities with current SPCC plans not due for renewal
+                        </p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+              <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
                 <button
                   onClick={() => {
                     setShowRefreshOptions(false);
                     // Reset to saved settings value
                     setExcludeCompleted(settings?.exclude_completed_facilities ?? false);
+                    setExcludeCompletedType(settings?.exclude_completed_type ?? 'inspection');
                     setShowAdvanced(false);
                   }}
                   className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -1296,14 +1562,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </button>
                 <button
                   onClick={handleRefreshTimesOnly}
-                  className="flex-1 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                  className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
                   title="Quickly update times without regenerating routes"
                 >
                   Apply & Refresh Times
                 </button>
                 <button
                   onClick={handleRefreshWithSettings}
-                  className="flex-1 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
                   title="Fully re-optimize routes with new constraints"
                 >
                   Apply & Re-optimize
@@ -1334,32 +1600,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
               <div className="p-4 bg-white dark:bg-gray-800">
                 <ExportRoutes result={result} facilities={facilities} homeBase={homeBase} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Inspection Export Popup */}
-        {showInspectionExportPopup && accountId && (
-          <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
-            onClick={() => setShowInspectionExportPopup(false)}
-          >
-            <div
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-4 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
-                <button
-                  onClick={() => setShowInspectionExportPopup(false)}
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-                >
-                  <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                </button>
-              </div>
-              <div className="p-4 bg-white dark:bg-gray-800 overflow-y-auto flex-1">
-                <InspectionReportExport facilities={facilities} userId={userId} accountId={accountId} />
               </div>
             </div>
           </div>
@@ -1480,50 +1720,25 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
       {!showOnlyRouteList && settings && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 transition-colors duration-200">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Route Planning Settings</h3>
-            <div className="flex gap-2">
+        <div className="bg-white/50 dark:bg-gray-800/40 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200">
+          <div className="flex items-center justify-end gap-2">
+            {excludedCount > 0 && (
               <button
-                onClick={() => setShowRefreshOptions(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                onClick={handleRestoreExcluded}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20 transition-all"
+                title={`Restore ${excludedCount} excluded facilit${excludedCount === 1 ? 'y' : 'ies'}`}
               >
-                <RefreshCw className="w-4 h-4" />
-                Update Route
+                <Undo2 className="w-3.5 h-3.5" />
+                <span>Restore {excludedCount}</span>
               </button>
-              {excludedCount > 0 && (
-                <button
-                  onClick={handleRestoreExcluded}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                  title={`Restore ${excludedCount} excluded facilit${excludedCount === 1 ? 'y' : 'ies'}`}
-                >
-                  <Undo2 className="w-4 h-4" />
-                  Restore ({excludedCount})
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-gray-600 dark:text-gray-400">Max Facilities/Day</p>
-              <p className="font-semibold text-gray-900 dark:text-white">
-                {settings.use_facilities_constraint ? settings.max_facilities_per_day : 'Unlimited'}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-600 dark:text-gray-400">Max Hours/Day</p>
-              <p className="font-semibold text-gray-900 dark:text-white">
-                {settings.use_hours_constraint ? `${settings.max_hours_per_day}h` : 'Unlimited'}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-600 dark:text-gray-400">Default Visit Duration</p>
-              <p className="font-semibold text-gray-900 dark:text-white">{settings.default_visit_duration_minutes} mins</p>
-            </div>
-            <div>
-              <p className="text-gray-600 dark:text-gray-400">Start Time</p>
-              <p className="font-semibold text-gray-900 dark:text-white">{formatTimeTo12Hour(settings.start_time || '08:00')}</p>
-            </div>
+            )}
+            <button
+              onClick={() => setShowRefreshOptions(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl hover:from-blue-700 hover:to-blue-800 shadow-[0_2px_8px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.4)] transition-all active:scale-[0.98]"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Update Route</span>
+            </button>
           </div>
         </div>
       )}
@@ -1582,48 +1797,86 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     >
                       All Facilities
                     </button>
-                    <button
-                      onClick={() => setSurveyType('spcc_inspection')}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                        }`}
-                    >
-                      <FileText className="w-4 h-4" />
-                      SPCC Inspections
-                      {counts.inspectionInRouteCount > 0 && (
-                        <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                          }`} title={`${counts.inspectionInRouteCount} in current route, ${counts.inspectionCount} total need inspection`}>
-                          {counts.inspectionInRouteCount}
-                        </span>
-                      )}
-                      {counts.inspectionPastDueCount > 0 && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.inspectionPastDueCount} overdue total`}>
-                          {counts.inspectionPastDueCount} overdue
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setSurveyType('spcc_plan')}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                        }`}
-                    >
-                      <FileCheck className="w-4 h-4" />
-                      SPCC Plans
-                      {counts.planInRouteCount > 0 && (
-                        <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                          }`} title={`${counts.planInRouteCount} in current route, ${counts.planCount} total facilities need attention`}>
-                          {counts.planInRouteCount}
-                        </span>
-                      )}
-                      {counts.planPastDueCount > 0 && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white" title={`${counts.planPastDueCount} overdue total`}>
-                          {counts.planPastDueCount} overdue
-                        </span>
-                      )}
-                    </button>
+                    <div className="relative group/inspection">
+                      <button
+                        onClick={() => setSurveyType('spcc_inspection')}
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                          }`}
+                      >
+                        <FileText className="w-4 h-4" />
+                        SPCC Inspections
+                        {counts.inspectionInRouteCount > 0 && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                            {counts.inspectionInRouteCount}
+                          </span>
+                        )}
+                        {counts.inspectionPastDueCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                            {counts.inspectionPastDueCount} overdue
+                          </span>
+                        )}
+                      </button>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 opacity-0 pointer-events-none group-hover/inspection:opacity-100 transition-opacity duration-200 z-[9999]">
+                        <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
+                          <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Inspections</div>
+                          <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
+                            <div className="flex items-start gap-2">
+                              <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              <span><strong>{counts.inspectionInRouteCount}</strong> of {counts.inspectionCount} needing inspection are in this route</span>
+                            </div>
+                            {counts.inspectionPastDueCount > 0 && (
+                              <div className="flex items-start gap-2">
+                                <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
+                                <span><strong>{counts.inspectionPastDueCount}</strong> overdue — last inspected over 1 year ago or never inspected</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-r border-b border-white/50 dark:border-white/10" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="relative group/plan">
+                      <button
+                        onClick={() => setSurveyType('spcc_plan')}
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                          }`}
+                      >
+                        <FileCheck className="w-4 h-4" />
+                        SPCC Plans
+                        {counts.planInRouteCount > 0 && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                            {counts.planInRouteCount}
+                          </span>
+                        )}
+                        {counts.planPastDueCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                            {counts.planPastDueCount} overdue
+                          </span>
+                        )}
+                      </button>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 opacity-0 pointer-events-none group-hover/plan:opacity-100 transition-opacity duration-200 z-[9999]">
+                        <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
+                          <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Plans</div>
+                          <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
+                            <div className="flex items-start gap-2">
+                              <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              <span><strong>{counts.planInRouteCount}</strong> of {counts.planCount} needing attention are in this route</span>
+                            </div>
+                            {counts.planPastDueCount > 0 && (
+                              <div className="flex items-start gap-2">
+                                <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
+                                <span><strong>{counts.planPastDueCount}</strong> overdue — expired or missed the 6-month filing deadline</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-r border-b border-white/50 dark:border-white/10" />
+                        </div>
+                      </div>
+                    </div>
                   </>
                 );
               })()}
@@ -1668,19 +1921,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             )}
             <span className="hidden sm:inline">{isReoptimizing ? 'Re-optimizing...' : 'Re-optimize Days'}</span>
           </button>
-          {onToggleHideCompleted && (
-            <button
-              onClick={onToggleHideCompleted}
-              className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted
-                ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
-                }`}
-              title="Adjust completed facilities visibility"
-            >
-              {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted ? <EyeOff className="w-5 h-5 sm:w-4 sm:h-4" /> : <Eye className="w-5 h-5 sm:w-4 sm:h-4" />}
-              <span className="hidden sm:inline">Visibility</span>
-            </button>
-          )}
         </div>
         <button
           onClick={handleAddDay}
@@ -1693,7 +1933,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       </div>
 
       <div className="space-y-4">
-        {result.routes.map((route) => (
+        {result.routes
+          .filter(route => surveyType === 'all' || route.facilities.some(f => isFacilityVisible(f.name)))
+          .map((route) => (
           <div
             key={route.day}
             className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"
@@ -1717,17 +1959,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <div className="flex items-center gap-4 text-sm">
                   <span className="flex items-center gap-1">
                     <MapPin className="w-4 h-4" />
-                    {route.facilities.filter(f => !shouldHideFacility(f.name) && matchesSurveyTypeFilter(f.name)).length} stops
+                    {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
                   </span>
                   <span className="flex items-center gap-1">
                     <TrendingUp className="w-4 h-4" />
                     {route.totalMiles.toFixed(1)} mi
                   </span>
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1" title="Driving time">
                     <Navigation className="w-4 h-4" />
                     {Math.round(route.totalDriveTime / 60)}h {Math.round(route.totalDriveTime % 60)}m drive
                   </span>
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1" title="Visit/inspection time">
+                    <CheckCircle className="w-4 h-4" />
+                    {Math.round(route.totalVisitTime / 60)}h {Math.round(route.totalVisitTime % 60)}m visits
+                  </span>
+                  <span className="flex items-center gap-1" title="Total workday time (drive + visits + breaks)">
                     <Clock className="w-4 h-4" />
                     {Math.round(route.totalTime / 60)}h {Math.round(route.totalTime % 60)}m total
                   </span>
@@ -1833,7 +2079,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       }
                       // Filter based on visibility settings and survey type
                       const facilityName = segment.to;
-                      return !shouldHideFacility(facilityName) && matchesSurveyTypeFilter(facilityName);
+                      return isFacilityVisible(facilityName);
                     }).map((segment, index) => {
                       const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
                       const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
@@ -2127,7 +2373,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       {showRefreshOptions && tempSettings && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4 overflow-y-auto"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[2000] p-4 overflow-y-auto"
           onClick={() => {
             setShowRefreshOptions(false);
             setExcludeCompleted(false);
@@ -2135,10 +2381,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           }}
         >
           <div
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full my-8 transition-colors duration-200"
+            className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-2xl backdrop-saturate-150 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/50 dark:border-white/[0.08] max-w-2xl w-full my-8 transition-colors duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="p-6 border-b border-gray-200/60 dark:border-gray-700/60">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">Update Route Settings</h3>
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                 Adjust route optimization constraints. Visit duration and time settings are managed in Settings → Route Planning.
@@ -2194,6 +2440,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <Clock className="inline w-4 h-4 mr-1" />
                       Maximum Hours Per Day
                     </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Total drive time + visit time combined</p>
                     <input
                       type="number"
                       min="1"
@@ -2206,6 +2453,73 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       })}
                       disabled={!tempSettings.use_hours_constraint}
                       className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 dark:disabled:bg-gray-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t dark:border-gray-700 pt-4 space-y-4">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Workday Constraints</p>
+
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                      <Clock className="inline w-4 h-4 mr-1" />
+                      Lunch / Break Time (minutes)
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Added at the midpoint of each day's route</p>
+                    <input
+                      type="number"
+                      min="0"
+                      max="120"
+                      step="5"
+                      value={tempSettings.lunch_break_minutes ?? 0}
+                      onChange={(e) => setTempSettings({
+                        ...tempSettings,
+                        lunch_break_minutes: parseInt(e.target.value) || 0,
+                      })}
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                      <Navigation className="inline w-4 h-4 mr-1" />
+                      Max Drive Time Per Day (minutes)
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Limits cumulative driving time per day. 0 = no limit.</p>
+                    <input
+                      type="number"
+                      min="0"
+                      max="720"
+                      step="15"
+                      value={tempSettings.max_drive_time_minutes ?? 0}
+                      onChange={(e) => setTempSettings({
+                        ...tempSettings,
+                        max_drive_time_minutes: parseInt(e.target.value) || 0,
+                      })}
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                      <Home className="inline w-4 h-4 mr-1" />
+                      Return to Home Base By
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
+                    <input
+                      type="time"
+                      value={tempSettings.return_by_time ?? ''}
+                      onChange={(e) => setTempSettings({
+                        ...tempSettings,
+                        return_by_time: e.target.value || '',
+                      })}
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                 </div>
@@ -2224,7 +2538,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   <div className="mt-4 space-y-4">
                     <div>
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                        <span>Geographic Clustering Tightness: {((tempSettings.clustering_tightness ?? 0.5) * 100).toFixed(0)}%</span>
+                        <span>Geographic Clustering Tightness: {((tempSettings.clustering_tightness ?? 0.75) * 100).toFixed(0)}%</span>
                         <div className="relative group">
                           <Info className="w-4 h-4 text-gray-400 cursor-help" />
                           <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
@@ -2237,7 +2551,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         min="0"
                         max="1"
                         step="0.1"
-                        value={tempSettings.clustering_tightness ?? 0.5}
+                        value={tempSettings.clustering_tightness ?? 0.75}
                         onChange={(e) => setTempSettings({
                           ...tempSettings,
                           clustering_tightness: parseFloat(e.target.value),
@@ -2253,7 +2567,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                     <div>
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                        <span>Cluster Balance Weight: {((tempSettings.cluster_balance_weight ?? 0.5) * 100).toFixed(0)}%</span>
+                        <span>Cluster Balance Weight: {((tempSettings.cluster_balance_weight ?? 0.35) * 100).toFixed(0)}%</span>
                         <div className="relative group">
                           <Info className="w-4 h-4 text-gray-400 cursor-help" />
                           <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
@@ -2266,7 +2580,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         min="0"
                         max="1"
                         step="0.1"
-                        value={tempSettings.cluster_balance_weight ?? 0.5}
+                        value={tempSettings.cluster_balance_weight ?? 0.35}
                         onChange={(e) => setTempSettings({
                           ...tempSettings,
                           cluster_balance_weight: parseFloat(e.target.value),
@@ -2279,34 +2593,111 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <span>Even Days</span>
                       </div>
                     </div>
+
+                    {(() => {
+                      const t = tempSettings.clustering_tightness ?? 0.75;
+                      const b = tempSettings.cluster_balance_weight ?? 0.35;
+                      const isPreset = (pt: number, pb: number) => Math.abs(t - pt) < 0.05 && Math.abs(b - pb) < 0.05;
+                      const activeClass = "px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors font-medium";
+                      const inactiveClass = "px-3 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors";
+                      return (
+                        <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                          <p className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">Quick Presets</p>
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.8, cluster_balance_weight: 0.3 })}
+                              className={isPreset(0.8, 0.3) ? activeClass : inactiveClass}
+                            >
+                              Tight Loops
+                            </button>
+                            <button
+                              onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.65, cluster_balance_weight: 0.5 })}
+                              className={isPreset(0.65, 0.5) ? activeClass : inactiveClass}
+                            >
+                              Balanced
+                            </button>
+                            <button
+                              onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.3, cluster_balance_weight: 0.8 })}
+                              className={isPreset(0.3, 0.8) ? activeClass : inactiveClass}
+                            >
+                              Even Days
+                            </button>
+                            <button
+                              onClick={() => setTempSettings({ ...tempSettings, clustering_tightness: 0.9, cluster_balance_weight: 0.1 })}
+                              className={isPreset(0.9, 0.1) ? activeClass : inactiveClass}
+                            >
+                              Minimal Driving
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
 
               <div className="border-t dark:border-gray-700 pt-4">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={excludeCompleted}
-                    onChange={(e) => setExcludeCompleted(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 text-blue-600 rounded"
-                  />
-                  <div>
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Exclude Completed Facilities from Route Optimization</span>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
-                      Remove facilities with valid inspections from route planning. They will still be visible on the map and can be toggled on/off for viewing.
-                    </p>
-                  </div>
-                </label>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">Exclude Completed Facilities from Route Optimization</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Selected facilities will be removed from route planning but remain visible on the map.
+                </p>
+                <div className="space-y-2.5 ml-1">
+                  <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={excludeCompleted && (excludeCompletedType === 'inspection' || excludeCompletedType === 'both')}
+                      onChange={(e) => {
+                        const inspChecked = e.target.checked;
+                        const planChecked = excludeCompletedType === 'plan' || excludeCompletedType === 'both';
+                        if (inspChecked && planChecked) setExcludeCompletedType('both');
+                        else if (inspChecked) setExcludeCompletedType('inspection');
+                        else if (planChecked) setExcludeCompletedType('plan');
+                        else { setExcludeCompleted(false); }
+                        if (inspChecked && !excludeCompleted) setExcludeCompleted(true);
+                      }}
+                      className="mt-0.5 w-4 h-4 text-blue-600 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Inspection Completed</span>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Facilities with valid SPCC inspections within the last year
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={excludeCompleted && (excludeCompletedType === 'plan' || excludeCompletedType === 'both')}
+                      onChange={(e) => {
+                        const planChecked = e.target.checked;
+                        const inspChecked = excludeCompletedType === 'inspection' || excludeCompletedType === 'both';
+                        if (inspChecked && planChecked) setExcludeCompletedType('both');
+                        else if (planChecked) setExcludeCompletedType('plan');
+                        else if (inspChecked) setExcludeCompletedType('inspection');
+                        else { setExcludeCompleted(false); }
+                        if (planChecked && !excludeCompleted) setExcludeCompleted(true);
+                      }}
+                      className="mt-0.5 w-4 h-4 text-blue-600 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">SPCC Plan Completed (Up to date)</span>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Facilities with current SPCC plans not due for renewal
+                      </p>
+                    </div>
+                  </label>
+                </div>
               </div>
             </div>
 
-            <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+            <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
               <button
                 onClick={() => {
                   setShowRefreshOptions(false);
                   // Reset to saved settings value
                   setExcludeCompleted(settings?.exclude_completed_facilities ?? false);
+                  setExcludeCompletedType(settings?.exclude_completed_type ?? 'inspection');
                   setShowAdvanced(false);
                 }}
                 className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -2315,14 +2706,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </button>
               <button
                 onClick={handleRefreshTimesOnly}
-                className="flex-1 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
                 title="Quickly update times without regenerating routes"
               >
                 Apply & Refresh Times
               </button>
               <button
                 onClick={handleRefreshWithSettings}
-                className="flex-1 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
                 title="Fully re-optimize routes with new constraints"
               >
                 Apply & Re-optimize
@@ -2353,32 +2744,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
             <div className="p-4">
               <ExportRoutes result={result} facilities={facilities} homeBase={homeBase} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Inspection Export Popup */}
-      {showInspectionExportPopup && accountId && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
-          onClick={() => setShowInspectionExportPopup(false)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
-              <button
-                onClick={() => setShowInspectionExportPopup(false)}
-                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-              >
-                <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-              </button>
-            </div>
-            <div className="p-4 bg-white dark:bg-gray-800 overflow-y-auto flex-1 transition-colors duration-200">
-              <InspectionReportExport facilities={facilities} userId={userId} accountId={accountId} />
             </div>
           </div>
         </div>
