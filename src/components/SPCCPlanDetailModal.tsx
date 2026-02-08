@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList } from 'lucide-react';
+import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getStatusBadgeConfig, type SPCCPlanStatus } from '../utils/spccStatus';
@@ -23,6 +23,7 @@ const statusIconMap = {
 function getStatusGradient(status: SPCCPlanStatus, darkMode: boolean): string {
   switch (status) {
     case 'valid':
+    case 'recertified':
       return darkMode
         ? 'from-green-800 to-green-900'
         : 'from-green-600 to-green-700';
@@ -51,6 +52,7 @@ function getStatusGradient(status: SPCCPlanStatus, darkMode: boolean): string {
 function getStatusRingColor(status: SPCCPlanStatus, darkMode: boolean): string {
   switch (status) {
     case 'valid':
+    case 'recertified':
       return darkMode ? 'ring-green-500/30' : 'ring-green-400/30';
     case 'expiring':
     case 'renewal_due':
@@ -450,6 +452,186 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               )}
             </div>
           </div>
+
+          {/* Compliance Tracking */}
+          {(facility.initial_inspection_completed || facility.company_signature_date || facility.recertified_date || (facility.spcc_pe_stamp_date || savedPeDate)) && (
+            <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+              <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Compliance
+                </h3>
+              </div>
+              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {facility.initial_inspection_completed && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <CheckCircle className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Initial Inspection</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {new Date(facility.initial_inspection_completed).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+                {facility.company_signature_date && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Edit2 className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Company Signature</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {new Date(facility.company_signature_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+                {facility.recertified_date && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <ShieldCheck className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertified</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {new Date(facility.recertified_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+                {(() => {
+                  const peDate = facility.spcc_pe_stamp_date || savedPeDate;
+                  if (!peDate) return null;
+                  const d = new Date(peDate);
+                  if (isNaN(d.getTime())) return null;
+                  const due = new Date(d);
+                  due.setFullYear(due.getFullYear() + 5);
+                  const daysUntil = Math.floor((due.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  return (
+                    <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertification Due</span>
+                      </div>
+                      <span className={`text-sm font-medium ${
+                        daysUntil < 0
+                          ? (darkMode ? 'text-red-400' : 'text-red-600')
+                          : daysUntil <= 90
+                            ? (darkMode ? 'text-amber-400' : 'text-amber-600')
+                            : (darkMode ? 'text-white' : 'text-gray-900')
+                      }`}>
+                        {due.toLocaleDateString()}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* Field Operations */}
+          {(facility.photos_taken || facility.field_visit_date || facility.estimated_oil_per_day != null) && (
+            <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+              <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Field Operations
+                </h3>
+              </div>
+              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {facility.field_visit_date && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Calendar className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Field Visit</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {new Date(facility.field_visit_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+                <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Camera className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                    <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Photos Taken</span>
+                  </div>
+                  <span className={`text-sm font-medium ${facility.photos_taken
+                    ? (darkMode ? 'text-green-400' : 'text-green-600')
+                    : (darkMode ? 'text-gray-500' : 'text-gray-400')
+                  }`}>
+                    {facility.photos_taken ? 'Yes' : 'No'}
+                  </span>
+                </div>
+                {facility.estimated_oil_per_day != null && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Droplets className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Est. Oil/Day</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {facility.estimated_oil_per_day} bbl
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Berm Measurements */}
+          {(facility.berm_depth_inches != null || facility.berm_length != null || facility.berm_width != null) && (
+            <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+              <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Berm Measurements
+                </h3>
+              </div>
+              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {facility.berm_depth_inches != null && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Ruler className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Depth / Height</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {facility.berm_depth_inches} in
+                    </span>
+                  </div>
+                )}
+                {facility.berm_length != null && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Ruler className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Length</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {facility.berm_length}
+                    </span>
+                  </div>
+                )}
+                {facility.berm_width != null && (
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Ruler className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Width</span>
+                    </div>
+                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {facility.berm_width}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Location */}
+          {facility.county && (
+            <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MapPin className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>County</span>
+                </div>
+                <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {facility.county}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Plan document section */}
           <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>

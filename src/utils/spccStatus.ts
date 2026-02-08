@@ -9,6 +9,7 @@ export type SPCCPlanStatus =
   | 'initial_due'      // Within 30 days of 6-month deadline, no plan
   | 'initial_overdue'  // Past 6-month deadline, no plan
   | 'valid'            // Plan on file, >90 days until renewal
+  | 'recertified'      // Recertified within last 5 years
   | 'expiring'         // Plan valid but <90 days until 5-year renewal
   | 'expired'          // Plan past 5-year renewal date
   | 'renewal_due';     // Alias for expiring (used in compliance tracking)
@@ -28,6 +29,7 @@ export interface SPCCStatusFacility {
   first_prod_date?: string | null;
   spcc_plan_url?: string | null;
   spcc_pe_stamp_date?: string | null;
+  recertified_date?: string | null;
 }
 
 export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResult {
@@ -37,6 +39,33 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
   // PE stamp date is the ONLY source for SPCC plan completion
   // (spcc_inspection_date is separate and used for SPCC inspection tracking)
   const hasPlan = !!(facility.spcc_plan_url && facility.spcc_pe_stamp_date);
+
+  // Case 0: Has a recertified_date within last 5 years -> SPCC Recertified (green)
+  if (facility.recertified_date) {
+    const recertDate = new Date(facility.recertified_date);
+    recertDate.setHours(0, 0, 0, 0);
+    const recertRenewalDate = new Date(recertDate);
+    recertRenewalDate.setFullYear(recertRenewalDate.getFullYear() + 5);
+    const daysUntilRecertRenewal = Math.ceil(
+      (recertRenewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysUntilRecertRenewal > 90) {
+      const peStampDate = facility.spcc_pe_stamp_date ? new Date(facility.spcc_pe_stamp_date) : null;
+      if (peStampDate) peStampDate.setHours(0, 0, 0, 0);
+      return {
+        status: 'recertified',
+        message: 'SPCC Recertified',
+        isCompliant: true,
+        isUrgent: false,
+        daysUntilDue: daysUntilRecertRenewal,
+        peStampDate,
+        renewalDate: recertRenewalDate,
+        hasPlan,
+      };
+    }
+    // If recertification is expiring or expired, fall through to PE stamp logic below
+  }
 
   // Case 1: Has a PE stamp date -> check renewal status
   if (facility.spcc_pe_stamp_date) {
@@ -166,6 +195,13 @@ export function getStatusBadgeConfig(status: SPCCPlanStatus): StatusBadgeConfig 
         icon: 'check',
         label: 'SPCC Valid',
       };
+    case 'recertified':
+      return {
+        colorClass: 'bg-green-100 text-green-700',
+        darkColorClass: 'bg-green-900/30 text-green-400',
+        icon: 'check',
+        label: 'SPCC Recertified',
+      };
     case 'expiring':
     case 'renewal_due':
       return {
@@ -223,6 +259,7 @@ export function getSPCCPlanStatusText(facility: SPCCStatusFacility): string {
   const result = getSPCCPlanStatus(facility);
   switch (result.status) {
     case 'valid': return 'Current';
+    case 'recertified': return 'Recertified';
     case 'expiring': return 'Expiring';
     case 'expired': return 'Expired';
     case 'initial_due': return 'Due Soon';

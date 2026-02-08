@@ -243,7 +243,7 @@ function App() {
       if (hideValidPlans || hideExpiringPlans) {
         facilities.forEach(f => {
           const planStatus = getSPCCPlanStatus(f);
-          if (hideValidPlans && planStatus.status === 'valid') {
+          if (hideValidPlans && (planStatus.status === 'valid' || planStatus.status === 'recertified')) {
             hiddenFacilityIds.add(f.id);
           }
           if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
@@ -1050,7 +1050,7 @@ function App() {
           // Exclude facilities with valid/current SPCC plans (not due for renewal)
           activeFacilities.forEach(facility => {
             const planStatus = getSPCCPlanStatus(facility);
-            if (planStatus.status === 'valid') {
+            if (planStatus.status === 'valid' || planStatus.status === 'recertified') {
               completedFacilityIds.add(facility.id);
             }
           });

@@ -50,7 +50,7 @@ interface FacilityWithDistance extends Facility {
 
 type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
 type ViewModeType = 'inspections' | 'plans';
-type SPCCPlanStatusType = 'valid' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
+type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
 export default function SurveyMode({ result, facilities, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap }: SurveyModeProps) {
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
@@ -559,6 +559,19 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   }
 
   function getSPCCPlanStatus(facility: Facility): SPCCPlanStatusType {
+    // Check recertified_date first — if within 5 years, it's recertified
+    if (facility.recertified_date) {
+      const recertDate = new Date(facility.recertified_date);
+      const recertRenewal = new Date(recertDate);
+      recertRenewal.setFullYear(recertRenewal.getFullYear() + 5);
+      const today = new Date();
+      const daysUntil = Math.ceil((recertRenewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysUntil > 90) {
+        return 'recertified';
+      }
+      // If recertification is expiring/expired, fall through to PE stamp logic
+    }
+
     // Check if plan exists
     if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
       // Check First Prod Date
@@ -630,7 +643,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
             case 'incomplete':
               return planStatus === 'missing' || planStatus === 'pending';
             case 'completed':
-              return planStatus === 'valid';
+              return planStatus === 'valid' || planStatus === 'recertified';
             case 'expired':
               return planStatus === 'expired' || planStatus === 'expiring' || planStatus === 'overdue';
             case 'draft':
@@ -686,7 +699,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
   const completedCount = viewMode === 'inspections'
     ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'completed').length
-    : facilitiesWithDistance.filter(f => getSPCCPlanStatus(f) === 'valid').length;
+    : facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'valid' || s === 'recertified'; }).length;
 
   const expiredCount = viewMode === 'inspections'
     ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'expired').length

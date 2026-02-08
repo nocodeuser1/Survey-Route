@@ -201,7 +201,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         }
         if (excludePlans) {
           const planStatus = getSPCCPlanStatus(f);
-          if (planStatus.status === 'valid') return true;
+          if (planStatus.status === 'valid' || planStatus.status === 'recertified') return true;
         }
         return false;
       });
@@ -593,7 +593,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     // Plan-based hiding (applies in All and Plans modes)
     if (hideValidPlans || hideExpiringPlans) {
       const planStatus = getSPCCPlanStatus(facility);
-      if (hideValidPlans && planStatus.status === 'valid') {
+      if (hideValidPlans && (planStatus.status === 'valid' || planStatus.status === 'recertified')) {
         return true;
       }
       if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {

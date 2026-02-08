@@ -125,7 +125,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     if (hideValidPlans || hideExpiringPlans) {
       facilities.forEach(f => {
         const planStatus = getSPCCPlanStatus(f);
-        if (hideValidPlans && planStatus.status === 'valid') {
+        if (hideValidPlans && (planStatus.status === 'valid' || planStatus.status === 'recertified')) {
           completed.add(f.name);
         }
         if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
@@ -1460,7 +1460,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           let hasValidSPCCPlanForNonRoute = false;
           if (surveyType === 'spcc_plan') {
             const planResult = getSPCCPlanStatus(facility);
-            hasValidSPCCPlanForNonRoute = planResult.status === 'valid';
+            hasValidSPCCPlanForNonRoute = planResult.status === 'valid' || planResult.status === 'recertified';
           }
 
           const hasAnyValidCompletion = surveyType === 'spcc_plan'
