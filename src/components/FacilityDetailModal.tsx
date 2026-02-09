@@ -7,6 +7,7 @@ import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
+import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
 
@@ -290,7 +291,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                 {facility.status === 'sold' && (
                   <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300">
                     <DollarSign className="w-3 h-3" />
-                    Sold {facility.sold_at ? `on ${new Date(facility.sold_at).toLocaleDateString()}` : ''}
+                    Sold {facility.sold_at ? `on ${formatDate(facility.sold_at)}` : ''}
                   </span>
                 )}
               </div>
@@ -373,13 +374,13 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
               {facility.first_prod_date && (
                 <div>
                   <span className="text-blue-200">First Production:</span>{' '}
-                  <span className="text-white">{new Date(facility.first_prod_date).toLocaleDateString()}</span>
+                  <span className="text-white">{formatDate(facility.first_prod_date)}</span>
                 </div>
               )}
               {facility.spcc_due_date && (
                 <div>
                   <span className="text-blue-200">SPCC Due:</span>{' '}
-                  <span className="text-white">{new Date(facility.spcc_due_date).toLocaleDateString()}</span>
+                  <span className="text-white">{formatDate(facility.spcc_due_date)}</span>
                 </div>
               )}
             </div>
@@ -502,10 +503,10 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       </p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
-                        Completed on {new Date(facility.spcc_inspection_date).toLocaleDateString()}
+                        Completed on {formatDate(facility.spcc_inspection_date)}
                       </p>
                       {facility.spcc_inspection_date && (() => {
-                        const completedDate = new Date(facility.spcc_inspection_date);
+                        const completedDate = parseLocalDate(facility.spcc_inspection_date);
                         const expirationDate = new Date(completedDate);
                         expirationDate.setFullYear(expirationDate.getFullYear() + 1);
                         const now = new Date();
@@ -517,11 +518,11 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                             {isExpired ? (
                               <>
                                 <AlertTriangle className="w-4 h-4 inline mr-1" />
-                                Expired on {expirationDate.toLocaleDateString()}
+                                Expired on {expirationDate.toLocaleDateString('en-US')}
                               </>
                             ) : (
                               <>
-                                Expires on {expirationDate.toLocaleDateString()} ({daysUntilExpiration} days remaining)
+                                Expires on {expirationDate.toLocaleDateString('en-US')} ({daysUntilExpiration} days remaining)
                               </>
                             )}
                           </p>
@@ -551,10 +552,10 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                       </p>
                       <p className="text-sm text-gray-600 dark:text-gray-300">
                         <Clock className="w-4 h-4 inline mr-1" />
-                        Completed on {new Date(facility.spcc_inspection_date).toLocaleDateString()}
+                        Completed on {formatDate(facility.spcc_inspection_date)}
                       </p>
                       {facility.spcc_inspection_date && (() => {
-                        const completedDate = new Date(facility.spcc_inspection_date);
+                        const completedDate = parseLocalDate(facility.spcc_inspection_date);
                         const expirationDate = new Date(completedDate);
                         expirationDate.setFullYear(expirationDate.getFullYear() + 1);
                         const now = new Date();
@@ -566,11 +567,11 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
                             {isExpired ? (
                               <>
                                 <AlertTriangle className="w-4 h-4 inline mr-1" />
-                                Expired on {expirationDate.toLocaleDateString()}
+                                Expired on {expirationDate.toLocaleDateString('en-US')}
                               </>
                             ) : (
                               <>
-                                Expires on {expirationDate.toLocaleDateString()} ({daysUntilExpiration} days remaining)
+                                Expires on {expirationDate.toLocaleDateString('en-US')} ({daysUntilExpiration} days remaining)
                               </>
                             )}
                           </p>

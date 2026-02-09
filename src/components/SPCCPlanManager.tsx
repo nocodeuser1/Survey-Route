@@ -5,6 +5,7 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import SPCCPlanUploadModal from './SPCCPlanUploadModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
+import { formatDate } from '../utils/dateUtils';
 
 interface SPCCPlanManagerProps {
     facility: Facility;
@@ -55,7 +56,7 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                                     <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'
                                         }`}>
                                         <Calendar className="w-3 h-3" />
-                                        Stamped: {new Date(facility.spcc_pe_stamp_date!).toLocaleDateString()}
+                                        Stamped: {formatDate(facility.spcc_pe_stamp_date!)}
                                     </span>
                                     {status.renewalDate && (
                                         <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Image, Upload, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Image, Upload, CheckCircle, AlertTriangle, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface AccountBrandingSettingsProps {
@@ -9,6 +9,7 @@ interface AccountBrandingSettingsProps {
 export default function AccountBrandingSettings({ accountId }: AccountBrandingSettingsProps) {
   const [companyName, setCompanyName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [timezone, setTimezone] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingMessage, setBrandingMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -21,7 +22,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
     try {
       const { data, error } = await supabase
         .from('accounts')
-        .select('company_name, logo_url')
+        .select('company_name, logo_url, timezone')
         .eq('id', accountId)
         .single();
 
@@ -30,6 +31,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
       if (data) {
         setCompanyName(data.company_name || '');
         setLogoUrl(data.logo_url || '');
+        setTimezone(data.timezone || '');
       }
     } catch (err) {
       console.error('Error loading branding:', err);
@@ -86,6 +88,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
         .update({
           company_name: companyName,
           logo_url: logoUrl,
+          timezone: timezone || null,
         })
         .eq('id', accountId);
 
@@ -125,6 +128,41 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Used in inspection reports (e.g., &quot;Camino&quot; becomes &quot;Camino SPCC Inspection&quot;)
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+            <div className="flex items-center gap-1.5">
+              <Globe className="w-4 h-4" />
+              Account Timezone
+            </div>
+          </label>
+          <select
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+          >
+            <option value="">Select timezone...</option>
+            <optgroup label="US Timezones">
+              <option value="America/New_York">Eastern (ET) - New York</option>
+              <option value="America/Chicago">Central (CT) - Chicago</option>
+              <option value="America/Denver">Mountain (MT) - Denver</option>
+              <option value="America/Los_Angeles">Pacific (PT) - Los Angeles</option>
+              <option value="America/Anchorage">Alaska (AKT) - Anchorage</option>
+              <option value="Pacific/Honolulu">Hawaii (HST) - Honolulu</option>
+            </optgroup>
+            <optgroup label="Other Timezones">
+              <option value="America/Phoenix">Arizona (MST, no DST)</option>
+              <option value="America/Indiana/Indianapolis">Indiana (Eastern, no DST)</option>
+              <option value="America/Boise">Mountain - Boise</option>
+              <option value="America/Adak">Hawaii-Aleutian - Adak</option>
+              <option value="America/Nome">Alaska - Nome</option>
+              <option value="America/Juneau">Alaska - Juneau</option>
+            </optgroup>
+          </select>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            All dates and times across the account will be displayed in this timezone.
           </p>
         </div>
 

@@ -8,6 +8,7 @@ import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
+import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NavigationPopup from './NavigationPopup';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
@@ -112,7 +113,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
       facilities
-        .filter(f => f.spcc_inspection_date && new Date(f.spcc_inspection_date) >= oneYearAgo)
+        .filter(f => f.spcc_inspection_date && parseLocalDate(f.spcc_inspection_date) >= oneYearAgo)
         .forEach(f => completed.add(f.name));
     }
     if (hideAllCompleted || hideExternallyCompleted) {
@@ -1011,7 +1012,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     ${!planStatus.hasPlan && fullFacility.first_prod_date ? `
                       <div style="display: flex; justify-content: space-between;">
                         <span style="color: #6B7280;">IP Date:</span>
-                        <span style="font-weight: 500;">${new Date(fullFacility.first_prod_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        <span style="font-weight: 500;">${formatDate(fullFacility.first_prod_date)}</span>
                       </div>
                     ` : ''}
                     ${fullFacility.spcc_plan_url ? `
@@ -1451,11 +1452,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const isManuallyRemoved = facility.day_assignment === -2;
 
           // Determine marker appearance
+          const hasPositiveDayAssignment = facility.day_assignment !== null && facility.day_assignment > 0;
           const markerContent = isManuallyRemoved
             ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
             : hasAnyValidCompletion
               ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-              : '?';
+              : hasPositiveDayAssignment
+                ? `D${facility.day_assignment}`
+                : '?';
 
           // Determine border colors
           let completionBorderColor = '#3B82F6';
@@ -1475,8 +1479,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerSize = hasAnyValidCompletion ? 30 : 36;
           const markerAnchor = hasAnyValidCompletion ? 15 : 18;
 
-          // Background color: use plan status color in SPCC plan mode, gray otherwise
-          let markerBgColor = isManuallyRemoved ? '#9CA3AF' : '#6B7280';
+          // Background color: use day color for assigned facilities, plan status color in SPCC plan mode, gray otherwise
+          let markerBgColor = isManuallyRemoved ? '#9CA3AF' : hasPositiveDayAssignment ? COLORS[(facility.day_assignment! - 1) % COLORS.length] : '#6B7280';
           if (surveyType === 'spcc_plan' && !isManuallyRemoved) {
             const planResult = getSPCCPlanStatus(facility);
             if (hasValidSPCCPlanForNonRoute) {
@@ -1575,7 +1579,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   ${!planStatus.hasPlan && facility.first_prod_date ? `
                     <div style="display: flex; justify-content: space-between;">
                       <span style="color: #6B7280;">IP Date:</span>
-                      <span style="font-weight: 500;">${new Date(facility.first_prod_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      <span style="font-weight: 500;">${formatDate(facility.first_prod_date)}</span>
                     </div>
                   ` : ''}
                   ${facility.spcc_plan_url ? `
@@ -1811,7 +1815,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 </div>
                 ${facility.spcc_inspection_date ? `
                   <div style="font-size: 12px; color: #6B7280; margin-bottom: 4px;">
-                    <strong>Completed:</strong> ${new Date(facility.spcc_inspection_date).toLocaleDateString()}
+                    <strong>Completed:</strong> ${formatDate(facility.spcc_inspection_date)}
                   </div>
                 ` : ''}
                 <div style="font-size: 11px; color: #9CA3AF; margin-top: 8px; padding-top: 8px; border-top: 1px solid #E5E7EB;">

@@ -1,4 +1,5 @@
 import { CheckCircle } from 'lucide-react';
+import { parseLocalDate } from '../utils/dateUtils';
 
 interface SPCCExternalCompletionBadgeProps {
   completedDate: string | null | undefined;
@@ -9,7 +10,7 @@ interface SPCCExternalCompletionBadgeProps {
 export default function SPCCExternalCompletionBadge({ completedDate, className = '', showDate = false }: SPCCExternalCompletionBadgeProps) {
   if (!completedDate) return null;
 
-  const formattedDate = new Date(completedDate).toLocaleDateString('en-US', {
+  const formattedDate = parseLocalDate(completedDate).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'

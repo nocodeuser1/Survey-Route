@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { FileText, Download, AlertTriangle, Loader, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { formatDate } from '../utils/dateUtils';
 
 interface PlanInfo {
   facility_name: string;
@@ -88,7 +89,7 @@ export default function SPCCPlanViewerPage() {
                   <span>{planInfo.company_name}</span>
                 )}
                 {planInfo.pe_stamp_date && (
-                  <span>PE Stamp: {new Date(planInfo.pe_stamp_date).toLocaleDateString()}</span>
+                  <span>PE Stamp: {formatDate(planInfo.pe_stamp_date)}</span>
                 )}
               </div>
             </div>
@@ -122,7 +123,7 @@ export default function SPCCPlanViewerPage() {
               </h2>
               {planInfo.pe_stamp_date && (
                 <p className="text-sm text-gray-500 mb-4">
-                  PE Stamp Date: {new Date(planInfo.pe_stamp_date).toLocaleDateString()}
+                  PE Stamp Date: {formatDate(planInfo.pe_stamp_date)}
                 </p>
               )}
               <p className="text-gray-600 mb-6">

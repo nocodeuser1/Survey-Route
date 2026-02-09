@@ -6,8 +6,9 @@ import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { UserSettings, Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
-import { isInspectionValid } from '../utils/inspectionUtils';
+import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
+import { parseLocalDate } from '../utils/dateUtils';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
 import SavedRoutesManager from './SavedRoutesManager';
@@ -570,24 +571,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   };
 
   // Check if facility needs an SPCC Inspection (for filtering)
+  // Returns true for expired, expiring (within 90 days), or pending inspections
   const facilityNeedsSPCCInspection = (facility: Facility): boolean => {
-    // Check for valid completion type
-    if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const completedDate = new Date(facility.spcc_inspection_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      if (new Date() <= oneYearFromCompletion) {
-        return false; // Has valid inspection
-      }
-    }
-
-    // Check for valid internal inspection
     const inspection = inspections.get(facility.id);
-    if (isInspectionValid(inspection)) {
-      return false; // Has valid inspection
-    }
-
-    return true; // Needs inspection
+    const expiry = getFacilityInspectionExpiry(facility, inspection);
+    // Needs attention if expired, expiring within 90 days, or no inspection at all
+    return expiry.status !== 'valid';
   };
 
   // Filter facility based on survey type selection
@@ -661,7 +650,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         if (!inspection && !f.spcc_inspection_date) {
           // No inspection ever - check if facility has been active > 1 year (past due)
           if (f.first_prod_date) {
-            const firstProd = new Date(f.first_prod_date);
+            const firstProd = parseLocalDate(f.first_prod_date);
             const oneYearLater = new Date(firstProd);
             oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
             if (new Date() > oneYearLater) {
@@ -671,7 +660,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         } else if (inspection && !isInspectionValid(inspection)) {
           isPastDue = true;
         } else if (f.spcc_inspection_date) {
-          const completedDate = new Date(f.spcc_inspection_date);
+          const completedDate = parseLocalDate(f.spcc_inspection_date);
           const oneYearFromCompletion = new Date(completedDate);
           oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
           if (new Date() > oneYearFromCompletion) {
@@ -1023,7 +1012,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   <div className="relative group/tip">
                     <button
                       onClick={onConfigureHomeBase}
-                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
                     >
                       <Home className="w-4 h-4" />
                     </button>
@@ -1041,7 +1030,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         console.log('[showOnlySettings] Load Route button clicked');
                         setShowLoadRoutePopup(true);
                       }}
-                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
                     >
                       <FolderOpen className="w-4 h-4" />
                     </button>
@@ -1059,7 +1048,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         console.log('[showOnlySettings] Save Route button clicked');
                         setShowSaveRoutePopup(true);
                       }}
-                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
                     >
                       <Save className="w-4 h-4" />
                     </button>
@@ -1076,7 +1065,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       console.log('[showOnlySettings] Export Routes button clicked');
                       setShowExportPopup(true);
                     }}
-                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                    className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
                   >
                     <Download className="w-4 h-4" />
                   </button>

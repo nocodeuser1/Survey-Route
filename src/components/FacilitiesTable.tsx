@@ -5,6 +5,7 @@ import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
 
 import { isInspectionValid } from '../utils/inspectionUtils';
+import { parseLocalDate } from '../utils/dateUtils';
 
 interface FacilitiesTableProps {
   facilities: Facility[];
@@ -58,7 +59,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
   const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' => {
     // Check for internal or external completion
     if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const spccDate = new Date(facility.spcc_inspection_date);
+      const spccDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();

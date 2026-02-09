@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
 import FacilityDetailModal from './FacilityDetailModal';
@@ -16,8 +16,8 @@ import CompletionTypeModal from './CompletionTypeModal';
 import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
-import { isInspectionValid } from '../utils/inspectionUtils';
-import { getSPCCPlanStatus } from '../utils/spccStatus';
+import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
+import { getSPCCPlanStatus, formatDayCount } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
@@ -32,6 +32,7 @@ interface FacilitiesManagerProps {
   initialFacilityToEdit?: Facility | null;
   onFacilityEditHandled?: () => void;
   isLoading?: boolean;
+  onCreateRoute?: (facilityIds: string[]) => void;
 }
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -112,7 +113,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
@@ -180,6 +181,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [exportColumnOrder, setExportColumnOrder] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
   const [exportVisibleColumns, setExportVisibleColumns] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
   const [draggedExportColumn, setDraggedExportColumn] = useState<ColumnId | null>(null);
+  const [exportColumnSearch, setExportColumnSearch] = useState('');
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
   const [mobileEditingFacility, setMobileEditingFacility] = useState<Facility | null>(null);
   const [mobileEditFormData, setMobileEditFormData] = useState<Record<ColumnId, string>>({} as Record<ColumnId, string>);
@@ -199,6 +201,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesValue, setNotesValue] = useState('');
+  const [notesOverrides, setNotesOverrides] = useState<Record<string, string | null>>({});
+  const [showNotesSymbols, setShowNotesSymbols] = useState(false);
+  const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
@@ -212,6 +217,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   } | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Clear optimistic notes overrides when facilities prop refreshes
+  useEffect(() => {
+    setNotesOverrides({});
+  }, [facilities]);
 
   // Lock body scroll when edit modal is open
   useEffect(() => {
@@ -233,20 +243,61 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   }, [mobileEditingFacility]);
 
-  // Parse pasted date in mm/dd/yy or mm/dd/yyyy format into YYYY-MM-DD
-  const handleDatePaste = (field: ColumnId) => (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const pasted = e.clipboardData.getData('text').trim();
-    const match = pasted.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
-    if (match) {
-      e.preventDefault();
-      const month = match[1].padStart(2, '0');
-      const day = match[2].padStart(2, '0');
-      let year = match[3];
+  // Normalize a date string to YYYY-MM-DD, supports mm/dd/yy, mm/dd/yyyy, yyyy-mm-dd, etc.
+  const normalizeDateValue = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    // Already YYYY-MM-DD
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    // mm/dd/yyyy or mm-dd-yyyy or mm.dd.yyyy (also handles m/d/yy)
+    const usMatch = trimmed.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+    if (usMatch) {
+      const month = usMatch[1].padStart(2, '0');
+      const day = usMatch[2].padStart(2, '0');
+      let year = usMatch[3];
       if (year.length === 2) {
         const num = parseInt(year);
         year = (num > 50 ? '19' : '20') + year;
       }
-      setMobileEditFormData(prev => ({ ...prev, [field]: `${year}-${month}-${day}` }));
+      return `${year}-${month}-${day}`;
+    }
+    return trimmed;
+  };
+
+  // Format YYYY-MM-DD to MM/DD/YYYY for display
+  const displayDate = (isoDate: string): string => {
+    if (!isoDate) return '';
+    const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) return `${match[2]}/${match[3]}/${match[1]}`;
+    return isoDate;
+  };
+
+  // Handle date field blur: normalize the text to ISO format
+  const handleDateBlur = (field: ColumnId) => (e: React.FocusEvent<HTMLInputElement>) => {
+    const normalized = normalizeDateValue(e.target.value);
+    if (field === 'field_visit_date') {
+      const updates: Partial<Record<ColumnId, string>> = { field_visit_date: normalized };
+      if (normalized) updates.photos_taken = 'true';
+      setMobileEditFormData(prev => ({ ...prev, ...updates }));
+    } else {
+      setMobileEditFormData(prev => ({ ...prev, [field]: normalized }));
+    }
+  };
+
+  // Parse pasted date in mm/dd/yy or mm/dd/yyyy format into YYYY-MM-DD
+  const handleDatePaste = (field: ColumnId) => (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text').trim();
+    const normalized = normalizeDateValue(pasted);
+    if (normalized !== pasted) {
+      e.preventDefault();
+      if (field === 'field_visit_date') {
+        const updates: Partial<Record<ColumnId, string>> = { field_visit_date: normalized };
+        if (normalized) updates.photos_taken = 'true';
+        setMobileEditFormData(prev => ({ ...prev, ...updates }));
+      } else {
+        setMobileEditFormData(prev => ({ ...prev, [field]: normalized }));
+      }
     }
   };
 
@@ -511,56 +562,42 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const getVerificationIcon = (facility: Facility) => {
-    // Check for completion type first (internal or external)
-    if (facility.spcc_completion_type === 'internal' && facility.spcc_inspection_date) {
-      const completedDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      const now = new Date();
-
-      if (now > oneYearFromCompletion) {
-        return <span title="Internal completion expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
-      }
-      return <SPCCInspectionBadge />;
-    } else if (facility.spcc_completion_type === 'external' && facility.spcc_inspection_date) {
-      const completedDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      const now = new Date();
-
-      if (now > oneYearFromCompletion) {
-        return <span title="External completion expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
-      }
-      return <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date} />;
-    }
-
-    // Fall back to checking inspection records
     const inspection = inspections.get(facility.id);
-    if (isInspectionValid(inspection)) {
-      return <SPCCInspectionBadge />;
-    } else if (inspection) {
-      return <span title="Inspection expired - Reinspection needed"><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
+    const expiry = getFacilityInspectionExpiry(facility, inspection);
+
+    if (expiry.status === 'expired') {
+      const label = facility.spcc_completion_type === 'external' ? 'External' : facility.spcc_completion_type === 'internal' ? 'Internal' : 'Inspection';
+      return <span title={`${label} completion expired - Reinspection needed`}><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
     }
+
+    if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400" title={`Expires in ${expiry.daysUntilExpiry}d - Reinspection due soon`}>
+          <Clock className="w-3.5 h-3.5" />
+          <span className="text-xs font-medium">{formatDayCount(expiry.daysUntilExpiry)}</span>
+        </span>
+      );
+    }
+
+    if (expiry.status === 'valid') {
+      if (facility.spcc_completion_type === 'external') {
+        return <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />;
+      }
+      return <SPCCInspectionBadge />;
+    }
+
     return null;
   };
 
-  const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' => {
-    // Check for internal or external completion
-    if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const spccDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromSpcc = new Date(spccDate);
-      oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
-      const now = new Date();
-
-      if (now > oneYearFromSpcc) {
-        return 'expired';
-      }
-      return 'inspected';
-    }
-
+  const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' | 'expiring' => {
     const inspection = inspections.get(facility.id);
-    if (!inspection) return 'pending';
-    return isInspectionValid(inspection) ? 'inspected' : 'expired';
+    const expiry = getFacilityInspectionExpiry(facility, inspection);
+    switch (expiry.status) {
+      case 'valid': return 'inspected';
+      case 'expiring': return 'expiring';
+      case 'expired': return 'expired';
+      case 'pending': return 'pending';
+    }
   };
 
   const matchesReportTypeFilter = (facility: Facility): boolean => {
@@ -712,7 +749,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           }
           case 'inspection_status': {
             const status = getInspectionStatus(facility);
-            const order = { pending: 0, expired: 1, inspected: 2 };
+            const order = { pending: 0, expired: 1, expiring: 2, inspected: 3 };
             return order[status];
           }
           case 'matched_facility_name':
@@ -1325,6 +1362,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const handleExportFacilities = () => {
+    setExportVisibleColumns([...visibleColumns]);
+    setExportColumnOrder([...ALL_COLUMNS_ORDER]);
+    setExportColumnSearch('');
     setShowExportColumnSelector(true);
   };
 
@@ -1365,7 +1405,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           } else if (columnId === 'spcc_completion_type') {
             return facility.spcc_completion_type || '';
           } else if (columnId === 'photos_taken') {
-            return facility.photos_taken ? 'Yes' : 'No';
+            return facility.photos_taken
+              ? <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center"><CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
+              : <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center"><AlertCircle className="w-3 h-3 text-red-500 dark:text-red-400" /></div>;
           } else if (columnId === 'day_assignment') {
             return facility.day_assignment != null ? String(facility.day_assignment) : '';
           } else if (columnId === 'team_assignment') {
@@ -1514,7 +1556,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const resetExportColumns = () => {
     setExportColumnOrder(ALL_COLUMNS_ORDER);
-    setExportVisibleColumns(ALL_COLUMNS_ORDER);
+    setExportVisibleColumns([...visibleColumns]);
   };
 
   const handleExportDragStart = (columnId: ColumnId) => {
@@ -1553,24 +1595,57 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const handleNotesSave = async (facilityId: string) => {
+    const savedValue = notesValue || null;
+    // Optimistically update UI immediately
+    setNotesOverrides(prev => ({ ...prev, [facilityId]: savedValue }));
+    setEditingNotesId(null);
+    setShowNotesSymbols(false);
+
     try {
       const { error: updateError } = await supabase
         .from('facilities')
-        .update({ notes: notesValue || null })
+        .update({ notes: savedValue })
         .eq('id', facilityId);
 
       if (updateError) throw updateError;
 
-      setEditingNotesId(null);
       onFacilitiesChange();
     } catch (err: any) {
       console.error('Error saving notes:', err);
       setError(err.message || 'Failed to save notes');
+      // Revert optimistic update on error
+      setNotesOverrides(prev => {
+        const next = { ...prev };
+        delete next[facilityId];
+        return next;
+      });
     }
+  };
+
+  const insertNoteSymbol = (symbol: string) => {
+    const textarea = notesTextareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newValue = notesValue.slice(0, start) + symbol + notesValue.slice(end);
+    setNotesValue(newValue);
+    setShowNotesSymbols(false);
+    // Restore cursor position after the inserted symbol
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + symbol.length;
+    });
+  };
+
+  // Get effective notes value (with optimistic overrides applied)
+  const getEffectiveNotes = (facility: Facility): string | null => {
+    if (facility.id in notesOverrides) return notesOverrides[facility.id];
+    return facility.notes || null;
   };
 
   const handleNotesCancel = () => {
     setEditingNotesId(null);
+    setShowNotesSymbols(false);
     setNotesValue('');
   };
 
@@ -1665,8 +1740,35 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.spcc_due_date || '-';
       case 'spcc_pe_stamp_date':
         return facility.spcc_pe_stamp_date || '-';
-      case 'spcc_inspection_date':
-        return facility.spcc_inspection_date || '-';
+      case 'spcc_inspection_date': {
+        if (!facility.spcc_inspection_date && !inspections.get(facility.id)) return '-';
+        const insp = inspections.get(facility.id);
+        const expiry = getFacilityInspectionExpiry(facility, insp);
+        const dateStr = facility.spcc_inspection_date || (insp ? new Date(insp.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-');
+        if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
+          return (
+            <div className="flex flex-col gap-0.5">
+              <span>{dateStr}</span>
+              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 text-[10px] font-medium">
+                <Clock className="w-3 h-3" />
+                Expires in {formatDayCount(expiry.daysUntilExpiry)}
+              </span>
+            </div>
+          );
+        }
+        if (expiry.status === 'expired' && expiry.daysUntilExpiry !== null) {
+          return (
+            <div className="flex flex-col gap-0.5">
+              <span>{dateStr}</span>
+              <span className="inline-flex items-center gap-0.5 text-red-600 dark:text-red-400 text-[10px] font-medium">
+                <AlertCircle className="w-3 h-3" />
+                Expired {formatDayCount(expiry.daysUntilExpiry)} ago
+              </span>
+            </div>
+          );
+        }
+        return dateStr;
+      }
       case 'spcc_completion_type':
         if (!facility.spcc_completion_type) return '-';
         return facility.spcc_completion_type === 'internal' ? 'Internal' : 'External';
@@ -1677,7 +1779,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       case 'visit_duration':
         return `${facility.visit_duration_minutes} min`;
       case 'photos_taken':
-        return facility.photos_taken ? 'Yes' : 'No';
+        return facility.photos_taken
+          ? <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center"><CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
+          : <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center"><AlertCircle className="w-3 h-3 text-red-500 dark:text-red-400" /></div>;
       case 'field_visit_date':
         return facility.field_visit_date || '-';
       case 'estimated_oil_per_day':
@@ -1706,33 +1810,57 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           : <span className="text-green-600 dark:text-green-400 font-medium">Active</span>;
       case 'created_at':
         return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '-';
-      case 'notes':
+      case 'notes': {
+        const effectiveNotes = getEffectiveNotes(facility);
         if (editingNotesId === facility.id) {
           return (
-            <div className="flex flex-col gap-1 min-w-[200px]">
-              <textarea
-                value={notesValue}
-                onChange={(e) => setNotesValue(e.target.value)}
-                placeholder="Add notes..."
-                className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
-                rows={3}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    handleNotesCancel();
-                  }
-                }}
-              />
+            <div className="flex flex-col gap-1 min-w-[200px] relative">
+              <div className="relative">
+                <textarea
+                  ref={notesTextareaRef}
+                  value={notesValue}
+                  onChange={(e) => setNotesValue(e.target.value)}
+                  placeholder="Add notes..."
+                  className="w-full px-2 py-1 pr-7 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
+                  rows={3}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      handleNotesCancel();
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => setShowNotesSymbols(!showNotesSymbols)}
+                  style={{ minHeight: 0, minWidth: 0 }}
+                  className="absolute top-1 right-1 p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                  title="Insert symbol"
+                >
+                  <span className="text-xs leading-none">±</span>
+                </button>
+                {showNotesSymbols && (
+                  <div className="absolute top-0 right-6 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-1.5 flex gap-1 z-10">
+                    <button onClick={() => insertNoteSymbol('✅')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Complete">✅</button>
+                    <button onClick={() => insertNoteSymbol('⚠️')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Warning">⚠️</button>
+                    <button onClick={() => insertNoteSymbol('❌')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Not done">❌</button>
+                    <button onClick={() => insertNoteSymbol('📋')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Clipboard">📋</button>
+                    <button onClick={() => insertNoteSymbol('📸')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Photos">📸</button>
+                    <button onClick={() => insertNoteSymbol('🔧')} style={{ minHeight: 0, minWidth: 0 }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm" title="Maintenance">🔧</button>
+                  </div>
+                )}
+              </div>
               <div className="flex gap-1">
                 <button
                   onClick={() => handleNotesSave(facility.id)}
-                  className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                  style={{ minHeight: 0, minWidth: 0 }}
+                  className="px-2.5 py-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-500/10 dark:bg-blue-400/10 rounded-md hover:bg-blue-500/20 dark:hover:bg-blue-400/20 backdrop-blur-sm transition-colors leading-tight"
                 >
                   Save
                 </button>
                 <button
                   onClick={handleNotesCancel}
-                  className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+                  style={{ minHeight: 0, minWidth: 0 }}
+                  className="px-2.5 py-0.5 text-xs text-gray-500 dark:text-gray-400 bg-white/10 dark:bg-white/5 rounded-md hover:bg-white/20 dark:hover:bg-white/10 backdrop-blur-sm transition-colors leading-tight"
                 >
                   Cancel
                 </button>
@@ -1743,12 +1871,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return (
           <div
             className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded min-h-[2rem] whitespace-pre-wrap break-words"
-            onClick={() => handleNotesEdit(facility.id, facility.notes || null)}
+            onClick={() => handleNotesEdit(facility.id, effectiveNotes || '')}
             title="Click to edit notes"
           >
-            {facility.notes || <span className="text-gray-400 italic text-sm">Click to add notes...</span>}
+            {effectiveNotes || <span className="text-gray-400 italic text-sm">Click to add notes...</span>}
           </div>
         );
+      }
       default:
         return '-';
     }
@@ -1821,13 +1950,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             {/* Toggle bar */}
             <div className="flex items-center justify-between px-5 sm:px-6 py-2 border-b border-white/20 dark:border-white/5 shrink-0 bg-white/30 dark:bg-white/[0.03]">
               <span className="text-xs text-gray-500 dark:text-gray-400">Show only fields with data</span>
-              <button
-                type="button"
+              <div
+                role="switch"
+                aria-checked={hideEmptyFields}
+                tabIndex={0}
                 onClick={toggleHideEmpty}
-                className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${hideEmptyFields ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHideEmpty(); } }}
+                style={{ width: 48, height: 26, minWidth: 48, minHeight: 26, maxHeight: 26, borderRadius: 9999, position: 'relative', cursor: 'pointer', flexShrink: 0, lineHeight: 0, fontSize: 0, boxSizing: 'border-box', overflow: 'hidden' }}
+                className={`transition-colors duration-200 ${hideEmptyFields ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
               >
-                <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${hideEmptyFields ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
+                <div
+                  style={{ position: 'absolute', top: 2.5, left: 3, width: 20, height: 20, borderRadius: 9999, backgroundColor: 'white', transform: hideEmptyFields ? 'translateX(22px)' : 'translateX(0)', transition: 'transform 200ms' }}
+                />
+              </div>
             </div>
 
             {/* Scrollable body */}
@@ -1927,9 +2062,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Production</label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.first_prod_date || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.first_prod_date || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, first_prod_date: e.target.value })}
+                          onBlur={handleDateBlur('first_prod_date')}
                           onPaste={handleDatePaste('first_prod_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -1941,9 +2078,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           SPCC Due <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Optional</span>
                         </label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.spcc_due_date || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.spcc_due_date || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, spcc_due_date: e.target.value })}
+                          onBlur={handleDateBlur('spcc_due_date')}
                           onPaste={handleDatePaste('spcc_due_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -1953,9 +2092,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inspection Date</label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.spcc_inspection_date || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.spcc_inspection_date || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, spcc_inspection_date: e.target.value })}
+                          onBlur={handleDateBlur('spcc_inspection_date')}
                           onPaste={handleDatePaste('spcc_inspection_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -1976,13 +2117,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     {isFieldVisible('photos_taken') && (
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Photos Taken</label>
-                        <button
-                          type="button"
+                        <div
+                          role="switch"
+                          aria-checked={mobileEditFormData.photos_taken === 'true'}
+                          tabIndex={0}
                           onClick={() => setMobileEditFormData({ ...mobileEditFormData, photos_taken: mobileEditFormData.photos_taken === 'true' ? 'false' : 'true' })}
-                          className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMobileEditFormData({ ...mobileEditFormData, photos_taken: mobileEditFormData.photos_taken === 'true' ? 'false' : 'true' }); } }}
+                          style={{ width: 48, height: 26, minWidth: 48, minHeight: 26, maxHeight: 26, borderRadius: 9999, position: 'relative', cursor: 'pointer', flexShrink: 0, lineHeight: 0, fontSize: 0, boxSizing: 'border-box', overflow: 'hidden' }}
+                          className={`transition-colors duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                         >
-                          <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${mobileEditFormData.photos_taken === 'true' ? 'translate-x-5' : 'translate-x-0'}`} />
-                        </button>
+                          <div
+                            style={{ position: 'absolute', top: 2.5, left: 3, width: 20, height: 20, borderRadius: 9999, backgroundColor: 'white', transform: mobileEditFormData.photos_taken === 'true' ? 'translateX(22px)' : 'translateX(0)', transition: 'transform 200ms' }}
+                          />
+                        </div>
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1990,9 +2137,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Field Visit Date</label>
                           <input
-                            type="date"
-                            value={mobileEditFormData.field_visit_date || ''}
+                            type="text"
+                            placeholder="MM/DD/YYYY"
+                            value={displayDate(mobileEditFormData.field_visit_date || '')}
                             onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, field_visit_date: e.target.value })}
+                            onBlur={handleDateBlur('field_visit_date')}
                             onPaste={handleDatePaste('field_visit_date')}
                             className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                           />
@@ -2083,9 +2232,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Initial Inspection</label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.initial_inspection_completed || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.initial_inspection_completed || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, initial_inspection_completed: e.target.value })}
+                          onBlur={handleDateBlur('initial_inspection_completed')}
                           onPaste={handleDatePaste('initial_inspection_completed')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -2095,9 +2246,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company Signature</label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.company_signature_date || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.company_signature_date || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, company_signature_date: e.target.value })}
+                          onBlur={handleDateBlur('company_signature_date')}
                           onPaste={handleDatePaste('company_signature_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -2107,9 +2260,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recertified</label>
                         <input
-                          type="date"
-                          value={mobileEditFormData.recertified_date || ''}
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.recertified_date || '')}
                           onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, recertified_date: e.target.value })}
+                          onBlur={handleDateBlur('recertified_date')}
                           onPaste={handleDatePaste('recertified_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         />
@@ -2121,8 +2276,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           Recert. Due Date <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Auto</span>
                         </label>
                         <input
-                          type="date"
-                          value={computeRecertificationDueDate(mobileEditingFacility)}
+                          type="text"
+                          value={displayDate(computeRecertificationDueDate(mobileEditingFacility))}
                           readOnly
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-gray-100/60 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 cursor-not-allowed"
                         />
@@ -2590,6 +2745,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <span>Mark Sold</span>
                   </button>
                 )}
+                {onCreateRoute && (
+                  <button
+                    onClick={() => {
+                      onCreateRoute(Array.from(selectedFacilityIds));
+                      setSelectedFacilityIds(new Set());
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm"
+                    title="Create route from selected facilities"
+                  >
+                    <Route className="w-3.5 h-3.5" />
+                    <span>Create Route</span>
+                  </button>
+                )}
                 <button
                   onClick={handleDeleteSelected}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
@@ -2813,7 +2981,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         {visibleColumns.map(columnId => (
                           <td
                             key={columnId}
-                            className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs min-w-[200px] sm:min-w-[100px] md:min-w-[400px]' : 'whitespace-nowrap'
+                            className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap'
                               }`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
@@ -2830,10 +2998,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                 e.stopPropagation();
                                 handleEdit(facility);
                               }}
-                              className="p-1 rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 flex items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-200 hover:scale-110"
                               title="Edit"
                             >
-                              <Edit2 className="w-3 h-3" />
+                              <Edit2 className="w-3 h-3 shrink-0" />
                             </button>
                             <button
                               onClick={(e) => {
@@ -2841,20 +3009,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                 setManagingFacility(facility);
                                 setShowSPCCPlanManager(true);
                               }}
-                              className="p-1 rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 flex items-center justify-center rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
                               title="Manage SPCC Plan"
                             >
-                              <ShieldCheck className="w-3 h-3" />
+                              <ShieldCheck className="w-3 h-3 shrink-0" />
                             </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDelete(facility.id);
                               }}
-                              className="p-1 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
+                              className="p-1 flex items-center justify-center rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
                               title="Delete"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-3 h-3 shrink-0" />
                             </button>
                           </div>
                         </td>
@@ -2868,112 +3036,197 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         }
       </div >
 
-      {
-        showExportColumnSelector && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowExportColumnSelector(false)}>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200" onClick={(e) => e.stopPropagation()}>
-              <div className="p-4 border-b border-gray-200 dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Select Columns to Export</h3>
+      {showExportColumnSelector && (() => {
+        const exportSearchLower = exportColumnSearch.toLowerCase();
+        const selectedColumns = exportColumnOrder.filter(id => exportVisibleColumns.includes(id));
+        const unselectedColumns = exportColumnOrder.filter(id => !exportVisibleColumns.includes(id));
+        const filteredSelected = selectedColumns.filter(id =>
+          COLUMN_LABELS[id].toLowerCase().includes(exportSearchLower)
+        );
+        const filteredUnselected = unselectedColumns.filter(id =>
+          COLUMN_LABELS[id].toLowerCase().includes(exportSearchLower)
+        );
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+            onClick={() => setShowExportColumnSelector(false)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
+                    <FileDown className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Export Columns</h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {exportVisibleColumns.length} of {exportColumnOrder.length} selected
+                    </p>
+                  </div>
+                </div>
                 <button
                   onClick={() => setShowExportColumnSelector(false)}
-                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-4 overflow-y-auto flex-1">
-                <div className="flex gap-2 mb-4">
+
+              {/* Search */}
+              <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={exportColumnSearch}
+                    onChange={(e) => setExportColumnSearch(e.target.value)}
+                    placeholder="Search fields..."
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-2 mt-2">
                   <button
                     onClick={showAllExportColumns}
-                    className="text-sm px-3 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-900"
+                    style={{ minHeight: 0, minWidth: 0 }}
+                    className="text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
                   >
                     Select All
                   </button>
                   <button
                     onClick={resetExportColumns}
-                    className="text-sm px-3 py-2 bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-500"
+                    style={{ minHeight: 0, minWidth: 0 }}
+                    className="text-xs px-2 py-1 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                   >
                     Reset
                   </button>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  Drag the grip handle to reorder columns. The CSV will be exported with columns in this order.
-                </p>
-                <div className="space-y-1">
-                  {exportColumnOrder.map((columnId) => (
-                    <div
-                      key={columnId}
-                      data-column-id={columnId}
-                      className={`flex items-center gap-2 p-3 rounded transition-colors ${draggedExportColumn === columnId
-                        ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                        }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={exportVisibleColumns.includes(columnId)}
-                        onChange={() => toggleExportColumn(columnId)}
-                        className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{COLUMN_LABELS[columnId]}</span>
-                      <div
-                        draggable
-                        onDragStart={() => handleExportDragStart(columnId)}
-                        onDragOver={(e) => handleExportDragOver(e, columnId)}
-                        onDragEnd={handleExportDragEnd}
-                        onTouchStart={(e) => {
-                          const target = e.target as HTMLElement;
-                          if (target.closest('.grip-handle')) {
-                            handleExportDragStart(columnId);
-                            e.preventDefault();
-                          }
-                        }}
-                        onTouchMove={(e) => {
-                          if (draggedExportColumn) {
-                            const touch = e.touches[0];
-                            const elementAtPoint = document.elementFromPoint(touch.clientX, touch.clientY);
-                            const targetDiv = elementAtPoint?.closest('[data-column-id]');
-                            if (targetDiv) {
-                              const targetColumnId = targetDiv.getAttribute('data-column-id') as ColumnId;
-                              if (targetColumnId && draggedExportColumn && targetColumnId !== draggedExportColumn) {
-                                const syntheticEvent = {
-                                  preventDefault: () => { }
-                                } as React.DragEvent;
-                                handleExportDragOver(syntheticEvent, targetColumnId);
-                              }
-                            }
-                            e.preventDefault();
-                          }
-                        }}
-                        onTouchEnd={handleExportDragEnd}
-                        className="grip-handle cursor-move touch-none p-1"
-                      >
-                        <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
-              <div className="p-4 border-t border-gray-200 dark:border-gray-600 flex gap-3 flex-shrink-0">
+
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {/* Selected columns */}
+                {filteredSelected.length > 0 && (
+                  <div className="px-5 pt-3 pb-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Eye className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Selected ({filteredSelected.length})
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {filteredSelected.map((columnId, idx) => (
+                        <div
+                          key={columnId}
+                          data-column-id={columnId}
+                          draggable={!exportColumnSearch}
+                          onDragStart={() => handleExportDragStart(columnId)}
+                          onDragOver={(e) => handleExportDragOver(e, columnId)}
+                          onDragEnd={handleExportDragEnd}
+                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${
+                            draggedExportColumn === columnId
+                              ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                          }`}
+                        >
+                          <button
+                            onClick={() => toggleExportColumn(columnId)}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center shrink-0 hover:bg-blue-700 transition-colors"
+                            title="Deselect column"
+                          >
+                            <CheckCircle className="w-3 h-3 text-white" />
+                          </button>
+                          <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">
+                            {COLUMN_LABELS[columnId]}
+                          </span>
+                          {!exportColumnSearch && (
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div
+                                className="cursor-grab active:cursor-grabbing p-0.5 text-gray-400"
+                                draggable
+                                onDragStart={() => handleExportDragStart(columnId)}
+                              >
+                                <GripVertical className="w-3 h-3" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Divider */}
+                {filteredSelected.length > 0 && filteredUnselected.length > 0 && (
+                  <div className="mx-5 border-t border-gray-200 dark:border-gray-700" />
+                )}
+
+                {/* Unselected columns */}
+                {filteredUnselected.length > 0 && (
+                  <div className="px-5 pt-3 pb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <EyeOff className="w-3.5 h-3.5 text-gray-400" />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Not Selected ({filteredUnselected.length})
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {filteredUnselected.map((columnId) => (
+                        <div
+                          key={columnId}
+                          className="flex items-center gap-2 px-2 py-0.5 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <button
+                            onClick={() => toggleExportColumn(columnId)}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            className="w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-500 flex items-center justify-center shrink-0 hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                            title="Select column"
+                          >
+                          </button>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">
+                            {COLUMN_LABELS[columnId]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No results */}
+                {filteredSelected.length === 0 && filteredUnselected.length === 0 && exportColumnSearch && (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No fields matching "{exportColumnSearch}"
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 shrink-0 flex gap-3">
+                <button
+                  onClick={() => setShowExportColumnSelector(false)}
+                  className="flex-1 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
                 <button
                   onClick={performExport}
                   disabled={exportVisibleColumns.length === 0}
-                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
+                  className="flex-1 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
                 >
-                  Export {exportVisibleColumns.length} Column{exportVisibleColumns.length !== 1 ? 's' : ''} to CSV
-                </button>
-                <button
-                  onClick={() => setShowExportColumnSelector(false)}
-                  className="px-4 py-3 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
-                >
-                  Cancel
+                  Export {exportVisibleColumns.length} Column{exportVisibleColumns.length !== 1 ? 's' : ''}
                 </button>
               </div>
             </div>
           </div>
-        )
-      }
+        );
+      })()}
 
       {
         showUpload && (

@@ -29,9 +29,10 @@ import { useAuth } from './contexts/AuthContext';
 import { useAccount } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
 import { useNavigate } from 'react-router-dom';
-import { isInspectionValid } from './utils/inspectionUtils';
+import { isInspectionValid, getFacilityInspectionExpiry } from './utils/inspectionUtils';
 import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
+import { parseLocalDate } from './utils/dateUtils';
 import { useActivityLogger } from './hooks/useActivityLogger';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -193,17 +194,11 @@ function App() {
 
     const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
-    // Helper: check if a facility needs SPCC inspection
+    // Helper: check if a facility needs SPCC inspection (expired, expiring within 90d, or pending)
     const facilityNeedsInspection = (facility: Facility): boolean => {
-      if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-        const completedDate = new Date(facility.spcc_inspection_date);
-        const oneYearFromCompletion = new Date(completedDate);
-        oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-        if (new Date() <= oneYearFromCompletion) return false;
-      }
       const insp = inspections.find(i => i.facility_id === facility.id);
-      if (isInspectionValid(insp)) return false;
-      return true;
+      const expiry = getFacilityInspectionExpiry(facility, insp);
+      return expiry.status !== 'valid';
     };
 
     // Collect facility IDs to hide based on visibility settings
@@ -237,7 +232,7 @@ function App() {
           const oneYearAgo = new Date();
           oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
           facilities
-            .filter(f => f.spcc_inspection_date && new Date(f.spcc_inspection_date) >= oneYearAgo)
+            .filter(f => f.spcc_inspection_date && parseLocalDate(f.spcc_inspection_date) >= oneYearAgo)
             .forEach(f => hiddenFacilityIds.add(f.id));
         }
         if (hideExternallyCompleted) {
@@ -268,8 +263,9 @@ function App() {
         const facilityData = facilities.find(f => f.name === facility.name);
         if (!facilityData) return;
 
-        // Skip excluded/removed facilities
-        if (facilityData.day_assignment === -1 || facilityData.day_assignment === -2) return;
+        // Skip excluded/removed facilities (only in 'all' mode; survey modes route regardless of day_assignment)
+        if (surveyType === 'all' && (facilityData.day_assignment === -1 || facilityData.day_assignment === -2)) return;
+        if (facilityData.day_assignment === -2) return;
 
         // Apply visibility hiding (only populated in 'all' mode)
         if (hiddenFacilityIds.has(facilityData.id)) return;
@@ -1019,8 +1015,12 @@ function App() {
     setError(null);
 
     try {
-      // Filter out excluded and manually removed facilities (day_assignment === -1 or -2)
-      let activeFacilities = facilities.filter(isActiveFacility);
+      // In specific survey modes (SPCC Plans/Inspections), include all non-sold facilities
+      // since day_assignment=-1 exclusions are for general routing, not targeted SPCC routing.
+      // Only manually removed (-2) and sold facilities remain excluded.
+      let activeFacilities = (surveyType === 'spcc_plan' || surveyType === 'spcc_inspection')
+        ? facilities.filter(f => f.day_assignment !== -2 && f.status !== 'sold')
+        : facilities.filter(isActiveFacility);
 
       // Exclude facilities based on current visibility settings (driven by the visibility modal)
       const completedFacilityIds = new Set<string>();
@@ -1104,6 +1104,20 @@ function App() {
         facilitiesForRouting = activeFacilities.filter(f => !completedFacilityIds.has(f.id));
         excludeCount = facilitiesBeforeFilter - facilitiesForRouting.length;
         console.log(`Excluded ${excludeCount} facilities from route based on visibility settings`);
+      }
+
+      // Survey type filtering: only route facilities relevant to the selected mode
+      if (surveyType === 'spcc_plan') {
+        facilitiesForRouting = facilitiesForRouting.filter(f => facilityNeedsSPCCPlan(f));
+        console.log(`SPCC Plans mode: ${facilitiesForRouting.length} facilities need plan attention`);
+      } else if (surveyType === 'spcc_inspection') {
+        facilitiesForRouting = facilitiesForRouting.filter(f => {
+          const insp = inspections.find(i => i.facility_id === f.id);
+          const expiry = getFacilityInspectionExpiry(f, insp);
+          // Include expired, expiring (within 90 days), and pending inspections
+          return expiry.status !== 'valid';
+        });
+        console.log(`SPCC Inspections mode: ${facilitiesForRouting.length} facilities need inspection`);
       }
 
       if (facilitiesForRouting.length === 0) {
@@ -1393,6 +1407,17 @@ function App() {
         console.log(`Updated day assignments for ${updatePromises.length} facilities (single team mode)`);
       }
 
+      // Refresh local facilities state so UI reflects updated day_assignment and team_assignment
+      const { data: updatedFacilities } = await supabase
+        .from('facilities')
+        .select('*')
+        .eq('account_id', currentAccount.id)
+        .order('created_at', { ascending: true });
+
+      if (updatedFacilities) {
+        setFacilities(updatedFacilities);
+      }
+
       setOptimizationResult(result);
       setLastUsedSettings(settings);
       setRouteVersion(prev => prev + 1);
@@ -1427,6 +1452,169 @@ function App() {
     } catch (err: any) {
       console.error('Error generating routes:', err);
       setError(err.message || 'Failed to generate routes');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleCreateRouteFromSelection = async (facilityIds: string[]) => {
+    if (!homeBase) {
+      setError('Please configure your home base first');
+      return;
+    }
+
+    if (facilityIds.length === 0) {
+      setError('No facilities selected');
+      return;
+    }
+
+    // Get current settings
+    let settings = lastUsedSettings;
+    if (!settings && currentAccount) {
+      const { data: dbSettings } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', currentAccount.id)
+        .single();
+      if (dbSettings) {
+        settings = dbSettings;
+        setLastUsedSettings(dbSettings);
+      }
+    }
+    if (!settings) {
+      setError('Route planning settings not found. Please configure settings first.');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+    setCurrentView('route-planning');
+    localStorage.setItem('currentView', 'route-planning');
+
+    try {
+      // Filter to only selected facilities with valid coordinates
+      const selectedFacilities = facilities.filter(
+        f => facilityIds.includes(f.id) && f.latitude && f.longitude
+      );
+
+      if (selectedFacilities.length === 0) {
+        setError('Selected facilities have no valid coordinates');
+        setIsGenerating(false);
+        return;
+      }
+
+      const constraints = {
+        maxFacilitiesPerDay: settings.max_facilities_per_day,
+        maxHoursPerDay: settings.max_hours_per_day,
+        useFacilitiesConstraint: settings.use_facilities_constraint,
+        useHoursConstraint: settings.use_hours_constraint,
+        startTime: settings.start_time || '08:00',
+        clusteringTightness: settings.clustering_tightness ?? 0.75,
+        clusterBalanceWeight: settings.cluster_balance_weight ?? 0.35,
+        lunchBreakMinutes: settings.lunch_break_minutes || 0,
+        maxDriveTimeMinutes: settings.max_drive_time_minutes || 0,
+        returnByTime: settings.return_by_time || '',
+      };
+
+      const locations = [
+        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
+        ...selectedFacilities.map(f => ({
+          latitude: Number(f.latitude),
+          longitude: Number(f.longitude),
+        })),
+      ];
+
+      const distanceMatrix = await calculateDistanceMatrix(locations);
+
+      const facilitiesWithIndex: FacilityWithIndex[] = selectedFacilities.map((f, idx) => ({
+        index: idx + 1,
+        name: f.name,
+        latitude: Number(f.latitude),
+        longitude: Number(f.longitude),
+        visitDuration: getVisitDuration(f, settings, surveyType),
+      }));
+
+      const result = optimizeRoutes(
+        facilitiesWithIndex,
+        distanceMatrix,
+        constraints,
+        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) }
+      );
+
+      // Update facility day_assignment in DB
+      const updatePromises: Promise<any>[] = [];
+      result.routes.forEach(route => {
+        route.facilities.forEach(facility => {
+          const actualFacility = selectedFacilities.find(f => f.name === facility.name);
+          if (actualFacility) {
+            updatePromises.push(
+              supabase
+                .from('facilities')
+                .update({ day_assignment: route.day, team_assignment: 1 })
+                .eq('id', actualFacility.id)
+                .then()
+            );
+          }
+        });
+      });
+      await Promise.all(updatePromises);
+
+      // Refresh facilities
+      if (currentAccount) {
+        const { data: updatedFacilities } = await supabase
+          .from('facilities')
+          .select('*')
+          .eq('account_id', currentAccount.id)
+          .order('created_at', { ascending: true });
+        if (updatedFacilities) {
+          setFacilities(updatedFacilities);
+        }
+      }
+
+      // Build descriptive name
+      const now = new Date();
+      const dateStr = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+      let routeName: string;
+      if (surveyType === 'spcc_plan') {
+        routeName = `SPCC Plan Route ${dateStr}`;
+      } else if (surveyType === 'spcc_inspection') {
+        routeName = `SPCC Inspection Route ${dateStr}`;
+      } else {
+        routeName = `Selected Facilities Route ${dateStr}`;
+      }
+
+      // Clear previous last_viewed
+      if (currentAccount) {
+        await supabase
+          .from('route_plans')
+          .update({ is_last_viewed: false })
+          .eq('account_id', currentAccount.id)
+          .eq('is_last_viewed', true);
+      }
+
+      // Save the route
+      const { data: newRoute } = await supabase.from('route_plans').insert({
+        user_id: DEMO_USER_ID,
+        account_id: currentAccount?.id,
+        upload_batch_id: facilities[0]?.upload_batch_id,
+        plan_data: result,
+        total_days: result.totalDays,
+        total_miles: result.totalMiles,
+        total_facilities: result.totalFacilities,
+        name: routeName,
+        is_last_viewed: true,
+        settings: settings,
+        home_base_data: homeBase,
+      }).select().single();
+
+      setOptimizationResult(result);
+      setRouteVersion(prev => prev + 1);
+      if (newRoute) {
+        setCurrentRouteId(newRoute.id);
+      }
+    } catch (err: any) {
+      console.error('Error creating route from selection:', err);
+      setError(err.message || 'Failed to create route from selected facilities');
     } finally {
       setIsGenerating(false);
     }
@@ -2561,48 +2749,47 @@ function App() {
           </div>
         )}
 
-        {currentView === 'facilities' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <FacilitiesManager
-              facilities={facilities}
-              accountId={currentAccount.id}
-              userId={user?.authUserId || ''}
-              onFacilitiesChange={loadData}
-              isLoading={isLoadingFacilities}
-              initialFacilityToEdit={facilityToEdit}
-              onFacilityEditHandled={() => setFacilityToEdit(null)}
-              onShowOnMap={(latitude, longitude) => {
-                console.log('[Show on Map] Showing facility on map and ensuring visibility');
-                // Ensure ALL facilities are visible by resetting visibility state
-                setCompletedVisibility({
-                  hideAllCompleted: false,
-                  hideInternallyCompleted: false,
-                  hideExternallyCompleted: false,
-                });
-                // Switch to route planning view and set map to fullscreen mode
-                viewingFacilityRef.current = true;
-                setCurrentView('route-planning');
-                setIsFullScreenMap(true);
-                setMapTargetCoords({ latitude, longitude });
-                // Don't clear targetCoords - let the map handle it naturally
-              }}
-              onCoordinatesUpdated={(facilityId, latitude, longitude) => {
-                console.log('[Coordinates Updated] Showing updated facility on map');
-                // Facility coordinates were updated - center map on new location and ensure visibility
-                setCompletedVisibility({
-                  hideAllCompleted: false,
-                  hideInternallyCompleted: false,
-                  hideExternallyCompleted: false,
-                });
-                viewingFacilityRef.current = true;
-                setCurrentView('route-planning');
-                setIsFullScreenMap(true);
-                setMapTargetCoords({ latitude, longitude });
-                // Don't clear targetCoords - let the map handle it naturally
-              }}
-            />
-          </div>
-        )}
+        <div className={currentView === 'facilities' ? '' : 'hidden'}>
+          <FacilitiesManager
+            facilities={facilities}
+            accountId={currentAccount.id}
+            userId={user?.authUserId || ''}
+            onFacilitiesChange={loadData}
+            isLoading={isLoadingFacilities}
+            initialFacilityToEdit={facilityToEdit}
+            onFacilityEditHandled={() => setFacilityToEdit(null)}
+            onShowOnMap={(latitude, longitude) => {
+              console.log('[Show on Map] Showing facility on map and ensuring visibility');
+              // Ensure ALL facilities are visible by resetting visibility state
+              setCompletedVisibility({
+                hideAllCompleted: false,
+                hideInternallyCompleted: false,
+                hideExternallyCompleted: false,
+              });
+              // Switch to route planning view and set map to fullscreen mode
+              viewingFacilityRef.current = true;
+              setCurrentView('route-planning');
+              setIsFullScreenMap(true);
+              setMapTargetCoords({ latitude, longitude });
+              // Don't clear targetCoords - let the map handle it naturally
+            }}
+            onCoordinatesUpdated={(facilityId, latitude, longitude) => {
+              console.log('[Coordinates Updated] Showing updated facility on map');
+              // Facility coordinates were updated - center map on new location and ensure visibility
+              setCompletedVisibility({
+                hideAllCompleted: false,
+                hideInternallyCompleted: false,
+                hideExternallyCompleted: false,
+              });
+              viewingFacilityRef.current = true;
+              setCurrentView('route-planning');
+              setIsFullScreenMap(true);
+              setMapTargetCoords({ latitude, longitude });
+              // Don't clear targetCoords - let the map handle it naturally
+            }}
+            onCreateRoute={handleCreateRouteFromSelection}
+          />
+        </div>
 
         {/* Legacy configure view handled by useEffect redirect */}
 
@@ -2676,12 +2863,12 @@ function App() {
 
               {isGenerating && optimizationResult && (
                 <div className="flex flex-col items-center justify-center py-16 px-4">
-                  <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+                  <div className="bg-white/60 dark:bg-white/10 backdrop-blur-xl rounded-2xl shadow-lg ring-1 ring-black/5 dark:ring-white/15 p-8 max-w-md w-full text-center transition-colors">
                     <div className="mb-6 flex justify-center">
-                      <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 dark:border-blue-400"></div>
                     </div>
-                    <h3 className="text-xl font-semibold text-gray-800 mb-2">Updating Routes...</h3>
-                    <p className="text-gray-600">Please wait while we apply your new settings.</p>
+                    <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">Updating Routes...</h3>
+                    <p className="text-gray-500 dark:text-gray-300">Please wait while we apply your new settings.</p>
                   </div>
                 </div>
               )}
@@ -2824,38 +3011,11 @@ function App() {
                         planInRouteCount++;
                       }
                       // SPCC Inspection counts
-                      let needsInspection = true;
-                      if (f.spcc_completion_type && f.spcc_inspection_date) {
-                        const cd = new Date(f.spcc_inspection_date);
-                        const oneYear = new Date(cd);
-                        oneYear.setFullYear(oneYear.getFullYear() + 1);
-                        if (new Date() <= oneYear) needsInspection = false;
-                      }
-                      if (needsInspection) {
-                        const insp = inspectionsMap.get(f.id);
-                        if (isInspectionValid(insp)) needsInspection = false;
-                      }
-                      if (needsInspection) {
+                      const insp = inspectionsMap.get(f.id);
+                      const inspExpiry = getFacilityInspectionExpiry(f, insp);
+                      if (inspExpiry.status !== 'valid') {
                         if (isInRoute) inspectionInRouteCount++;
-                        // Check if past due
-                        const insp = inspectionsMap.get(f.id);
-                        let isPastDue = false;
-                        if (!insp && !f.spcc_inspection_date) {
-                          if (f.first_prod_date) {
-                            const fp = new Date(f.first_prod_date);
-                            const oneYearLater = new Date(fp);
-                            oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-                            if (new Date() > oneYearLater) isPastDue = true;
-                          }
-                        } else if (insp && !isInspectionValid(insp)) {
-                          isPastDue = true;
-                        } else if (f.spcc_inspection_date) {
-                          const cd = new Date(f.spcc_inspection_date);
-                          const oneYear = new Date(cd);
-                          oneYear.setFullYear(oneYear.getFullYear() + 1);
-                          if (new Date() > oneYear) isPastDue = true;
-                        }
-                        if (isPastDue) inspectionPastDueCount++;
+                        if (inspExpiry.status === 'expired') inspectionPastDueCount++;
                       }
                     });
 
@@ -3269,9 +3429,11 @@ function App() {
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 transition-colors duration-200">
                 <SettingsTabs
                   tabs={[
+                    // — Operations —
                     {
                       id: 'route-planning',
                       label: 'Route Planning',
+                      section: 'operations',
                       icon: getSettingsIcon('route-planning'),
                       content: (
                         <RoutePlanningSettings
@@ -3286,6 +3448,7 @@ function App() {
                     {
                       id: 'navigation',
                       label: 'Navigation & Maps',
+                      section: 'operations',
                       icon: getSettingsIcon('navigation'),
                       content: (
                         <NavigationSettings
@@ -3294,9 +3457,66 @@ function App() {
                         />
                       ),
                     },
+                    // — Compliance —
+                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                      id: 'spcc-extraction',
+                      label: 'SPCC Extraction',
+                      section: 'compliance',
+                      icon: getSettingsIcon('spcc-extraction'),
+                      content: (
+                        <SPCCExtractionSettings
+                          accountId={currentAccount.id}
+                          authUserId={user?.id || ''}
+                        />
+                      ),
+                    }] : []),
+                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                      id: 'report-display',
+                      label: 'Report Display',
+                      section: 'compliance',
+                      icon: getSettingsIcon('report-display'),
+                      content: (
+                        <ReportDisplaySettings
+                          userId={user?.id || ''}
+                          accountId={currentAccount.id}
+                        />
+                      ),
+                    }] : []),
+                    // — Administration —
+                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                      id: 'account',
+                      label: 'Account & Branding',
+                      section: 'admin',
+                      icon: getSettingsIcon('account'),
+                      content: (
+                        <div className="space-y-8">
+                          <AccountBrandingSettings accountId={currentAccount.id} />
+                          <div className="border-t pt-8">
+                            <DataBackup
+                              accountId={currentAccount.id}
+                              facilities={facilities}
+                              onFacilitiesChange={loadData}
+                            />
+                          </div>
+                        </div>
+                      ),
+                    }] : [{
+                      id: 'account',
+                      label: 'Data Management',
+                      section: 'admin',
+                      icon: getSettingsIcon('account'),
+                      content: (
+                        <DataBackup
+                          accountId={currentAccount.id}
+                          facilities={facilities}
+                          onFacilitiesChange={loadData}
+                        />
+                      ),
+                    }]),
                     {
                       id: 'team',
                       label: 'Team Management',
+                      section: 'admin',
                       icon: getSettingsIcon('team'),
                       content: (user?.isAgencyOwner || accountRole === 'account_admin') ? (
                         <div className="space-y-8">
@@ -3366,59 +3586,10 @@ function App() {
                         </div>
                       ),
                     },
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
-                      id: 'account',
-                      label: 'Account & Branding',
-                      icon: getSettingsIcon('account'),
-                      content: (
-                        <div className="space-y-8">
-                          <AccountBrandingSettings accountId={currentAccount.id} />
-                          <div className="border-t pt-8">
-                            <DataBackup
-                              accountId={currentAccount.id}
-                              facilities={facilities}
-                              onFacilitiesChange={loadData}
-                            />
-                          </div>
-                        </div>
-                      ),
-                    }] : [{
-                      id: 'account',
-                      label: 'Data Management',
-                      icon: getSettingsIcon('account'),
-                      content: (
-                        <DataBackup
-                          accountId={currentAccount.id}
-                          facilities={facilities}
-                          onFacilitiesChange={loadData}
-                        />
-                      ),
-                    }]),
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
-                      id: 'report-display',
-                      label: 'Report Display',
-                      icon: getSettingsIcon('report-display'),
-                      content: (
-                        <ReportDisplaySettings
-                          userId={user?.id || ''}
-                          accountId={currentAccount.id}
-                        />
-                      ),
-                    }] : []),
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
-                      id: 'spcc-extraction',
-                      label: 'SPCC Extraction',
-                      icon: getSettingsIcon('spcc-extraction'),
-                      content: (
-                        <SPCCExtractionSettings
-                          accountId={currentAccount.id}
-                          authUserId={user?.id || ''}
-                        />
-                      ),
-                    }] : []),
                     {
                       id: 'security',
                       label: 'Security',
+                      section: 'admin',
                       icon: getSettingsIcon('security'),
                       content: (
                         <SecuritySettings userId={user?.id || ''} />

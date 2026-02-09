@@ -11,6 +11,7 @@ import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { isInspectionValid } from '../utils/inspectionUtils';
+import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 
 const COLORS = [
@@ -521,7 +522,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   function getInspectionStatus(facility: Facility): 'completed' | 'incomplete' | 'expired' | 'draft' {
     // Check for internal or external completion
     if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const spccDate = new Date(facility.spcc_inspection_date);
+      const spccDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();
@@ -546,7 +547,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
     // Check if SPCC is expired based on spcc_inspection_date
     if (facility.spcc_inspection_date) {
-      const spccDate = new Date(facility.spcc_inspection_date);
+      const spccDate = parseLocalDate(facility.spcc_inspection_date);
       const oneYearFromSpcc = new Date(spccDate);
       oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
       const now = new Date();
@@ -561,7 +562,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   function getSPCCPlanStatus(facility: Facility): SPCCPlanStatusType {
     // Check recertified_date first — if within 5 years, it's recertified
     if (facility.recertified_date) {
-      const recertDate = new Date(facility.recertified_date);
+      const recertDate = parseLocalDate(facility.recertified_date);
       const recertRenewal = new Date(recertDate);
       recertRenewal.setFullYear(recertRenewal.getFullYear() + 5);
       const today = new Date();
@@ -576,7 +577,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
       // Check First Prod Date
       if (facility.first_prod_date) {
-        const firstProd = new Date(facility.first_prod_date);
+        const firstProd = parseLocalDate(facility.first_prod_date);
         const sixMonthsLater = new Date(firstProd);
         sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
         const today = new Date();
@@ -596,7 +597,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     }
 
     // Check Renewal (5 years)
-    const peStampDate = new Date(facility.spcc_pe_stamp_date);
+    const peStampDate = parseLocalDate(facility.spcc_pe_stamp_date);
     const renewalDate = new Date(peStampDate);
     renewalDate.setFullYear(renewalDate.getFullYear() + 5);
     const today = new Date();

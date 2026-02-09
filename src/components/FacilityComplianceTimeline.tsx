@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Calendar, CheckCircle, Clock, AlertTriangle, FileText, TrendingUp } from 'lucide-react';
 import { supabase, Facility, SPCCComplianceTracking } from '../lib/supabase';
+import { parseLocalDate } from '../utils/dateUtils';
 
 interface FacilityComplianceTimelineProps {
   facility: Facility;
@@ -118,7 +119,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
 
   const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return 'Not set';
-    return new Date(dateStr).toLocaleDateString();
+    return parseLocalDate(dateStr).toLocaleDateString('en-US');
   };
 
   const timelineEvents = [];

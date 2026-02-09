@@ -1,11 +1,12 @@
 import { ReactNode } from 'react';
-import { Settings, Navigation, Users, Building2, Lock, FileText, ScanLine } from 'lucide-react';
+import { Settings, Users, Building2, Lock, FileText, ScanLine, Route, Map } from 'lucide-react';
 
 interface SettingsTab {
   id: string;
   label: string;
   icon: ReactNode;
   content: ReactNode;
+  section?: string;
 }
 
 interface SettingsTabsProps {
@@ -15,27 +16,41 @@ interface SettingsTabsProps {
 }
 
 export default function SettingsTabs({ tabs, activeTab, onTabChange }: SettingsTabsProps) {
+  // Group tabs by section for rendering dividers
+  const renderedSections = new Set<string>();
+
   return (
     <div className="space-y-6">
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Settings tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`
-                flex items-center gap-2 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors
-                ${
-                  activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600'
-                }
-              `}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
+        <nav className="-mb-px flex items-center overflow-x-auto" aria-label="Settings tabs">
+          {tabs.map((tab, index) => {
+            const showDivider = tab.section && !renderedSections.has(tab.section) && index > 0;
+            if (tab.section) renderedSections.add(tab.section);
+
+            return (
+              <div key={tab.id} className="flex items-center">
+                {showDivider && (
+                  <div className="flex items-center mx-3 self-stretch py-2">
+                    <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+                  </div>
+                )}
+                <button
+                  onClick={() => onTabChange(tab.id)}
+                  className={`
+                    flex items-center gap-2 whitespace-nowrap py-4 px-3 border-b-2 font-medium text-sm transition-colors
+                    ${
+                      activeTab === tab.id
+                        ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600'
+                    }
+                  `}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              </div>
+            );
+          })}
         </nav>
       </div>
 
@@ -49,9 +64,9 @@ export default function SettingsTabs({ tabs, activeTab, onTabChange }: SettingsT
 export function getSettingsIcon(tabId: string) {
   switch (tabId) {
     case 'route-planning':
-      return <Settings className="w-5 h-5" />;
+      return <Route className="w-5 h-5" />;
     case 'navigation':
-      return <Navigation className="w-5 h-5" />;
+      return <Map className="w-5 h-5" />;
     case 'team':
       return <Users className="w-5 h-5" />;
     case 'account':

@@ -159,16 +159,19 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
       const match = dateStr.match(format);
       if (match) {
         if (format === formats[1]) {
-          return new Date(`${match[1]}-${match[2]}-${match[3]}`);
+          // YYYY-MM-DD
+          return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
         } else if (format === formats[0]) {
-          return new Date(`${match[3]}-${match[1]}-${match[2]}`);
+          // M/D/YYYY
+          return new Date(parseInt(match[3]), parseInt(match[1]) - 1, parseInt(match[2]));
         } else {
-          return new Date(`${match[3]}-${match[1]}-${match[2]}`);
+          // M-D-YYYY
+          return new Date(parseInt(match[3]), parseInt(match[1]) - 1, parseInt(match[2]));
         }
       }
     }
 
-    const attemptParse = new Date(dateStr);
+    const attemptParse = new Date(dateStr + 'T00:00:00');
     return isNaN(attemptParse.getTime()) ? null : attemptParse;
   };
 
