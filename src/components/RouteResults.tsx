@@ -95,6 +95,74 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [bulkReassignTargetDay, setBulkReassignTargetDay] = useState<number>(1);
   const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
 
+  // Per-day start times
+  const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
+  const [showStartTimeModal, setShowStartTimeModal] = useState(false);
+  const [tempDayStartTimes, setTempDayStartTimes] = useState<Record<number, string>>({});
+
+  const getDayStartTime = (day: number) => dayStartTimes[day] || settings?.start_time || '08:00';
+
+  const addMinutesToTimeLocal = (time: string, minutes: number): string => {
+    const [hours, mins] = time.split(':').map(Number);
+    const totalMinutes = Math.round(hours * 60 + mins + minutes);
+    const newHours = Math.floor(totalMinutes / 60) % 24;
+    const newMins = totalMinutes % 60;
+    return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
+  };
+
+  const applyDayStartTimes = (startTimes: Record<number, string>) => {
+    if (!result || !onUpdateResult) return;
+
+    const updatedRoutes = result.routes.map(route => {
+      const newStartTime = startTimes[route.day] || settings?.start_time || '08:00';
+      if (newStartTime === route.startTime) return route;
+
+      // Recalculate all segment times from the new start time
+      const updatedSegments = [];
+      let currentTime = newStartTime;
+
+      for (const segment of route.segments) {
+        // Drive to this location
+        currentTime = addMinutesToTimeLocal(currentTime, segment.duration);
+        const arrivalTime = currentTime;
+
+        let departureTime = arrivalTime;
+        if (segment.to !== 'Home Base') {
+          // Find visit duration from the existing segment timing
+          const oldArrival = segment.arrivalTime;
+          const oldDepart = segment.departureTime;
+          const [aH, aM] = oldArrival.split(':').map(Number);
+          const [dH, dM] = oldDepart.split(':').map(Number);
+          const visitMinutes = (dH * 60 + dM) - (aH * 60 + aM);
+          departureTime = addMinutesToTimeLocal(arrivalTime, Math.max(visitMinutes, 0));
+          currentTime = departureTime;
+        }
+
+        updatedSegments.push({
+          ...segment,
+          arrivalTime,
+          departureTime,
+        });
+      }
+
+      // Compute last facility departure (second to last segment)
+      const lastFacilityDept = updatedSegments.length > 1
+        ? updatedSegments[updatedSegments.length - 2].departureTime
+        : updatedSegments[updatedSegments.length - 1]?.departureTime || newStartTime;
+
+      return {
+        ...route,
+        startTime: newStartTime,
+        endTime: updatedSegments[updatedSegments.length - 1]?.arrivalTime || newStartTime,
+        lastFacilityDepartureTime: lastFacilityDept,
+        segments: updatedSegments,
+      };
+    });
+
+    onUpdateResult({ ...result, routes: updatedRoutes });
+    setDayStartTimes(startTimes);
+  };
+
   useEffect(() => {
     loadInspections();
     setExcludedCount(facilities.filter(f => f.day_assignment === -1).length);
@@ -274,8 +342,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 const visitDuration = surveyType === 'spcc_inspection'
                   ? (tempSettings.inspection_visit_duration_minutes ?? settings?.inspection_visit_duration_minutes ?? 30)
                   : surveyType === 'spcc_plan'
-                  ? (tempSettings.plan_visit_duration_minutes ?? settings?.plan_visit_duration_minutes ?? 60)
-                  : (facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes);
+                    ? (tempSettings.plan_visit_duration_minutes ?? settings?.plan_visit_duration_minutes ?? 60)
+                    : (facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes);
                 departureTime = addMinutesToTime(arrivalTime, visitDuration);
                 totalVisitTime += visitDuration;
               }
@@ -1006,7 +1074,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         )}
         {settings && (
           <div className="bg-white/90 dark:bg-gray-800/80 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200 overflow-visible relative z-10">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-0.5">
                 {onConfigureHomeBase && (
                   <div className="relative group/tip">
@@ -1611,7 +1679,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       )}
       {!showOnlyRouteList && settings && (
         <div className="bg-white/50 dark:bg-gray-800/40 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200">
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {excludedCount > 0 && (
               <button
                 onClick={handleRestoreExcluded}
@@ -1826,250 +1894,266 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         {result.routes
           .filter(route => surveyType === 'all' || route.facilities.some(f => isFacilityVisible(f.name)))
           .map((route) => (
-          <div
-            key={route.day}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"
-            onDragOver={handleDragOver}
-            onDrop={() => handleDrop(route.day)}
-          >
             <div
-              className="relative px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white cursor-pointer hover:from-blue-600 hover:to-blue-700 transition-colors"
-              onClick={() => toggleDayCollapse(route.day)}
+              key={route.day}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"
+              onDragOver={handleDragOver}
+              onDrop={() => handleDrop(route.day)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold">Day {route.day}</h3>
-                  {collapsedDays.has(route.day) ? (
-                    <ChevronDown className="w-5 h-5" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5" />
-                  )}
-                </div>
-
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="flex items-center gap-1">
-                    <MapPin className="w-4 h-4" />
-                    {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <TrendingUp className="w-4 h-4" />
-                    {route.totalMiles.toFixed(1)} mi
-                  </span>
-                  <span className="flex items-center gap-1" title="Driving time">
-                    <Navigation className="w-4 h-4" />
-                    {Math.round(route.totalDriveTime / 60)}h {Math.round(route.totalDriveTime % 60)}m drive
-                  </span>
-                  <span className="flex items-center gap-1" title="Visit/inspection time">
-                    <CheckCircle className="w-4 h-4" />
-                    {Math.round(route.totalVisitTime / 60)}h {Math.round(route.totalVisitTime % 60)}m visits
-                  </span>
-                  <span className="flex items-center gap-1" title="Total workday time (drive + visits + breaks)">
-                    <Clock className="w-4 h-4" />
-                    {Math.round(route.totalTime / 60)}h {Math.round(route.totalTime % 60)}m total
-                  </span>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {(() => {
-                    // Get departure time from last facility (for both display and sunset calculation)
-                    const lastDepartureTime = route.lastFacilityDepartureTime || route.endTime || '';
-
-                    return (
-                      <>
-                        <div className="text-sm text-blue-100">
-                          {formatTimeTo12Hour(route.startTime)} - {formatTimeTo12Hour(lastDepartureTime)}
-                        </div>
-                        {(() => {
-
-                          // Calculate sunset for the first facility location
-                          const firstFacility = route.facilities[0];
-                          if (!firstFacility || !lastDepartureTime) return null;
-
-                          const calculateSunset = (lat: number) => {
-                            const today = new Date();
-                            const month = today.getMonth() + 1;
-                            const isWinter = month >= 11 || month <= 2;
-                            const isSummer = month >= 5 && month <= 8;
-                            let baseHour = 18;
-                            if (isWinter) baseHour = 17;
-                            if (isSummer) baseHour = 20;
-                            const latAdjust = Math.floor((lat - 35) / 10);
-                            baseHour += latAdjust;
-                            return baseHour;
-                          };
-
-                          const sunsetHour = calculateSunset(Number(firstFacility.latitude));
-
-                          // Parse end time
-                          const endHour = lastDepartureTime.includes('PM')
-                            ? parseInt(lastDepartureTime) + (lastDepartureTime.includes('12:') ? 0 : 12)
-                            : parseInt(lastDepartureTime);
-                          const endMinutes = parseInt(lastDepartureTime.split(':')[1] || '0');
-                          const endTimeInMinutes = endHour * 60 + endMinutes;
-
-                          // Apply sunset offset from settings
-                          const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
-                          const sunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
-                          const minutesUntilSunset = sunsetInMinutes - endTimeInMinutes;
-
-                          let icon = '';
-                          let bgColor = '';
-                          let textColor = '';
-                          let label = '';
-
-                          if (minutesUntilSunset < 0) {
-                            icon = '🌙';
-                            bgColor = 'bg-red-500';
-                            textColor = 'text-white';
-                            label = 'After sunset';
-                          } else if (minutesUntilSunset < 60) {
-                            icon = '🌅';
-                            bgColor = 'bg-orange-400';
-                            textColor = 'text-white';
-                            label = 'Near sunset';
-                          } else {
-                            icon = '☀️';
-                            bgColor = 'bg-green-500';
-                            textColor = 'text-white';
-                            label = 'Before sunset';
-                          }
-
-                          return (
-                            <div className={`px-2 py-1 ${bgColor} ${textColor} rounded text-xs font-semibold flex items-center gap-1`} title={`Leaving last facility: ${formatTimeTo12Hour(lastDepartureTime)}`}>
-                              <span>{icon}</span>
-                              <span>{label}</span>
-                            </div>
-                          );
-                        })()}
-                      </>
-                    );
-                  })()}
-                </div>
-                <div className="px-3 py-1 bg-blue-700 text-white rounded-md font-bold text-xs border-2 border-blue-400">
-                  {route.facilities.length} {route.facilities.length === 1 ? 'Facility' : 'Facilities'}
-                </div>
-              </div>
-            </div>
-
-            {!collapsedDays.has(route.day) && (
-              <div className="p-6">
-                {route.facilities.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                    <p className="text-sm">No facilities assigned to this day</p>
-                    <p className="text-xs mt-1">Drag facilities here or use the selection tool to assign them</p>
+              <div
+                className="relative px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white cursor-pointer hover:from-blue-600 hover:to-blue-700 transition-colors"
+                onClick={() => toggleDayCollapse(route.day)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold">Day {route.day}</h3>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const times: Record<number, string> = {};
+                        result.routes.forEach(r => {
+                          times[r.day] = dayStartTimes[r.day] || r.startTime || settings?.start_time || '08:00';
+                        });
+                        setTempDayStartTimes(times);
+                        setShowStartTimeModal(true);
+                      }}
+                      className="flex items-center gap-1 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded-md text-xs font-medium transition-colors"
+                      title="Set day start times"
+                    >
+                      <Clock className="w-3 h-3" />
+                      <span>{formatTimeTo12Hour(getDayStartTime(route.day))}</span>
+                    </button>
+                    {collapsedDays.has(route.day) ? (
+                      <ChevronDown className="w-5 h-5" />
+                    ) : (
+                      <ChevronUp className="w-5 h-5" />
+                    )}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {route.segments.filter(segment => {
-                      // Always show home base segments
-                      if (segment.from === 'Home Base' || segment.to === 'Home Base') {
-                        return true;
-                      }
-                      // Filter based on visibility settings and survey type
-                      const facilityName = segment.to;
-                      return isFacilityVisible(facilityName);
-                    }).map((segment, index) => {
-                      const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
-                      const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
-                      const isSelected = selectedFacilityNames.has(facilityName);
+
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-4 h-4" />
+                      {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <TrendingUp className="w-4 h-4" />
+                      {route.totalMiles.toFixed(1)} mi
+                    </span>
+                    <span className="flex items-center gap-1" title="Driving time">
+                      <Navigation className="w-4 h-4" />
+                      {Math.round(route.totalDriveTime / 60)}h {Math.round(route.totalDriveTime % 60)}m drive
+                    </span>
+                    <span className="flex items-center gap-1" title="Visit/inspection time">
+                      <CheckCircle className="w-4 h-4" />
+                      {Math.round(route.totalVisitTime / 60)}h {Math.round(route.totalVisitTime % 60)}m visits
+                    </span>
+                    <span className="flex items-center gap-1" title="Total workday time (drive + visits + breaks)">
+                      <Clock className="w-4 h-4" />
+                      {Math.round(route.totalTime / 60)}h {Math.round(route.totalTime % 60)}m total
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {(() => {
+                      // Get departure time from last facility (for both display and sunset calculation)
+                      const lastDepartureTime = route.lastFacilityDepartureTime || route.endTime || '';
 
                       return (
-                        <div
-                          key={index}
-                          className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
-                          draggable={!isHomeBaseSegment}
-                          onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
-                          onClick={() => {
-                            if (listSelectionMode && !isHomeBaseSegment) {
-                              handleToggleFacilitySelection(facilityName);
-                            }
-                          }}
-                        >
-                          {listSelectionMode && !isHomeBaseSegment && (
-                            <div className="flex-shrink-0 mt-1" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleToggleFacilitySelection(facilityName)}
-                                className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">
-                            {segment.from === 'Home Base' ? (
-                              <Navigation className="w-4 h-4" />
-                            ) : segment.to === 'Home Base' ? (
-                              <Navigation className="w-4 h-4" />
-                            ) : (
-                              index
-                            )}
+                        <>
+                          <div className="text-sm text-blue-100">
+                            {formatTimeTo12Hour(route.startTime)} - {formatTimeTo12Hour(lastDepartureTime)}
                           </div>
+                          {(() => {
 
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p
-                                    className={`font-medium ${segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
-                                      }`}
-                                    onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
-                                  >
-                                    {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
+                            // Calculate sunset for the first facility location
+                            const firstFacility = route.facilities[0];
+                            if (!firstFacility || !lastDepartureTime) return null;
+
+                            const calculateSunset = (lat: number) => {
+                              const today = new Date();
+                              const month = today.getMonth() + 1;
+                              const isWinter = month >= 11 || month <= 2;
+                              const isSummer = month >= 5 && month <= 8;
+                              let baseHour = 18;
+                              if (isWinter) baseHour = 17;
+                              if (isSummer) baseHour = 20;
+                              const latAdjust = Math.floor((lat - 35) / 10);
+                              baseHour += latAdjust;
+                              return baseHour;
+                            };
+
+                            const sunsetHour = calculateSunset(Number(firstFacility.latitude));
+
+                            // Parse end time
+                            const endHour = lastDepartureTime.includes('PM')
+                              ? parseInt(lastDepartureTime) + (lastDepartureTime.includes('12:') ? 0 : 12)
+                              : parseInt(lastDepartureTime);
+                            const endMinutes = parseInt(lastDepartureTime.split(':')[1] || '0');
+                            const endTimeInMinutes = endHour * 60 + endMinutes;
+
+                            // Apply sunset offset from settings
+                            const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
+                            const sunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
+                            const minutesUntilSunset = sunsetInMinutes - endTimeInMinutes;
+
+                            let icon = '';
+                            let bgColor = '';
+                            let textColor = '';
+                            let label = '';
+
+                            if (minutesUntilSunset < 0) {
+                              icon = '🌙';
+                              bgColor = 'bg-red-500';
+                              textColor = 'text-white';
+                              label = 'After sunset';
+                            } else if (minutesUntilSunset < 60) {
+                              icon = '🌅';
+                              bgColor = 'bg-orange-400';
+                              textColor = 'text-white';
+                              label = 'Near sunset';
+                            } else {
+                              icon = '☀️';
+                              bgColor = 'bg-green-500';
+                              textColor = 'text-white';
+                              label = 'Before sunset';
+                            }
+
+                            return (
+                              <div className={`px-2 py-1 ${bgColor} ${textColor} rounded text-xs font-semibold flex items-center gap-1`} title={`Leaving last facility: ${formatTimeTo12Hour(lastDepartureTime)}`}>
+                                <span>{icon}</span>
+                                <span>{label}</span>
+                              </div>
+                            );
+                          })()}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="px-3 py-1 bg-blue-700 text-white rounded-md font-bold text-xs border-2 border-blue-400">
+                    {route.facilities.length} {route.facilities.length === 1 ? 'Facility' : 'Facilities'}
+                  </div>
+                </div>
+              </div>
+
+              {!collapsedDays.has(route.day) && (
+                <div className="p-6">
+                  {route.facilities.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                      <p className="text-sm">No facilities assigned to this day</p>
+                      <p className="text-xs mt-1">Drag facilities here or use the selection tool to assign them</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {route.segments.filter(segment => {
+                        // Always show home base segments
+                        if (segment.from === 'Home Base' || segment.to === 'Home Base') {
+                          return true;
+                        }
+                        // Filter based on visibility settings and survey type
+                        const facilityName = segment.to;
+                        return isFacilityVisible(facilityName);
+                      }).map((segment, index) => {
+                        const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
+                        const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
+                        const isSelected = selectedFacilityNames.has(facilityName);
+
+                        return (
+                          <div
+                            key={index}
+                            className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+                            draggable={!isHomeBaseSegment}
+                            onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
+                            onClick={() => {
+                              if (listSelectionMode && !isHomeBaseSegment) {
+                                handleToggleFacilitySelection(facilityName);
+                              }
+                            }}
+                          >
+                            {listSelectionMode && !isHomeBaseSegment && (
+                              <div className="flex-shrink-0 mt-1" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => handleToggleFacilitySelection(facilityName)}
+                                  className="w-5 h-5 text-blue-600 rounded cursor-pointer"
+                                />
+                              </div>
+                            )}
+                            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">
+                              {segment.from === 'Home Base' ? (
+                                <Navigation className="w-4 h-4" />
+                              ) : segment.to === 'Home Base' ? (
+                                <Navigation className="w-4 h-4" />
+                              ) : (
+                                index
+                              )}
+                            </div>
+
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p
+                                      className={`font-medium ${segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
+                                        }`}
+                                      onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
+                                    >
+                                      {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
+                                    </p>
+                                    {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
+                                    {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
+                                      const facility = getFacilityForStop(segment.to);
+                                      if (!facility) return null;
+                                      return <SPCCStatusBadge facility={facility} showMessage />;
+                                    })()}
+                                    {/* Standard inspection icons - show when not filtering by spcc_plan */}
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
+                                      <span title="Verified - Inspection within last year">
+                                        <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                      </span>
+                                    )}
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
+                                      <span title="Inspection expired - Reinspection needed">
+                                        <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
+                                      </span>
+                                    )}
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to) && (
+                                      <span title="No inspection yet">
+                                        <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                    <span className="inline-flex items-center gap-1">
+                                      <TrendingUp className="w-3 h-3" />
+                                      {segment.distance.toFixed(1)} mi
+                                    </span>
+                                    <span className="mx-2">•</span>
+                                    <span className="inline-flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {Math.round(segment.duration)} mins drive
+                                    </span>
                                   </p>
-                                  {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
-                                  {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
-                                    const facility = getFacilityForStop(segment.to);
-                                    if (!facility) return null;
-                                    return <SPCCStatusBadge facility={facility} showMessage />;
-                                  })()}
-                                  {/* Standard inspection icons - show when not filtering by spcc_plan */}
-                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
-                                    <span title="Verified - Inspection within last year">
-                                      <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                                    </span>
-                                  )}
-                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
-                                    <span title="Inspection expired - Reinspection needed">
-                                      <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
-                                    </span>
-                                  )}
-                                  {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to) && (
-                                    <span title="No inspection yet">
-                                      <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                                    </span>
+                                </div>
+                                <div className="text-right text-sm">
+                                  <p className="text-gray-600 dark:text-gray-400">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
+                                  {segment.to !== 'Home Base' && (
+                                    <p className="text-gray-600 dark:text-gray-400">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                  <span className="inline-flex items-center gap-1">
-                                    <TrendingUp className="w-3 h-3" />
-                                    {segment.distance.toFixed(1)} mi
-                                  </span>
-                                  <span className="mx-2">•</span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    {Math.round(segment.duration)} mins drive
-                                  </span>
-                                </p>
-                              </div>
-                              <div className="text-right text-sm">
-                                <p className="text-gray-600 dark:text-gray-400">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
-                                {segment.to !== 'Home Base' && (
-                                  <p className="text-gray-600 dark:text-gray-400">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
-                                )}
                               </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
 
         {removedFacilities.length > 0 && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden mt-4 transition-colors duration-200">
@@ -2717,6 +2801,84 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           accountId={accountId}
           onClose={() => setShowExportSurveysPopup(false)}
         />
+      )}
+
+      {/* Per-Day Start Times Modal */}
+      {showStartTimeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowStartTimeModal(false)}>
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Day Start Times</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Set when you leave homebase each day</p>
+              </div>
+              <button
+                onClick={() => setShowStartTimeModal(false)}
+                className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <XIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[50vh] space-y-3">
+              {result.routes.map(route => (
+                <div key={route.day} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold">
+                      {route.day}
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">Day {route.day}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                        {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    type="time"
+                    value={tempDayStartTimes[route.day] || settings?.start_time || '08:00'}
+                    onChange={(e) => setTempDayStartTimes(prev => ({ ...prev, [route.day]: e.target.value }))}
+                    className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  const defaultTime = settings?.start_time || '08:00';
+                  const resetTimes: Record<number, string> = {};
+                  result.routes.forEach(r => { resetTimes[r.day] = defaultTime; });
+                  setTempDayStartTimes(resetTimes);
+                }}
+                className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                Reset All
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowStartTimeModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    applyDayStartTimes(tempDayStartTimes);
+                    setShowStartTimeModal(false);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

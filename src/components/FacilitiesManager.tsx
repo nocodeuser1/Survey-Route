@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route } from 'lucide-react';
 import { Facility, Inspection, supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
@@ -32,10 +32,78 @@ interface FacilitiesManagerProps {
   initialFacilityToEdit?: Facility | null;
   onFacilityEditHandled?: () => void;
   isLoading?: boolean;
-  onCreateRoute?: (facilityIds: string[]) => void;
+  onCreateRoute?: (facilityIds: string[], surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
 }
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+/* ── TouchTooltipButton ──────────────────────────────────────────────
+   On mobile: first tap shows the tooltip label, second tap fires the
+   action. Scrolling or tapping elsewhere dismisses the tooltip.
+   On desktop: click fires the action immediately (no change).
+   ──────────────────────────────────────────────────────────────────── */
+function TouchTooltipButton({
+  id,
+  tooltip,
+  activeTooltipId,
+  onTooltipShow,
+  onClick,
+  className,
+  children,
+}: {
+  id: string;
+  tooltip: string;
+  activeTooltipId: string | null;
+  onTooltipShow: (id: string | null) => void;
+  onClick: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const isActive = activeTooltipId === id;
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        className={className}
+        title={tooltip}
+        onTouchEnd={(e) => {
+          if (!isActive) {
+            // First tap → show tooltip, prevent action
+            e.preventDefault();
+            onTooltipShow(id);
+          } else {
+            // Second tap → fire action (let onClick handle it)
+            onTooltipShow(null);
+            onClick();
+            e.preventDefault();
+          }
+        }}
+        onClick={(e) => {
+          // Desktop click — always fire
+          // On touch devices the onTouchEnd already handled it,
+          // but we guard against double-firing by checking if touch initiated
+          if (activeTooltipId !== null) {
+            // Touch sequence in progress; already handled by onTouchEnd
+            return;
+          }
+          onClick();
+        }}
+      >
+        {children}
+      </button>
+      {isActive && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 pointer-events-none">
+          <div className="px-2.5 py-1.5 text-xs font-medium text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg whitespace-nowrap animate-[fadeIn_0.15s_ease-out]">
+            {tooltip}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-1 w-2 h-2 bg-gray-900 dark:bg-gray-700 rotate-45" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' |
   'spcc_status' | 'inspection_status' | 'notes' |
@@ -215,8 +283,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     warnings: string[];
     isUpdateOnly: boolean;
   } | null>(null);
+  const [mobileTooltipId, setMobileTooltipId] = useState<string | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss mobile tooltip on scroll or outside touch
+  useEffect(() => {
+    if (!mobileTooltipId) return;
+    const dismiss = () => setMobileTooltipId(null);
+    window.addEventListener('scroll', dismiss, true);
+    // Delay adding touchstart listener so the current tap doesn't immediately dismiss
+    const timer = setTimeout(() => {
+      window.addEventListener('touchstart', dismiss, true);
+    }, 50);
+    return () => {
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('touchstart', dismiss, true);
+      clearTimeout(timer);
+    };
+  }, [mobileTooltipId]);
 
   // Clear optimistic notes overrides when facilities prop refreshes
   useEffect(() => {
@@ -901,13 +986,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
     // Auto-expand well section if any well data exists
     const hasWellData = [formData.well_name_1, formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
-      formData.well_api_1, formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6,
-      formData.matched_facility_name, formData.api_numbers_combined].some(v => v && v.trim());
+    formData.well_api_1, formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6,
+    formData.matched_facility_name, formData.api_numbers_combined].some(v => v && v.trim());
     setShowWellSection(hasWellData);
 
     // Auto-expand wells 2-6 if any have data
     const hasWells2to6 = [formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
-      formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6].some(v => v && v.trim());
+    formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6].some(v => v && v.trim());
     setShowWells2to6(hasWells2to6);
   };
 
@@ -2497,22 +2582,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <div className="hidden sm:flex items-center gap-1.5 ml-1">
                     <button
                       onClick={() => setSpccPlanFilter(spccPlanFilter === 'overdue' ? 'all' : 'overdue')}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${
-                        spccPlanFilter === 'overdue'
-                          ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-2 ring-red-400 dark:ring-red-500'
-                          : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:ring-1 hover:ring-red-300 dark:hover:ring-red-600'
-                      }`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${spccPlanFilter === 'overdue'
+                        ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-2 ring-red-400 dark:ring-red-500'
+                        : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:ring-1 hover:ring-red-300 dark:hover:ring-red-600'
+                        }`}
                     >
                       {oc} overdue
                       {spccPlanFilter === 'overdue' && <X className="w-3 h-3 ml-0.5" />}
                     </button>
                     <button
                       onClick={() => setSpccPlanFilter(spccPlanFilter === 'current' ? 'all' : 'current')}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${
-                        spccPlanFilter === 'current'
-                          ? 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 ring-2 ring-emerald-400 dark:ring-emerald-500'
-                          : 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 hover:ring-1 hover:ring-emerald-300 dark:hover:ring-emerald-600'
-                      }`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${spccPlanFilter === 'current'
+                        ? 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 ring-2 ring-emerald-400 dark:ring-emerald-500'
+                        : 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 hover:ring-1 hover:ring-emerald-300 dark:hover:ring-emerald-600'
+                        }`}
                     >
                       {cc} current
                       {spccPlanFilter === 'current' && <X className="w-3 h-3 ml-0.5" />}
@@ -2570,31 +2653,37 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
               {/* View controls group */}
               <div className="flex items-center gap-1">
-                <button
+                <TouchTooltipButton
+                  id="tb-sold"
+                  tooltip={showSoldFacilities ? "Show Active Facilities" : "Show Sold Facilities"}
+                  activeTooltipId={mobileTooltipId}
+                  onTooltipShow={setMobileTooltipId}
                   onClick={() => setShowSoldFacilities(!showSoldFacilities)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium ${showSoldFacilities
                     ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                     : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200'
                     }`}
-                  title={showSoldFacilities ? "Show Active Facilities" : "Show Sold Facilities"}
                 >
                   <DollarSign className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">{showSoldFacilities ? 'Active' : 'Sold'}</span>
-                </button>
+                </TouchTooltipButton>
 
                 <div className="relative">
-                  <button
+                  <TouchTooltipButton
+                    id="tb-filters"
+                    tooltip="Toggle Filters"
+                    activeTooltipId={mobileTooltipId}
+                    onTooltipShow={setMobileTooltipId}
                     onClick={() => setShowFilters(!showFilters)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium ${showFilters
                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200'
                       }`}
-                    title="Toggle Filters"
                   >
                     <Filter className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Filters</span>
                     {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  </button>
+                  </TouchTooltipButton>
                   {showFilters && (
                     <>
                       <div
@@ -2640,45 +2729,57 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   )}
                 </div>
 
-                <button
+                <TouchTooltipButton
+                  id="tb-columns"
+                  tooltip="Column Visibility"
+                  activeTooltipId={mobileTooltipId}
+                  onTooltipShow={setMobileTooltipId}
                   onClick={openColumnSelector}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
-                  title="Column Visibility"
                 >
                   <Columns className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Columns</span>
-                </button>
+                </TouchTooltipButton>
               </div>
 
               <div className="h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
 
               {/* Add / Import */}
               <div className="flex items-center gap-1">
-                <button
+                <TouchTooltipButton
+                  id="tb-add"
+                  tooltip="Add Facility"
+                  activeTooltipId={mobileTooltipId}
+                  onTooltipShow={setMobileTooltipId}
                   onClick={() => setShowAddForm(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                  title="Add Facility"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Add</span>
-                </button>
-                <button
+                </TouchTooltipButton>
+                <TouchTooltipButton
+                  id="tb-import"
+                  tooltip="Import CSV"
+                  activeTooltipId={mobileTooltipId}
+                  onTooltipShow={setMobileTooltipId}
                   onClick={() => setShowUpload(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                  title="Import CSV"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Import</span>
-                </button>
+                </TouchTooltipButton>
                 {spccMode === 'plan' && (
-                  <button
+                  <TouchTooltipButton
+                    id="tb-bulk"
+                    tooltip="Bulk Upload SPCC Plans"
+                    activeTooltipId={mobileTooltipId}
+                    onTooltipShow={setMobileTooltipId}
                     onClick={() => setShowBulkSPCCUpload(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                    title="Bulk Upload SPCC Plans"
                   >
                     <FileText className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Bulk PDFs</span>
-                  </button>
+                  </TouchTooltipButton>
                 )}
               </div>
 
@@ -2688,30 +2789,39 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
                   {/* Export & Reporting */}
                   <div className="flex items-center gap-1">
-                    <button
+                    <TouchTooltipButton
+                      id="tb-csv"
+                      tooltip="Export Facilities to CSV"
+                      activeTooltipId={mobileTooltipId}
+                      onTooltipShow={setMobileTooltipId}
                       onClick={handleExportFacilities}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                      title="Export Facilities to CSV"
                     >
                       <Database className="w-3.5 h-3.5" />
                       <span className="hidden md:inline">CSV</span>
-                    </button>
-                    <button
+                    </TouchTooltipButton>
+                    <TouchTooltipButton
+                      id="tb-reports"
+                      tooltip="Export Inspection Reports"
+                      activeTooltipId={mobileTooltipId}
+                      onTooltipShow={setMobileTooltipId}
                       onClick={() => setShowExportPopup(true)}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
-                      title="Export Inspection Reports"
                     >
                       <FileDown className="w-3.5 h-3.5" />
                       <span className="hidden md:inline">Reports</span>
-                    </button>
-                    <button
+                    </TouchTooltipButton>
+                    <TouchTooltipButton
+                      id="tb-overview"
+                      tooltip="Inspection Overview"
+                      activeTooltipId={mobileTooltipId}
+                      onTooltipShow={setMobileTooltipId}
                       onClick={() => setShowInspectionOverview(true)}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
-                      title="Inspection Overview"
                     >
                       <ClipboardList className="w-3.5 h-3.5" />
                       <span className="hidden md:inline">Overview</span>
-                    </button>
+                    </TouchTooltipButton>
                   </div>
                 </>
               )}
@@ -2748,7 +2858,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 {onCreateRoute && (
                   <button
                     onClick={() => {
-                      onCreateRoute(Array.from(selectedFacilityIds));
+                      const mappedSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan' =
+                        spccMode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
+                      onCreateRoute(Array.from(selectedFacilityIds), mappedSurveyType);
                       setSelectedFacilityIds(new Set());
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm"
@@ -3127,11 +3239,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           onDragStart={() => handleExportDragStart(columnId)}
                           onDragOver={(e) => handleExportDragOver(e, columnId)}
                           onDragEnd={handleExportDragEnd}
-                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${
-                            draggedExportColumn === columnId
-                              ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                          }`}
+                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${draggedExportColumn === columnId
+                            ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            }`}
                         >
                           <button
                             onClick={() => toggleExportColumn(columnId)}
@@ -3558,11 +3669,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           onDragStart={() => handleDragStart(columnId)}
                           onDragOver={(e) => handleDragOver(e, columnId)}
                           onDragEnd={handleDragEnd}
-                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${
-                            draggedColumn === columnId
-                              ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
-                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                          }`}
+                          className={`flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors group ${draggedColumn === columnId
+                            ? 'bg-blue-100 dark:bg-blue-900/50 opacity-50'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            }`}
                         >
                           <button
                             onClick={() => toggleColumn(columnId)}

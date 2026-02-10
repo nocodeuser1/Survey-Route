@@ -51,6 +51,7 @@ interface RouteMapProps {
   locationTracking?: boolean;
   onLocationTrackingChange?: (enabled: boolean) => void;
   surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
+  showOnlyRouteFacilities?: boolean;
 }
 
 const COLORS = [
@@ -80,7 +81,7 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all' }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapWrapperRef = useRef<HTMLDivElement>(null);
@@ -1411,7 +1412,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // When hideCompletedFacilities is TRUE, this block doesn't execute, so unassigned facilities are hidden
       // In SPCC plan mode, always show this section since externally completed facilities
       // (an inspection concept) are skipped from the external section and need plan-aware rendering
-      if (!hideCompletedFacilities || surveyType === 'spcc_plan') {
+      if ((!hideCompletedFacilities || surveyType === 'spcc_plan') && !showOnlyRouteFacilities) {
         // Get facility names already shown in routes
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
@@ -1747,7 +1748,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // Add markers for externally completed facilities (not assigned to routes but should be visible)
       // Skip in SPCC plan mode - external completion is an inspection concept, not plan-related
       // These facilities will be handled by the normal non-route section with plan-aware logic
-      if (surveyType !== 'spcc_plan' && facilities && facilities.length > 0) {
+      if (surveyType !== 'spcc_plan' && !showOnlyRouteFacilities && facilities && facilities.length > 0) {
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
           route.facilities.forEach(f => facilitiesInRoutes.add(f.name));
@@ -1949,7 +1950,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
     }
-  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, triggerFitBounds, surveyType]);
+  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, triggerFitBounds, surveyType, showOnlyRouteFacilities]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {

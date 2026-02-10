@@ -153,7 +153,7 @@ function App() {
     // Load saved visibility for the default survey type ('all')
     const saved = localStorage.getItem('facilityVisibility_all');
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try { return JSON.parse(saved); } catch { }
     }
     return {
       hideAllCompleted: false,
@@ -175,6 +175,8 @@ function App() {
   const [isInspectionFormActive, setIsInspectionFormActive] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>('all');
+  const [routeFacilityIds, setRouteFacilityIds] = useState<string[] | null>(null);
+  const [showOnlyRouteFacilities, setShowOnlyRouteFacilities] = useState(false);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(() => {
     // Initialize as loading if we're starting on route-planning view
     const savedView = localStorage.getItem('currentView');
@@ -310,7 +312,7 @@ function App() {
       try {
         setCompletedVisibility(JSON.parse(saved));
         return;
-      } catch {}
+      } catch { }
     }
     // First-time defaults per survey type
     if (surveyType === 'spcc_inspection') {
@@ -1014,6 +1016,10 @@ function App() {
     setIsGenerating(true);
     setError(null);
 
+    // Full re-generate clears any selected-facility-only mode
+    setRouteFacilityIds(null);
+    setShowOnlyRouteFacilities(false);
+
     try {
       // In specific survey modes (SPCC Plans/Inspections), include all non-sold facilities
       // since day_assignment=-1 exclusions are for general routing, not targeted SPCC routing.
@@ -1457,7 +1463,7 @@ function App() {
     }
   };
 
-  const handleCreateRouteFromSelection = async (facilityIds: string[]) => {
+  const handleCreateRouteFromSelection = async (facilityIds: string[], sourceSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => {
     if (!homeBase) {
       setError('Please configure your home base first');
       return;
@@ -1467,6 +1473,9 @@ function App() {
       setError('No facilities selected');
       return;
     }
+
+    // Set the survey type from the facilities tab so visit durations are correct
+    setSurveyType(sourceSurveyType);
 
     // Get current settings
     let settings = lastUsedSettings;
@@ -1490,6 +1499,10 @@ function App() {
     setError(null);
     setCurrentView('route-planning');
     localStorage.setItem('currentView', 'route-planning');
+
+    // Track selected facility IDs for re-optimize and map filtering
+    setRouteFacilityIds(facilityIds);
+    setShowOnlyRouteFacilities(true);
 
     try {
       // Filter to only selected facilities with valid coordinates
@@ -1526,12 +1539,13 @@ function App() {
 
       const distanceMatrix = await calculateDistanceMatrix(locations);
 
+      // Use sourceSurveyType directly (not the state surveyType) since setSurveyType is async
       const facilitiesWithIndex: FacilityWithIndex[] = selectedFacilities.map((f, idx) => ({
         index: idx + 1,
         name: f.name,
         latitude: Number(f.latitude),
         longitude: Number(f.longitude),
-        visitDuration: getVisitDuration(f, settings, surveyType),
+        visitDuration: getVisitDuration(f, settings, sourceSurveyType),
       }));
 
       const result = optimizeRoutes(
@@ -1710,7 +1724,7 @@ function App() {
     localStorage.setItem('currentView', 'route-planning');
     setShowRefreshOptions(false);
 
-    // Reload settings and trigger full route regeneration
+    // Reload settings and trigger route regeneration
     const { data: latestSettings, error } = await supabase
       .from('user_settings')
       .select('*')
@@ -1724,7 +1738,12 @@ function App() {
     }
 
     if (latestSettings) {
-      await handleGenerateRoutes(latestSettings);
+      // If we have a selected facility list, re-optimize with only those facilities
+      if (routeFacilityIds && routeFacilityIds.length > 0) {
+        await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+      } else {
+        await handleGenerateRoutes(latestSettings);
+      }
     }
   };
 
@@ -3163,6 +3182,7 @@ function App() {
                         onEditFacility={handleEditFacility}
                         surveyType={surveyType}
                         onToggleHideCompleted={() => setShowVisibilityModal(true)}
+                        showOnlyRouteFacilities={showOnlyRouteFacilities}
                       />
                     </div>
                   )}
@@ -3203,13 +3223,21 @@ function App() {
                         }
 
                         if (latestSettings) {
-                          console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
-                          handleGenerateRoutes(latestSettings);
+                          console.log('Loaded latest settings, calling route generation');
+                          // If we have a selected facility list, re-optimize with only those
+                          if (routeFacilityIds && routeFacilityIds.length > 0) {
+                            await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+                          } else {
+                            handleGenerateRoutes(latestSettings);
+                          }
                         } else {
-                          // Settings don't exist yet, use lastUsedSettings or create defaults
                           console.warn('No settings found in database, using current settings');
                           if (lastUsedSettings) {
-                            handleGenerateRoutes(lastUsedSettings);
+                            if (routeFacilityIds && routeFacilityIds.length > 0) {
+                              await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+                            } else {
+                              handleGenerateRoutes(lastUsedSettings);
+                            }
                           } else {
                             alert('Settings not found. Please configure settings first.');
                           }
@@ -3224,7 +3252,12 @@ function App() {
                       }}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                       surveyType={surveyType}
-                      onSurveyTypeChange={setSurveyType}
+                      onSurveyTypeChange={(newType) => {
+                        setSurveyType(newType);
+                        // Clear selected facility list when survey type changes
+                        setRouteFacilityIds(null);
+                        setShowOnlyRouteFacilities(false);
+                      }}
                     />
                   )}
 
@@ -3308,6 +3341,7 @@ function App() {
                             triggerFitBounds={triggerFitBounds}
                             onEditFacility={handleEditFacility}
                             surveyType={surveyType}
+                            showOnlyRouteFacilities={showOnlyRouteFacilities}
                           />
                         </div>
                       </div>
