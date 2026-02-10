@@ -121,14 +121,28 @@ canvas {
 
 /* Tooltip fade-in for mobile touch buttons */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Subtle pulse for active map border */
 @keyframes map-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.3); }
-  50% { box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.08); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.08);
+  }
 }
 
 /* Glass-like backdrop for spiderfied markers */
@@ -136,4 +150,17 @@ canvas {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Slide-up animation for floating selection bar */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

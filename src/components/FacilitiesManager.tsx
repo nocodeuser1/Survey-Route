@@ -2828,64 +2828,89 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           )}
 
-          {/* Selection Actions Bar */}
+          {/* Floating Selection Actions Bar — fixed to bottom on mobile, sticky on desktop */}
           {selectedFacilityIds.size > 0 && (
-            <div className="mx-4 mb-3 flex items-center gap-3 p-2.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
-              <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-                <CheckCircle className="w-4 h-4" />
-                <span>{selectedFacilityIds.size} selected</span>
-              </div>
-              <div className="h-4 w-px bg-blue-300 dark:bg-blue-700"></div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => setShowCompletionModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm"
-                  title="Mark as SPCC completed"
-                >
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Mark Complete</span>
-                </button>
-                {!showSoldFacilities && (
+            <div
+              className="fixed bottom-0 left-0 right-0 z-[9999] animate-[slideUp_0.25s_ease-out]"
+              style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+            >
+              <div className="mx-2 mb-2 md:mx-auto md:max-w-2xl rounded-2xl border border-white/10 dark:border-white/[0.08] bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl shadow-[0_-4px_30px_rgba(0,0,0,0.15)] dark:shadow-[0_-4px_30px_rgba(0,0,0,0.5)]">
+                <div className="flex items-center justify-between gap-2 px-3 py-2.5 md:px-4 md:py-3">
+                  {/* Selection count */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-full bg-blue-500/15 dark:bg-blue-400/15">
+                      <CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                      {selectedFacilityIds.size}
+                      <span className="hidden md:inline ml-1 font-normal text-gray-500 dark:text-gray-400">selected</span>
+                    </span>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="hidden md:block h-6 w-px bg-gray-200 dark:bg-gray-700 shrink-0"></div>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-1.5 md:gap-2">
+                    {/* Mark Complete */}
+                    <button
+                      onClick={() => setShowCompletionModal(true)}
+                      className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-500/10 dark:bg-blue-400/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-400/20 active:scale-95 transition-all text-xs font-medium"
+                      title="Mark as SPCC completed"
+                    >
+                      <CheckCircle className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                      <span className="hidden md:inline">Complete</span>
+                    </button>
+
+                    {/* Mark Sold */}
+                    {!showSoldFacilities && (
+                      <button
+                        onClick={() => setShowSoldModal(true)}
+                        className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 dark:hover:bg-emerald-400/20 active:scale-95 transition-all text-xs font-medium"
+                        title="Mark as Sold"
+                      >
+                        <DollarSign className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <span className="hidden md:inline">Sold</span>
+                      </button>
+                    )}
+
+                    {/* Create Route */}
+                    {onCreateRoute && (
+                      <button
+                        onClick={() => {
+                          const mappedSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan' =
+                            spccMode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
+                          onCreateRoute(Array.from(selectedFacilityIds), mappedSurveyType);
+                          setSelectedFacilityIds(new Set());
+                        }}
+                        className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 dark:hover:bg-indigo-400/20 active:scale-95 transition-all text-xs font-medium"
+                        title="Create route from selected facilities"
+                      >
+                        <Route className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <span className="hidden md:inline">Route</span>
+                      </button>
+                    )}
+
+                    {/* Delete */}
+                    <button
+                      onClick={handleDeleteSelected}
+                      className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg text-red-500 dark:text-red-400 hover:bg-red-500/15 dark:hover:bg-red-400/15 active:scale-95 transition-all text-xs font-medium"
+                      title="Delete Selected"
+                    >
+                      <Trash2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                      <span className="hidden md:inline">Delete</span>
+                    </button>
+                  </div>
+
+                  {/* Clear button */}
                   <button
-                    onClick={() => setShowSoldModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
-                    title="Mark as Sold"
+                    onClick={() => setSelectedFacilityIds(new Set())}
+                    className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-full hover:bg-gray-200/80 dark:hover:bg-gray-700/80 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 active:scale-90 transition-all shrink-0"
+                    title="Clear Selection"
                   >
-                    <DollarSign className="w-3.5 h-3.5" />
-                    <span>Mark Sold</span>
+                    <X className="w-4 h-4" />
                   </button>
-                )}
-                {onCreateRoute && (
-                  <button
-                    onClick={() => {
-                      const mappedSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan' =
-                        spccMode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
-                      onCreateRoute(Array.from(selectedFacilityIds), mappedSurveyType);
-                      setSelectedFacilityIds(new Set());
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm"
-                    title="Create route from selected facilities"
-                  >
-                    <Route className="w-3.5 h-3.5" />
-                    <span>Create Route</span>
-                  </button>
-                )}
-                <button
-                  onClick={handleDeleteSelected}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
-                  title="Delete Selected"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete</span>
-                </button>
-                <button
-                  onClick={() => setSelectedFacilityIds(new Set())}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors text-sm"
-                  title="Clear Selection"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Clear</span>
-                </button>
+                </div>
               </div>
             </div>
           )}
