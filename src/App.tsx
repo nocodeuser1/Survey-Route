@@ -2906,56 +2906,58 @@ function App() {
                     />
                   )}
 
-                  <RouteResults
-                    result={optimizationResult}
-                    settings={lastUsedSettings}
-                    facilities={facilities}
-                    userId={currentAccount.id}
-                    teamNumber={1}
-                    accountId={currentAccount.id}
-                    onSaveCurrentRoute={handleSaveCurrentRoute}
-                    onLoadRoute={handleLoadRoute}
-                    currentRouteId={currentRouteId || undefined}
-                    onConfigureHomeBase={() => setShowHomeBaseModal(true)}
-                    homeBase={homeBase || undefined}
-                    onUpdateResult={(newResult) => {
-                      setOptimizationResult(newResult);
-                      setRouteVersion(prev => prev + 1);
-                    }}
-                    onRefresh={async () => {
-                      console.log('RouteResults onRefresh called');
-                      setTriggerFitBounds(prev => prev + 1);
-                      // Reload latest settings from database
-                      const { data: latestSettings, error } = await supabase
-                        .from('user_settings')
-                        .select('*')
-                        .eq('account_id', currentAccount.id)
-                        .maybeSingle();
+                  {!isFullScreenMap && (
+                    <RouteResults
+                      result={optimizationResult}
+                      settings={lastUsedSettings}
+                      facilities={facilities}
+                      userId={currentAccount.id}
+                      teamNumber={1}
+                      accountId={currentAccount.id}
+                      onSaveCurrentRoute={handleSaveCurrentRoute}
+                      onLoadRoute={handleLoadRoute}
+                      currentRouteId={currentRouteId || undefined}
+                      onConfigureHomeBase={() => setShowHomeBaseModal(true)}
+                      homeBase={homeBase || undefined}
+                      onUpdateResult={(newResult) => {
+                        setOptimizationResult(newResult);
+                        setRouteVersion(prev => prev + 1);
+                      }}
+                      onRefresh={async () => {
+                        console.log('RouteResults onRefresh called');
+                        setTriggerFitBounds(prev => prev + 1);
+                        // Reload latest settings from database
+                        const { data: latestSettings, error } = await supabase
+                          .from('user_settings')
+                          .select('*')
+                          .eq('account_id', currentAccount.id)
+                          .maybeSingle();
 
-                      if (error) {
-                        console.error('Error loading settings for refresh:', error);
-                        alert(`Failed to load settings: ${error.message}`);
-                        return;
-                      }
-
-                      if (latestSettings) {
-                        console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
-                        handleGenerateRoutes(latestSettings);
-                      } else {
-                        // Settings don't exist yet, use lastUsedSettings or create defaults
-                        console.warn('No settings found in database, using current settings');
-                        if (lastUsedSettings) {
-                          handleGenerateRoutes(lastUsedSettings);
-                        } else {
-                          alert('Settings not found. Please configure settings first.');
+                        if (error) {
+                          console.error('Error loading settings for refresh:', error);
+                          alert(`Failed to load settings: ${error.message}`);
+                          return;
                         }
-                      }
-                    }}
-                    onFacilitiesUpdated={loadData}
-                    isRefreshing={isGenerating}
-                    showOnlySettings={true}
-                    onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
-                  />
+
+                        if (latestSettings) {
+                          console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
+                          handleGenerateRoutes(latestSettings);
+                        } else {
+                          // Settings don't exist yet, use lastUsedSettings or create defaults
+                          console.warn('No settings found in database, using current settings');
+                          if (lastUsedSettings) {
+                            handleGenerateRoutes(lastUsedSettings);
+                          } else {
+                            alert('Settings not found. Please configure settings first.');
+                          }
+                        }
+                      }}
+                      onFacilitiesUpdated={loadData}
+                      isRefreshing={isGenerating}
+                      showOnlySettings={true}
+                      onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
+                    />
+                  )}
 
                   <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                     <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
