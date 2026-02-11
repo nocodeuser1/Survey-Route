@@ -1977,6 +1977,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   // forceNavMode: optional parameter to override navigationMode state (for initial Drive Mode centering)
   const centerMapOnLocation = (latitude: number, longitude: number, zoom: number, animate: boolean = true, forceNavMode?: boolean) => {
     if (!mapRef.current) return;
+    if (isDraggingRef.current) return; // Don't center while user is dragging
 
     // Validate coordinates to prevent map jumping to invalid locations
     if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
@@ -2810,15 +2811,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       userInteractedWithMapRef.current = true;
       setAutoCentering(false);
 
-      // Disable location tracking when user manually moves the map
-      if (locationTracking && !navigationMode) {
-        console.log('User dragged map, disabling location tracking');
-        if (onLocationTrackingChange) {
-          onLocationTrackingChange(false);
-        } else {
-          setInternalLocationTracking(false);
-        }
-      }
+      // Don't kill location tracking on drag — just pause auto-centering.
+      // The user can freely pan the map and tracking resumes after inactivity.
 
       // Clear existing timeout
       if (autoCenteringTimeoutRef.current) {
@@ -2835,14 +2829,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // Clear dragging flag
       isDraggingRef.current = false;
 
-      // Re-enable auto-centering after 15 seconds of inactivity
+      // Re-enable auto-centering after 5 seconds of inactivity
       // Re-enable if navigation mode OR location tracking is active
       autoCenteringTimeoutRef.current = setTimeout(() => {
         if (navigationMode || locationTracking) {
           setAutoCentering(true);
           userInteractedWithMapRef.current = false;
         }
-      }, 15000);
+      }, 5000);
     };
 
     const handleZoomStart = () => {
@@ -2862,14 +2856,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         interactionTimer = null;
       }, 500);
 
-      // Re-enable auto-centering after 15 seconds of inactivity
+      // Re-enable auto-centering after 5 seconds of inactivity
       // Re-enable if navigation mode OR location tracking is active
       autoCenteringTimeoutRef.current = setTimeout(() => {
         if (navigationMode || locationTracking) {
           setAutoCentering(true);
           userInteractedWithMapRef.current = false;
         }
-      }, 15000);
+      }, 5000);
     };
 
     // Listen for drag and zoom interactions
@@ -2935,58 +2929,66 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     setIsLocating(true);
     console.log('Requesting geolocation...');
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        console.log('[goToCurrentLocation] Geolocation success:', position.coords);
-        const { latitude, longitude } = position.coords;
+    const handleSuccess = (position: GeolocationPosition) => {
+      console.log('[goToCurrentLocation] Geolocation success:', position.coords);
+      const { latitude, longitude } = position.coords;
 
-        // Update user location marker
-        updateUserLocation(position);
+      // Update user location marker
+      updateUserLocation(position);
 
-        // Use zoom level 18 for location tracking (close-up view)
-        const trackingZoom = 18;
-        setLocationTrackingZoom(trackingZoom);
+      // Use zoom level 18 for location tracking (close-up view)
+      const trackingZoom = 18;
+      setLocationTrackingZoom(trackingZoom);
 
-        // Enable auto-centering for manual tracking
-        setAutoCentering(true);
+      // Enable auto-centering for manual tracking
+      setAutoCentering(true);
 
-        // Reset interaction flags to allow tracking to work
-        justNavigatedRef.current = false;
-        userInteractedWithMapRef.current = false;
-        isDraggingRef.current = false;
+      // Reset interaction flags to allow tracking to work
+      justNavigatedRef.current = false;
+      userInteractedWithMapRef.current = false;
+      isDraggingRef.current = false;
 
-        // Center the map on user location IMMEDIATELY at zoom 18
-        console.log('[goToCurrentLocation] Calling centerMapOnLocation with zoom 18:', { latitude, longitude });
-        centerMapOnLocation(latitude, longitude, trackingZoom, true);
+      // Center the map on user location IMMEDIATELY at zoom 18
+      console.log('[goToCurrentLocation] Calling centerMapOnLocation with zoom 18:', { latitude, longitude });
+      centerMapOnLocation(latitude, longitude, trackingZoom, true);
 
-        setIsLocating(false);
-        console.log('[goToCurrentLocation] Complete - map should now be centered');
-      },
-      (error) => {
-        console.error('Geolocation error:', error);
-        setIsLocating(false);
+      setIsLocating(false);
+      console.log('[goToCurrentLocation] Complete - map should now be centered');
+    };
 
-        let errorMessage = 'Unable to get your location';
+    const handleError = (error: GeolocationPositionError) => {
+      console.error('Geolocation error:', error);
+      setIsLocating(false);
 
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage = 'Location permission denied. Please enable location access in your browser settings.';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage = 'Location information is unavailable. Make sure location services are enabled on your device.';
-            break;
-          case error.TIMEOUT:
-            errorMessage = 'Location request timed out. Please try again.';
-            break;
-        }
+      let errorMessage = 'Unable to get your location';
 
-        alert(errorMessage);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          errorMessage = 'Location permission denied. Please enable location access in your browser settings.';
+          break;
+        case error.POSITION_UNAVAILABLE:
+          errorMessage = 'Location information is unavailable. Make sure location services are enabled on your device.';
+          break;
+        case error.TIMEOUT:
+          errorMessage = 'Location request timed out. Please try again.';
+          break;
       }
+
+      alert(errorMessage);
+    };
+
+    // Two-stage approach: try high accuracy first, fall back to cached position
+    navigator.geolocation.getCurrentPosition(
+      handleSuccess,
+      (error) => {
+        console.warn('[goToCurrentLocation] High accuracy failed, trying fallback:', error.message);
+        navigator.geolocation.getCurrentPosition(
+          handleSuccess,
+          handleError,
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 

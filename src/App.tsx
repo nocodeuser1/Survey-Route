@@ -3186,7 +3186,7 @@ function App() {
                       />
                     </div>
                   )}
-                  {(!isFullScreenMap || showRefreshOptions) && (
+                  {!isFullScreenMap && (
                     <RouteResults
                       result={filteredOptimizationResult}
                       settings={lastUsedSettings}
@@ -3314,6 +3314,7 @@ function App() {
                             onBulkReassignFacilities={handleBulkReassignFacilities}
                             onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
                             onUpdateRoute={() => {
+                              setIsFullScreenMap(false);
                               setShowRefreshOptions(true);
                               setTriggerFitBounds(prev => prev + 1);
                             }}
