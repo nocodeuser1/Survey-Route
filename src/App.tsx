@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList } from 'lucide-react';
+import OfflineIndicator from './components/OfflineIndicator';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
 import FacilitiesManager from './components/FacilitiesManager';
 import RoutePlanningControls from './components/RoutePlanningControls';
@@ -34,6 +35,7 @@ import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
 import { parseLocalDate } from './utils/dateUtils';
 import { useActivityLogger } from './hooks/useActivityLogger';
+import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -795,6 +797,8 @@ function App() {
 
       if (facilitiesData && facilitiesData.length > 0) {
         setFacilities(facilitiesData);
+        // Cache to IndexedDB for offline use
+        cacheOfflineFacilities(facilitiesData).catch(() => {});
       } else {
         // Set empty array if no facilities
         setFacilities([]);
@@ -804,6 +808,8 @@ function App() {
         setHomeBases(homeBaseData);
         setHomeBase(homeBaseData[0]);
         setTeamCount(homeBaseData.length);
+        // Cache to IndexedDB for offline use
+        cacheOfflineHomeBases(homeBaseData).catch(() => {});
       }
 
       console.log('[App] Loaded inspections:', {
@@ -898,6 +904,8 @@ function App() {
         setOptimizationResult(loadedResult);
         setCurrentRouteId(lastRoutePlan.id);
         setRouteVersion(prev => prev + 1);
+        // Cache route plan to IndexedDB for offline use
+        cacheOfflineRoutePlans([lastRoutePlan]).catch(() => {});
 
         // Always use current settings from database, not saved settings from route plan
         if (currentSettings) {
@@ -955,6 +963,35 @@ function App() {
 
     } catch (err) {
       console.error('Error loading data:', err);
+
+      // Fallback to IndexedDB when offline or on error
+      if (!navigator.onLine && currentAccount) {
+        console.log('[loadData] Offline - loading from IndexedDB cache');
+        try {
+          const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
+            getOfflineFacilities(currentAccount.id),
+            getOfflineHomeBases(user!.id),
+            getOfflineRoutePlans(user!.id),
+          ]);
+          if (cachedFacilities.length > 0) {
+            setFacilities(cachedFacilities);
+          }
+          if (cachedHomeBases.length > 0) {
+            setHomeBases(cachedHomeBases);
+            setHomeBase(cachedHomeBases[0]);
+            setTeamCount(cachedHomeBases.length);
+          }
+          const lastViewed = cachedRoutePlans.find(p => p.is_last_viewed);
+          if (lastViewed) {
+            setOptimizationResult(lastViewed.plan_data);
+            setCurrentRouteId(lastViewed.id);
+            setRouteVersion(prev => prev + 1);
+          }
+        } catch (cacheErr) {
+          console.error('Error loading offline cache:', cacheErr);
+        }
+      }
+
       // On error, clear loading state
       setIsLoadingRoutes(false);
       setIsLoadingFacilities(false);
@@ -3704,6 +3741,8 @@ function App() {
           onClose={() => setShowHomeBaseModal(false)}
         />
       )}
+
+      <OfflineIndicator />
     </div>
   );
 }
