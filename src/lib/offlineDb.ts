@@ -51,29 +51,34 @@ let dbInstance: IDBPDatabase<SurveyRouteDB> | null = null;
 export async function getDb(): Promise<IDBPDatabase<SurveyRouteDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<SurveyRouteDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      // Facilities store
-      const facilityStore = db.createObjectStore('facilities', { keyPath: 'id' });
-      facilityStore.createIndex('by-user', 'user_id');
-      facilityStore.createIndex('by-account', 'account_id');
+  try {
+    dbInstance = await openDB<SurveyRouteDB>(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        // Facilities store
+        const facilityStore = db.createObjectStore('facilities', { keyPath: 'id' });
+        facilityStore.createIndex('by-user', 'user_id');
+        facilityStore.createIndex('by-account', 'account_id');
 
-      // Route plans store
-      const routeStore = db.createObjectStore('route_plans', { keyPath: 'id' });
-      routeStore.createIndex('by-user', 'user_id');
+        // Route plans store
+        const routeStore = db.createObjectStore('route_plans', { keyPath: 'id' });
+        routeStore.createIndex('by-user', 'user_id');
 
-      // Home bases store
-      const homeBaseStore = db.createObjectStore('home_bases', { keyPath: 'id' });
-      homeBaseStore.createIndex('by-user', 'user_id');
+        // Home bases store
+        const homeBaseStore = db.createObjectStore('home_bases', { keyPath: 'id' });
+        homeBaseStore.createIndex('by-user', 'user_id');
 
-      // Sync queue store
-      const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
-      syncStore.createIndex('by-table', 'table');
-      syncStore.createIndex('by-timestamp', 'timestamp');
-    },
-  });
+        // Sync queue store
+        const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
+        syncStore.createIndex('by-table', 'table');
+        syncStore.createIndex('by-timestamp', 'timestamp');
+      },
+    });
 
-  return dbInstance;
+    return dbInstance;
+  } catch (err) {
+    console.error('[offlineDb] IndexedDB unavailable (private browsing or storage quota exceeded):', err);
+    throw new Error('IndexedDB is unavailable. Offline features are disabled.');
+  }
 }
 
 // --- Facilities ---
@@ -156,6 +161,16 @@ export async function getHomeBasesByUser(userId: string): Promise<HomeBase[]> {
   return all.map(({ _localUpdatedAt: _, ...rest }) => rest as unknown as HomeBase);
 }
 
+export async function saveHomeBase(base: HomeBase): Promise<void> {
+  const db = await getDb();
+  await db.put('home_bases', { ...base, _localUpdatedAt: Date.now() });
+}
+
+export async function deleteHomeBase(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete('home_bases', id);
+}
+
 // --- Sync Queue ---
 
 export async function addToSyncQueue(entry: Omit<SyncQueueEntry, 'id' | 'timestamp' | 'retries'>): Promise<void> {
@@ -193,4 +208,32 @@ export async function getSyncQueueCount(): Promise<number> {
 export async function clearSyncQueue(): Promise<void> {
   const db = await getDb();
   await db.clear('sync_queue');
+}
+
+// --- Storage Estimate ---
+
+export interface StorageEstimate {
+  usageMB: number;
+  quotaMB: number;
+  percentUsed: number;
+}
+
+/**
+ * Check storage usage so the UI can warn users when storage is getting full.
+ * Returns null if the Storage API is unavailable.
+ */
+export async function getStorageEstimate(): Promise<StorageEstimate | null> {
+  if (!navigator.storage?.estimate) return null;
+  try {
+    const estimate = await navigator.storage.estimate();
+    const usage = estimate.usage ?? 0;
+    const quota = estimate.quota ?? 0;
+    return {
+      usageMB: Math.round((usage / (1024 * 1024)) * 100) / 100,
+      quotaMB: Math.round((quota / (1024 * 1024)) * 100) / 100,
+      percentUsed: quota > 0 ? Math.round((usage / quota) * 10000) / 100 : 0,
+    };
+  } catch {
+    return null;
+  }
 }

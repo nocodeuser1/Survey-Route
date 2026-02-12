@@ -965,13 +965,13 @@ function App() {
       console.error('Error loading data:', err);
 
       // Fallback to IndexedDB when offline or on error
-      if (!navigator.onLine && currentAccount) {
+      if (!navigator.onLine && currentAccount && user) {
         console.log('[loadData] Offline - loading from IndexedDB cache');
         try {
           const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
             getOfflineFacilities(currentAccount.id),
-            getOfflineHomeBases(user!.id),
-            getOfflineRoutePlans(user!.id),
+            getOfflineHomeBases(user.id),
+            getOfflineRoutePlans(user.id),
           ]);
           if (cachedFacilities.length > 0) {
             setFacilities(cachedFacilities);

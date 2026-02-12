@@ -6,15 +6,25 @@ import {
   addToSyncQueue,
   saveFacility,
   saveRoutePlan,
+  saveHomeBase,
   deleteFacility,
   deleteRoutePlan,
+  deleteHomeBase,
   type SyncQueueEntry,
 } from './offlineDb';
-import type { Facility, RoutePlan } from './supabase';
+import type { Facility, RoutePlan, HomeBase } from './supabase';
 
 const MAX_RETRIES = 5;
 let isSyncing = false;
 let syncListeners: Array<() => void> = [];
+let syncFailedListeners: Array<(entry: SyncQueueEntry) => void> = [];
+
+export function onSyncFailed(listener: (entry: SyncQueueEntry) => void): () => void {
+  syncFailedListeners.push(listener);
+  return () => {
+    syncFailedListeners = syncFailedListeners.filter((l) => l !== listener);
+  };
+}
 
 export function onSyncChange(listener: () => void): () => void {
   syncListeners.push(listener);
@@ -45,6 +55,9 @@ export async function queueRouteChange(
       case 'route_plans':
         await saveRoutePlan(data as unknown as RoutePlan);
         break;
+      case 'home_bases':
+        await saveHomeBase(data as unknown as HomeBase);
+        break;
     }
   } else if (operation === 'delete') {
     switch (table) {
@@ -54,6 +67,24 @@ export async function queueRouteChange(
       case 'route_plans':
         await deleteRoutePlan(data.id as string);
         break;
+      case 'home_bases':
+        await deleteHomeBase(data.id as string);
+        break;
+    }
+  }
+
+  // Deduplicate: update existing pending entry for same table+record instead of creating a new one
+  const recordId = data.id as string | undefined;
+  if (recordId) {
+    const queue = await getSyncQueue();
+    const existing = queue.find(
+      (e) => e.table === table && (e.data as Record<string, unknown>).id === recordId
+    );
+    if (existing) {
+      await updateSyncQueueEntry({ ...existing, operation, data, timestamp: Date.now() });
+      notifySyncListeners();
+      if (navigator.onLine) processQueue();
+      return;
     }
   }
 
@@ -83,7 +114,11 @@ export async function processQueue(): Promise<{ processed: number; failed: numbe
 
     for (const entry of queue) {
       if (entry.retries >= MAX_RETRIES) {
-        // Drop entries that have failed too many times
+        console.warn(
+          `[syncQueue] Permanently failed sync entry after ${MAX_RETRIES} retries:`,
+          { table: entry.table, operation: entry.operation, id: (entry.data as Record<string, unknown>).id }
+        );
+        syncFailedListeners.forEach((l) => l(entry));
         await removeSyncQueueEntry(entry.id);
         failed++;
         continue;

@@ -92,7 +92,7 @@ async function handleTileRequest(request) {
   } catch (err) {
     // Network failed - return stale cache if available
     if (cached) return cached;
-    throw err;
+    return new Response('', { status: 408, statusText: 'Tile unavailable offline' });
   }
 }
 
