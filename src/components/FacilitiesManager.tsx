@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route } from 'lucide-react';
-import { Facility, Inspection, supabase } from '../lib/supabase';
+import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
+import SurveyTypeSelector from './SurveyTypeSelector';
+import FacilitySurveyView from './FacilitySurveyView';
 import * as XLSX from 'xlsx';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
@@ -33,6 +35,15 @@ interface FacilitiesManagerProps {
   onFacilityEditHandled?: () => void;
   isLoading?: boolean;
   onCreateRoute?: (facilityIds: string[], surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
+  // Survey type filtering
+  surveyTypes?: SurveyType[];
+  activeSurveyTypeId?: string | null;
+  onSurveyTypeSelect?: (surveyTypeId: string | null) => void;
+  surveyTypesLoading?: boolean;
+  getFieldsForType?: (surveyTypeId: string) => SurveyField[];
+  getSurveyData?: (facilityId: string, surveyTypeId: string) => FacilitySurveyData[];
+  getCompletionStatus?: (facilityId: string, surveyTypeId: string) => { completed: number; total: number; percent: number };
+  onSurveyDataSaved?: () => void;
 }
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -181,7 +192,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
@@ -284,6 +295,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     isUpdateOnly: boolean;
   } | null>(null);
   const [mobileTooltipId, setMobileTooltipId] = useState<string | null>(null);
+  const [surveyViewFacility, setSurveyViewFacility] = useState<Facility | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
 
@@ -1667,6 +1679,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const handleFacilityRowClick = (facility: Facility) => {
+    // If a custom (non-system) survey type is active, open the survey view
+    if (activeSurveyTypeId) {
+      const activeType = surveyTypes.find(t => t.id === activeSurveyTypeId);
+      if (activeType && !activeType.is_system) {
+        setSurveyViewFacility(facility);
+        return;
+      }
+      // System types: SPCC Plan → plan detail, SPCC Inspection → facility detail
+      if (activeType?.is_system && activeType.name.toLowerCase().includes('plan')) {
+        setSpccPlanDetailFacility(facility);
+        return;
+      }
+    }
     if (spccMode === 'plan') {
       setSpccPlanDetailFacility(facility);
     } else {
@@ -1772,13 +1797,29 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     switch (columnId) {
-      case 'name':
+      case 'name': {
+        const surveyCompletion = activeSurveyTypeId && getCompletionStatus
+          ? getCompletionStatus(facility.id, activeSurveyTypeId)
+          : null;
         return (
           <div className="flex items-center gap-2 flex-wrap">
             <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
             <span className="break-words">{facility.name}</span>
+            {surveyCompletion && surveyCompletion.total > 0 && (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                surveyCompletion.percent === 100
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                  : surveyCompletion.percent > 0
+                    ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+              }`}>
+                {surveyCompletion.percent === 100 && <CheckCircle className="w-2.5 h-2.5" />}
+                {surveyCompletion.completed}/{surveyCompletion.total}
+              </span>
+            )}
           </div>
         );
+      }
       case 'latitude':
         return Number(facility.latitude).toFixed(6);
       case 'longitude':
@@ -2557,6 +2598,39 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </div>
         </div>
       )}
+
+      {/* Survey Type Selector */}
+      {surveyTypes.length > 0 && (
+        <SurveyTypeSelector
+          surveyTypes={surveyTypes}
+          activeSurveyTypeId={activeSurveyTypeId}
+          onSelect={(id) => onSurveyTypeSelect?.(id)}
+          loading={surveyTypesLoading}
+          className="mb-4"
+        />
+      )}
+
+      {/* FacilitySurveyView Modal */}
+      {surveyViewFacility && activeSurveyTypeId && (() => {
+        const activeType = surveyTypes.find(t => t.id === activeSurveyTypeId);
+        if (!activeType || activeType.is_system) return null;
+        const fields = getFieldsForType?.(activeSurveyTypeId) || [];
+        const data = getSurveyData?.(surveyViewFacility.id, activeSurveyTypeId) || [];
+        return (
+          <FacilitySurveyView
+            facility={surveyViewFacility}
+            surveyType={activeType}
+            fields={fields}
+            existingData={data}
+            userId={userId}
+            onClose={() => setSurveyViewFacility(null)}
+            onSaved={() => {
+              onSurveyDataSaved?.();
+              setSurveyViewFacility(null);
+            }}
+          />
+        );
+      })()}
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200">
         <div className="border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">

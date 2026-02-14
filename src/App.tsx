@@ -36,6 +36,7 @@ import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
 import { parseLocalDate } from './utils/dateUtils';
 import { useActivityLogger } from './hooks/useActivityLogger';
+import { useSurveyTypes } from './hooks/useSurveyTypes';
 import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -190,6 +191,17 @@ function App() {
   const [signatureBannerDismissed, setSignatureBannerDismissed] = useState(() => {
     return localStorage.getItem('signatureDeferred') === 'true';
   });
+  const [activeSurveyTypeId, setActiveSurveyTypeId] = useState<string | null>(null);
+
+  // Load survey types from database for app-wide filtering
+  const {
+    surveyTypes: dbSurveyTypes,
+    getFieldsForType,
+    getSurveyData,
+    getCompletionStatus,
+    refreshSurveyData,
+    loading: surveyTypesLoading,
+  } = useSurveyTypes(currentAccount?.id || '');
 
   // Calculate visible facility count based on completedVisibility settings and surveyType
   const visibleFacilityCount = useMemo(() => {
@@ -2845,6 +2857,14 @@ function App() {
               // Don't clear targetCoords - let the map handle it naturally
             }}
             onCreateRoute={handleCreateRouteFromSelection}
+            surveyTypes={dbSurveyTypes}
+            activeSurveyTypeId={activeSurveyTypeId}
+            onSurveyTypeSelect={setActiveSurveyTypeId}
+            surveyTypesLoading={surveyTypesLoading}
+            getFieldsForType={getFieldsForType}
+            getSurveyData={getSurveyData}
+            getCompletionStatus={getCompletionStatus}
+            onSurveyDataSaved={refreshSurveyData}
           />
         </div>
 
