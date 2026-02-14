@@ -398,6 +398,19 @@ export interface SurveyField {
   updated_at: string;
 }
 
+export interface FacilitySurveyData {
+  id: string;
+  facility_id: string;
+  survey_type_id: string;
+  field_id: string;
+  value: any;
+  photos: any;
+  completed_by: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SPCCComplianceTracking {
   id: string;
   facility_id: string;

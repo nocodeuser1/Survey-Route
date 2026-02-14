@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS survey_types (
 
 ALTER TABLE survey_types ENABLE ROW LEVEL SECURITY;
 
+-- Unique constraint to prevent duplicate names per account (needed for ON CONFLICT in seed)
+ALTER TABLE survey_types ADD CONSTRAINT survey_types_account_id_name_key UNIQUE (account_id, name);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_survey_types_account_id ON survey_types(account_id);
 CREATE INDEX IF NOT EXISTS idx_survey_types_enabled ON survey_types(account_id, enabled);
@@ -269,7 +272,7 @@ BEGIN
     -- SPCC Plan
     INSERT INTO survey_types (account_id, name, description, icon, color, is_system, enabled, sort_order)
     VALUES (acc.id, 'SPCC Plan', 'Spill Prevention, Control, and Countermeasure Plan documentation', 'file-text', '#3B82F6', true, true, 0)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (account_id, name) DO NOTHING
     RETURNING id INTO spcc_plan_id;
 
     IF spcc_plan_id IS NOT NULL THEN
@@ -296,7 +299,7 @@ BEGIN
     -- SPCC Inspection
     INSERT INTO survey_types (account_id, name, description, icon, color, is_system, enabled, sort_order)
     VALUES (acc.id, 'SPCC Inspection', 'SPCC compliance inspection checklist', 'clipboard-check', '#10B981', true, true, 1)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (account_id, name) DO NOTHING
     RETURNING id INTO spcc_inspection_id;
 
     IF spcc_inspection_id IS NOT NULL THEN
