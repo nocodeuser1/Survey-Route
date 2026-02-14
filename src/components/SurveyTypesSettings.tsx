@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ClipboardList, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
   ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Loader2, X,
   FileText, ClipboardCheck, Shield, HardHat, Droplets, Wrench, Flame,
   CheckCircle, AlertTriangle, Lock, GripVertical, Type, Hash, Calendar,
-  List, CheckSquare, Camera, PenTool, MapPin, Star, AlignLeft, Clock
+  List, CheckSquare, Camera, PenTool, MapPin, Star, AlignLeft, Clock,
+  Mic, MicOff, Headphones, Tags
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { SurveyType, SurveyField } from '../lib/supabase';
@@ -476,6 +477,138 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
     }
   };
 
+  // ─── Hands-Free toggles ───
+
+  const toggleHandsFree = async (type: SurveyTypeWithCount) => {
+    try {
+      const newVal = !type.hands_free_enabled;
+      const { error } = await supabase
+        .from('survey_types')
+        .update({ hands_free_enabled: newVal })
+        .eq('id', type.id);
+
+      if (error) throw error;
+
+      setSelectedType(prev => prev ? { ...prev, hands_free_enabled: newVal } : prev);
+      setSurveyTypes(prev =>
+        prev.map(t => t.id === type.id ? { ...t, hands_free_enabled: newVal } : t)
+      );
+    } catch (err) {
+      console.error('Error toggling hands-free:', err);
+      showMessage('error', 'Failed to update hands-free setting');
+    }
+  };
+
+  const toggleFieldVoice = async (field: SurveyField) => {
+    try {
+      const newVal = !field.voice_input_enabled;
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ voice_input_enabled: newVal })
+        .eq('id', field.id);
+
+      if (error) throw error;
+
+      setFields(prev =>
+        prev.map(f => f.id === field.id ? { ...f, voice_input_enabled: newVal } : f)
+      );
+    } catch (err) {
+      console.error('Error toggling voice input:', err);
+      showMessage('error', 'Failed to update field');
+    }
+  };
+
+  const toggleFieldPhoto = async (field: SurveyField) => {
+    try {
+      const newVal = !field.photo_capture_enabled;
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ photo_capture_enabled: newVal })
+        .eq('id', field.id);
+
+      if (error) throw error;
+
+      setFields(prev =>
+        prev.map(f => f.id === field.id ? { ...f, photo_capture_enabled: newVal } : f)
+      );
+    } catch (err) {
+      console.error('Error toggling photo capture:', err);
+      showMessage('error', 'Failed to update field');
+    }
+  };
+
+  const toggleAllVoice = async () => {
+    if (fields.length === 0) return;
+    const allEnabled = fields.every(f => f.voice_input_enabled);
+    const newVal = !allEnabled;
+    try {
+      const ids = fields.map(f => f.id);
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ voice_input_enabled: newVal })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setFields(prev => prev.map(f => ({ ...f, voice_input_enabled: newVal })));
+    } catch (err) {
+      console.error('Error toggling all voice:', err);
+      showMessage('error', 'Failed to update fields');
+    }
+  };
+
+  const toggleAllPhoto = async () => {
+    if (fields.length === 0) return;
+    const allEnabled = fields.every(f => f.photo_capture_enabled);
+    const newVal = !allEnabled;
+    try {
+      const ids = fields.map(f => f.id);
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ photo_capture_enabled: newVal })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setFields(prev => prev.map(f => ({ ...f, photo_capture_enabled: newVal })));
+    } catch (err) {
+      console.error('Error toggling all photo:', err);
+      showMessage('error', 'Failed to update fields');
+    }
+  };
+
+  const [editingKeywords, setEditingKeywords] = useState<string | null>(null);
+  const [keywordsInput, setKeywordsInput] = useState('');
+
+  const startEditKeywords = (field: SurveyField) => {
+    setEditingKeywords(field.id);
+    setKeywordsInput((field.voice_keywords || []).join(', '));
+  };
+
+  const saveKeywords = async (field: SurveyField) => {
+    try {
+      const keywords = keywordsInput
+        .split(',')
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ voice_keywords: keywords.length > 0 ? keywords : null })
+        .eq('id', field.id);
+
+      if (error) throw error;
+
+      setFields(prev =>
+        prev.map(f => f.id === field.id ? { ...f, voice_keywords: keywords.length > 0 ? keywords : null } : f)
+      );
+      setEditingKeywords(null);
+    } catch (err) {
+      console.error('Error saving voice keywords:', err);
+      showMessage('error', 'Failed to save keywords');
+    }
+  };
+
   // ─── Options management for select/multi_select ───
 
   const addOption = () => {
@@ -566,6 +699,71 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
           </button>
         </div>
 
+        {/* Hands-Free Mode Toggle */}
+        <div className="flex items-center justify-between p-4 rounded-xl border bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
+              <Headphones className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <h4 className="font-medium text-gray-900 dark:text-white">Hands-Free Mode</h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Enable voice-guided survey data collection
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => selectedType && toggleHandsFree(selectedType)}
+            className="p-1"
+          >
+            {selectedType?.hands_free_enabled ? (
+              <ToggleRight className="w-10 h-6 text-green-500" />
+            ) : (
+              <ToggleLeft className="w-10 h-6 text-gray-400" />
+            )}
+          </button>
+        </div>
+
+        {/* Column Headers with Toggle All */}
+        {fields.length > 0 && (
+          <div className="flex items-center gap-3 px-3 py-2">
+            <div className="w-[52px] flex-shrink-0" /> {/* reorder spacer */}
+            <div className="w-8 flex-shrink-0" /> {/* icon spacer */}
+            <div className="flex-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Fields
+            </div>
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <button
+                onClick={toggleAllVoice}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  fields.every(f => f.voice_input_enabled)
+                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+                title="Toggle all voice input"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                Voice
+              </button>
+              <button
+                onClick={toggleAllPhoto}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  fields.every(f => f.photo_capture_enabled)
+                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+                title="Toggle all photo capture"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                Photo
+              </button>
+              <span className="w-[120px] text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
+                Actions
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Message */}
         {message && (
           <div className={`flex items-center gap-2 p-3 rounded-lg ${
@@ -595,8 +793,8 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
         ) : (
           <div className="space-y-2">
             {fields.map((field, idx) => (
+              <React.Fragment key={field.id}>
               <div
-                key={field.id}
                 className="flex items-center gap-3 p-3 rounded-xl border bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700 backdrop-blur-sm group"
               >
                 {/* Reorder buttons */}
@@ -659,8 +857,47 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   </div>
                 </div>
 
+                {/* Voice & Photo toggles */}
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <button
+                    onClick={() => toggleFieldVoice(field)}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      field.voice_input_enabled
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                    title={field.voice_input_enabled ? 'Disable voice input' : 'Enable voice input'}
+                  >
+                    {field.voice_input_enabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={() => toggleFieldPhoto(field)}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      field.photo_capture_enabled
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                    title={field.photo_capture_enabled ? 'Disable photo capture' : 'Enable photo capture'}
+                  >
+                    <Camera className={`w-4 h-4 ${field.photo_capture_enabled ? '' : 'opacity-50'}`} />
+                  </button>
+                </div>
+
                 {/* Actions */}
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {/* Voice keywords */}
+                  <button
+                    onClick={() => startEditKeywords(field)}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      field.voice_keywords && field.voice_keywords.length > 0
+                        ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500'
+                    }`}
+                    title={`Voice keywords: ${field.voice_keywords?.join(', ') || 'none'}`}
+                  >
+                    <Tags className="w-3.5 h-3.5" />
+                  </button>
+
                   {/* Required toggle */}
                   {!field.is_system && (
                     <button
@@ -711,6 +948,48 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   )}
                 </div>
               </div>
+
+              {/* Voice Keywords Editor (inline) */}
+              {editingKeywords === field.id && (
+                <div className="ml-[52px] mr-3 mb-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                    Voice Keywords (comma-separated)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={keywordsInput}
+                      onChange={e => setKeywordsInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveKeywords(field); } }}
+                      placeholder="e.g., containment, wall, secondary"
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => saveKeywords(field)}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditingKeywords(null)}
+                      className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {keywordsInput && (
+                    <div className="flex gap-1 flex-wrap mt-2">
+                      {keywordsInput.split(',').map((k, i) => k.trim()).filter(k => k).map((k, i) => (
+                        <span key={i} className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                          {k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </React.Fragment>
             ))}
           </div>
         )}
@@ -962,6 +1241,10 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                 <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
                   <span className="inline-flex items-center gap-1">
                     <span className="font-medium">{type.field_count || 0}</span> field{(type.field_count || 0) !== 1 ? 's' : ''}
+                  </span>
+                  {' · Hands-free: '}
+                  <span className={type.hands_free_enabled ? 'text-green-600 dark:text-green-400' : ''}>
+                    {type.hands_free_enabled ? 'enabled' : 'disabled'}
                   </span>
                   {type.description && ` · ${type.description}`}
                 </p>
