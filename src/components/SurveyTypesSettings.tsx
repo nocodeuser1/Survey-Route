@@ -5,7 +5,7 @@ import {
   FileText, ClipboardCheck, Shield, HardHat, Droplets, Wrench, Flame,
   CheckCircle, AlertTriangle, Lock, GripVertical, Type, Hash, Calendar,
   List, CheckSquare, Camera, PenTool, MapPin, Star, AlignLeft, Clock,
-  Mic, MicOff, Headphones, Tags
+  Mic, Headphones, Tags
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { SurveyType, SurveyField } from '../lib/supabase';
@@ -577,6 +577,26 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
     }
   };
 
+  const toggleAll = async () => {
+    if (fields.length === 0) return;
+    const allEnabled = fields.every(f => f.voice_input_enabled && f.photo_capture_enabled);
+    const newVal = !allEnabled;
+    try {
+      const ids = fields.map(f => f.id);
+      const { error } = await supabase
+        .from('survey_fields')
+        .update({ voice_input_enabled: newVal, photo_capture_enabled: newVal })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setFields(prev => prev.map(f => ({ ...f, voice_input_enabled: newVal, photo_capture_enabled: newVal })));
+    } catch (err) {
+      console.error('Error toggling all:', err);
+      showMessage('error', 'Failed to update fields');
+    }
+  };
+
   const [editingKeywords, setEditingKeywords] = useState<string | null>(null);
   const [keywordsInput, setKeywordsInput] = useState('');
 
@@ -727,39 +747,34 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
         {/* Column Headers with Toggle All */}
         {fields.length > 0 && (
           <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-[52px] flex-shrink-0" /> {/* reorder spacer */}
-            <div className="w-8 flex-shrink-0" /> {/* icon spacer */}
+            <div className="w-[52px] flex-shrink-0" />
+            <div className="w-8 flex-shrink-0" />
             <div className="flex-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Fields
             </div>
             <div className="flex items-center gap-4 flex-shrink-0">
-              <button
+              <span
                 onClick={toggleAllVoice}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  fields.every(f => f.voice_input_enabled)
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
-                title="Toggle all voice input"
+                className="flex items-center gap-1 w-[52px] justify-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                title="Click to toggle all voice"
               >
-                <Mic className="w-3.5 h-3.5" />
+                <Mic className="w-3 h-3" />
                 Voice
-              </button>
-              <button
-                onClick={toggleAllPhoto}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  fields.every(f => f.photo_capture_enabled)
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
-                title="Toggle all photo capture"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                Photo
-              </button>
-              <span className="w-[120px] text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
-                Actions
               </span>
+              <span
+                onClick={toggleAllPhoto}
+                className="flex items-center gap-1 w-[52px] justify-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                title="Click to toggle all photo"
+              >
+                <Camera className="w-3 h-3" />
+                Photo
+              </span>
+              <button
+                onClick={toggleAll}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                Toggle All
+              </button>
             </div>
           </div>
         )}
@@ -859,28 +874,32 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
 
                 {/* Voice & Photo toggles */}
                 <div className="flex items-center gap-4 flex-shrink-0">
-                  <button
-                    onClick={() => toggleFieldVoice(field)}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      field.voice_input_enabled
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
-                    }`}
-                    title={field.voice_input_enabled ? 'Disable voice input' : 'Enable voice input'}
-                  >
-                    {field.voice_input_enabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={() => toggleFieldPhoto(field)}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      field.photo_capture_enabled
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
-                    }`}
-                    title={field.photo_capture_enabled ? 'Disable photo capture' : 'Enable photo capture'}
-                  >
-                    <Camera className={`w-4 h-4 ${field.photo_capture_enabled ? '' : 'opacity-50'}`} />
-                  </button>
+                  <div className="w-[52px] flex justify-center">
+                    <button
+                      onClick={() => toggleFieldVoice(field)}
+                      className={`w-7 h-7 rounded-md border-2 flex items-center justify-center transition-colors ${
+                        field.voice_input_enabled
+                          ? 'bg-blue-500 border-blue-500 text-white'
+                          : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
+                      }`}
+                      title={field.voice_input_enabled ? 'Disable voice input' : 'Enable voice input'}
+                    >
+                      {field.voice_input_enabled && <Mic className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <div className="w-[52px] flex justify-center">
+                    <button
+                      onClick={() => toggleFieldPhoto(field)}
+                      className={`w-7 h-7 rounded-md border-2 flex items-center justify-center transition-colors ${
+                        field.photo_capture_enabled
+                          ? 'bg-blue-500 border-blue-500 text-white'
+                          : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500'
+                      }`}
+                      title={field.photo_capture_enabled ? 'Disable photo capture' : 'Enable photo capture'}
+                    >
+                      {field.photo_capture_enabled && <Camera className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Actions */}
