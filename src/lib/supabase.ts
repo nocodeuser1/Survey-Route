@@ -366,6 +366,38 @@ export interface FacilityInspectionSchedule {
   updated_at: string;
 }
 
+export interface SurveyType {
+  id: string;
+  account_id: string;
+  name: string;
+  description: string | null;
+  icon: string;
+  color: string;
+  is_system: boolean;
+  enabled: boolean;
+  hands_free_enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SurveyField {
+  id: string;
+  survey_type_id: string;
+  name: string;
+  description: string | null;
+  field_type: 'text' | 'textarea' | 'number' | 'date' | 'datetime' | 'select' | 'multi_select' | 'checkbox' | 'photo' | 'signature' | 'location' | 'rating';
+  options: any;
+  required: boolean;
+  is_system: boolean;
+  sort_order: number;
+  voice_input_enabled: boolean;
+  photo_capture_enabled: boolean;
+  voice_keywords: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SPCCComplianceTracking {
   id: string;
   facility_id: string;

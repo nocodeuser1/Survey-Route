@@ -21,6 +21,7 @@ import SecuritySettings from './components/SecuritySettings';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
 import SPCCExtractionSettings from './components/SPCCExtractionSettings';
+import SurveyTypesSettings from './components/SurveyTypesSettings';
 import CompletedFacilitiesVisibilityModal, { CompletedVisibility } from './components/CompletedFacilitiesVisibilityModal';
 import HomeBaseModal from './components/HomeBaseModal';
 import LoadingScreen from './components/LoadingScreen';
@@ -3532,6 +3533,15 @@ function App() {
                       ),
                     },
                     // — Compliance —
+                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                      id: 'survey-types',
+                      label: 'Survey Types',
+                      section: 'compliance',
+                      icon: <ClipboardList className="w-5 h-5" />,
+                      content: (
+                        <SurveyTypesSettings accountId={currentAccount.id} />
+                      ),
+                    }] : []),
                     ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
                       id: 'spcc-extraction',
                       label: 'SPCC Extraction',
