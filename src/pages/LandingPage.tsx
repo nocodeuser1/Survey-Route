@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown } from 'lucide-react';
+import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, Wifi, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStripeCheckout } from '../hooks/useStripeCheckout';
 
@@ -221,8 +221,19 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">SPCC & Environmental Compliance</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Customizable inspection templates for SPCC, stormwater, and environmental audits.
-                  Track completion status, deadlines, and maintain complete compliance records.
+                  Built-in SPCC Plan and SPCC Inspection workflows with pre-configured fields.
+                  Track completion status, deadlines, PE stamp dates, and maintain complete compliance records.
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-purple-50 to-white rounded-xl p-8 border border-purple-100 hover:shadow-lg transition-shadow">
+                <div className="bg-purple-600 w-12 h-12 rounded-lg flex items-center justify-center mb-4 shadow-md">
+                  <Layers className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Any Survey Type</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Create unlimited custom survey types with your own fields — text, numbers, dates, dropdowns, photos, signatures, ratings, and more.
+                  Each company configures exactly the inspections they need. Think of it like custom fields in a CRM, but purpose-built for field surveys.
                 </p>
               </div>
 
@@ -232,19 +243,19 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Photo Documentation</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Capture and store photo evidence with GPS tagging and timestamps. Build comprehensive visual records
-                  for audits and regulatory reporting.
+                  Capture and store photo evidence with GPS tagging and timestamps. Photos auto-attach to the right inspection field
+                  based on context. Build comprehensive visual records for audits and regulatory reporting.
                 </p>
               </div>
 
-              <div className="bg-gradient-to-br from-orange-50 to-white rounded-xl p-8 border border-orange-100 hover:shadow-lg transition-shadow">
-                <div className="bg-orange-600 w-12 h-12 rounded-lg flex items-center justify-center mb-4 shadow-md">
-                  <FileText className="w-6 h-6 text-white" />
+              <div className="bg-gradient-to-br from-indigo-50 to-white rounded-xl p-8 border border-indigo-100 hover:shadow-lg transition-shadow">
+                <div className="bg-indigo-600 w-12 h-12 rounded-lg flex items-center justify-center mb-4 shadow-md">
+                  <Mic className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">Digital Signatures & Audit Trail</h3>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Hands-Free Inspection Mode</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Inspector certification with digital signatures. Complete audit trail of who inspected what and when.
-                  Meet regulatory documentation requirements.
+                  Go hands-free in the field — just talk. Voice recognition fills in fields, voice commands snap photos and navigate between fields.
+                  Say "take a picture" and the system captures, auto-captions from your speech, and maps it to the right field. Perfect for wearing safety gear or gloves.
                 </p>
               </div>
 
@@ -255,7 +266,7 @@ export default function LandingPage() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Smart Route Planning</h3>
                 <p className="text-gray-600 leading-relaxed">
                   Automatically optimize multi-day routes across well sites, tank farms, and facilities.
-                  Reduce travel time by 40% with intelligent routing.
+                  Reduce travel time by 40% with intelligent routing. Save, load, and share route plans across your team.
                 </p>
               </div>
 
@@ -266,7 +277,29 @@ export default function LandingPage() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Real-Time Field Navigation</h3>
                 <p className="text-gray-600 leading-relaxed">
                   GPS-enabled survey mode shows nearby facilities with distances and bearings.
-                  One-tap navigation to Google/Apple Maps for turn-by-turn directions.
+                  One-tap navigation to Google/Apple Maps for turn-by-turn directions. Full-screen map mode for the field.
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-orange-50 to-white rounded-xl p-8 border border-orange-100 hover:shadow-lg transition-shadow">
+                <div className="bg-orange-600 w-12 h-12 rounded-lg flex items-center justify-center mb-4 shadow-md">
+                  <FileText className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Digital Signatures & Audit Trail</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Inspector certification with digital signatures. Complete audit trail of who inspected what and when.
+                  Meet regulatory documentation requirements effortlessly.
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-cyan-50 to-white rounded-xl p-8 border border-cyan-100 hover:shadow-lg transition-shadow">
+                <div className="bg-cyan-600 w-12 h-12 rounded-lg flex items-center justify-center mb-4 shadow-md">
+                  <WifiOff className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Offline-First</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Work without cell service — routes, maps, and inspections are cached locally. Changes sync automatically
+                  when connectivity returns. Built for remote oil fields and rural sites with spotty coverage.
                 </p>
               </div>
 
@@ -277,8 +310,126 @@ export default function LandingPage() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Compliance Reporting</h3>
                 <p className="text-gray-600 leading-relaxed">
                   Generate professional inspection reports with photos and signatures. Export data for regulatory
-                  submissions. Custom branding with your company logo.
+                  submissions. Filter by survey type to see exactly what matters.
                 </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Custom Survey Types - Deep Dive */}
+        <section className="py-20 bg-gradient-to-br from-purple-50 via-white to-indigo-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 bg-purple-100 text-purple-700 px-4 py-2 rounded-full text-sm font-medium mb-6">
+                  <Settings className="w-4 h-4" />
+                  Fully Configurable
+                </div>
+                <h2 className="text-4xl font-bold text-gray-900 mb-6">
+                  Your Surveys, Your Way
+                </h2>
+                <p className="text-xl text-gray-600 mb-8 leading-relaxed">
+                  Every company has different inspection needs. Survey-Route lets you create any survey type with any fields —
+                  no coding required. If you can put it on a clipboard, you can put it in the app.
+                </p>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-4">
+                    <div className="bg-purple-100 w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <ClipboardList className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-1">12+ Field Types</h4>
+                      <p className="text-gray-600">Text, numbers, dates, dropdowns, multi-select, checkboxes, photos, signatures, locations, ratings — and more coming.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="bg-purple-100 w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Layers className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-1">Survey-Specific Views</h4>
+                      <p className="text-gray-600">Switch between survey types and the entire app filters — facilities, map, and forms show only what's relevant to that survey.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="bg-purple-100 w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Headphones className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-1">Hands-Free Per Survey Type</h4>
+                      <p className="text-gray-600">Enable hands-free mode per survey type and choose which fields accept voice input and which accept photos — down to the individual field level.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="bg-purple-100 w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Shield className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-1">System + Custom Types</h4>
+                      <p className="text-gray-600">SPCC Plan and SPCC Inspection come pre-built with all the right fields. Add your own survey types alongside them — tank inspections, environmental audits, safety checklists, whatever you need.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-900">Survey Types</h3>
+                  <p className="text-sm text-gray-500">Settings → Survey Types</p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">SPCC Plan</p>
+                        <p className="text-xs text-gray-500">16 fields · System</p>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">Enabled</span>
+                  </div>
+                  <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                        <ClipboardList className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">SPCC Inspection</p>
+                        <p className="text-xs text-gray-500">14 fields · System · 🎤 Hands-free</p>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">Enabled</span>
+                  </div>
+                  <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
+                        <Zap className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">Tank Farm Audit</p>
+                        <p className="text-xs text-gray-500">22 fields · Custom · 🎤 Hands-free</p>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium">Enabled</span>
+                  </div>
+                  <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center">
+                        <MapPin className="w-4 h-4 text-teal-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">Pipeline Integrity Check</p>
+                        <p className="text-xs text-gray-500">18 fields · Custom</p>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full font-medium">Enabled</span>
+                  </div>
+                  <div className="px-6 py-4 text-center">
+                    <button className="text-sm text-purple-600 font-medium hover:text-purple-700">+ Add Survey Type</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -581,8 +732,8 @@ export default function LandingPage() {
                 <div className="bg-green-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-green-500">
                   <Smartphone className="w-8 h-8 text-green-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Mobile Optimized</h3>
-                <p className="text-gray-400 text-sm">Responsive design works perfectly on phones and tablets</p>
+                <h3 className="text-lg font-semibold mb-2">Native iOS & Android</h3>
+                <p className="text-gray-400 text-sm">Real native apps on App Store and Google Play — not just a mobile website</p>
               </div>
 
               <div className="text-center">
@@ -598,20 +749,44 @@ export default function LandingPage() {
                   <Shield className="w-8 h-8 text-teal-400" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Secure Cloud</h3>
-                <p className="text-gray-400 text-sm">Enterprise-grade security with Supabase infrastructure</p>
+                <p className="text-gray-400 text-sm">Enterprise-grade security with row-level access control</p>
+              </div>
+
+              <div className="text-center">
+                <div className="bg-purple-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-purple-500">
+                  <Mic className="w-8 h-8 text-purple-400" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Voice Commands</h3>
+                <p className="text-gray-400 text-sm">Hands-free voice input with speech-to-field mapping and voice-triggered camera</p>
+              </div>
+
+              <div className="text-center">
+                <div className="bg-cyan-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-cyan-500">
+                  <WifiOff className="w-8 h-8 text-cyan-400" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Works Offline</h3>
+                <p className="text-gray-400 text-sm">Full offline support with smart sync when connectivity returns</p>
               </div>
 
               <div className="text-center">
                 <div className="bg-red-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-red-500">
                   <Camera className="w-8 h-8 text-red-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Photo Upload</h3>
-                <p className="text-gray-400 text-sm">Document findings with in-app photo capture and storage</p>
+                <h3 className="text-lg font-semibold mb-2">Smart Photos</h3>
+                <p className="text-gray-400 text-sm">Context-aware photo capture — auto-captions and field assignment from voice</p>
               </div>
 
               <div className="text-center">
                 <div className="bg-yellow-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-yellow-500">
-                  <FileText className="w-8 h-8 text-yellow-400" />
+                  <Layers className="w-8 h-8 text-yellow-400" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Custom Survey Types</h3>
+                <p className="text-gray-400 text-sm">Create any survey with any fields — 12+ field types, drag-to-reorder</p>
+              </div>
+
+              <div className="text-center">
+                <div className="bg-indigo-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-indigo-500">
+                  <FileText className="w-8 h-8 text-indigo-400" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Digital Signatures</h3>
                 <p className="text-gray-400 text-sm">Capture inspector signatures directly on any device</p>
@@ -622,7 +797,7 @@ export default function LandingPage() {
                   <Monitor className="w-8 h-8 text-blue-400" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Dark Mode</h3>
-                <p className="text-gray-400 text-sm">Full dark mode support for comfortable viewing</p>
+                <p className="text-gray-400 text-sm">Full dark mode support for comfortable viewing anywhere</p>
               </div>
 
               <div className="text-center">
@@ -631,6 +806,14 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Export Anywhere</h3>
                 <p className="text-gray-400 text-sm">CSV and PDF exports for seamless data integration</p>
+              </div>
+
+              <div className="text-center">
+                <div className="bg-orange-600/20 w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 border border-orange-500">
+                  <Fingerprint className="w-8 h-8 text-orange-400" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Haptic Feedback</h3>
+                <p className="text-gray-400 text-sm">Native haptics on photo capture and voice commands — you feel it work</p>
               </div>
             </div>
           </div>
@@ -662,7 +845,7 @@ export default function LandingPage() {
                 },
                 {
                   q: "Can I customize inspection forms?",
-                  a: "Yes, Professional and Enterprise plans include custom inspection template creation. You can design forms specific to your compliance needs with various question types, photo uploads, and digital signature capture."
+                  a: "Absolutely. You can create unlimited custom survey types with 12+ field types — text, numbers, dates, dropdowns, multi-select, checkboxes, photos, signatures, locations, and ratings. Each survey type gets its own fields, and the entire app filters to show only relevant data when you switch between survey types. It works like custom fields in a CRM, but built for field inspections."
                 },
                 {
                   q: "What happens if I exceed my facility limit?",
@@ -678,7 +861,15 @@ export default function LandingPage() {
                 },
                 {
                   q: "Does it work offline?",
-                  a: "Inspection forms can be filled out with limited connectivity, and the app will sync data when connection is restored. However, route optimization and map features require an internet connection for accurate routing and geocoding."
+                  a: "Yes — Survey-Route is built offline-first. Routes, map tiles, and inspection data are cached locally using IndexedDB and service workers. You can complete full inspections without cell service, and everything syncs automatically with smart conflict resolution when connectivity returns. This is critical for remote oil fields and rural sites."
+                },
+                {
+                  q: "What is Hands-Free Mode?",
+                  a: "Hands-Free Mode lets inspectors complete surveys using just their voice. Continuous speech recognition fills in fields automatically, and voice commands like 'take a picture' trigger the camera instantly. Photos are auto-captioned from what you were just saying and mapped to the correct field. It's configurable per survey type — you choose which fields accept voice input and which accept photos. Perfect for wearing safety gear, gloves, or working in harsh conditions."
+                },
+                {
+                  q: "Is there a native mobile app?",
+                  a: "Yes! Survey-Route is available as a native app on both iOS (App Store) and Android (Google Play). The native app gives you access to the device camera with haptic feedback, push notifications, and a smoother experience than a mobile website. It also works as a full web app in any browser."
                 }
               ].map((faq, index) => (
                 <div key={index} className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
