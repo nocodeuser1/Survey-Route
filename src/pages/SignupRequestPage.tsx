@@ -86,39 +86,39 @@ export default function SignupRequestPage() {
 
   return (
     <div
-      className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+      className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4 z-50 overflow-y-auto"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           navigate('/');
         }
       }}
     >
-      <div className="max-w-2xl w-full my-8">
+      <div className="max-w-2xl w-full my-2 sm:my-8">
         <button
           onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-white hover:text-gray-200 mb-4 transition-colors drop-shadow-lg"
+          className="flex items-center gap-2 text-white hover:text-gray-200 mb-2 sm:mb-4 transition-colors drop-shadow-lg"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Home
         </button>
 
-        <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl p-8">
-          <div className="flex items-center justify-center mb-8">
-            <div className="bg-blue-600 p-3 rounded-xl">
-              <Route className="w-8 h-8 text-white" />
+        <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl p-4 sm:p-8">
+          <div className="flex items-center justify-center mb-4 sm:mb-8">
+            <div className="bg-blue-600 p-2 sm:p-3 rounded-xl">
+              <Route className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
             </div>
           </div>
 
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <div className="text-center mb-4 sm:mb-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">
               Request Access to Survey-Route
             </h1>
-            <p className="text-gray-600">
+            <p className="text-sm sm:text-base text-gray-600">
               Fill out the form below and we'll review your request
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
             {error && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
@@ -137,7 +137,7 @@ export default function SignupRequestPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="w-full px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm sm:text-base"
                   placeholder="John Doe"
                 />
               </div>
