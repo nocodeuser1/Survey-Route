@@ -51,7 +51,11 @@ const PHOTO_COMMANDS = [
 ];
 const NEXT_COMMANDS = ['next field', 'next', 'go next', 'move on', 'continue', 'next one', 'go to next', 'forward'];
 const SKIP_COMMANDS = ['skip', 'skip field', 'skip this', 'pass', 'skip it', 'skip this one'];
-const DONE_COMMANDS = ['done', 'finish', 'complete', "i'm done", 'all done', 'finished', 'we are done', 'that is it', 'thats it', 'thats all', 'wrap up', 'save it', 'complete survey'];
+const DONE_COMMANDS = [
+  'done', 'finish', 'complete', "i'm done", 'all done', 'finished',
+  'we are done', "that's it", 'thats it', "that's all", 'thats all',
+  'wrap up', 'save it', 'complete survey',
+];
 const BACK_COMMANDS = ['go back', 'previous', 'previous field', 'back', 'go to previous'];
 
 function matchesCommand(text: string, commands: string[]): boolean {
@@ -637,6 +641,7 @@ export default function HandsFreeMode({
               {commandFlash === 'Photo' && <Camera className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Next' && <ChevronRight className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Skip' && <ChevronRight className="w-6 h-6 inline mr-2" />}
+              {commandFlash === 'Back' && <ChevronLeft className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Done' && <CheckCircle className="w-6 h-6 inline mr-2" />}
               {commandFlash}
             </div>
@@ -792,7 +797,7 @@ export default function HandsFreeMode({
             {/* Mic toggle */}
             <button
               onClick={() => { listening ? stopRecognition() : startRecognition(); }}
-              className={`p-4 rounded-full transition-all duration-200 ${
+              className={`p-4 min-w-[44px] min-h-[44px] rounded-full transition-all duration-200 ${
                 listening
                   ? 'bg-red-500 text-white shadow-lg shadow-red-500/40 ring-4 ring-red-500/20'
                   : 'bg-white/10 text-white/60 hover:bg-white/20 border border-white/10'
@@ -804,7 +809,7 @@ export default function HandsFreeMode({
             {/* Camera button */}
             <button
               onClick={triggerPhotoCapture}
-              className="p-4 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/40 hover:bg-blue-500 transition-all duration-200 ring-4 ring-blue-600/20"
+              className="p-4 min-w-[44px] min-h-[44px] rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/40 hover:bg-blue-500 transition-all duration-200 ring-4 ring-blue-600/20"
             >
               <Camera className="w-7 h-7" />
             </button>
@@ -814,7 +819,7 @@ export default function HandsFreeMode({
               <button
                 onClick={goBack}
                 disabled={currentFieldIdx <= 0}
-                className="p-3 rounded-full bg-white/10 text-white/60 hover:bg-white/20 transition-colors disabled:opacity-20 disabled:cursor-not-allowed border border-white/10"
+                className="p-3 min-w-[44px] min-h-[44px] rounded-full bg-white/10 text-white/60 hover:bg-white/20 transition-colors disabled:opacity-20 disabled:cursor-not-allowed border border-white/10"
                 title="Previous field"
               >
                 <ChevronLeft className="w-5 h-5" />
@@ -822,14 +827,14 @@ export default function HandsFreeMode({
               <button
                 onClick={advanceField}
                 disabled={currentFieldIdx >= voiceFields.length - 1}
-                className="p-3 rounded-full bg-white/10 text-white/60 hover:bg-white/20 transition-colors disabled:opacity-20 disabled:cursor-not-allowed border border-white/10"
+                className="p-3 min-w-[44px] min-h-[44px] rounded-full bg-white/10 text-white/60 hover:bg-white/20 transition-colors disabled:opacity-20 disabled:cursor-not-allowed border border-white/10"
                 title="Next field"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
               <button
                 onClick={finishRecording}
-                className="px-5 py-3 rounded-full bg-green-600 text-white font-bold text-sm hover:bg-green-500 transition-all duration-200 shadow-lg shadow-green-600/30"
+                className="px-5 py-3 min-h-[44px] rounded-full bg-green-600 text-white font-bold text-sm hover:bg-green-500 transition-all duration-200 shadow-lg shadow-green-600/30"
               >
                 Done
               </button>
