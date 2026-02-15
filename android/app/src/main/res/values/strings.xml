@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Survey Route</string>
+    <string name="title_activity_main">Survey Route</string>
+    <string name="package_name">com.surveyroute.app</string>
+    <string name="custom_url_scheme">com.surveyroute.app</string>
+</resources>

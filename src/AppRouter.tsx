@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AccountProvider } from './contexts/AccountContext';
 import { DarkModeProvider } from './contexts/DarkModeContext';
@@ -14,6 +15,8 @@ import UnsubscribePage from './pages/UnsubscribePage';
 import SPCCPlanViewerPage from './pages/SPCCPlanViewerPage';
 import App from './App';
 import LoadingScreen from './components/LoadingScreen';
+
+const isNative = Capacitor.isNativePlatform();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -51,6 +54,10 @@ function RootRoute() {
   }
 
   if (!user) {
+    // On native platforms, skip the landing page and go straight to login
+    if (isNative) {
+      return <Navigate to="/login" replace />;
+    }
     return <LandingPage />;
   }
 
@@ -73,6 +80,11 @@ function LoginRoute() {
       return <Navigate to="/agency" replace />;
     }
     return <Navigate to="/app" replace />;
+  }
+
+  // On native platforms, show only the login page without the landing page background
+  if (isNative) {
+    return <LoginPage />;
   }
 
   return (

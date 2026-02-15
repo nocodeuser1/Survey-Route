@@ -1,10 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Mic, MicOff, Camera, X, ChevronRight, ChevronLeft,
+  Mic, MicOff, Camera as CameraIcon, X, ChevronRight, ChevronLeft,
   CheckCircle, Save, Loader2, Image, ArrowLeft,
   AlertCircle, Volume2, ChevronDown, Trash2, Edit3,
 } from 'lucide-react';
 import { supabase, Facility, SurveyType, SurveyField, FacilitySurveyData } from '../lib/supabase';
+import { Capacitor } from '@capacitor/core';
+import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+
+const isNative = Capacitor.isNativePlatform();
+
+async function hapticImpact(style: ImpactStyle = ImpactStyle.Medium) {
+  if (!isNative) return;
+  try { await Haptics.impact({ style }); } catch { /* ignore on web */ }
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -308,9 +318,61 @@ export default function HandsFreeMode({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Photo capture ──────────────────────────────────────────────────────
-  const triggerPhotoCapture = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  const addPhoto = useCallback((dataUrl: string) => {
+    const timestamp = Date.now();
+    const context = getRecentTranscript(15);
+    const matchedFieldId = matchPhotoToField(context);
+    const caption = generateCaption(context);
+
+    const photo: CapturedPhoto = {
+      id: uid(),
+      dataUrl,
+      timestamp,
+      fieldId: matchedFieldId,
+      caption,
+      transcriptContext: context,
+    };
+
+    setPhotos(prev => [...prev, photo]);
+
+    if (matchedFieldId) {
+      setFieldData(prev => {
+        const fd = prev[matchedFieldId] || {
+          fieldId: matchedFieldId,
+          value: null,
+          photos: [],
+          voiceTranscript: '',
+        };
+        return {
+          ...prev,
+          [matchedFieldId]: { ...fd, photos: [...fd.photos, photo] },
+        };
+      });
+    }
+
+    // Haptic feedback on photo capture success
+    hapticImpact(ImpactStyle.Medium);
+  }, [getRecentTranscript, matchPhotoToField, generateCaption]);
+
+  const triggerPhotoCapture = useCallback(async () => {
+    if (isNative) {
+      try {
+        const result = await CapCamera.getPhoto({
+          resultType: CameraResultType.Base64,
+          quality: 80,
+          source: CameraSource.Camera,
+        });
+        if (result.base64String) {
+          const dataUrl = `data:image/${result.format || 'jpeg'};base64,${result.base64String}`;
+          addPhoto(dataUrl);
+        }
+      } catch (err) {
+        console.error('[HandsFree] Native camera error:', err);
+      }
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [addPhoto]);
 
   const handlePhotoCaptured = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -318,43 +380,26 @@ export default function HandsFreeMode({
     const reader = new FileReader();
     reader.onloadend = () => {
       const dataUrl = reader.result as string;
-      const timestamp = Date.now();
-      const context = getRecentTranscript(15);
-      const matchedFieldId = matchPhotoToField(context);
-      const caption = generateCaption(context);
-
-      const photo: CapturedPhoto = {
-        id: uid(),
-        dataUrl,
-        timestamp,
-        fieldId: matchedFieldId,
-        caption,
-        transcriptContext: context,
-      };
-
-      setPhotos(prev => [...prev, photo]);
-
-      if (matchedFieldId) {
-        setFieldData(prev => {
-          const fd = prev[matchedFieldId] || {
-            fieldId: matchedFieldId,
-            value: null,
-            photos: [],
-            voiceTranscript: '',
-          };
-          return {
-            ...prev,
-            [matchedFieldId]: { ...fd, photos: [...fd.photos, photo] },
-          };
-        });
-      }
+      addPhoto(dataUrl);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
-  }, [getRecentTranscript, matchPhotoToField, generateCaption]);
+  }, [addPhoto]);
 
   // ── Voice command handler ──────────────────────────────────────────────
   const handleVoiceCommand = useCallback((text: string) => {
+    const isCommand =
+      matchesCommand(text, PHOTO_COMMANDS) ||
+      matchesCommand(text, DONE_COMMANDS) ||
+      matchesCommand(text, NEXT_COMMANDS) ||
+      matchesCommand(text, SKIP_COMMANDS) ||
+      matchesCommand(text, BACK_COMMANDS);
+
+    // Haptic feedback on voice command recognition
+    if (isCommand) {
+      hapticImpact(ImpactStyle.Medium);
+    }
+
     if (matchesCommand(text, PHOTO_COMMANDS)) {
       flashCommand('Photo');
       triggerPhotoCapture();
@@ -638,7 +683,7 @@ export default function HandsFreeMode({
         {commandFlash && (
           <div className="absolute inset-x-0 top-24 flex justify-center z-50 pointer-events-none">
             <div className="px-6 py-3 rounded-2xl bg-white/15 backdrop-blur-xl border border-white/20 text-white text-xl font-bold shadow-2xl animate-pulse">
-              {commandFlash === 'Photo' && <Camera className="w-6 h-6 inline mr-2" />}
+              {commandFlash === 'Photo' && <CameraIcon className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Next' && <ChevronRight className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Skip' && <ChevronRight className="w-6 h-6 inline mr-2" />}
               {commandFlash === 'Back' && <ChevronLeft className="w-6 h-6 inline mr-2" />}
@@ -811,7 +856,7 @@ export default function HandsFreeMode({
               onClick={triggerPhotoCapture}
               className="p-4 min-w-[44px] min-h-[44px] rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/40 hover:bg-blue-500 transition-all duration-200 ring-4 ring-blue-600/20"
             >
-              <Camera className="w-7 h-7" />
+              <CameraIcon className="w-7 h-7" />
             </button>
 
             {/* Navigation */}
