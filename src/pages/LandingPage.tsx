@@ -309,8 +309,8 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-sm sm:text-xl font-semibold text-gray-900 mb-1 sm:mb-3">Compliance Reporting</h3>
                 <p className="text-xs sm:text-base text-gray-600 leading-relaxed line-clamp-2 sm:line-clamp-none">
-                  Generate professional inspection reports with photos and signatures. Export data for regulatory
-                  submissions. Filter by survey type to see exactly what matters.
+                  Generate professional inspection reports with photos and signatures. Export full local backups of all your data
+                  for safekeeping — your company always owns its records. Filter by survey type to see exactly what matters.
                 </p>
               </div>
             </div>
@@ -537,9 +537,9 @@ export default function LandingPage() {
               </div>
 
               <div className="text-center p-4 sm:p-8 bg-gradient-to-br from-red-50 to-white rounded-xl border border-red-100">
-                <div className="text-3xl sm:text-5xl font-bold text-red-600 mb-2">Cloud</div>
-                <div className="text-gray-900 font-semibold mb-2">Secure Storage</div>
-                <div className="text-gray-600">Enterprise-grade security for sensitive compliance data and records</div>
+                <div className="text-3xl sm:text-5xl font-bold text-red-600 mb-2">Your</div>
+                <div className="text-gray-900 font-semibold mb-2">Data, Your Backups</div>
+                <div className="text-gray-600">Enterprise-grade cloud security plus export your own local backups anytime — your company always owns its data</div>
               </div>
 
               <div className="text-center p-4 sm:p-8 bg-gradient-to-br from-yellow-50 to-white rounded-xl border border-yellow-100">
@@ -804,8 +804,8 @@ export default function LandingPage() {
                 <div className="bg-green-600/20 w-12 h-12 sm:w-16 sm:h-16 rounded-lg flex items-center justify-center mx-auto mb-3 sm:mb-4 border border-green-500">
                   <BarChart3 className="w-6 h-6 sm:w-8 sm:h-8 text-green-400" />
                 </div>
-                <h3 className="text-sm sm:text-lg font-semibold mb-1 sm:mb-2">Export Anywhere</h3>
-                <p className="text-gray-400 text-sm">CSV and PDF exports for seamless data integration</p>
+                <h3 className="text-sm sm:text-lg font-semibold mb-1 sm:mb-2">Export & Backup</h3>
+                <p className="text-gray-400 text-sm">CSV and PDF exports — keep local backups of all your data for safekeeping</p>
               </div>
 
               <div className="text-center">
@@ -841,7 +841,7 @@ export default function LandingPage() {
                 },
                 {
                   q: "Is my data secure?",
-                  a: "Yes. All data is stored in secure Supabase infrastructure with enterprise-grade encryption. We implement row-level security policies, role-based access control, and regular backups. Your facility data, inspections, and team information are protected and only accessible to your organization."
+                  a: "Yes. All data is stored in secure Supabase infrastructure with enterprise-grade encryption. We implement row-level security policies, role-based access control, and regular backups. Plus, your company can export full local backups of all data at any time — CSV exports of facilities, inspections, survey results, and reports. You always own your data and can keep your own copies for safekeeping."
                 },
                 {
                   q: "Can I customize inspection forms?",
