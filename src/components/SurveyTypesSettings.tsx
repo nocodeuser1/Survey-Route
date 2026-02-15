@@ -817,18 +817,18 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   <button
                     onClick={() => moveField(field, 'up')}
                     disabled={idx === 0 || reordering !== null}
-                    className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     title="Move up"
                   >
-                    <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+                    <ChevronUp className="w-4 h-4 text-gray-400" />
                   </button>
                   <button
                     onClick={() => moveField(field, 'down')}
                     disabled={idx === fields.length - 1 || reordering !== null}
-                    className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     title="Move down"
                   >
-                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
                   </button>
                 </div>
 
@@ -907,21 +907,21 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   {/* Voice keywords */}
                   <button
                     onClick={() => startEditKeywords(field)}
-                    className={`p-1.5 rounded-lg transition-colors ${
+                    className={`p-2 rounded-lg transition-colors ${
                       field.voice_keywords && field.voice_keywords.length > 0
                         ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
                         : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500'
                     }`}
                     title={`Voice keywords: ${field.voice_keywords?.join(', ') || 'none'}`}
                   >
-                    <Tags className="w-3.5 h-3.5" />
+                    <Tags className="w-4 h-4" />
                   </button>
 
                   {/* Required toggle */}
                   {!field.is_system && (
                     <button
                       onClick={() => toggleFieldRequired(field)}
-                      className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                         field.required
                           ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
@@ -936,10 +936,10 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   {!field.is_system && (
                     <button
                       onClick={() => openEditFieldModal(field)}
-                      className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                       title="Edit field"
                     >
-                      <Pencil className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                      <Pencil className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                     </button>
                   )}
 
@@ -948,13 +948,13 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                     <button
                       onClick={() => handleFieldDelete(field)}
                       disabled={fieldDeleting === field.id}
-                      className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                       title="Delete field"
                     >
                       {fieldDeleting === field.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                        <Loader2 className="w-4 h-4 animate-spin text-red-500" />
                       ) : (
-                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                        <Trash2 className="w-4 h-4 text-red-500" />
                       )}
                     </button>
                   )}
@@ -999,8 +999,8 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   </div>
                   {keywordsInput && (
                     <div className="flex gap-1 flex-wrap mt-2">
-                      {keywordsInput.split(',').map((k, i) => k.trim()).filter(k => k).map((k, i) => (
-                        <span key={i} className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                      {keywordsInput.split(',').map(k => k.trim()).filter(k => k).map((k, idx) => (
+                        <span key={idx} className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
                           {k}
                         </span>
                       ))}

@@ -22,7 +22,10 @@ export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
   const [error, setError] = useState<string | null>(null);
 
   const loadSurveyTypes = useCallback(async () => {
-    if (!accountId) return;
+    if (!accountId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);

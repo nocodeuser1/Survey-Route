@@ -93,6 +93,28 @@ export default function HandsFreeMode({
 }: HandsFreeModeProps) {
   const voiceFields = fields.filter(f => f.voice_input_enabled);
 
+  // Edge case: no voice-enabled fields
+  if (voiceFields.length === 0) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 999999 }}>
+        <div className="text-center px-8">
+          <MicOff className="w-16 h-16 text-white/20 mx-auto mb-4" />
+          <h2 className="text-white text-xl font-bold mb-2">No Voice-Enabled Fields</h2>
+          <p className="text-white/50 text-sm mb-6">
+            None of the fields in "{surveyType.name}" have voice input enabled.
+            Enable voice input on fields in Settings → Survey Types.
+          </p>
+          <button
+            onClick={onClose}
+            className="px-6 py-3 bg-white/10 text-white rounded-2xl border border-white/20 hover:bg-white/20 transition-colors font-medium"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── State ───────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<'recording' | 'review'>('recording');
   const [currentFieldIdx, setCurrentFieldIdx] = useState(0);
@@ -1016,11 +1038,11 @@ export default function HandsFreeMode({
                         updateFieldValue(field.id, e.target.value);
                         setEditingFieldValue(null);
                       }}
-                      className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white text-sm"
+                      className="w-full px-3 py-2 bg-gray-900 border border-white/20 rounded-xl text-white text-sm"
                     >
-                      <option value="">Select...</option>
+                      <option value="" className="bg-gray-900 text-white">Select...</option>
                       {(Array.isArray(field.options) ? field.options : []).map((opt: string) => (
-                        <option key={opt} value={opt}>{opt}</option>
+                        <option key={opt} value={opt} className="bg-gray-900 text-white">{opt}</option>
                       ))}
                     </select>
                   ) : field.field_type === 'rating' ? (
@@ -1241,18 +1263,18 @@ export default function HandsFreeMode({
                         <select
                           value=""
                           onChange={(e) => { if (e.target.value) reassignPhoto(photo.id, e.target.value); }}
-                          className="w-full px-2 py-1.5 bg-white/10 border border-white/15 rounded-lg text-white text-xs appearance-none pr-6"
+                          className="w-full px-2 py-1.5 bg-gray-900 border border-white/15 rounded-lg text-white text-xs appearance-none pr-6"
                         >
-                          <option value="">Assign to field...</option>
+                          <option value="" className="bg-gray-900 text-white">Assign to field...</option>
                           {voiceFields.filter(f => f.photo_capture_enabled).map(f => (
-                            <option key={f.id} value={f.id}>{f.name}</option>
+                            <option key={f.id} value={f.id} className="bg-gray-900 text-white">{f.name}</option>
                           ))}
                           {/* Also show all fields as fallback */}
                           {voiceFields.filter(f => !f.photo_capture_enabled).length > 0 && (
-                            <option disabled>── Other fields ──</option>
+                            <option disabled className="bg-gray-900 text-gray-500">── Other fields ──</option>
                           )}
                           {voiceFields.filter(f => !f.photo_capture_enabled).map(f => (
-                            <option key={f.id} value={f.id}>{f.name}</option>
+                            <option key={f.id} value={f.id} className="bg-gray-900 text-white">{f.name}</option>
                           ))}
                         </select>
                         <ChevronDown className="absolute right-1.5 top-2 w-3 h-3 text-white/30 pointer-events-none" />

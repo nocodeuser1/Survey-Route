@@ -32,7 +32,6 @@ export default function FacilitySurveyView({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signatureCanvas, setSignatureCanvas] = useState<string | null>(null);
   const [showHandsFree, setShowHandsFree] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
@@ -372,7 +371,7 @@ export default function FacilitySurveyView({
                     updateField(field.id, '');
                     setActiveSignatureField(field.id);
                   }}
-                  className="ml-2 text-xs text-blue-600 hover:text-blue-700"
+                  className="ml-2 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                 >
                   Re-sign
                 </button>

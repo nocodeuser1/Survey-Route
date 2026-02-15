@@ -84,7 +84,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   });
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
-  const [isRestoringState, setIsRestoringState] = useState(true);
+  const [, setIsRestoringState] = useState(true);
   const facilityListRef = useRef<HTMLDivElement>(null);
   const scrollCleanupRef = useRef<(() => void) | null>(null);
   const lastInspectionLoadRef = useRef<number>(0);
@@ -458,10 +458,11 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
           if (closestFacilityInfo !== null) {
             // Get the current day's route
-            const currentDayRoute = result.routes[closestFacilityInfo.routeIndex];
+            const info = closestFacilityInfo as { routeIndex: number; facilityIndex: number };
+            const currentDayRoute = result.routes[info.routeIndex];
 
             // Store the current position in the route (where you are now)
-            const currentPositionInRoute = closestFacilityInfo.facilityIndex;
+            const currentPositionInRoute = info.facilityIndex;
 
             // Create a map from facility ID to route position using the index to match facilities
             const facilityIdToRoutePosition = new Map<string, number>();

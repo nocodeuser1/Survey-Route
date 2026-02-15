@@ -45,7 +45,7 @@ CREATE POLICY "Admins can insert survey types"
   WITH CHECK (
     account_id IN (
       SELECT au.account_id FROM account_users au
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -55,13 +55,13 @@ CREATE POLICY "Admins can update survey types"
   USING (
     account_id IN (
       SELECT au.account_id FROM account_users au
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   )
   WITH CHECK (
     account_id IN (
       SELECT au.account_id FROM account_users au
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -72,7 +72,7 @@ CREATE POLICY "Admins can delete custom survey types"
     is_system = false AND
     account_id IN (
       SELECT au.account_id FROM account_users au
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -125,7 +125,7 @@ CREATE POLICY "Admins can insert survey fields"
     survey_type_id IN (
       SELECT st.id FROM survey_types st
       JOIN account_users au ON au.account_id = st.account_id
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -136,14 +136,14 @@ CREATE POLICY "Admins can update survey fields"
     survey_type_id IN (
       SELECT st.id FROM survey_types st
       JOIN account_users au ON au.account_id = st.account_id
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   )
   WITH CHECK (
     survey_type_id IN (
       SELECT st.id FROM survey_types st
       JOIN account_users au ON au.account_id = st.account_id
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -155,7 +155,7 @@ CREATE POLICY "Admins can delete non-system survey fields"
     survey_type_id IN (
       SELECT st.id FROM survey_types st
       JOIN account_users au ON au.account_id = st.account_id
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
@@ -232,7 +232,7 @@ CREATE POLICY "Admins can delete facility survey data"
     facility_id IN (
       SELECT f.id FROM facilities f
       JOIN account_users au ON au.account_id = f.account_id
-      WHERE au.user_id = auth.uid() AND au.role IN ('owner', 'admin')
+      WHERE au.user_id = auth.uid() AND au.role = 'account_admin'
     )
   );
 
