@@ -45,10 +45,14 @@ interface HandsFreeModeProps {
 const PHOTO_COMMANDS = [
   'take a picture', 'take picture', 'take a photo', 'take photo',
   'capture photo', 'capture image', 'snap photo', 'photograph',
+  'snap a pic', 'snap pic', 'snap a picture', 'get a photo',
+  'get a picture', 'take a shot', 'take shot', 'photo please',
+  'picture please', 'camera',
 ];
-const NEXT_COMMANDS = ['next field', 'next', 'go next', 'move on'];
-const SKIP_COMMANDS = ['skip', 'skip field', 'skip this'];
-const DONE_COMMANDS = ['done', 'finish', 'complete', "i'm done", 'all done', 'finished'];
+const NEXT_COMMANDS = ['next field', 'next', 'go next', 'move on', 'continue', 'next one', 'go to next', 'forward'];
+const SKIP_COMMANDS = ['skip', 'skip field', 'skip this', 'pass', 'skip it', 'skip this one'];
+const DONE_COMMANDS = ['done', 'finish', 'complete', "i'm done", 'all done', 'finished', 'we are done', 'that is it', 'thats it', 'thats all', 'wrap up', 'save it', 'complete survey'];
+const BACK_COMMANDS = ['go back', 'previous', 'previous field', 'back', 'go to previous'];
 
 function matchesCommand(text: string, commands: string[]): boolean {
   const lower = text.toLowerCase().trim();
@@ -100,6 +104,8 @@ export default function HandsFreeMode({
   const transcriptBufferRef = useRef<TranscriptEntry[]>([]);
   const restartTimeoutRef = useRef<number | null>(null);
   const commandFlashTimeoutRef = useRef<number | null>(null);
+  const restartAttemptsRef = useRef(0);
+  const listeningRef = useRef(false);
   // Refs to track mutable state for callbacks
   const currentFieldIdxRef = useRef(currentFieldIdx);
   const fieldDataRef = useRef(fieldData);
@@ -357,10 +363,13 @@ export default function HandsFreeMode({
     } else if (matchesCommand(text, SKIP_COMMANDS)) {
       flashCommand('Skip');
       advanceField();
+    } else if (matchesCommand(text, BACK_COMMANDS)) {
+      flashCommand('Back');
+      goBack();
     } else {
       appendToCurrentField(text);
     }
-  }, [flashCommand, triggerPhotoCapture, finishRecording, advanceField, appendToCurrentField]);
+  }, [flashCommand, triggerPhotoCapture, finishRecording, advanceField, goBack, appendToCurrentField]);
 
   // Keep handleVoiceCommand ref stable for recognition callback
   const handleVoiceCommandRef = useRef(handleVoiceCommand);
@@ -369,8 +378,15 @@ export default function HandsFreeMode({
   // ── Speech Recognition ─────────────────────────────────────────────────
   const scheduleRestart = useCallback(() => {
     if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+    if (restartAttemptsRef.current >= 5) {
+      setMicError('Voice recognition stopped after repeated failures. Tap the mic to retry.');
+      setListening(false);
+      listeningRef.current = false;
+      return;
+    }
+    restartAttemptsRef.current += 1;
     restartTimeoutRef.current = window.setTimeout(() => {
-      if (recognitionRef.current) {
+      if (recognitionRef.current && listeningRef.current) {
         try { recognitionRef.current.start(); } catch { /* already running */ }
       }
     }, 300);
@@ -391,10 +407,12 @@ export default function HandsFreeMode({
 
     recognition.onstart = () => {
       setListening(true);
+      listeningRef.current = true;
       setMicError(null);
     };
 
     recognition.onresult = (event: any) => {
+      restartAttemptsRef.current = 0;
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
@@ -420,6 +438,7 @@ export default function HandsFreeMode({
       if (event.error === 'not-allowed') {
         setMicError('Microphone access denied. Please allow microphone permissions.');
         setListening(false);
+        listeningRef.current = false;
       } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
         scheduleRestart();
       }
@@ -446,6 +465,8 @@ export default function HandsFreeMode({
       try { rec.stop(); } catch { /* noop */ }
     }
     setListening(false);
+    listeningRef.current = false;
+    restartAttemptsRef.current = 0;
   }, []);
 
   // Start recognition on mount
@@ -598,7 +619,7 @@ export default function HandsFreeMode({
   // ─── Recording Phase ──────────────────────────────────────────────────
   if (phase === 'recording') {
     return (
-      <div className="fixed inset-0 bg-gray-950/95 flex flex-col" style={{ zIndex: 999999 }}>
+      <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 999999 }}>
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -757,8 +778,9 @@ export default function HandsFreeMode({
         {/* Voice commands hint bar */}
         <div className="flex-shrink-0 px-4 py-2 bg-white/[0.03] border-t border-white/10 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-2 text-xs text-white/30 whitespace-nowrap">
-            <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"take a photo"</span>
-            <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"next field"</span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"snap a pic"</span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"next"</span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"go back"</span>
             <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"skip"</span>
             <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 font-medium">"done"</span>
           </div>
@@ -827,7 +849,7 @@ export default function HandsFreeMode({
 
   // ─── Review Phase ──────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-gray-950/95 flex flex-col" style={{ zIndex: 999999 }}>
+    <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 999999 }}>
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between bg-white/5 backdrop-blur-md border-b border-white/10">
         <div className="flex items-center gap-3">
