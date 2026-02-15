@@ -125,27 +125,27 @@ export default function LandingPage() {
     <div className="min-h-screen bg-white">
       {/* Header */}
       <header className="bg-white/95 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <div className="bg-blue-600 p-2 rounded-lg shadow-md">
-                <Route className="w-6 h-6 text-white" />
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-12 sm:h-16">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="bg-blue-600 p-1.5 sm:p-2 rounded-lg shadow-md flex-shrink-0">
+                <Route className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Survey-Route</h1>
-                <p className="text-xs text-gray-500">by BEAR DATA</p>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-xl font-bold text-gray-900 truncate">Survey-Route</h1>
+                <p className="text-[10px] sm:text-xs text-gray-500 hidden sm:block">by BEAR DATA</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
               <button
                 onClick={() => navigate('/login')}
-                className="px-4 py-2 text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                className="px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-base text-blue-600 hover:text-blue-700 font-medium transition-colors"
               >
                 Sign In
               </button>
               <button
                 onClick={() => navigate('/request-access')}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-md hover:shadow-lg"
+                className="px-3 sm:px-6 py-1.5 sm:py-2 text-xs sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-md hover:shadow-lg whitespace-nowrap"
               >
                 Request Access
               </button>
