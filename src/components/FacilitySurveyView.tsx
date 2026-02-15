@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Save, CheckCircle, X, Camera, MapPin, Star, Loader2, Trash2, ChevronDown, ClipboardList } from 'lucide-react';
+import { Save, CheckCircle, X, Camera, MapPin, Star, Loader2, Trash2, ChevronDown, ClipboardList, Mic } from 'lucide-react';
 import { supabase, Facility, SurveyType, SurveyField, FacilitySurveyData } from '../lib/supabase';
+import HandsFreeMode from './HandsFreeMode';
 
 interface FacilitySurveyViewProps {
   facility: Facility;
@@ -32,6 +33,7 @@ export default function FacilitySurveyView({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureCanvas, setSignatureCanvas] = useState<string | null>(null);
+  const [showHandsFree, setShowHandsFree] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -496,9 +498,20 @@ export default function FacilitySurveyView({
                 </span>
               </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {surveyType.hands_free_enabled && (
+                <button
+                  onClick={() => setShowHandsFree(true)}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  title="Hands-Free Mode"
+                >
+                  <Mic className="w-5 h-5" />
+                </button>
+              )}
+              <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
           {/* Progress bar */}
           <div className="mt-2 h-1.5 bg-white/20 rounded-full overflow-hidden">
@@ -582,7 +595,22 @@ export default function FacilitySurveyView({
           </div>
         )}
       </div>
+
+      {/* Hands-Free Mode overlay */}
+      {showHandsFree && (
+        <HandsFreeMode
+          facility={facility}
+          surveyType={surveyType}
+          fields={fields}
+          existingData={existingData}
+          userId={userId}
+          onClose={() => setShowHandsFree(false)}
+          onSaved={() => {
+            setShowHandsFree(false);
+            if (onSaved) onSaved();
+          }}
+        />
+      )}
     </div>
   );
 }
-
