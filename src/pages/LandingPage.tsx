@@ -92,14 +92,20 @@ function MapMockup() {
       </div>
       {/* Map area */}
       <div className="relative h-56 sm:h-72 overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4d8 0%, #d4cfbf 30%, #e0ddd0 60%, #c8d4b8 100%)' }}>
-        {/* Road-like lines */}
+        {/* Road network — subtle gray unnamed roads like a real map */}
         <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          {/* Interstate lines (pink/red like real map) */}
-          <line x1="0" y1="65%" x2="100%" y2="55%" stroke="#e88" strokeWidth="1.5" opacity="0.5" />
-          <line x1="10%" y1="0" x2="45%" y2="100%" stroke="#e88" strokeWidth="1.5" opacity="0.4" />
-          {/* Secondary roads (orange) */}
-          <line x1="0" y1="40%" x2="100%" y2="35%" stroke="#d9a" strokeWidth="1" opacity="0.3" />
-          {/* Route lines (blue, like the real app) */}
+          {/* Major roads */}
+          <path d="M 0 45% Q 25% 42% 50% 48% T 100% 44%" fill="none" stroke="#c8c3b4" strokeWidth="2.5" />
+          <path d="M 15% 0 Q 20% 30% 35% 60% T 40% 100%" fill="none" stroke="#c8c3b4" strokeWidth="2.5" />
+          <path d="M 60% 0 Q 55% 25% 58% 50% T 65% 100%" fill="none" stroke="#c8c3b4" strokeWidth="2" />
+          {/* Minor roads */}
+          <path d="M 0 22% Q 20% 20% 40% 24% T 75% 18%" fill="none" stroke="#d4cfbf" strokeWidth="1.5" />
+          <path d="M 0 72% Q 30% 68% 55% 74% T 100% 70%" fill="none" stroke="#d4cfbf" strokeWidth="1.5" />
+          <path d="M 80% 0 Q 78% 20% 82% 45% T 85% 100%" fill="none" stroke="#d4cfbf" strokeWidth="1.2" />
+          <path d="M 30% 0 Q 28% 15% 32% 35% T 28% 55%" fill="none" stroke="#d4cfbf" strokeWidth="1.2" />
+          <path d="M 0 85% Q 15% 82% 30% 88% T 55% 84%" fill="none" stroke="#d4cfbf" strokeWidth="1" />
+          <path d="M 50% 15% Q 60% 18% 72% 14% T 100% 20%" fill="none" stroke="#d4cfbf" strokeWidth="1" />
+          {/* Optimized route (blue) */}
           <path d="M 25% 15% L 35% 25% L 50% 30% L 60% 45% L 45% 55% L 35% 60% L 40% 75% L 55% 85%" fill="none" stroke="#3b82f6" strokeWidth="2.5" opacity="0.85" />
           <path d="M 55% 85% L 70% 70% L 80% 50% L 75% 30% L 60% 20% L 45% 15%" fill="none" stroke="#3b82f6" strokeWidth="2.5" opacity="0.6" />
         </svg>
@@ -296,8 +302,12 @@ function RouteMapMockup() {
       {/* Map */}
       <div className="relative h-48 sm:h-56 overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4d8 0%, #d4cfbf 30%, #e0ddd0 60%, #c8d4b8 100%)' }}>
         <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          <line x1="0" y1="60%" x2="100%" y2="50%" stroke="#e88" strokeWidth="1.5" opacity="0.4" />
-          <line x1="20%" y1="0" x2="50%" y2="100%" stroke="#e88" strokeWidth="1" opacity="0.3" />
+          {/* Unnamed roads */}
+          <path d="M 0 40% Q 25% 36% 50% 42% T 100% 38%" fill="none" stroke="#c8c3b4" strokeWidth="2" />
+          <path d="M 20% 0 Q 25% 30% 30% 55% T 35% 100%" fill="none" stroke="#c8c3b4" strokeWidth="2" />
+          <path d="M 65% 0 Q 60% 25% 63% 50% T 70% 100%" fill="none" stroke="#d4cfbf" strokeWidth="1.5" />
+          <path d="M 0 75% Q 30% 72% 60% 78% T 100% 74%" fill="none" stroke="#d4cfbf" strokeWidth="1.2" />
+          <path d="M 85% 0 Q 82% 30% 88% 60% T 90% 100%" fill="none" stroke="#d4cfbf" strokeWidth="1" />
           {/* Day 1 route - blue */}
           <path d="M 40 160 Q 80 120 130 100 T 200 70 T 240 55" fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.8" />
           {/* Day 2 route - green */}
