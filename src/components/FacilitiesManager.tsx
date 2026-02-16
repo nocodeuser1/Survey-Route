@@ -127,7 +127,7 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet';
 
-const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'visit_duration', 'spcc_status', 'inspection_status', 'notes'];
+const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'notes'];
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
@@ -2149,19 +2149,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         placeholder="-97.832028"
                       />
                     </div>
-                    {isFieldVisible('visit_duration') && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Visit Duration (min)</label>
-                        <input
-                          type="number"
-                          value={mobileEditFormData.visit_duration || ''}
-                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, visit_duration: e.target.value })}
-                          min="1"
-                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                          placeholder="30"
-                        />
-                      </div>
-                    )}
+                    {/* Visit Duration removed — controlled via route planning settings */}
                   </div>
                   {isFieldVisible('county') && (
                     <div>
