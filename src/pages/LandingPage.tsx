@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, Wifi, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint } from 'lucide-react';
+import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, Wifi, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint, Clock, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useStripeCheckout } from '../hooks/useStripeCheckout';
 
@@ -68,71 +68,96 @@ function useCountUp(end: number, duration = 2000, trigger = false, suffix = '', 
 
 // ─── MapMockup ────────────────────────────────────────────────────────
 function MapMockup() {
+  // Pin component matching real app: circle with checkmark/label, ring color = status
+  const Pin = ({ x, y, ring = 'blue', checked = true, label }: { x: string; y: string; ring?: string; checked?: boolean; label?: string }) => {
+    const ringColors: Record<string, string> = { blue: 'ring-blue-400 bg-blue-500', yellow: 'ring-yellow-400 bg-yellow-500', purple: 'ring-purple-400 bg-purple-500' };
+    return (
+      <div className="absolute flex flex-col items-center" style={{ left: x, top: y }}>
+        <div className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-white shadow-md ring-2 ${ringColors[ring] || ringColors.blue}`}>
+          {checked ? <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <span className="text-[9px] font-bold">{label}</span>}
+        </div>
+      </div>
+    );
+  };
   return (
     <div className="bg-gray-100 rounded-2xl overflow-hidden shadow-2xl border border-gray-200">
-      {/* Browser chrome */}
-      <div className="bg-gray-800 px-4 py-2.5 flex items-center gap-2">
-        <div className="flex gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-red-500" />
-          <div className="w-3 h-3 rounded-full bg-yellow-500" />
-          <div className="w-3 h-3 rounded-full bg-green-500" />
-        </div>
-        <div className="flex-1 bg-gray-700 rounded-md px-3 py-1 text-xs text-gray-400 ml-2">app.survey-route.com/map</div>
-      </div>
-      {/* Stats bar */}
-      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-4">
-          <span className="font-semibold text-gray-900">Route Planner</span>
-          <span className="text-blue-600 font-medium">Day 1 of 3</span>
-        </div>
-        <div className="flex items-center gap-3 text-gray-500">
-          <span>12 stops</span>
-          <span>•</span>
-          <span>142 mi</span>
-          <span>•</span>
-          <span className="text-green-600 font-medium">Optimized</span>
+      {/* App header bar */}
+      <div className="bg-white px-3 sm:px-4 py-2 flex items-center justify-between border-b border-gray-200">
+        <span className="font-semibold text-gray-900 text-xs sm:text-sm">Route Map</span>
+        <div className="flex items-center gap-1">
+          <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center"><ArrowRight className="w-3.5 h-3.5 text-white rotate-180" /></div>
+          <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center"><Globe className="w-3.5 h-3.5 text-gray-500" /></div>
+          <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center"><Settings className="w-3.5 h-3.5 text-gray-500" /></div>
         </div>
       </div>
       {/* Map area */}
-      <div className="relative h-64 bg-gradient-to-br from-green-100 via-emerald-50 to-green-200 overflow-hidden">
-        {/* Grid lines for map feel */}
+      <div className="relative h-56 sm:h-72 overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4d8 0%, #d4cfbf 30%, #e0ddd0 60%, #c8d4b8 100%)' }}>
+        {/* Road-like lines */}
         <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="mapGrid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#mapGrid)" />
-          {/* Route lines */}
-          <path d="M 60 200 Q 100 160 140 130 T 220 100 T 300 80 T 380 110" fill="none" stroke="#3b82f6" strokeWidth="3" strokeDasharray="none" opacity="0.8" />
-          <path d="M 380 110 Q 400 140 350 170 T 280 200 T 200 220" fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.5" />
+          {/* Interstate lines (pink/red like real map) */}
+          <line x1="0" y1="65%" x2="100%" y2="55%" stroke="#e88" strokeWidth="1.5" opacity="0.5" />
+          <line x1="10%" y1="0" x2="45%" y2="100%" stroke="#e88" strokeWidth="1.5" opacity="0.4" />
+          {/* Secondary roads (orange) */}
+          <line x1="0" y1="40%" x2="100%" y2="35%" stroke="#d9a" strokeWidth="1" opacity="0.3" />
+          {/* Route lines (blue, like the real app) */}
+          <path d="M 25% 15% L 35% 25% L 50% 30% L 60% 45% L 45% 55% L 35% 60% L 40% 75% L 55% 85%" fill="none" stroke="#3b82f6" strokeWidth="2.5" opacity="0.85" />
+          <path d="M 55% 85% L 70% 70% L 80% 50% L 75% 30% L 60% 20% L 45% 15%" fill="none" stroke="#3b82f6" strokeWidth="2.5" opacity="0.6" />
         </svg>
-        {/* Facility pins */}
-        <div className="absolute top-12 left-16 flex flex-col items-center">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg ring-2 ring-white">1</div>
-          <div className="mt-1 bg-white px-2 py-0.5 rounded text-[10px] font-medium shadow text-gray-700">Well A-12</div>
+        {/* Zoom controls */}
+        <div className="absolute top-2 left-2 flex flex-col gap-0.5">
+          <div className="w-7 h-7 bg-white rounded shadow text-center leading-7 text-gray-600 text-sm font-bold">+</div>
+          <div className="w-7 h-7 bg-white rounded shadow text-center leading-7 text-gray-600 text-sm font-bold">−</div>
         </div>
-        <div className="absolute top-20 left-[40%] flex flex-col items-center">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg ring-2 ring-white">2</div>
-          <div className="mt-1 bg-white px-2 py-0.5 rounded text-[10px] font-medium shadow text-gray-700">Tank Farm</div>
+        {/* Facility pins — clusters matching real screenshot layout */}
+        {/* Top cluster */}
+        <Pin x="20%" y="8%" ring="blue" /><Pin x="26%" y="5%" ring="blue" /><Pin x="32%" y="10%" ring="blue" />
+        <Pin x="15%" y="14%" ring="blue" /><Pin x="22%" y="16%" ring="yellow" /><Pin x="28%" y="13%" ring="blue" />
+        <Pin x="38%" y="7%" ring="blue" /><Pin x="44%" y="12%" ring="blue" />
+        {/* Middle cluster */}
+        <Pin x="45%" y="28%" ring="blue" label="D1" checked={false} /><Pin x="52%" y="25%" ring="blue" />
+        <Pin x="60%" y="22%" ring="blue" /><Pin x="68%" y="27%" ring="blue" />
+        <Pin x="40%" y="35%" ring="blue" /><Pin x="48%" y="33%" ring="blue" />
+        {/* Center-left cluster */}
+        <Pin x="30%" y="45%" ring="yellow" /><Pin x="25%" y="50%" ring="purple" />
+        <Pin x="32%" y="52%" ring="blue" /><Pin x="28%" y="55%" ring="blue" />
+        <Pin x="35%" y="48%" ring="blue" />
+        {/* Lower cluster */}
+        <Pin x="38%" y="62%" ring="purple" /><Pin x="45%" y="60%" ring="blue" />
+        <Pin x="42%" y="68%" ring="blue" /><Pin x="50%" y="65%" ring="yellow" />
+        {/* Bottom cluster */}
+        <Pin x="55%" y="78%" ring="blue" /><Pin x="48%" y="82%" ring="blue" />
+        <Pin x="60%" y="75%" ring="yellow" /><Pin x="65%" y="72%" ring="blue" />
+        <Pin x="52%" y="85%" ring="blue" /><Pin x="58%" y="88%" ring="blue" />
+        {/* Right side */}
+        <Pin x="72%" y="40%" ring="blue" /><Pin x="78%" y="45%" ring="yellow" />
+        <Pin x="75%" y="55%" ring="blue" /><Pin x="70%" y="58%" ring="blue" />
+        {/* Floating bottom buttons */}
+        <div className="absolute bottom-2 left-2 flex gap-1.5">
+          <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-lg"><X className="w-4 h-4 text-white" /></div>
+          <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-gray-200"><Globe className="w-4 h-4 text-gray-600" /></div>
         </div>
-        <div className="absolute top-8 right-[25%] flex flex-col items-center">
-          <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg ring-2 ring-white">3</div>
-          <div className="mt-1 bg-white px-2 py-0.5 rounded text-[10px] font-medium shadow text-gray-700">Pipeline X</div>
+        <div className="absolute bottom-2 right-2 flex gap-1.5">
+          <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg border border-gray-200"><Route className="w-4 h-4 text-gray-600" /></div>
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shadow-lg"><Navigation className="w-4 h-4 text-white" /></div>
         </div>
-        <div className="absolute bottom-16 right-[15%] flex flex-col items-center">
-          <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg ring-2 ring-white">4</div>
-          <div className="mt-1 bg-white px-2 py-0.5 rounded text-[10px] font-medium shadow text-gray-700">Compressor</div>
+      </div>
+      {/* Stats bar (matching real screenshot) */}
+      <div className="bg-white px-3 sm:px-4 py-2.5 flex items-center justify-between text-[10px] sm:text-xs border-t border-gray-200">
+        <div className="flex items-center gap-1.5">
+          <Calendar className="w-3.5 h-3.5 text-blue-600" />
+          <div><span className="font-bold text-gray-900">3 days</span><br /><span className="text-gray-500">12h 30m total</span></div>
         </div>
-        <div className="absolute bottom-12 left-[30%] flex flex-col items-center">
-          <div className="w-8 h-8 bg-teal-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg ring-2 ring-white">5</div>
-          <div className="mt-1 bg-white px-2 py-0.5 rounded text-[10px] font-medium shadow text-gray-700">Well B-7</div>
+        <div className="flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5 text-green-600" />
+          <span className="font-bold text-gray-900">47</span>
         </div>
-        {/* Floating action bar */}
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur rounded-xl shadow-xl px-4 py-2 flex items-center gap-3 border border-gray-200">
-          <button className="bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Optimize</button>
-          <button className="text-xs text-gray-600 font-medium px-2 py-1.5">Add Stop</button>
-          <button className="text-xs text-gray-600 font-medium px-2 py-1.5">Export</button>
+        <div className="flex items-center gap-1.5">
+          <TrendingUp className="w-3.5 h-3.5 text-orange-600" />
+          <span className="font-bold text-gray-900">284.3</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Clock className="w-3.5 h-3.5 text-purple-600" />
+          <div><span className="font-bold text-gray-900">8h 15m</span><br /><span className="text-gray-500">drive time</span></div>
         </div>
       </div>
     </div>
@@ -249,67 +274,56 @@ function RouteMapMockup() {
     <div className="bg-gray-100 rounded-2xl overflow-hidden shadow-2xl border border-gray-200">
       {/* Stats bar */}
       <div className="bg-white px-4 py-3 flex items-center justify-between border-b border-gray-200">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 sm:gap-6">
           <div className="text-center">
-            <p className="text-lg font-bold text-gray-900">3</p>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Days</p>
+            <p className="text-base sm:text-lg font-bold text-gray-900">3</p>
+            <p className="text-[9px] sm:text-[10px] text-gray-500 uppercase tracking-wide">Days</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-blue-600">24</p>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Stops</p>
+            <p className="text-base sm:text-lg font-bold text-blue-600">47</p>
+            <p className="text-[9px] sm:text-[10px] text-gray-500 uppercase tracking-wide">Facilities</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-green-600">267</p>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Miles</p>
+            <p className="text-base sm:text-lg font-bold text-green-600">284</p>
+            <p className="text-[9px] sm:text-[10px] text-gray-500 uppercase tracking-wide">Miles</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-orange-600">-41%</p>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Savings</p>
+            <p className="text-base sm:text-lg font-bold text-orange-600">-41%</p>
+            <p className="text-[9px] sm:text-[10px] text-gray-500 uppercase tracking-wide">vs Manual</p>
           </div>
         </div>
       </div>
       {/* Map */}
-      <div className="relative h-56 bg-gradient-to-br from-green-100 via-emerald-50 to-teal-100 overflow-hidden">
+      <div className="relative h-48 sm:h-56 overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4d8 0%, #d4cfbf 30%, #e0ddd0 60%, #c8d4b8 100%)' }}>
         <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="routeGrid" width="30" height="30" patternUnits="userSpaceOnUse">
-              <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(0,0,0,0.03)" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#routeGrid)" />
+          <line x1="0" y1="60%" x2="100%" y2="50%" stroke="#e88" strokeWidth="1.5" opacity="0.4" />
+          <line x1="20%" y1="0" x2="50%" y2="100%" stroke="#e88" strokeWidth="1" opacity="0.3" />
           {/* Day 1 route - blue */}
-          <path d="M 40 180 Q 80 140 120 120 T 180 90 T 220 70" fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.8" />
+          <path d="M 40 160 Q 80 120 130 100 T 200 70 T 240 55" fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.8" />
           {/* Day 2 route - green */}
-          <path d="M 200 160 Q 250 130 300 110 T 370 90" fill="none" stroke="#22c55e" strokeWidth="3" opacity="0.8" />
+          <path d="M 220 140 Q 270 110 320 90 T 390 75" fill="none" stroke="#22c55e" strokeWidth="3" opacity="0.8" />
           {/* Day 3 route - orange */}
-          <path d="M 150 200 Q 200 190 250 200 T 350 180" fill="none" stroke="#f97316" strokeWidth="3" opacity="0.8" />
+          <path d="M 160 180 Q 210 170 260 175 T 360 160" fill="none" stroke="#f97316" strokeWidth="3" opacity="0.8" />
         </svg>
-        {/* Day markers */}
-        <div className="absolute top-10 left-12">
-          <div className="w-5 h-5 bg-blue-600 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute top-16 left-[35%]">
-          <div className="w-5 h-5 bg-blue-600 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute top-8 left-[50%]">
-          <div className="w-5 h-5 bg-blue-600 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute top-[45%] left-[55%]">
-          <div className="w-5 h-5 bg-green-600 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute top-[35%] right-[20%]">
-          <div className="w-5 h-5 bg-green-600 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute bottom-10 left-[40%]">
-          <div className="w-5 h-5 bg-orange-500 rounded-full ring-2 ring-white shadow" />
-        </div>
-        <div className="absolute bottom-6 right-[18%]">
-          <div className="w-5 h-5 bg-orange-500 rounded-full ring-2 ring-white shadow" />
-        </div>
+        {/* Facility pins */}
+        {[
+          { x: '8%', y: '65%', c: 'bg-blue-500' }, { x: '15%', y: '55%', c: 'bg-blue-500' }, { x: '22%', y: '42%', c: 'bg-blue-500' },
+          { x: '30%', y: '35%', c: 'bg-blue-500' }, { x: '40%', y: '25%', c: 'bg-blue-500' }, { x: '48%', y: '20%', c: 'bg-blue-500' },
+          { x: '55%', y: '50%', c: 'bg-green-500' }, { x: '62%', y: '38%', c: 'bg-green-500' }, { x: '70%', y: '30%', c: 'bg-green-500' },
+          { x: '78%', y: '25%', c: 'bg-green-500' }, { x: '85%', y: '28%', c: 'bg-green-500' },
+          { x: '35%', y: '72%', c: 'bg-orange-500' }, { x: '45%', y: '68%', c: 'bg-orange-500' }, { x: '58%', y: '65%', c: 'bg-orange-500' },
+          { x: '68%', y: '60%', c: 'bg-orange-500' }, { x: '80%', y: '58%', c: 'bg-orange-500' },
+        ].map((p, i) => (
+          <div key={i} className="absolute" style={{ left: p.x, top: p.y }}>
+            <div className={`w-5 h-5 ${p.c} rounded-full ring-2 ring-white shadow-md flex items-center justify-center`}>
+              <CheckCircle className="w-3 h-3 text-white" />
+            </div>
+          </div>
+        ))}
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 bg-white/90 backdrop-blur rounded-lg px-3 py-2 flex items-center gap-3 text-[10px] font-medium shadow">
-          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-600" /> Day 1</div>
-          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-green-600" /> Day 2</div>
+        <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur rounded-lg px-2.5 py-1.5 flex items-center gap-2.5 text-[9px] sm:text-[10px] font-medium shadow">
+          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Day 1</div>
+          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-green-500" /> Day 2</div>
           <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Day 3</div>
         </div>
       </div>
@@ -578,10 +592,6 @@ export default function LandingPage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-6 text-sm text-gray-500">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-600" />
-                    <span>No credit card required</span>
-                  </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-600" />
                     <span>14-day free trial</span>
@@ -1202,7 +1212,7 @@ export default function LandingPage() {
               </button>
             </div>
             <p className="mt-6 text-blue-200 text-sm">
-              No credit card required • Cancel anytime • Setup in minutes
+              Cancel anytime • Setup in minutes
             </p>
           </div>
         </section>
