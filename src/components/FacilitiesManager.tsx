@@ -982,6 +982,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     formData.first_prod_date = facility.first_prod_date || '';
     formData.spcc_due_date = facility.spcc_due_date || '';
     formData.spcc_inspection_date = facility.spcc_inspection_date || '';
+    formData.spcc_pe_stamp_date = facility.spcc_pe_stamp_date || '';
     formData.county = facility.county || '';
     formData.photos_taken = facility.photos_taken ? 'true' : 'false';
     formData.field_visit_date = facility.field_visit_date || '';
@@ -1074,6 +1075,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           berm_length: bermLength,
           berm_width: bermWidth,
           initial_inspection_completed: mobileEditFormData.initial_inspection_completed?.trim() || null,
+          spcc_pe_stamp_date: mobileEditFormData.spcc_pe_stamp_date?.trim() || null,
           company_signature_date: mobileEditFormData.company_signature_date?.trim() || null,
           recertified_date: mobileEditFormData.recertified_date?.trim() || null,
           matched_facility_name: mobileEditFormData.matched_facility_name?.trim() || null,
@@ -2176,12 +2178,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 </div>
               </section>
 
-              {/* Section 2: SPCC Dates */}
-              {isSectionVisible(['first_prod_date', 'spcc_due_date', 'spcc_inspection_date']) && (
+              {/* Section 2: SPCC Plan Dates */}
+              {isSectionVisible(['first_prod_date', 'spcc_due_date', 'spcc_inspection_date', 'spcc_pe_stamp_date', 'company_signature_date', 'recertified_date', 'recertification_due_date']) && (
                 <section>
                   <div className="flex items-center gap-2 mb-3">
                     <Calendar className="w-4 h-4 text-gray-400" />
-                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">SPCC Dates</h3>
+                    <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">SPCC Plan Dates</h3>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {isFieldVisible('first_prod_date') && (
@@ -2225,6 +2227,61 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           onBlur={handleDateBlur('spcc_inspection_date')}
                           onPaste={handleDatePaste('spcc_inspection_date')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('spcc_pe_stamp_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">PE Stamp Date</label>
+                        <input
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.spcc_pe_stamp_date || '')}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, spcc_pe_stamp_date: e.target.value })}
+                          onBlur={handleDateBlur('spcc_pe_stamp_date')}
+                          onPaste={handleDatePaste('spcc_pe_stamp_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('company_signature_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company Signature</label>
+                        <input
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.company_signature_date || '')}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, company_signature_date: e.target.value })}
+                          onBlur={handleDateBlur('company_signature_date')}
+                          onPaste={handleDatePaste('company_signature_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('recertified_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recertified</label>
+                        <input
+                          type="text"
+                          placeholder="MM/DD/YYYY"
+                          value={displayDate(mobileEditFormData.recertified_date || '')}
+                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, recertified_date: e.target.value })}
+                          onBlur={handleDateBlur('recertified_date')}
+                          onPaste={handleDatePaste('recertified_date')}
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        />
+                      </div>
+                    )}
+                    {isFieldVisible('recertification_due_date') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Recert. Due Date <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Auto</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={displayDate(computeRecertificationDueDate(mobileEditingFacility))}
+                          readOnly
+                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-gray-100/60 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 cursor-not-allowed"
                         />
                       </div>
                     )}
@@ -2347,7 +2404,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               )}
 
               {/* Section 5: Compliance */}
-              {isSectionVisible(['initial_inspection_completed', 'company_signature_date', 'recertified_date', 'recertification_due_date']) && (
+              {isSectionVisible(['initial_inspection_completed']) && (
                 <section>
                   <div className="flex items-center gap-2 mb-3">
                     <ShieldCheck className="w-4 h-4 text-gray-400" />
@@ -2365,47 +2422,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           onBlur={handleDateBlur('initial_inspection_completed')}
                           onPaste={handleDatePaste('initial_inspection_completed')}
                           className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                        />
-                      </div>
-                    )}
-                    {isFieldVisible('company_signature_date') && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company Signature</label>
-                        <input
-                          type="text"
-                          placeholder="MM/DD/YYYY"
-                          value={displayDate(mobileEditFormData.company_signature_date || '')}
-                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, company_signature_date: e.target.value })}
-                          onBlur={handleDateBlur('company_signature_date')}
-                          onPaste={handleDatePaste('company_signature_date')}
-                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                        />
-                      </div>
-                    )}
-                    {isFieldVisible('recertified_date') && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recertified</label>
-                        <input
-                          type="text"
-                          placeholder="MM/DD/YYYY"
-                          value={displayDate(mobileEditFormData.recertified_date || '')}
-                          onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, recertified_date: e.target.value })}
-                          onBlur={handleDateBlur('recertified_date')}
-                          onPaste={handleDatePaste('recertified_date')}
-                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                        />
-                      </div>
-                    )}
-                    {isFieldVisible('recertification_due_date') && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Recert. Due Date <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">Auto</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={displayDate(computeRecertificationDueDate(mobileEditingFacility))}
-                          readOnly
-                          className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-gray-100/60 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 cursor-not-allowed"
                         />
                       </div>
                     )}
