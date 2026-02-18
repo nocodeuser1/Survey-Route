@@ -3479,6 +3479,8 @@ function App() {
               teamNumber={1}
               accountId={currentAccount.id}
               userRole={user?.isAgencyOwner ? 'owner' : accountRole === 'account_admin' ? 'admin' : 'user'}
+              surveyType={surveyType}
+              onSurveyTypeChange={setSurveyType}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;
                 if (batchId) {

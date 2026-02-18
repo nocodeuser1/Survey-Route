@@ -40,6 +40,8 @@ interface SurveyModeProps {
   userRole?: 'owner' | 'admin' | 'user';
   onFacilitiesChange?: () => void;
   onShowOnMap?: (latitude: number, longitude: number) => void;
+  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
+  onSurveyTypeChange?: (surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
 }
 
 interface FacilityWithDistance extends Facility {
@@ -50,10 +52,10 @@ interface FacilityWithDistance extends Facility {
 }
 
 type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
-type ViewModeType = 'inspections' | 'plans';
+type ViewModeType = 'all' | 'inspections' | 'plans';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap }: SurveyModeProps) {
+export default function SurveyMode({ result, facilities, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange }: SurveyModeProps) {
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [facilitiesWithDistance, setFacilitiesWithDistance] = useState<FacilityWithDistance[]>([]);
   const [inspectingFacility, setInspectingFacility] = useState<Facility | null>(null);
@@ -91,9 +93,28 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showDraftRecovery, setShowDraftRecovery] = useState(false);
   const [recoveredDraftFacility, setRecoveredDraftFacility] = useState<Facility | null>(null);
-  const [viewMode, setViewMode] = useState<ViewModeType>(() => {
+  const [viewMode, setViewModeInternal] = useState<ViewModeType>(() => {
+    if (externalSurveyType === 'spcc_plan') return 'plans';
+    if (externalSurveyType === 'spcc_inspection') return 'inspections';
+    if (externalSurveyType === 'all') return 'all';
     return statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
   });
+
+  // Sync from external surveyType
+  useEffect(() => {
+    if (!externalSurveyType) return;
+    const mapped: ViewModeType = externalSurveyType === 'spcc_plan' ? 'plans' : externalSurveyType === 'spcc_inspection' ? 'inspections' : 'all';
+    if (mapped !== viewMode) setViewModeInternal(mapped);
+  }, [externalSurveyType]);
+
+  // Wrapper to sync outward
+  const setViewMode = (mode: ViewModeType) => {
+    setViewModeInternal(mode);
+    if (onSurveyTypeChange) {
+      const mapped = mode === 'plans' ? 'spcc_plan' : mode === 'inspections' ? 'spcc_inspection' : 'all';
+      onSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
+    }
+  };
 
   // Persist UI state to localStorage
   useEffect(() => {
@@ -635,7 +656,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     let filtered = facilitiesWithDistance;
 
     if (filter !== 'all') {
-      if (viewMode === 'inspections') {
+      if (viewMode === 'inspections' || viewMode === 'all') {
         filtered = filtered.filter(f => getInspectionStatus(f) === filter);
       } else {
         // SPCC Plans mode - map filter types to plan statuses
@@ -692,27 +713,21 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   const filteredFacilities = getFilteredFacilities();
 
   // Calculate counts based on view mode
-  const incompleteCount = viewMode === 'inspections'
-    ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'incomplete').length
-    : facilitiesWithDistance.filter(f => {
-      const status = getSPCCPlanStatus(f);
-      return status === 'missing' || status === 'pending';
-    }).length;
+  const incompleteCount = viewMode === 'plans'
+    ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'missing' || s === 'pending'; }).length
+    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'incomplete').length;
 
-  const completedCount = viewMode === 'inspections'
-    ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'completed').length
-    : facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'valid' || s === 'recertified'; }).length;
+  const completedCount = viewMode === 'plans'
+    ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'valid' || s === 'recertified'; }).length
+    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'completed').length;
 
-  const expiredCount = viewMode === 'inspections'
-    ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'expired').length
-    : facilitiesWithDistance.filter(f => {
-      const status = getSPCCPlanStatus(f);
-      return status === 'expired' || status === 'expiring' || status === 'overdue';
-    }).length;
+  const expiredCount = viewMode === 'plans'
+    ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'expired' || s === 'expiring' || s === 'overdue'; }).length
+    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'expired').length;
 
-  const draftCount = viewMode === 'inspections'
-    ? facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'draft').length
-    : 0; // Drafts don't apply to plans
+  const draftCount = viewMode === 'plans'
+    ? 0
+    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'draft').length;
 
   if (inspectingFacility) {
     return (
@@ -808,13 +823,22 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
           <div className="flex items-center justify-center mb-3">
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5">
               <button
+                onClick={() => setViewMode('all')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'all'
+                  ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
+                  }`}
+              >
+                All
+              </button>
+              <button
                 onClick={() => setViewMode('inspections')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'inspections'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
                   }`}
               >
-                SPCC Inspections
+                Inspections
               </button>
               <button
                 onClick={() => setViewMode('plans')}
@@ -823,12 +847,12 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                   : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
                   }`}
               >
-                SPCC Plans
+                Plans
               </button>
             </div>
           </div>
 
-          <div className={`grid ${viewMode === 'plans' ? 'grid-cols-4' : 'grid-cols-5'} gap-2 mb-3`}>
+          <div className={`grid ${viewMode === 'plans' ? 'grid-cols-4' : viewMode === 'all' ? 'grid-cols-5' : 'grid-cols-5'} gap-2 mb-3`}>
             <button
               onClick={() => setFilter('all')}
               className={`p-2 rounded-lg transition-all ${filter === 'all'
@@ -847,9 +871,9 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                 }`}
             >
               <div className="text-lg font-bold">{incompleteCount}</div>
-              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Missing' : 'Pending'}</div>
+              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Missing' : 'Incomplete'}</div>
             </button>
-            {viewMode === 'inspections' && (
+            {(viewMode === 'inspections' || viewMode === 'all') && (
               <button
                 onClick={() => setFilter('draft')}
                 className={`p-2 rounded-lg transition-all ${filter === 'draft'
