@@ -44,6 +44,9 @@ interface FacilitiesManagerProps {
   getSurveyData?: (facilityId: string, surveyTypeId: string) => FacilitySurveyData[];
   getCompletionStatus?: (facilityId: string, surveyTypeId: string) => { completed: number; total: number; percent: number };
   onSurveyDataSaved?: () => void;
+  // Global mode sync (all/plan/inspection)
+  globalSurveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
+  onGlobalSurveyTypeChange?: (surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
 }
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -192,7 +195,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
@@ -213,7 +216,28 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('spcc_inspection_internal');
-  const [spccMode, setSpccMode] = useState<'plan' | 'inspection'>('plan');
+  const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection'>(() => {
+    if (globalSurveyType === 'spcc_plan') return 'plan';
+    if (globalSurveyType === 'spcc_inspection') return 'inspection';
+    return 'all';
+  });
+
+  // Sync: when global surveyType changes externally, update local spccMode
+  useEffect(() => {
+    if (!globalSurveyType) return;
+    const mapped = globalSurveyType === 'spcc_plan' ? 'plan' : globalSurveyType === 'spcc_inspection' ? 'inspection' : 'all';
+    if (mapped !== spccMode) setSpccModeInternal(mapped);
+  }, [globalSurveyType]);
+
+  // Wrapper: when local mode changes, notify parent
+  const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
+    setSpccModeInternal(mode);
+    userChangedMode.current = true;
+    if (onGlobalSurveyTypeChange) {
+      const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
+      onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
+    }
+  };
 
   // Load column order and visibility per report type + spccMode combination
   const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`;
@@ -229,7 +253,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
     const inspectionColumns: ColumnId[] = ['inspection_status'];
     let cols = [...DEFAULT_VISIBLE_COLUMNS];
-    if (mode === 'plan') {
+    if (mode === 'all') {
+      planColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
+      inspectionColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
+    } else if (mode === 'plan') {
       planColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
       cols = cols.filter(col => !inspectionColumns.includes(col));
     } else {
@@ -474,16 +501,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
     }
 
-    // Only reset sort to mode defaults when the user explicitly switches modes,
-    // not when selectedReportType loads from Supabase on mount
+    // Sort is now sticky across mode changes — no reset
     if (userChangedMode.current) {
-      if (spccMode === 'plan') {
-        setSortColumn('spcc_due_date');
-        setSortDirection('asc');
-      } else {
-        setSortColumn('name');
-        setSortDirection('asc');
-      }
       userChangedMode.current = false;
     }
   }, [selectedReportType, spccMode]);
@@ -2685,7 +2704,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             {/* SPCC Mode Toggle */}
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 flex-shrink-0">
               <button
-                onClick={() => { userChangedMode.current = true; setSpccMode('plan'); }}
+                onClick={() => { setSpccMode('all'); setSpccPlanFilter('all'); }}
+                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'all'
+                  ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
+                  }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => { setSpccMode('plan'); }}
                 className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'plan'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
@@ -2694,7 +2722,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 Plans
               </button>
               <button
-                onClick={() => { userChangedMode.current = true; setSpccMode('inspection'); setSpccPlanFilter('all'); }}
+                onClick={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
                 className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'inspection'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
@@ -2957,7 +2985,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <button
                         onClick={() => {
                           const mappedSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan' =
-                            spccMode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
+                            spccMode === 'plan' ? 'spcc_plan' : spccMode === 'inspection' ? 'spcc_inspection' : 'all';
                           onCreateRoute(Array.from(selectedFacilityIds), mappedSurveyType);
                           setSelectedFacilityIds(new Set());
                         }}

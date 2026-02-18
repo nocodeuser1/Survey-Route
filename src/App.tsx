@@ -2865,6 +2865,8 @@ function App() {
             getSurveyData={getSurveyData}
             getCompletionStatus={getCompletionStatus}
             onSurveyDataSaved={refreshSurveyData}
+            globalSurveyType={surveyType}
+            onGlobalSurveyTypeChange={setSurveyType}
           />
         </div>
 
