@@ -158,7 +158,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   spcc_status: 'SPCC Status',
   inspection_status: 'SPCC Inspection',
   notes: 'Notes',
-  first_prod_date: 'First Prod',
+  first_prod_date: 'Initial Production',
   spcc_due_date: 'SPCC Due',
   spcc_pe_stamp_date: 'PE Stamp Date',
   spcc_inspection_date: 'SPCC Inspection Date',
@@ -1235,7 +1235,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const exportRows = rows.map(r => ({
       'Well Name': r.name,
       'County': r.county || '',
-      'First Prod': r.first_prod_date || '',
+      'Initial Production': r.first_prod_date || '',
       'Photos Taken': r.photos_taken ? 'Yes' : '',
       'Field Visit': r.field_visit_date || '',
       'Estimated Oil BOPD': r.estimated_oil_per_day ?? '',
@@ -2176,7 +2176,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {isFieldVisible('first_prod_date') && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Production</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Initial Production</label>
                         <input
                           type="text"
                           placeholder="MM/DD/YYYY"

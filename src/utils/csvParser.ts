@@ -135,7 +135,7 @@ const longWellSheetVariations = [
 
 const firstProdVariations = [
   'first_prod', 'first prod', 'first production', 'first production date',
-  'first_prod_date', 'prod_date'
+  'first_prod_date', 'prod_date', 'initial production', 'initial production date', 'initial prod', 'ip date'
 ];
 
 const spccDueDateVariations = [

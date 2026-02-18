@@ -373,7 +373,7 @@ export default function FacilityDetailModal({ facility, userId, teamNumber, onCl
               )}
               {facility.first_prod_date && (
                 <div>
-                  <span className="text-blue-200">First Production:</span>{' '}
+                  <span className="text-blue-200">Initial Production:</span>{' '}
                   <span className="text-white">{formatDate(facility.first_prod_date)}</span>
                 </div>
               )}
