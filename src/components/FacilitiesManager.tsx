@@ -1124,7 +1124,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           lat_well_sheet: latWellSheet,
           long_well_sheet: longWellSheet,
           first_prod_date: mobileEditFormData.first_prod_date?.trim() || null,
-          spcc_due_date: mobileEditFormData.spcc_due_date?.trim() || null,
+          // Auto-calculate SPCC due date (first_prod_date + 6 months) if first_prod_date is set
+          // and spcc_due_date wasn't manually overridden
+          spcc_due_date: (() => {
+            const manualDue = mobileEditFormData.spcc_due_date?.trim();
+            const firstProd = mobileEditFormData.first_prod_date?.trim();
+            if (manualDue) return manualDue;
+            if (firstProd) {
+              const d = parseLocalDate(firstProd);
+              d.setMonth(d.getMonth() + 6);
+              return d.toISOString().split('T')[0];
+            }
+            return null;
+          })(),
           spcc_inspection_date: mobileEditFormData.spcc_inspection_date?.trim() || null,
         })
         .eq('id', mobileEditingFacility.id);
@@ -1244,7 +1256,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (parsedFacility.lat_well_sheet !== undefined) d.lat_well_sheet = parsedFacility.lat_well_sheet ?? null;
     if (parsedFacility.long_well_sheet !== undefined) d.long_well_sheet = parsedFacility.long_well_sheet ?? null;
     if (parsedFacility.first_prod_date !== undefined) d.first_prod_date = parsedFacility.first_prod_date || null;
-    if (parsedFacility.spcc_due_date !== undefined) d.spcc_due_date = parsedFacility.spcc_due_date || null;
+    if (parsedFacility.spcc_due_date !== undefined) {
+      d.spcc_due_date = parsedFacility.spcc_due_date || null;
+    } else if (parsedFacility.first_prod_date && !parsedFacility.spcc_due_date) {
+      // Auto-calculate SPCC due date as first_prod_date + 6 months
+      const ipd = parseLocalDate(parsedFacility.first_prod_date);
+      ipd.setMonth(ipd.getMonth() + 6);
+      d.spcc_due_date = ipd.toISOString().split('T')[0];
+    }
     if (parsedFacility.spcc_inspection_date !== undefined) d.spcc_inspection_date = parsedFacility.spcc_inspection_date || null;
     if (parsedFacility.photos_taken !== undefined) d.photos_taken = parsedFacility.photos_taken ?? false;
     if (parsedFacility.field_visit_date !== undefined) d.field_visit_date = parsedFacility.field_visit_date || null;
