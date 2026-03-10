@@ -49,6 +49,7 @@ interface FacilityDetailModalProps {
   allInspections?: Inspection[];
   onViewNearbyFacility?: (facility: Facility) => void;
   onViewSPCCPlan?: () => void;
+  initialTab?: FacilityTab;
 }
 
 type FacilityTab = 'general' | 'inspections' | 'documents';
@@ -107,6 +108,7 @@ export default function FacilityDetailModal({
   allInspections = [],
   onViewNearbyFacility,
   onViewSPCCPlan,
+  initialTab = 'general'
 }: FacilityDetailModalProps) {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [showInspectionForm, setShowInspectionForm] = useState(false);
@@ -118,7 +120,7 @@ export default function FacilityDetailModal({
   const [nearbyFacilitiesData, setNearbyFacilitiesData] = useState<NearbyFacilityWithDistance[]>([]);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [showCompletionMenu, setShowCompletionMenu] = useState(false);
-  const [activeTab, setActiveTab] = useState<FacilityTab>('general');
+  const [activeTab, setActiveTab] = useState<FacilityTab>(initialTab);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

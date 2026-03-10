@@ -3634,6 +3634,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
+          initialTab={surveyType === 'spcc_inspection' ? 'inspections' : 'general'}
           onClose={() => setSurveyFacility(null)}
           onInspectionCompleted={() => {
             // Reload facilities and inspection data to update markers

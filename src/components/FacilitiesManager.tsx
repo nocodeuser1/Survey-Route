@@ -3572,6 +3572,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             userId={userId}
             teamNumber={1}
             accountId={accountId}
+            initialTab={spccMode === 'inspection' ? 'inspections' : 'general'}
             onClose={() => {
               setSelectedFacility(null);
               loadInspections();
