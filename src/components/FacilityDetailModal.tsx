@@ -136,7 +136,6 @@ export default function FacilityDetailModal({
   useEffect(() => {
     loadInspections();
     loadSettings();
-    setActiveTab('general');
   }, [facility.id]);
 
   useEffect(() => {

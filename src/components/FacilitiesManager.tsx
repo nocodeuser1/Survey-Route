@@ -3275,10 +3275,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               }
                               if (columnId === 'inspection_status') {
                                 e.stopPropagation();
-                                const inspection = inspections.get(facility.id);
-                                if (inspection) {
-                                  setViewingInspection(inspection);
-                                }
+                                setForcedTab('inspections');
+                                setSelectedFacility(facility);
                                 return;
                               }
                               handleFacilityRowClick(facility);
