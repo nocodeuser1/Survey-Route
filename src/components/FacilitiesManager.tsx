@@ -1220,7 +1220,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     try {
       const batchId = facilities[0]?.upload_batch_id || crypto.randomUUID();
 
-      const { error: insertError } = await supabase
+      const { data, error: insertError } = await supabase
         .from('facilities')
         .insert({
           user_id: DEMO_USER_ID,
@@ -1230,13 +1230,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           longitude: lng,
           visit_duration_minutes: editForm.visitDuration,
           upload_batch_id: batchId
-        });
+        })
+        .select()
+        .single();
 
       if (insertError) throw insertError;
 
       setShowAddForm(false);
       setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
       onFacilitiesChange();
+
+      if (data) {
+        setSelectedFacility(data as Facility);
+      }
     } catch (err) {
       console.error('Error adding facility:', err);
       setError('Failed to add facility');
@@ -3258,9 +3264,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           <td
                             key={columnId}
                             className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap'
-                              }`}
+                              } ${columnId === 'spcc_status' || columnId === 'inspection_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
+                              if (columnId === 'spcc_status') {
+                                e.stopPropagation();
+                                setSpccPlanDetailFacility(facility);
+                                return;
+                              }
+                              if (columnId === 'inspection_status') {
+                                e.stopPropagation();
+                                const inspection = inspections.get(facility.id);
+                                if (inspection) {
+                                  setViewingInspection(inspection);
+                                }
+                                return;
+                              }
                               handleFacilityRowClick(facility);
                             }}
                           >
@@ -3563,6 +3582,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             allInspections={Array.from(inspections.values())}
             onViewNearbyFacility={(facility) => {
               setSelectedFacility(facility);
+            }}
+            onViewSPCCPlan={() => {
+              setSpccPlanDetailFacility(selectedFacility);
             }}
           />
         )

@@ -3233,7 +3233,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     }
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('facilities')
         .insert({
           name: newFacilityName.trim(),
@@ -3241,7 +3241,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           longitude: lng,
           visit_duration_minutes: 30,
           account_id: accountId
-        });
+        })
+        .select()
+        .single();
 
       if (error) throw error;
 
@@ -3253,6 +3255,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       if (onFacilitiesChange) {
         onFacilitiesChange();
+      }
+
+      if (data) {
+        setSurveyFacility(data as Facility);
       }
 
       alert('Facility added successfully!');

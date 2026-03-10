@@ -30,6 +30,10 @@ import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
+import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
+import { formatDayCount } from '../utils/spccStatus';
+import SPCCInspectionBadge from './SPCCInspectionBadge';
+import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 
 interface FacilityDetailModalProps {
   facility: Facility;
@@ -44,6 +48,7 @@ interface FacilityDetailModalProps {
   facilities?: Facility[];
   allInspections?: Inspection[];
   onViewNearbyFacility?: (facility: Facility) => void;
+  onViewSPCCPlan?: () => void;
 }
 
 type FacilityTab = 'general' | 'inspections' | 'documents';
@@ -101,6 +106,7 @@ export default function FacilityDetailModal({
   facilities = [],
   allInspections = [],
   onViewNearbyFacility,
+  onViewSPCCPlan,
 }: FacilityDetailModalProps) {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [showInspectionForm, setShowInspectionForm] = useState(false);
@@ -939,6 +945,44 @@ export default function FacilityDetailModal({
     );
   }
 
+  const renderInspectionBadge = () => {
+    const inspection = inspections[0];
+    const expiry = getFacilityInspectionExpiry(facility, inspection);
+
+    if (expiry.status === 'valid') {
+      if (facility.spcc_completion_type === 'external') {
+        return <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />;
+      }
+      return <SPCCInspectionBadge />;
+    }
+
+    if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium" title={`Expires in ${expiry.daysUntilExpiry}d - Reinspection due soon`}>
+          <Clock className="w-3.5 h-3.5" />
+          <span>Inspection Expiring ({formatDayCount(expiry.daysUntilExpiry)})</span>
+        </span>
+      );
+    }
+
+    if (expiry.status === 'expired') {
+      const label = facility.spcc_completion_type === 'external' ? 'External' : facility.spcc_completion_type === 'internal' ? 'Internal' : 'Inspection';
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium" title={`${label} completion expired - Reinspection needed`}>
+          <AlertTriangle className="w-3 h-3" />
+          <span>Inspection Expired</span>
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium" title="No SPCC Inspection on record">
+        <Clock className="w-3 h-3" />
+        <span>No Inspection</span>
+      </span>
+    );
+  };
+
   const modalContent = (
     <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center overflow-y-auto p-4"
@@ -955,7 +999,27 @@ export default function FacilityDetailModal({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-2xl font-bold">{facility.name}</h2>
-                  <SPCCStatusBadge facility={facility} showMessage />
+                  
+                  {onViewSPCCPlan ? (
+                    <button 
+                      onClick={onViewSPCCPlan}
+                      className="hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                      title="View SPCC Plan Details"
+                    >
+                      <SPCCStatusBadge facility={facility} showMessage />
+                    </button>
+                  ) : (
+                    <SPCCStatusBadge facility={facility} showMessage />
+                  )}
+
+                  <button
+                    onClick={() => setActiveTab('inspections')}
+                    className="hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                    title="View Inspections"
+                  >
+                    {renderInspectionBadge()}
+                  </button>
+
                   {facility.status === 'sold' && (
                     <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300">
                       <DollarSign className="w-3 h-3" />
