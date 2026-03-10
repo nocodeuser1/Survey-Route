@@ -124,6 +124,10 @@ export default function FacilityDetailModal({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, facility.id]);
+
+  useEffect(() => {
     if (onInspectionFormActiveChange) {
       onInspectionFormActiveChange(showInspectionForm);
     }
