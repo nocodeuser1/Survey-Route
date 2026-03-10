@@ -166,6 +166,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [navigationTarget, setNavigationTarget] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
   const [surveyFacility, setSurveyFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
   const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
   const [addFacilityCoords, setAddFacilityCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -3634,8 +3635,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
-          initialTab={surveyType === 'spcc_inspection' ? 'inspections' : 'general'}
-          onClose={() => setSurveyFacility(null)}
+          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : 'general')}
+          onClose={() => {
+            setSurveyFacility(null);
+            setForcedTab(null);
+          }}
           onInspectionCompleted={() => {
             // Reload facilities and inspection data to update markers
             if (onFacilitiesChange) {
@@ -3660,6 +3664,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             if (onFacilitiesChange) onFacilitiesChange();
           }}
           onViewInspectionDetails={() => {
+            setForcedTab('inspections');
+            setSurveyFacility(spccPlanDetailFacility);
+          }}
+          onViewFacilityDetails={() => {
+            setForcedTab('general');
             setSurveyFacility(spccPlanDetailFacility);
           }}
         />

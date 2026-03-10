@@ -221,6 +221,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (globalSurveyType === 'spcc_inspection') return 'inspection';
     return 'all';
   });
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
   // Sync: when global surveyType changes externally, update local spccMode
   useEffect(() => {
@@ -3572,9 +3573,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             userId={userId}
             teamNumber={1}
             accountId={accountId}
-            initialTab={spccMode === 'inspection' ? 'inspections' : 'general'}
+            initialTab={forcedTab || (spccMode === 'inspection' ? 'inspections' : 'general')}
             onClose={() => {
               setSelectedFacility(null);
+              setForcedTab(null);
               loadInspections();
             }}
             onShowOnMap={onShowOnMap}
@@ -3598,10 +3600,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onClose={() => setSpccPlanDetailFacility(null)}
             onFacilitiesChange={onFacilitiesChange}
             onViewInspectionDetails={() => {
+              setForcedTab('inspections');
               setSelectedFacility(spccPlanDetailFacility);
             }}
             onViewFacilityDetails={() => {
-              handleEdit(spccPlanDetailFacility);
+              setForcedTab('general');
+              setSelectedFacility(spccPlanDetailFacility);
             }}
           />
         )
@@ -3622,7 +3626,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               userId={userId}
               accountId={accountId}
               onViewFacilityDetails={() => {
-                handleEdit(viewingFacility);
+                setForcedTab('general');
+                setSelectedFacility(viewingFacility);
               }}
               onViewSPCCPlan={() => {
                 setSpccPlanDetailFacility(viewingFacility);

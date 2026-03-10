@@ -59,6 +59,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
   const [internalShowRefreshOptions, setInternalShowRefreshOptions] = useState(false);
   const [internalSurveyType, setInternalSurveyType] = useState<SurveyType>('all');
   const surveyType = externalSurveyType !== undefined ? externalSurveyType : internalSurveyType;
@@ -2318,8 +2319,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
+          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : 'general')}
           onClose={() => {
             setSelectedFacility(null);
+            setForcedTab(null);
             loadInspections();
           }}
           onShowOnMap={onShowOnMap}
@@ -2340,6 +2343,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             if (onFacilitiesUpdated) onFacilitiesUpdated();
           }}
           onViewInspectionDetails={() => {
+            setForcedTab('inspections');
+            setSelectedFacility(spccPlanDetailFacility);
+          }}
+          onViewFacilityDetails={() => {
+            setForcedTab('general');
             setSelectedFacility(spccPlanDetailFacility);
           }}
         />
