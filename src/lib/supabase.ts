@@ -80,6 +80,24 @@ export interface Facility {
   notes?: string | null;
 }
 
+export interface FacilityRegulation {
+  id: string;
+  facility_id: string;
+  name: string;
+  type: string;
+  effective_date: string | null;
+  notes: string | null;
+}
+
+export interface FacilityDocument {
+  id: string;
+  facility_id: string;
+  name: string;
+  url: string;
+  type: string;
+  uploaded_at: string;
+}
+
 export interface HomeBase {
   id: string;
   user_id: string;
