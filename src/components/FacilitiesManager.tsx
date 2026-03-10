@@ -572,9 +572,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   }, [initialFacilityToEdit]);
 
+  // Determine if any filter is active (for indicator badge)
+  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all';
+
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
     setSelectedReportType(reportType);
+
+    // Auto-switch app-wide mode based on report type filter
+    if (reportType === 'spcc_plan') {
+      setSpccMode('plan');
+    } else if (reportType === 'spcc_inspection' || reportType === 'spcc_inspection_internal' || reportType === 'spcc_inspection_external') {
+      setSpccMode('inspection');
+    }
 
     try {
       const { error } = await supabase
@@ -2790,6 +2800,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <span className="hidden sm:inline">Filters</span>
                     {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </TouchTooltipButton>
+                  {/* Active filter indicator dot */}
+                  {hasActiveFilter && !showFilters && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-700 pointer-events-none" />
+                  )}
                   {showFilters && (
                     <>
                       <div
