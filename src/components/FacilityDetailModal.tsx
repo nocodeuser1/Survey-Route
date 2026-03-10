@@ -20,6 +20,8 @@ import {
   CalendarDays,
   Link as LinkIcon,
   LocateFixed,
+  ShieldCheck,
+  Calendar,
 } from 'lucide-react';
 import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
@@ -31,7 +33,7 @@ import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
 import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
-import { formatDayCount } from '../utils/spccStatus';
+import { formatDayCount, getSPCCPlanStatus } from '../utils/spccStatus';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 
@@ -52,7 +54,7 @@ interface FacilityDetailModalProps {
   initialTab?: FacilityTab;
 }
 
-type FacilityTab = 'general' | 'inspections' | 'documents';
+type FacilityTab = 'general' | 'inspections' | 'documents' | 'spcc';
 
 type DerivedRegulation = {
   name: string;
@@ -121,6 +123,11 @@ export default function FacilityDetailModal({
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [showCompletionMenu, setShowCompletionMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<FacilityTab>(initialTab);
+  const [editingIpDate, setEditingIpDate] = useState(false);
+  const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDate(facility.first_prod_date) : '');
+  const [editingPeDate, setEditingPeDate] = useState(false);
+  const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : '');
+  const [savingDate, setSavingDate] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -285,6 +292,58 @@ export default function FacilityDetailModal({
     }
   };
 
+  function parseDateInput(input: string): string | null {
+    const trimmed = input.trim();
+    const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+    if (!match) return null;
+    const month = parseInt(match[1], 10);
+    const day = parseInt(match[2], 10);
+    let year = parseInt(match[3], 10);
+    if (year < 100) year += 2000;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  const handleSaveIpDate = async () => {
+    const isoDate = ipDateValue ? parseDateInput(ipDateValue) : null;
+    if (ipDateValue && !isoDate) return;
+    setSavingDate(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ first_prod_date: isoDate })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.first_prod_date = isoDate;
+      setEditingIpDate(false);
+    } catch (err) {
+      console.error('Error saving IP date:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const handleSavePeDate = async () => {
+    const isoDate = peDateValue ? parseDateInput(peDateValue) : null;
+    if (peDateValue && !isoDate) return;
+    setSavingDate(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ spcc_pe_stamp_date: isoDate })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.spcc_pe_stamp_date = isoDate;
+      setEditingPeDate(false);
+    } catch (err) {
+      console.error('Error saving PE stamp date:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const spccStatus = getSPCCPlanStatus(facility);
+
   const wells = WELL_NUMBERS.flatMap((num) => {
     const wellName = facility[`well_name_${num}` as keyof Facility] as string | null | undefined;
     const wellApi = facility[`well_api_${num}` as keyof Facility] as string | null | undefined;
@@ -363,6 +422,7 @@ export default function FacilityDetailModal({
 
   const tabItems: Array<{ id: FacilityTab; label: string; icon: typeof Building2 }> = [
     { id: 'general', label: 'General', icon: Building2 },
+    { id: 'spcc', label: 'SPCC Plan', icon: ShieldCheck },
     { id: 'inspections', label: 'Inspections', icon: Shield },
     { id: 'documents', label: 'Documents', icon: Files },
   ];
@@ -465,6 +525,133 @@ export default function FacilityDetailModal({
 
   const renderInspectionsTab = () => (
     <div className="space-y-6">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Plan Details</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Key dates for SPCC compliance.</p>
+          </div>
+          {onViewSPCCPlan && (
+            <button
+              onClick={onViewSPCCPlan}
+              className="inline-flex items-center justify-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+            >
+              View Full Details
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5" />
+              Initial Production
+            </p>
+            {editingIpDate ? (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  placeholder="mm/dd/yy"
+                  value={ipDateValue}
+                  onChange={(e) => setIpDateValue(e.target.value)}
+                  className={`text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveIpDate}
+                  disabled={savingDate || (!!ipDateValue && !parseDateInput(ipDateValue))}
+                  className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setEditingIpDate(false); setIpDateValue(facility.first_prod_date ? formatDate(facility.first_prod_date) : ''); }}
+                  className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mt-2">
+                <p className={`text-sm font-medium ${facility.first_prod_date ? 'text-gray-900 dark:text-white' : 'text-gray-400 italic'}`}>
+                  {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not set'}
+                </p>
+                <button
+                  onClick={() => setEditingIpDate(true)}
+                  className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  title="Edit IP date"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              PE Stamp Date
+            </p>
+            {editingPeDate ? (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  placeholder="mm/dd/yy"
+                  value={peDateValue}
+                  onChange={(e) => setPeDateValue(e.target.value)}
+                  className={`text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
+                  autoFocus
+                />
+                <button
+                  onClick={handleSavePeDate}
+                  disabled={savingDate || (!!peDateValue && !parseDateInput(peDateValue))}
+                  className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setEditingPeDate(false); setPeDateValue(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : ''); }}
+                  className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mt-2">
+                <p className={`text-sm font-medium ${facility.spcc_pe_stamp_date ? 'text-gray-900 dark:text-white' : 'text-gray-400 italic'}`}>
+                  {facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : 'Not set'}
+                </p>
+                <button
+                  onClick={() => setEditingPeDate(true)}
+                  className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  title="Edit PE stamp date"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              5-Year Renewal
+            </p>
+            <p className="text-sm font-medium mt-2 text-gray-900 dark:text-white">
+              {spccStatus.renewalDate ? spccStatus.renewalDate.toLocaleDateString('en-US') : 'N/A'}
+              {spccStatus.renewalDate && spccStatus.daysUntilDue !== null && (
+                <span className="ml-1.5 text-xs opacity-75">
+                  ({spccStatus.daysUntilDue > 0 ? `${formatDayCount(spccStatus.daysUntilDue)} left` : `${formatDayCount(spccStatus.daysUntilDue)} ago`})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Inspection History</h3>
@@ -868,6 +1055,201 @@ export default function FacilityDetailModal({
     </div>
   );
 
+  const renderSPCCPlanTab = () => {
+    const statusConfig = {
+      valid: { label: 'Valid', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300', icon: CheckCircle },
+      expiring: { label: 'Expiring Soon', color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300', icon: Clock },
+      expired: { label: 'Expired', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300', icon: AlertTriangle },
+      no_plan: { label: 'No Plan', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300', icon: FileText },
+      no_ip_date: { label: 'IP Date Required', color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300', icon: AlertTriangle },
+    };
+    const statusKey = spccStatus.status as keyof typeof statusConfig;
+    const config = statusConfig[statusKey] || statusConfig.no_plan;
+    const StatusIcon = config.icon;
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`}>
+              <StatusIcon className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Plan Status</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{spccStatus.message}</p>
+            </div>
+            <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${config.color}`}>
+              {config.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <Calendar className="w-3.5 h-3.5" />
+                Initial Production
+              </p>
+              {editingIpDate ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="mm/dd/yy"
+                    value={ipDateValue}
+                    onChange={(e) => setIpDateValue(e.target.value)}
+                    className={`text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveIpDate}
+                    disabled={savingDate || (!!ipDateValue && !parseDateInput(ipDateValue))}
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setEditingIpDate(false); setIpDateValue(facility.first_prod_date ? formatDate(facility.first_prod_date) : ''); }}
+                    className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className={`text-base font-medium ${facility.first_prod_date ? 'text-gray-900 dark:text-white' : 'text-gray-400 italic'}`}>
+                    {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not set'}
+                  </p>
+                  <button
+                    onClick={() => setEditingIpDate(true)}
+                    className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                    title="Edit IP date"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                PE Stamp Date
+              </p>
+              {editingPeDate ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="mm/dd/yy"
+                    value={peDateValue}
+                    onChange={(e) => setPeDateValue(e.target.value)}
+                    className={`text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSavePeDate}
+                    disabled={savingDate || (!!peDateValue && !parseDateInput(peDateValue))}
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setEditingPeDate(false); setPeDateValue(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : ''); }}
+                    className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className={`text-base font-medium ${facility.spcc_pe_stamp_date ? 'text-gray-900 dark:text-white' : 'text-gray-400 italic'}`}>
+                    {facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : 'Not set'}
+                  </p>
+                  <button
+                    onClick={() => setEditingPeDate(true)}
+                    className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                    title="Edit PE stamp date"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <Clock className="w-3.5 h-3.5" />
+                5-Year Renewal
+              </p>
+              <p className="text-base font-medium text-gray-900 dark:text-white">
+                {spccStatus.renewalDate ? spccStatus.renewalDate.toLocaleDateString('en-US') : 'N/A'}
+              </p>
+              {spccStatus.renewalDate && spccStatus.daysUntilDue !== null && (
+                <p className={`text-sm mt-1 ${spccStatus.daysUntilDue < 0 ? 'text-red-600 dark:text-red-400' : spccStatus.daysUntilDue <= 90 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                  {spccStatus.daysUntilDue > 0 ? `${formatDayCount(spccStatus.daysUntilDue)} remaining` : `${formatDayCount(spccStatus.daysUntilDue)} overdue`}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {(facility.initial_inspection_completed || facility.company_signature_date || facility.recertified_date) && (
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Compliance Records</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {facility.initial_inspection_completed && (
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Initial Inspection</p>
+                  <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">{formatDate(facility.initial_inspection_completed)}</p>
+                </div>
+              )}
+              {facility.company_signature_date && (
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Company Signature</p>
+                  <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">{formatDate(facility.company_signature_date)}</p>
+                </div>
+              )}
+              {facility.recertified_date && (
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Recertified</p>
+                  <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">{formatDate(facility.recertified_date)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Plan Document</h3>
+          {facility.spcc_plan_url ? (
+            <div className="flex items-center gap-4 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/60">
+              <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="flex-1">
+                <p className="font-medium text-gray-900 dark:text-white">SPCC Plan on File</p>
+                {facility.spcc_pe_stamp_date && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">PE Stamped: {formatDate(facility.spcc_pe_stamp_date)}</p>
+                )}
+              </div>
+              <a
+                href={facility.spcc_plan_url}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                View Plan
+              </a>
+            </div>
+          ) : (
+            <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+              <FileText className="w-10 h-10 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
+              <p className="text-gray-500 dark:text-gray-400">No SPCC plan uploaded</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderDocumentsTab = () => (
     <div className="space-y-6">
       <div>
@@ -1096,6 +1478,7 @@ export default function FacilityDetailModal({
 
         <div className="p-6 bg-gray-50 dark:bg-gray-900/40 rounded-b-lg">
           {activeTab === 'general' && renderGeneralTab()}
+          {activeTab === 'spcc' && renderSPCCPlanTab()}
           {activeTab === 'inspections' && renderInspectionsTab()}
           {activeTab === 'documents' && renderDocumentsTab()}
         </div>

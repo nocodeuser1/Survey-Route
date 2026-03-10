@@ -3571,7 +3571,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             userId={userId}
             teamNumber={1}
             accountId={accountId}
-            initialTab={forcedTab || (spccMode === 'inspection' ? 'inspections' : 'general')}
+            initialTab={forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general')}
             onClose={() => {
               setSelectedFacility(null);
               setForcedTab(null);

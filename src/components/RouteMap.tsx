@@ -3635,7 +3635,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
-          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : 'general')}
+          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : surveyType === 'spcc_plan' ? 'spcc' : 'general')}
           onClose={() => {
             setSurveyFacility(null);
             setForcedTab(null);

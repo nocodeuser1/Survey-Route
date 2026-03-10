@@ -2319,7 +2319,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
-          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : 'general')}
+          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : surveyType === 'spcc_plan' ? 'spcc' : 'general')}
           onClose={() => {
             setSelectedFacility(null);
             setForcedTab(null);
