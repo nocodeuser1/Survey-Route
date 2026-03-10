@@ -200,12 +200,26 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
               </p>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {onViewFacilityDetails && (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onViewFacilityDetails();
+                  }}
+                  className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 text-white"
+                >
+                  <MapPin className="w-4 h-4" />
+                  <span className="hidden sm:inline">Facility Overview</span>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Status hero badge */}
@@ -722,7 +736,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   }`}
               >
                 <Edit2 className="w-4 h-4" />
-                Facility Details
+                Facility Overview
               </button>
             )}
 

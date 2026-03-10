@@ -1,4 +1,4 @@
-import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck } from 'lucide-react';
+import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin } from 'lucide-react';
 import { Inspection, Facility, InspectionTemplate, InspectionPhoto, supabase } from '../lib/supabase';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
@@ -529,7 +529,20 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inspection Details</h2>
               <p className="text-sm text-gray-900 dark:text-white font-bold mt-1">{facility.name}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {onViewFacilityDetails && !isEditMode && (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onViewFacilityDetails();
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 border border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-500 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors text-sm sm:text-base"
+                >
+                  <MapPin className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline">Facility Overview</span>
+                  <span className="sm:hidden">Overview</span>
+                </button>
+              )}
               {canEditReport && !isEditMode && inspection.status === 'completed' && console.log('[InspectionViewer] Showing Edit Report button')}
               {canEditReport && !isEditMode && inspection.status === 'completed' && (
                 <button
@@ -849,7 +862,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                 className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 <Edit2 className="w-3.5 h-3.5" />
-                Facility Details
+                Facility Overview
               </button>
             )}
             {onViewSPCCPlan && (
