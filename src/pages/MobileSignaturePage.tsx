@@ -18,6 +18,7 @@ export default function MobileSignaturePage() {
   const [userId, setUserId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
   // Validate token
   useEffect(() => {
@@ -45,20 +46,20 @@ export default function MobileSignaturePage() {
     })();
   }, [token]);
 
-  // Fit canvas pixel dimensions to wrapper div
+  // Fit canvas to wrapper
   const fitCanvas = useCallback(() => {
     const sc = sigCanvas.current;
     const wrap = wrapperRef.current;
     if (!sc || !wrap) return;
 
-    // Save strokes
     const d = sc.toData();
     if (d && d.length) savedData.current = d;
 
     const canvas = sc.getCanvas();
     const dpr = window.devicePixelRatio || 1;
-    const w = wrap.clientWidth;
-    const h = wrap.clientHeight;
+    const rect = wrap.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    const h = Math.round(rect.height);
     if (!w || !h) return;
 
     canvas.width = w * dpr;
@@ -68,25 +69,27 @@ export default function MobileSignaturePage() {
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.scale(dpr, dpr);
 
-    // Restore strokes
+    setCanvasSize({ w, h });
+
     if (savedData.current.length) sc.fromData(savedData.current as any);
   }, []);
 
-  // Resize on mount + orientation change
+  // Resize on mount + window resize
   useEffect(() => {
     if (state !== 'ready' && state !== 'saving') return;
 
     const run = () => {
       fitCanvas();
-      setTimeout(fitCanvas, 200);
-      setTimeout(fitCanvas, 500);
+      setTimeout(fitCanvas, 150);
+      setTimeout(fitCanvas, 400);
     };
-    // initial
-    setTimeout(run, 100);
+    setTimeout(run, 50);
 
     window.addEventListener('resize', run);
-    window.addEventListener('orientationchange', () => setTimeout(run, 400));
-    return () => window.removeEventListener('resize', run);
+    window.addEventListener('orientationchange', () => setTimeout(run, 500));
+    return () => {
+      window.removeEventListener('resize', run);
+    };
   }, [state, fitCanvas]);
 
   const handleClear = () => { sigCanvas.current?.clear(); savedData.current = []; };
@@ -117,7 +120,7 @@ export default function MobileSignaturePage() {
   // ---- Status screens ----
   if (state === 'loading') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f9ff' }}>
+      <div style={centerScreen}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: 48, height: 48, border: '3px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' }} />
           <p style={{ marginTop: 16, color: '#6b7280' }}>Validating link...</p>
@@ -129,8 +132,8 @@ export default function MobileSignaturePage() {
 
   if (state === 'expired') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fef2f2' }}>
-        <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+      <div style={centerScreen}>
+        <div style={card}>
           <AlertTriangle style={{ width: 64, height: 64, color: '#f59e0b', margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Link Expired</h2>
           <p style={{ color: '#6b7280' }}>This link has expired or been used. Please generate a new QR code from your desktop.</p>
@@ -141,8 +144,8 @@ export default function MobileSignaturePage() {
 
   if (state === 'error') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fef2f2' }}>
-        <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+      <div style={centerScreen}>
+        <div style={card}>
           <AlertTriangle style={{ width: 64, height: 64, color: '#ef4444', margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Something went wrong</h2>
           <p style={{ color: '#6b7280' }}>{error}</p>
@@ -153,7 +156,7 @@ export default function MobileSignaturePage() {
 
   if (state === 'success') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'linear-gradient(135deg, #f0fdf4, #fff, #eff6ff)' }}>
+      <div style={{ ...centerScreen, flexDirection: 'column' as const }}>
         <div style={{ background: '#fff', borderRadius: 16, maxWidth: 420, width: '100%', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.1)' }}>
           <div style={{ background: 'linear-gradient(135deg, #22c55e, #10b981)', padding: '32px 24px', textAlign: 'center' }}>
             <div style={{ width: 80, height: 80, background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
@@ -197,49 +200,48 @@ export default function MobileSignaturePage() {
   }
 
   // ====== SIGNING VIEW ======
-  // Simple full-viewport layout. Canvas fills all available space.
-  // Works in both portrait and landscape without re-mounting.
+  // Uses 100% height with explicit calc for canvas area.
+  // No position:fixed (problematic on iOS Safari with address bar).
   return (
     <div
       style={{
-        position: 'fixed',
-        top: 0, left: 0, right: 0, bottom: 0,
+        width: '100%',
+        height: '100dvh', // dynamic viewport height - accounts for Safari chrome
         display: 'flex',
         flexDirection: 'column',
         background: '#f9fafb',
-        touchAction: 'none',
-        WebkitUserSelect: 'none',
-        userSelect: 'none',
         overflow: 'hidden',
+        // Prevent pull-to-refresh and bounce
+        overscrollBehavior: 'none',
+        WebkitOverflowScrolling: 'touch',
       } as React.CSSProperties}
     >
-      {/* Top bar */}
+      {/* Top bar - always visible */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '8px 12px',
+        padding: '10px 12px',
+        paddingTop: 'max(10px, env(safe-area-inset-top))',
         background: '#fff',
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '2px solid #e5e7eb',
         flexShrink: 0,
-        zIndex: 10,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <MapPin style={{ width: 18, height: 18, color: '#16a34a' }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{fullName}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{fullName}</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={handleClear}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '6px 12px', background: '#fff',
-              border: '1px solid #d1d5db', borderRadius: 6,
-              fontSize: 13, fontWeight: 500, color: '#374151',
-              cursor: 'pointer',
+              padding: '8px 14px', background: '#fff',
+              border: '1px solid #d1d5db', borderRadius: 8,
+              fontSize: 14, fontWeight: 500, color: '#374151',
             }}
           >
-            <Trash2 style={{ width: 14, height: 14 }} />
+            <Trash2 style={{ width: 15, height: 15 }} />
             Clear
           </button>
           <button
@@ -247,14 +249,13 @@ export default function MobileSignaturePage() {
             disabled={state === 'saving'}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '6px 14px', background: '#2563eb',
-              border: 'none', borderRadius: 6,
-              fontSize: 13, fontWeight: 600, color: '#fff',
-              cursor: 'pointer',
+              padding: '8px 16px', background: '#2563eb',
+              border: 'none', borderRadius: 8,
+              fontSize: 14, fontWeight: 600, color: '#fff',
               opacity: state === 'saving' ? 0.5 : 1,
             }}
           >
-            <Save style={{ width: 14, height: 14 }} />
+            <Save style={{ width: 15, height: 15 }} />
             {state === 'saving' ? 'Saving...' : 'Save'}
           </button>
         </div>
@@ -267,15 +268,17 @@ export default function MobileSignaturePage() {
         </div>
       )}
 
-      {/* Canvas area - fills remaining space */}
+      {/* Canvas wrapper - takes all remaining space */}
       <div
         ref={wrapperRef}
         style={{
-          flex: 1,
+          flex: '1 1 0%',
           position: 'relative',
-          background: '#fff',
+          background: '#ffffff',
+          borderTop: '1px solid #e5e7eb',
+          // Explicit min-height fallback for browsers that don't support dvh
+          minHeight: 200,
           touchAction: 'none',
-          minHeight: 0, /* important for flex children */
         }}
       >
         <SignatureCanvas
@@ -286,21 +289,48 @@ export default function MobileSignaturePage() {
           velocityFilterWeight={0.7}
           canvasProps={{
             style: {
-              position: 'absolute',
-              top: 0, left: 0,
+              display: 'block',
               touchAction: 'none',
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
+              userSelect: 'none',
             } as React.CSSProperties,
           }}
         />
 
-        {/* Sign-here line */}
-        <div style={{ position: 'absolute', left: 24, right: 24, bottom: 32, pointerEvents: 'none' }}>
-          <div style={{ borderBottom: '1.5px dashed #d1d5db' }} />
-          <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>Sign above this line</p>
+        {/* Sign-here guide line */}
+        <div style={{ position: 'absolute', left: 24, right: 24, bottom: 32, pointerEvents: 'none', zIndex: 1 }}>
+          <div style={{ borderBottom: '1.5px dashed #cbd5e1' }} />
+          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>Sign above this line</p>
         </div>
+
+        {/* Debug: shows canvas dimensions (remove after testing) */}
+        {canvasSize.w > 0 && (
+          <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 10, color: '#d1d5db', pointerEvents: 'none', zIndex: 1 }}>
+            {canvasSize.w}×{canvasSize.h}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+// Shared styles
+const centerScreen: React.CSSProperties = {
+  minHeight: '100dvh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+  background: 'linear-gradient(135deg, #f0f9ff 0%, #fff 50%, #f0fdf4 100%)',
+};
+
+const card: React.CSSProperties = {
+  background: '#fff',
+  borderRadius: 16,
+  padding: 32,
+  maxWidth: 400,
+  width: '100%',
+  textAlign: 'center',
+  boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+};
