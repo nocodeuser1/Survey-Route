@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, RotateCw, Monitor, LogIn, Sparkles } from 'lucide-react';
+import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, Monitor, LogIn, Sparkles } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 type PageState = 'loading' | 'ready' | 'saving' | 'success' | 'expired' | 'error';
@@ -10,159 +10,118 @@ export default function MobileSignaturePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const sigCanvas = useRef<SignatureCanvas>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const savedSignatureData = useRef<object[]>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const savedData = useRef<object[]>([]);
 
   const [state, setState] = useState<PageState>('loading');
   const [fullName, setFullName] = useState('');
   const [userId, setUserId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
-  const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
 
-  // Validate token on mount
+  // Validate token
   useEffect(() => {
-    if (!token) {
-      setState('expired');
-      return;
-    }
+    if (!token) { setState('expired'); return; }
 
-    const validateToken = async () => {
+    (async () => {
       try {
-        const { data, error: fetchError } = await supabase
+        const { data, error: e } = await supabase
           .from('signature_tokens')
           .select('*')
           .eq('token', token)
           .is('used_at', null)
           .gt('expires_at', new Date().toISOString())
           .maybeSingle();
-
-        if (fetchError) throw fetchError;
-
-        if (!data) {
-          setState('expired');
-          return;
-        }
-
+        if (e) throw e;
+        if (!data) { setState('expired'); return; }
         setFullName(data.full_name);
         setUserId(data.user_id);
         setAccountId(data.account_id);
         setState('ready');
       } catch (err: any) {
-        console.error('Token validation error:', err);
         setError(err.message || 'Failed to validate link');
         setState('error');
       }
-    };
-
-    validateToken();
+    })();
   }, [token]);
 
-  // Resize canvas to fill its container, preserving signature
-  const resizeCanvas = useCallback(() => {
-    const container = canvasContainerRef.current;
+  // Fit canvas pixel dimensions to wrapper div
+  const fitCanvas = useCallback(() => {
     const sc = sigCanvas.current;
-    if (!container || !sc) return;
+    const wrap = wrapperRef.current;
+    if (!sc || !wrap) return;
 
-    // Save current strokes as point data (survives resize)
-    const data = sc.toData();
-    if (data && data.length > 0) {
-      savedSignatureData.current = data;
-    }
+    // Save strokes
+    const d = sc.toData();
+    if (d && d.length) savedData.current = d;
 
     const canvas = sc.getCanvas();
-    const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    const w = container.offsetWidth;
-    const h = container.offsetHeight;
+    const dpr = window.devicePixelRatio || 1;
+    const w = wrap.clientWidth;
+    const h = wrap.clientHeight;
+    if (!w || !h) return;
 
-    if (w === 0 || h === 0) return; // container not visible yet
-
-    canvas.width = w * ratio;
-    canvas.height = h * ratio;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
-
     const ctx = canvas.getContext('2d');
-    if (ctx) ctx.scale(ratio, ratio);
+    if (ctx) ctx.scale(dpr, dpr);
 
     // Restore strokes
-    if (savedSignatureData.current.length > 0) {
-      sc.fromData(savedSignatureData.current as any);
-    }
+    if (savedData.current.length) sc.fromData(savedData.current as any);
   }, []);
 
-  // Handle orientation / resize
+  // Resize on mount + orientation change
   useEffect(() => {
     if (state !== 'ready' && state !== 'saving') return;
 
-    const onResize = () => {
-      setIsLandscape(window.innerWidth > window.innerHeight);
-      // Let the browser finish layout, then resize canvas
-      requestAnimationFrame(() => {
-        setTimeout(resizeCanvas, 50);
-        // Safari sometimes needs a second pass
-        setTimeout(resizeCanvas, 300);
-      });
+    const run = () => {
+      fitCanvas();
+      setTimeout(fitCanvas, 200);
+      setTimeout(fitCanvas, 500);
     };
+    // initial
+    setTimeout(run, 100);
 
-    onResize();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', () => setTimeout(onResize, 400));
+    window.addEventListener('resize', run);
+    window.addEventListener('orientationchange', () => setTimeout(run, 400));
+    return () => window.removeEventListener('resize', run);
+  }, [state, fitCanvas]);
 
-    return () => {
-      window.removeEventListener('resize', onResize);
-    };
-  }, [state, resizeCanvas]);
-
-  const handleClear = () => {
-    sigCanvas.current?.clear();
-    savedSignatureData.current = [];
-  };
+  const handleClear = () => { sigCanvas.current?.clear(); savedData.current = []; };
 
   const handleSave = async () => {
     if (!sigCanvas.current || sigCanvas.current.isEmpty()) {
-      setError('Please draw your signature');
-      return;
+      setError('Please draw your signature'); return;
     }
-
     setState('saving');
     setError('');
-
     try {
-      const signatureData = sigCanvas.current.toDataURL();
-
-      const { error: sigError } = await supabase
-        .from('user_signatures')
-        .insert({
-          user_id: userId,
-          account_id: accountId,
-          signature_name: fullName,
-          signature_data: signatureData,
-        });
-
-      if (sigError) throw sigError;
-
-      await supabase
-        .from('signature_tokens')
+      const sig = sigCanvas.current.toDataURL();
+      const { error: e } = await supabase.from('user_signatures').insert({
+        user_id: userId, account_id: accountId,
+        signature_name: fullName, signature_data: sig,
+      });
+      if (e) throw e;
+      await supabase.from('signature_tokens')
         .update({ used_at: new Date().toISOString() })
         .eq('token', token!);
-
       setState('success');
     } catch (err: any) {
-      console.error('Error saving signature:', err);
-      setError(err.message || 'Failed to save signature');
+      setError(err.message || 'Failed to save');
       setState('ready');
     }
   };
 
-  // ---- Non-signing states ----
-
+  // ---- Status screens ----
   if (state === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
-          <p className="mt-4 text-gray-600">Validating link...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f9ff' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 48, height: 48, border: '3px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' }} />
+          <p style={{ marginTop: 16, color: '#6b7280' }}>Validating link...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
     );
@@ -170,13 +129,11 @@ export default function MobileSignaturePage() {
 
   if (state === 'expired') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-8 text-center">
-          <AlertTriangle className="w-16 h-16 text-amber-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Link Expired</h2>
-          <p className="text-gray-600">
-            This signature link has expired or has already been used. Please generate a new QR code from your desktop.
-          </p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fef2f2' }}>
+        <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+          <AlertTriangle style={{ width: 64, height: 64, color: '#f59e0b', margin: '0 auto 16px' }} />
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Link Expired</h2>
+          <p style={{ color: '#6b7280' }}>This link has expired or been used. Please generate a new QR code from your desktop.</p>
         </div>
       </div>
     );
@@ -184,11 +141,11 @@ export default function MobileSignaturePage() {
 
   if (state === 'error') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-8 text-center">
-          <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Something went wrong</h2>
-          <p className="text-gray-600">{error}</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fef2f2' }}>
+        <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+          <AlertTriangle style={{ width: 64, height: 64, color: '#ef4444', margin: '0 auto 16px' }} />
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Something went wrong</h2>
+          <p style={{ color: '#6b7280' }}>{error}</p>
         </div>
       </div>
     );
@@ -196,196 +153,153 @@ export default function MobileSignaturePage() {
 
   if (state === 'success') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex flex-col items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
-          <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-8 text-center">
-            <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce" style={{ animationDuration: '2s', animationIterationCount: '2' }}>
-              <CheckCircle className="w-12 h-12 text-white" />
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'linear-gradient(135deg, #f0fdf4, #fff, #eff6ff)' }}>
+        <div style={{ background: '#fff', borderRadius: 16, maxWidth: 420, width: '100%', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.1)' }}>
+          <div style={{ background: 'linear-gradient(135deg, #22c55e, #10b981)', padding: '32px 24px', textAlign: 'center' }}>
+            <div style={{ width: 80, height: 80, background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <CheckCircle style={{ width: 48, height: 48, color: '#fff' }} />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">Signature Saved!</h2>
-            <p className="text-green-100 text-sm">Your signature has been added to your account</p>
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Signature Saved!</h2>
+            <p style={{ color: '#bbf7d0', fontSize: 14 }}>Your signature has been added to your account</p>
           </div>
-          <div className="p-6 space-y-4">
-            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-              <div className="flex items-start gap-3">
-                <Monitor className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div style={{ padding: 24 }}>
+            <div style={{ background: '#eff6ff', border: '1px solid #dbeafe', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <Monitor style={{ width: 20, height: 20, color: '#2563eb', flexShrink: 0, marginTop: 2 }} />
                 <div>
-                  <p className="text-sm font-semibold text-blue-900 mb-1">Back on desktop?</p>
-                  <p className="text-sm text-blue-700">Your desktop session will automatically detect your new signature and proceed. Just switch back to that tab!</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: '#1e3a5f', marginBottom: 4 }}>Back on desktop?</p>
+                  <p style={{ fontSize: 14, color: '#3b82f6' }}>Your desktop session will automatically detect your signature and proceed. Just switch back!</p>
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">or</span>
-              <div className="flex-1 h-px bg-gray-200" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0' }}>
+              <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+              <span style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>or</span>
+              <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
             </div>
             <button
               onClick={() => navigate('/login')}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-semibold shadow-lg shadow-blue-500/25"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 16px', background: 'linear-gradient(135deg, #2563eb, #4f46e5)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer', boxShadow: '0 4px 12px rgba(37,99,235,0.25)' }}
             >
-              <LogIn className="w-5 h-5" />
+              <LogIn style={{ width: 20, height: 20 }} />
               Sign In on This Device
             </button>
-            <p className="text-xs text-gray-400 text-center">Access your full Survey Route account from your phone</p>
+            <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>Access your full Survey Route account from your phone</p>
           </div>
-          <div className="border-t border-gray-100 px-6 py-4 bg-gray-50/50">
-            <div className="flex items-center justify-center gap-2">
-              <MapPin className="w-4 h-4 text-green-600" />
-              <span className="text-sm font-semibold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">Survey Route</span>
-              <Sparkles className="w-3 h-3 text-amber-400" />
-            </div>
+          <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px 24px', background: '#fafafa', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <MapPin style={{ width: 16, height: 16, color: '#16a34a' }} />
+            <span style={{ fontSize: 14, fontWeight: 600, background: 'linear-gradient(90deg, #16a34a, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Survey Route</span>
+            <Sparkles style={{ width: 12, height: 12, color: '#f59e0b' }} />
           </div>
         </div>
       </div>
     );
   }
 
-  // ====== SINGLE SIGNING LAYOUT (adapts via CSS) ======
-  // One SignatureCanvas that's always mounted. Layout changes via CSS only.
+  // ====== SIGNING VIEW ======
+  // Simple full-viewport layout. Canvas fills all available space.
+  // Works in both portrait and landscape without re-mounting.
   return (
     <div
-      className={
-        isLandscape
-          ? 'fixed inset-0 bg-white flex flex-col'
-          : 'min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 flex items-center justify-center p-4'
-      }
-      style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+      style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#f9fafb',
+        touchAction: 'none',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        overflow: 'hidden',
+      } as React.CSSProperties}
     >
-      {/* Portrait: card wrapper */}
-      <div className={isLandscape ? 'flex flex-col h-full w-full' : 'bg-white rounded-xl shadow-lg max-w-lg w-full p-6'}>
-
-        {/* Header - only in portrait */}
-        {!isLandscape && (
-          <>
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <MapPin className="w-8 h-8 text-green-600" />
-              <span className="text-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
-                Survey Route
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 text-center mb-1">Add Your Signature</h2>
-            <p className="text-gray-500 text-center text-sm mb-4">Signing as <strong>{fullName}</strong></p>
-
-            {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
-            )}
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-              <div className="flex items-center gap-2 text-sm text-blue-800">
-                <RotateCw className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                <span>Rotate your phone for a larger signing area</span>
-              </div>
-            </div>
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Draw your signature below
-            </label>
-          </>
-        )}
-
-        {/* Canvas container - ONE instance, always mounted */}
-        <div
-          ref={canvasContainerRef}
-          className={
-            isLandscape
-              ? 'flex-1 relative'
-              : 'border-2 border-gray-300 rounded-lg bg-white overflow-hidden relative'
-          }
-          style={
-            isLandscape
-              ? { touchAction: 'none' }
-              : { height: 200, touchAction: 'none' }
-          }
-        >
-          <SignatureCanvas
-            ref={sigCanvas}
-            penColor="#1a1a2e"
-            minWidth={1.5}
-            maxWidth={3}
-            canvasProps={{
-              style: {
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                touchAction: 'none',
-                msTouchAction: 'none',
-                WebkitTouchCallout: 'none',
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-              } as React.CSSProperties,
-            }}
-          />
-
-          {/* Sign line hint */}
-          <div className={`absolute pointer-events-none ${isLandscape ? 'left-8 right-8 bottom-14' : 'left-4 right-4 bottom-6'}`}>
-            <div className="border-b border-dashed border-gray-300" />
-            {isLandscape && <p className="text-xs text-gray-400 mt-1 text-center">Sign above this line</p>}
-          </div>
+      {/* Top bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '8px 12px',
+        background: '#fff',
+        borderBottom: '1px solid #e5e7eb',
+        flexShrink: 0,
+        zIndex: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <MapPin style={{ width: 18, height: 18, color: '#16a34a' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{fullName}</span>
         </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleClear}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '6px 12px', background: '#fff',
+              border: '1px solid #d1d5db', borderRadius: 6,
+              fontSize: 13, fontWeight: 500, color: '#374151',
+              cursor: 'pointer',
+            }}
+          >
+            <Trash2 style={{ width: 14, height: 14 }} />
+            Clear
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={state === 'saving'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '6px 14px', background: '#2563eb',
+              border: 'none', borderRadius: 6,
+              fontSize: 13, fontWeight: 600, color: '#fff',
+              cursor: 'pointer',
+              opacity: state === 'saving' ? 0.5 : 1,
+            }}
+          >
+            <Save style={{ width: 14, height: 14 }} />
+            {state === 'saving' ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
 
-        {/* Landscape: floating buttons overlay */}
-        {isLandscape && (
-          <>
-            {/* Top-left name badge */}
-            <div className="absolute top-3 left-3 z-10 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-md border border-gray-200">
-              <div className="flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-green-600" />
-                <span className="text-xs font-medium text-gray-700">{fullName}</span>
-              </div>
-            </div>
+      {/* Error bar */}
+      {error && (
+        <div style={{ padding: '8px 12px', background: '#fef2f2', color: '#dc2626', fontSize: 13, borderBottom: '1px solid #fecaca', flexShrink: 0 }}>
+          {error}
+        </div>
+      )}
 
-            {/* Top-right action buttons */}
-            <div className="absolute top-3 right-3 z-10 flex gap-2">
-              <button
-                onClick={handleClear}
-                className="flex items-center gap-1.5 px-3 py-2 bg-white/90 backdrop-blur-sm border border-gray-300 text-gray-700 rounded-lg shadow-md text-sm font-medium active:bg-gray-100"
-              >
-                <Trash2 className="w-4 h-4" />
-                Clear
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={state === 'saving'}
-                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md text-sm font-semibold disabled:opacity-50 active:bg-blue-700"
-              >
-                <Save className="w-4 h-4" />
-                {state === 'saving' ? 'Saving...' : 'Save'}
-              </button>
-            </div>
+      {/* Canvas area - fills remaining space */}
+      <div
+        ref={wrapperRef}
+        style={{
+          flex: 1,
+          position: 'relative',
+          background: '#fff',
+          touchAction: 'none',
+          minHeight: 0, /* important for flex children */
+        }}
+      >
+        <SignatureCanvas
+          ref={sigCanvas}
+          penColor="#1a1a2e"
+          minWidth={1.5}
+          maxWidth={3.5}
+          velocityFilterWeight={0.7}
+          canvasProps={{
+            style: {
+              position: 'absolute',
+              top: 0, left: 0,
+              touchAction: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+            } as React.CSSProperties,
+          }}
+        />
 
-            {/* Error toast */}
-            {error && (
-              <div className="absolute bottom-4 left-4 right-4 z-10 p-3 bg-red-500 text-white text-sm rounded-lg shadow-lg text-center font-medium">
-                {error}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Portrait: buttons below canvas */}
-        {!isLandscape && (
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={handleClear}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg active:bg-gray-50 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={state === 'saving'}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg active:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
-            >
-              <Save className="w-4 h-4" />
-              {state === 'saving' ? 'Saving...' : 'Save Signature'}
-            </button>
-          </div>
-        )}
-
+        {/* Sign-here line */}
+        <div style={{ position: 'absolute', left: 24, right: 24, bottom: 32, pointerEvents: 'none' }}>
+          <div style={{ borderBottom: '1.5px dashed #d1d5db' }} />
+          <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>Sign above this line</p>
+        </div>
       </div>
     </div>
   );
