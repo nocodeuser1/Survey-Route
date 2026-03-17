@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, RotateCw } from 'lucide-react';
+import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, RotateCw, Monitor, LogIn, Sparkles } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 type PageState = 'loading' | 'ready' | 'saving' | 'success' | 'expired' | 'error';
 
 export default function MobileSignaturePage() {
   const { token } = useParams<{ token: string }>();
+  const navigate = useNavigate();
   const sigCanvas = useRef<SignatureCanvas>(null);
 
   const [state, setState] = useState<PageState>('loading');
@@ -147,18 +148,67 @@ export default function MobileSignaturePage() {
 
   if (state === 'success') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="w-10 h-10 text-green-600" />
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex flex-col items-center justify-center p-4">
+        {/* Animated success header */}
+        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+          {/* Green success banner */}
+          <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-8 text-center">
+            <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce" style={{ animationDuration: '2s', animationIterationCount: '2' }}>
+              <CheckCircle className="w-12 h-12 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-1">Signature Saved!</h2>
+            <p className="text-green-100 text-sm">
+              Your signature has been added to your account
+            </p>
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Signature Saved!</h2>
-          <p className="text-gray-600 mb-2">
-            Your signature has been added successfully.
-          </p>
-          <p className="text-sm text-gray-500">
-            You can close this tab and return to your desktop. The page will automatically update.
-          </p>
+
+          {/* Content */}
+          <div className="p-6 space-y-4">
+            {/* Desktop notice */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <Monitor className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-blue-900 mb-1">
+                    Back on desktop?
+                  </p>
+                  <p className="text-sm text-blue-700">
+                    Your desktop session will automatically detect your new signature and proceed. Just switch back to that tab!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">or</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* Sign in on mobile */}
+            <button
+              onClick={() => navigate('/login')}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-semibold shadow-lg shadow-blue-500/25"
+            >
+              <LogIn className="w-5 h-5" />
+              Sign In on This Device
+            </button>
+            <p className="text-xs text-gray-400 text-center">
+              Access your full Survey Route account from your phone
+            </p>
+          </div>
+
+          {/* Footer branding */}
+          <div className="border-t border-gray-100 px-6 py-4 bg-gray-50/50">
+            <div className="flex items-center justify-center gap-2">
+              <MapPin className="w-4 h-4 text-green-600" />
+              <span className="text-sm font-semibold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+                Survey Route
+              </span>
+              <Sparkles className="w-3 h-3 text-amber-400" />
+            </div>
+          </div>
         </div>
       </div>
     );

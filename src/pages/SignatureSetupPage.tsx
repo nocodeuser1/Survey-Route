@@ -483,9 +483,14 @@ export default function SignatureSetupPage() {
               <span>This code expires in 15 minutes</span>
             </div>
 
-            <div className="flex items-center gap-2 justify-center text-sm text-blue-600">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-              <span>Waiting for signature from your phone...</span>
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+              <div className="flex items-center gap-2 justify-center text-sm text-blue-700 font-medium">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                <span>Listening for your signature...</span>
+              </div>
+              <p className="text-xs text-blue-500 mt-1">
+                This page will automatically continue once you sign on your phone
+              </p>
             </div>
           </div>
         </div>
