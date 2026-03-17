@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, Monitor, LogIn, Sparkles } from 'lucide-react';
+import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, Monitor, LogIn, Sparkles, Route, RotateCcw } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 type PageState = 'loading' | 'ready' | 'saving' | 'success' | 'expired' | 'error';
 
 // Height of the top toolbar in px
-const BAR_H = 52;
+const BAR_H = 64;
 
 export default function MobileSignaturePage() {
   const { token } = useParams<{ token: string }>();
@@ -21,6 +21,7 @@ export default function MobileSignaturePage() {
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
   const [viewH, setViewH] = useState(window.innerHeight);
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
 
   // Validate token
   useEffect(() => {
@@ -49,7 +50,10 @@ export default function MobileSignaturePage() {
 
   // Track actual viewport height (handles iOS address bar)
   useEffect(() => {
-    const update = () => setViewH(window.innerHeight);
+    const update = () => {
+      setViewH(window.innerHeight);
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
     window.addEventListener('resize', update);
     window.addEventListener('orientationchange', () => setTimeout(update, 300));
     // visualViewport is more accurate on iOS
@@ -218,8 +222,10 @@ export default function MobileSignaturePage() {
             <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>Access your full Survey Route account from your phone</p>
           </div>
           <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px 24px', background: '#fafafa', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <MapPin style={{ width: 16, height: 16, color: '#16a34a' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, background: 'linear-gradient(90deg, #16a34a, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Survey Route</span>
+            <div className="bg-blue-600 p-1 rounded-md">
+              <Route style={{ width: 14, height: 14, color: '#fff' }} />
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Survey Route</span>
             <Sparkles style={{ width: 12, height: 12, color: '#f59e0b' }} />
           </div>
         </div>
@@ -253,27 +259,39 @@ export default function MobileSignaturePage() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 12px',
+        paddingTop: 'max(0px, env(safe-area-inset-top))',
         background: '#fff',
         borderBottom: '2px solid #2563eb',
         zIndex: 10,
         boxSizing: 'border-box',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <MapPin style={{ width: 18, height: 18, color: '#16a34a' }} />
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{fullName}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="bg-blue-600 p-2 rounded-lg">
+            <Route className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-gray-900 leading-tight">Survey-Route</span>
+            <span className="text-[10px] text-gray-500 font-medium">by BEAR DATA</span>
+          </div>
         </div>
+
+        <div className="hidden sm:flex flex-col items-center">
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Signing As</span>
+          <span className="text-sm font-bold text-blue-600">{fullName}</span>
+        </div>
+
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={handleClear}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '8px 14px', background: '#fff',
+              padding: '8px 12px', background: '#fff',
               border: '1px solid #d1d5db', borderRadius: 8,
-              fontSize: 14, fontWeight: 500, color: '#374151',
+              fontSize: 13, fontWeight: 500, color: '#374151',
               cursor: 'pointer',
             }}
           >
-            <Trash2 style={{ width: 15, height: 15 }} />
+            <Trash2 style={{ width: 14, height: 14 }} />
             Clear
           </button>
           <button
@@ -281,18 +299,35 @@ export default function MobileSignaturePage() {
             disabled={state === 'saving'}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '8px 16px', background: '#2563eb',
+              padding: '8px 14px', background: '#2563eb',
               border: 'none', borderRadius: 8,
-              fontSize: 14, fontWeight: 600, color: '#fff',
+              fontSize: 13, fontWeight: 600, color: '#fff',
               opacity: state === 'saving' ? 0.5 : 1,
               cursor: 'pointer',
             }}
           >
-            <Save style={{ width: 15, height: 15 }} />
-            {state === 'saving' ? 'Saving...' : 'Save'}
+            <Save style={{ width: 14, height: 14 }} />
+            {state === 'saving' ? 'Save' : 'Save'}
           </button>
         </div>
       </div>
+
+      {/* Portrait Prompt overlay */}
+      {isPortrait && state === 'ready' && (
+        <div style={{
+          position: 'absolute',
+          top: BAR_H + 8,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          pointerEvents: 'none',
+        }}>
+          <div className="bg-blue-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-bounce">
+            <RotateCcw className="w-4 h-4" />
+            <span className="text-xs font-bold whitespace-nowrap uppercase tracking-wide">Rotate for larger area</span>
+          </div>
+        </div>
+      )}
 
       {/* Error bar (if any) */}
       {error && (
@@ -311,18 +346,19 @@ export default function MobileSignaturePage() {
         position: 'absolute',
         top: BAR_H,
         left: 0,
-        width: window.innerWidth,
+        width: '100vw',
         height: canvasH,
         overflow: 'hidden',
-        background: '#e8e8e8',
+        background: '#fff',
       }}>
         <SignatureCanvas
           ref={sigCanvas}
-          penColor="#1a1a2e"
+          penColor="#111827"
           minWidth={1.5}
           maxWidth={3.5}
           velocityFilterWeight={0.7}
           clearOnResize={false}
+          backgroundColor="#ffffff"
           canvasProps={{
             width: window.innerWidth,
             height: canvasH,
@@ -338,18 +374,42 @@ export default function MobileSignaturePage() {
 
         {/* Sign-here guide */}
         <div style={{
-          position: 'absolute', left: 24, right: 24, bottom: 24,
+          position: 'absolute', left: 24, right: 24, bottom: 48,
           pointerEvents: 'none', zIndex: 5,
         }}>
-          <div style={{ borderBottom: '1.5px dashed #94a3b8' }} />
-          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>
-            Sign above this line
-          </p>
+          <div style={{ borderBottom: '2px solid #e5e7eb' }} />
+          <div className="flex justify-between items-center mt-2">
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Sign Above</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-blue-500 font-bold tracking-tight">{fullName}</span>
+              <Sparkles className="w-2 h-2 text-yellow-500" />
+            </div>
+          </div>
         </div>
       </div>
     </>
   );
 }
+
+const centerScreen: React.CSSProperties = {
+  minHeight: '100dvh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+  background: 'linear-gradient(135deg, #f0f9ff 0%, #fff 50%, #f0fdf4 100%)',
+};
+
+const cardStyle: React.CSSProperties = {
+  background: '#fff',
+  borderRadius: 16,
+  padding: 32,
+  maxWidth: 400,
+  width: '100%',
+  textAlign: 'center',
+  boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+};
+
 
 const centerScreen: React.CSSProperties = {
   minHeight: '100dvh',
