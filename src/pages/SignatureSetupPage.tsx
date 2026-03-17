@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, RefreshCw, CheckCircle, AlertCircle, ArrowLeft, MapPin, Shield, Smartphone, RotateCw, Trash2, Clock } from 'lucide-react';
+import { Save, RefreshCw, CheckCircle, AlertCircle, ArrowLeft, MapPin, Shield, Smartphone, RotateCw, Trash2, Clock, QrCode, X } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SignatureSetupPage() {
@@ -17,6 +18,10 @@ export default function SignatureSetupPage() {
   const [accountId, setAccountId] = useState('');
   const [isMobile, setIsMobile] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [generatingQR, setGeneratingQR] = useState(false);
+  const [qrPolling, setQrPolling] = useState(false);
 
   useEffect(() => {
     if (authLoading) {
@@ -107,6 +112,89 @@ export default function SignatureSetupPage() {
       setSaving(false);
     }
   };
+
+  const generateQRCode = async () => {
+    setGeneratingQR(true);
+    setError('');
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Not authenticated');
+
+      const { data: userProfile } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', authUser.id)
+        .maybeSingle();
+
+      if (!userProfile) throw new Error('User profile not found');
+
+      // Generate a random token
+      const token = crypto.randomUUID() + '-' + crypto.randomUUID().slice(0, 8);
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+      const { error: insertError } = await supabase
+        .from('signature_tokens')
+        .insert({
+          token,
+          user_id: userProfile.id,
+          account_id: accountId,
+          full_name: fullName.trim() || authUser.email || 'User',
+          expires_at: expiresAt.toISOString(),
+        });
+
+      if (insertError) throw insertError;
+
+      const url = `${window.location.origin}/mobile-signature/${token}`;
+      setQrUrl(url);
+      setShowQRCode(true);
+      setQrPolling(true);
+    } catch (err: any) {
+      console.error('Error generating QR code:', err);
+      setError(err.message || 'Failed to generate QR code');
+    } finally {
+      setGeneratingQR(false);
+    }
+  };
+
+  // Poll for signature completion when QR is shown
+  useEffect(() => {
+    if (!qrPolling || !user) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) return;
+
+        const { data: userProfile } = await supabase
+          .from('users')
+          .select('id')
+          .eq('auth_user_id', authUser.id)
+          .maybeSingle();
+
+        if (!userProfile) return;
+
+        const { data: sig } = await supabase
+          .from('user_signatures')
+          .select('id')
+          .eq('user_id', userProfile.id)
+          .eq('account_id', accountId)
+          .maybeSingle();
+
+        if (sig) {
+          // Signature was added via mobile!
+          setQrPolling(false);
+          setShowQRCode(false);
+          localStorage.removeItem('needsSignature');
+          localStorage.removeItem('signatureDeferred');
+          navigate('/app', { replace: true });
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [qrPolling, user, accountId, navigate]);
 
   const handleSave = async () => {
     if (!sigCanvas.current || sigCanvas.current.isEmpty()) {
@@ -228,18 +316,26 @@ export default function SignatureSetupPage() {
           <div className={`space-y-6 ${contentClass}`}>
             {!(isMobile && isLandscape) && (
               <>
-                {/* Mobile tip for desktop users */}
+                {/* Mobile QR code option for desktop users */}
                 {!isMobile && (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <div className="flex items-start gap-3">
                       <Smartphone className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium text-green-900 mb-1">
                           Prefer to sign on mobile?
                         </p>
-                        <p className="text-sm text-green-800">
-                          Signatures are easier to add on mobile devices. Click "Add Later" below, then log in at <strong>survey-root.com</strong> on your mobile device to add your signature with touch input.
+                        <p className="text-sm text-green-800 mb-3">
+                          Signatures are easier to add on mobile devices. Scan a QR code with your phone to sign directly - no login required.
                         </p>
+                        <button
+                          onClick={generateQRCode}
+                          disabled={generatingQR}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                        >
+                          <QrCode className="w-4 h-4" />
+                          {generatingQR ? 'Generating...' : 'Sign on Mobile'}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -339,7 +435,7 @@ export default function SignatureSetupPage() {
                       </p>
                       <p className="text-sm text-blue-800">
                         {!isMobile
-                          ? "You can add your signature now or click 'Add Later' to access the app and add it from your mobile device. You can update your signature anytime from the settings page."
+                          ? "You can add your signature now, scan a QR code to sign on your phone, or click 'Add Later' to come back to it. You can update your signature anytime from the settings page."
                           : "After adding your signature, you'll have full access to the application. You can update your signature anytime from the settings page."
                         }
                       </p>
@@ -351,6 +447,49 @@ export default function SignatureSetupPage() {
           </div>
         </div>
       </div>
+
+      {/* QR Code Modal */}
+      {showQRCode && qrUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center relative">
+            <button
+              onClick={() => { setShowQRCode(false); setQrPolling(false); }}
+              className="absolute top-4 right-4 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Smartphone className="w-6 h-6 text-green-600" />
+              <h3 className="text-xl font-bold text-gray-900">Scan with Your Phone</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-6">
+              Open your phone's camera and point it at the QR code below. You'll be taken directly to the signature page - no login needed.
+            </p>
+
+            <div className="inline-flex p-4 bg-white border-2 border-gray-100 rounded-xl shadow-inner mb-4">
+              <QRCodeSVG
+                value={qrUrl}
+                size={220}
+                level="M"
+                includeMargin
+                bgColor="#ffffff"
+                fgColor="#111827"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 justify-center text-sm text-amber-600 mb-4">
+              <Clock className="w-4 h-4" />
+              <span>This code expires in 15 minutes</span>
+            </div>
+
+            <div className="flex items-center gap-2 justify-center text-sm text-blue-600">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span>Waiting for signature from your phone...</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
