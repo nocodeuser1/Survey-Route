@@ -205,15 +205,12 @@ export default function MobileSignaturePage() {
   return (
     <div
       style={{
-        width: '100%',
-        height: '100dvh', // dynamic viewport height - accounts for Safari chrome
+        position: 'fixed',
+        inset: 0,
         display: 'flex',
         flexDirection: 'column',
         background: '#f9fafb',
         overflow: 'hidden',
-        // Prevent pull-to-refresh and bounce
-        overscrollBehavior: 'none',
-        WebkitOverflowScrolling: 'touch',
       } as React.CSSProperties}
     >
       {/* Top bar - always visible */}
@@ -276,8 +273,8 @@ export default function MobileSignaturePage() {
           position: 'relative',
           background: '#ffffff',
           borderTop: '1px solid #e5e7eb',
-          // Explicit min-height fallback for browsers that don't support dvh
-          minHeight: 200,
+          minHeight: 0, // critical: allows flex child to shrink below content size
+          overflow: 'hidden',
           touchAction: 'none',
         }}
       >
@@ -287,9 +284,14 @@ export default function MobileSignaturePage() {
           minWidth={1.5}
           maxWidth={3.5}
           velocityFilterWeight={0.7}
+          clearOnResize={false}
           canvasProps={{
             style: {
-              display: 'block',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
               touchAction: 'none',
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
