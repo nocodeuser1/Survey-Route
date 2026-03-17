@@ -6,11 +6,13 @@ import SignatureCanvas from 'react-signature-canvas';
 
 type PageState = 'loading' | 'ready' | 'saving' | 'success' | 'expired' | 'error';
 
+// Height of the top toolbar in px
+const BAR_H = 52;
+
 export default function MobileSignaturePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const sigCanvas = useRef<SignatureCanvas>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const savedData = useRef<object[]>([]);
 
   const [state, setState] = useState<PageState>('loading');
@@ -18,13 +20,12 @@ export default function MobileSignaturePage() {
   const [userId, setUserId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
-  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  const [viewH, setViewH] = useState(window.innerHeight);
 
   // Validate token
   useEffect(() => {
     if (!token) { setState('expired'); return; }
-
-    const validate = async () => {
+    (async () => {
       try {
         const { data, error: e } = await supabase
           .from('signature_tokens')
@@ -40,61 +41,86 @@ export default function MobileSignaturePage() {
         setAccountId(data.account_id);
         setState('ready');
       } catch (err: any) {
-        console.error('Token validation failed:', err);
         setError(err.message || 'Failed to validate link');
         setState('error');
       }
-    };
-    validate();
+    })();
   }, [token]);
 
-  // Fit canvas to wrapper
+  // Track actual viewport height (handles iOS address bar)
+  useEffect(() => {
+    const update = () => setViewH(window.innerHeight);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', () => setTimeout(update, 300));
+    // visualViewport is more accurate on iOS
+    window.visualViewport?.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+    };
+  }, []);
+
+  // Resize canvas to fill its container using actual pixel measurements
   const fitCanvas = useCallback(() => {
     const sc = sigCanvas.current;
-    const wrap = wrapperRef.current;
-    if (!sc || !wrap) return;
+    if (!sc) return;
 
+    // Save existing strokes
     const d = sc.toData();
     if (d && d.length) savedData.current = d;
 
     const canvas = sc.getCanvas();
-    const dpr = window.devicePixelRatio || 1;
-    const rect = wrap.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    const h = Math.round(rect.height);
-    if (!w || !h) return;
+    const dpr = Math.max(window.devicePixelRatio || 1, 1);
+    const w = window.innerWidth;
+    const h = viewH - BAR_H;
+    if (w < 1 || h < 1) return;
 
+    // Set physical pixel size
     canvas.width = w * dpr;
     canvas.height = h * dpr;
+    // Set display size
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
     const ctx = canvas.getContext('2d');
-    if (ctx) ctx.scale(dpr, dpr);
+    if (ctx) {
+      ctx.scale(dpr, dpr);
+      // Fill white background
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+    }
 
-    setCanvasSize({ w, h });
-
+    // Restore strokes
     if (savedData.current.length) sc.fromData(savedData.current as any);
-  }, []);
+  }, [viewH]);
 
-  // Resize on mount + window resize
+  // Run fitCanvas when ready and on viewport changes
   useEffect(() => {
     if (state !== 'ready' && state !== 'saving') return;
+    // Multiple passes for Safari timing
+    fitCanvas();
+    const t1 = setTimeout(fitCanvas, 100);
+    const t2 = setTimeout(fitCanvas, 500);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [state, fitCanvas, viewH]);
 
-    const run = () => {
-      fitCanvas();
-      setTimeout(fitCanvas, 150);
-      setTimeout(fitCanvas, 400);
-    };
-    setTimeout(run, 50);
-
-    window.addEventListener('resize', run);
-    window.addEventListener('orientationchange', () => setTimeout(run, 500));
-    return () => {
-      window.removeEventListener('resize', run);
-    };
-  }, [state, fitCanvas]);
-
-  const handleClear = () => { sigCanvas.current?.clear(); savedData.current = []; };
+  const handleClear = () => {
+    sigCanvas.current?.clear();
+    savedData.current = [];
+    // Re-fill white background after clear
+    const sc = sigCanvas.current;
+    if (sc) {
+      const canvas = sc.getCanvas();
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const dpr = window.devicePixelRatio || 1;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+    }
+  };
 
   const handleSave = async () => {
     if (!sigCanvas.current || sigCanvas.current.isEmpty()) {
@@ -135,7 +161,7 @@ export default function MobileSignaturePage() {
   if (state === 'expired') {
     return (
       <div style={centerScreen}>
-        <div style={card}>
+        <div style={cardStyle}>
           <AlertTriangle style={{ width: 64, height: 64, color: '#f59e0b', margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Link Expired</h2>
           <p style={{ color: '#6b7280' }}>This link has expired or been used. Please generate a new QR code from your desktop.</p>
@@ -147,7 +173,7 @@ export default function MobileSignaturePage() {
   if (state === 'error') {
     return (
       <div style={centerScreen}>
-        <div style={card}>
+        <div style={cardStyle}>
           <AlertTriangle style={{ width: 64, height: 64, color: '#ef4444', margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 8 }}>Something went wrong</h2>
           <p style={{ color: '#6b7280' }}>{error}</p>
@@ -202,29 +228,35 @@ export default function MobileSignaturePage() {
   }
 
   // ====== SIGNING VIEW ======
-  // Uses 100% height with explicit calc for canvas area.
-  // No position:fixed (problematic on iOS Safari with address bar).
+  // No flexbox. No position:fixed. Pure pixel math.
+  // Top bar = BAR_H px. Canvas = rest of viewport.
+  const canvasH = viewH - BAR_H;
+
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#f9fafb',
-        overflow: 'hidden',
-      } as React.CSSProperties}
-    >
-      {/* Top bar - always visible */}
+    <>
+      {/* Kill all scroll/bounce on this page */}
+      <style>{`
+        html, body, #root { 
+          margin: 0; padding: 0; overflow: hidden; 
+          height: ${viewH}px; width: 100vw;
+          touch-action: none;
+          -webkit-overflow-scrolling: auto;
+        }
+      `}</style>
+
+      {/* Top bar */}
       <div style={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        height: BAR_H,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '10px 12px',
-        paddingTop: 'max(10px, env(safe-area-inset-top))',
+        padding: '0 12px',
         background: '#fff',
-        borderBottom: '2px solid #e5e7eb',
-        flexShrink: 0,
+        borderBottom: '2px solid #2563eb',
+        zIndex: 10,
+        boxSizing: 'border-box',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <MapPin style={{ width: 18, height: 18, color: '#16a34a' }} />
@@ -238,6 +270,7 @@ export default function MobileSignaturePage() {
               padding: '8px 14px', background: '#fff',
               border: '1px solid #d1d5db', borderRadius: 8,
               fontSize: 14, fontWeight: 500, color: '#374151',
+              cursor: 'pointer',
             }}
           >
             <Trash2 style={{ width: 15, height: 15 }} />
@@ -252,6 +285,7 @@ export default function MobileSignaturePage() {
               border: 'none', borderRadius: 8,
               fontSize: 14, fontWeight: 600, color: '#fff',
               opacity: state === 'saving' ? 0.5 : 1,
+              cursor: 'pointer',
             }}
           >
             <Save style={{ width: 15, height: 15 }} />
@@ -260,68 +294,63 @@ export default function MobileSignaturePage() {
         </div>
       </div>
 
-      {/* Error bar */}
+      {/* Error bar (if any) */}
       {error && (
-        <div style={{ padding: '8px 12px', background: '#fef2f2', color: '#dc2626', fontSize: 13, borderBottom: '1px solid #fecaca', flexShrink: 0 }}>
+        <div style={{
+          position: 'absolute',
+          top: BAR_H, left: 0, right: 0,
+          padding: '8px 12px', background: '#fef2f2', color: '#dc2626',
+          fontSize: 13, zIndex: 10,
+        }}>
           {error}
         </div>
       )}
 
-      {/* Canvas wrapper - takes all remaining space */}
-      <div
-        ref={wrapperRef}
-        style={{
-          flex: '1 1 0%',
-          position: 'relative',
-          background: '#f0f0f0',
-          borderTop: '2px solid #2563eb',
-          minHeight: 0,
-          overflow: 'hidden',
-          touchAction: 'none',
-        }}
-      >
+      {/* Canvas - positioned absolutely below the bar */}
+      <div style={{
+        position: 'absolute',
+        top: BAR_H,
+        left: 0,
+        width: window.innerWidth,
+        height: canvasH,
+        overflow: 'hidden',
+        background: '#e8e8e8',
+      }}>
         <SignatureCanvas
           ref={sigCanvas}
           penColor="#1a1a2e"
-          backgroundColor="rgb(255, 255, 255)"
           minWidth={1.5}
           maxWidth={3.5}
           velocityFilterWeight={0.7}
           clearOnResize={false}
           canvasProps={{
+            width: window.innerWidth,
+            height: canvasH,
             style: {
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
+              display: 'block',
               touchAction: 'none',
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
               userSelect: 'none',
-              zIndex: 2,
             } as React.CSSProperties,
           }}
         />
 
-        {/* Sign-here guide line */}
-        <div style={{ position: 'absolute', left: 24, right: 24, bottom: 32, pointerEvents: 'none', zIndex: 1 }}>
-          <div style={{ borderBottom: '1.5px dashed #cbd5e1' }} />
-          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>Sign above this line</p>
+        {/* Sign-here guide */}
+        <div style={{
+          position: 'absolute', left: 24, right: 24, bottom: 24,
+          pointerEvents: 'none', zIndex: 5,
+        }}>
+          <div style={{ borderBottom: '1.5px dashed #94a3b8' }} />
+          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>
+            Sign above this line
+          </p>
         </div>
-
-        {/* Debug: shows canvas dimensions (remove after testing) */}
-        {canvasSize.w > 0 && (
-          <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 10, color: '#d1d5db', pointerEvents: 'none', zIndex: 1 }}>
-            {canvasSize.w}×{canvasSize.h}
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }
 
-// Shared styles
 const centerScreen: React.CSSProperties = {
   minHeight: '100dvh',
   display: 'flex',
@@ -331,7 +360,7 @@ const centerScreen: React.CSSProperties = {
   background: 'linear-gradient(135deg, #f0f9ff 0%, #fff 50%, #f0fdf4 100%)',
 };
 
-const card: React.CSSProperties = {
+const cardStyle: React.CSSProperties = {
   background: '#fff',
   borderRadius: 16,
   padding: 32,
