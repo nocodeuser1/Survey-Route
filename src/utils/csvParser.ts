@@ -39,6 +39,7 @@ export interface ParsedFacility {
   company_signature_date?: string;
   recertified_date?: string;
   county?: string;
+  camino_facility_id?: string;
   spcc_pe_stamp_date?: string;
 }
 
@@ -76,6 +77,7 @@ export interface ColumnMapping {
   company_signature_date?: string | null;
   recertified_date?: string | null;
   county?: string | null;
+  camino_facility_id?: string | null;
   spcc_pe_stamp_date?: string | null;
 }
 
@@ -198,6 +200,11 @@ const countyVariations = [
   'county', 'county name'
 ];
 
+const caminoFacilityIdVariations = [
+  'camino facility id', 'camino_facility_id', 'camino id', 'camino facility',
+  'facility id', 'camino fac id'
+];
+
 const peStampDateVariations = [
   'pe stamp date', 'pe_stamp_date', 'spcc_pe_stamp_date',
   'pe stamp', 'pe date'
@@ -257,6 +264,7 @@ export function detectColumns(headers: string[]): ColumnMapping {
     company_signature_date: findColumn(headers, companySignatureVariations),
     recertified_date: findColumn(headers, recertifiedVariations),
     county: findColumn(headers, countyVariations),
+    camino_facility_id: findColumn(headers, caminoFacilityIdVariations),
     spcc_pe_stamp_date: findColumn(headers, peStampDateVariations),
   };
 }
@@ -452,6 +460,10 @@ function processRow(
   if (columnMapping.county && row[columnMapping.county] != null) {
     const county = row[columnMapping.county]?.toString().trim();
     if (county && county.toLowerCase() !== 'nan') facility.county = county;
+  }
+  if (columnMapping.camino_facility_id && row[columnMapping.camino_facility_id] != null) {
+    const caminoId = row[columnMapping.camino_facility_id]?.toString().trim();
+    if (caminoId && caminoId.toLowerCase() !== 'nan') facility.camino_facility_id = caminoId;
   }
   if (columnMapping.spcc_pe_stamp_date && row[columnMapping.spcc_pe_stamp_date] != null) {
     facility.spcc_pe_stamp_date = normalizeDate(row[columnMapping.spcc_pe_stamp_date]);

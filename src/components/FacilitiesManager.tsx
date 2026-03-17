@@ -119,7 +119,7 @@ function TouchTooltipButton({
   );
 }
 
-type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' |
+type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' |
   'spcc_status' | 'inspection_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
@@ -134,7 +134,7 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 's
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
-  'name', 'address', 'latitude', 'longitude', 'visit_duration', 'county',
+  'name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
   'status', 'day_assignment', 'team_assignment',
   'spcc_status', 'inspection_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
@@ -155,6 +155,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   longitude: 'Longitude',
   visit_duration: 'Visit Duration',
   county: 'County',
+  camino_facility_id: 'Camino Facility ID',
   status: 'Status',
   day_assignment: 'Day Assignment',
   team_assignment: 'Team Assignment',
@@ -937,6 +938,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.address || '';
           case 'county':
             return facility.county || '';
+          case 'camino_facility_id':
+            return facility.camino_facility_id || '';
           case 'visit_duration':
             return facility.visit_duration_minutes || 0;
           case 'photos_taken':
@@ -1014,6 +1017,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     formData.spcc_inspection_date = facility.spcc_inspection_date || '';
     formData.spcc_pe_stamp_date = facility.spcc_pe_stamp_date || '';
     formData.county = facility.county || '';
+    formData.camino_facility_id = facility.camino_facility_id || '';
     formData.photos_taken = facility.photos_taken ? 'true' : 'false';
     formData.field_visit_date = facility.field_visit_date || '';
     formData.estimated_oil_per_day = facility.estimated_oil_per_day != null ? String(facility.estimated_oil_per_day) : '';
@@ -1098,6 +1102,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           longitude: lng,
           visit_duration_minutes: visitDuration,
           county: mobileEditFormData.county?.trim() || null,
+          camino_facility_id: mobileEditFormData.camino_facility_id?.trim() || null,
           photos_taken: mobileEditFormData.photos_taken === 'true',
           field_visit_date: mobileEditFormData.field_visit_date?.trim() || null,
           estimated_oil_per_day: estimatedOil,
@@ -1282,6 +1287,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (parsedFacility.company_signature_date !== undefined) d.company_signature_date = parsedFacility.company_signature_date || null;
     if (parsedFacility.recertified_date !== undefined) d.recertified_date = parsedFacility.recertified_date || null;
     if (parsedFacility.county !== undefined) d.county = parsedFacility.county || null;
+    if (parsedFacility.camino_facility_id !== undefined) d.camino_facility_id = parsedFacility.camino_facility_id || null;
     if (parsedFacility.spcc_pe_stamp_date !== undefined) d.spcc_pe_stamp_date = parsedFacility.spcc_pe_stamp_date || null;
     return d;
   };
@@ -1959,6 +1965,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.address || '-';
       case 'county':
         return facility.county || '-';
+      case 'camino_facility_id':
+        return facility.camino_facility_id || '-';
       case 'visit_duration':
         return `${facility.visit_duration_minutes} min`;
       case 'photos_taken':
@@ -2215,6 +2223,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, county: e.target.value })}
                         className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                         placeholder="County"
+                      />
+                    </div>
+                  )}
+                  {isFieldVisible('camino_facility_id') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Camino Facility ID</label>
+                      <input
+                        type="text"
+                        value={mobileEditFormData.camino_facility_id || ''}
+                        onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, camino_facility_id: e.target.value })}
+                        className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                        placeholder="Camino Facility ID"
                       />
                     </div>
                   )}

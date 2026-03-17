@@ -861,6 +861,10 @@ export default function FacilityDetailModal({
                 <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.county || 'Not available'}</p>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Camino Facility ID</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.camino_facility_id || 'Not available'}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Startup / First Production Date</p>
                 <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
                   {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not available'}

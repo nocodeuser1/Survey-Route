@@ -68,6 +68,7 @@ export interface Facility {
   company_signature_date?: string | null;
   recertified_date?: string | null;
   county?: string | null;
+  camino_facility_id?: string | null;
   // Inspection tracking
   inspection_frequency_days?: number;
   last_inspection_date?: string | null;
