@@ -409,23 +409,3 @@ const cardStyle: React.CSSProperties = {
   textAlign: 'center',
   boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
 };
-
-
-const centerScreen: React.CSSProperties = {
-  minHeight: '100dvh',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: 16,
-  background: 'linear-gradient(135deg, #f0f9ff 0%, #fff 50%, #f0fdf4 100%)',
-};
-
-const cardStyle: React.CSSProperties = {
-  background: '#fff',
-  borderRadius: 16,
-  padding: 32,
-  maxWidth: 400,
-  width: '100%',
-  textAlign: 'center',
-  boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
-};
