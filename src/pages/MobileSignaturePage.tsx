@@ -24,7 +24,7 @@ export default function MobileSignaturePage() {
   useEffect(() => {
     if (!token) { setState('expired'); return; }
 
-    (async () => {
+    const validate = async () => {
       try {
         const { data, error: e } = await supabase
           .from('signature_tokens')
@@ -40,10 +40,12 @@ export default function MobileSignaturePage() {
         setAccountId(data.account_id);
         setState('ready');
       } catch (err: any) {
+        console.error('Token validation failed:', err);
         setError(err.message || 'Failed to validate link');
         setState('error');
       }
-    })();
+    };
+    validate();
   }, [token]);
 
   // Fit canvas to wrapper
@@ -271,9 +273,9 @@ export default function MobileSignaturePage() {
         style={{
           flex: '1 1 0%',
           position: 'relative',
-          background: '#ffffff',
-          borderTop: '1px solid #e5e7eb',
-          minHeight: 0, // critical: allows flex child to shrink below content size
+          background: '#f0f0f0',
+          borderTop: '2px solid #2563eb',
+          minHeight: 0,
           overflow: 'hidden',
           touchAction: 'none',
         }}
@@ -281,6 +283,7 @@ export default function MobileSignaturePage() {
         <SignatureCanvas
           ref={sigCanvas}
           penColor="#1a1a2e"
+          backgroundColor="rgb(255, 255, 255)"
           minWidth={1.5}
           maxWidth={3.5}
           velocityFilterWeight={0.7}
@@ -296,6 +299,7 @@ export default function MobileSignaturePage() {
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
               userSelect: 'none',
+              zIndex: 2,
             } as React.CSSProperties,
           }}
         />
