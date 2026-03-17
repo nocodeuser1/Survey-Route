@@ -33,9 +33,12 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
     >
       <Icon className="w-3 h-3" />
       <span>{config.label}</span>
-      {showMessage && result.daysUntilDue !== null && result.status !== 'valid' && result.status !== 'recertified' && result.status !== 'no_plan' && result.status !== 'no_ip_date' && (
+      {showMessage && result.daysUntilDue !== null && result.status !== 'valid' && result.status !== 'recertified' && result.status !== 'no_ip_date' && (
         <span className="opacity-75">
-          ({result.daysUntilDue > 0 ? formatDayCount(result.daysUntilDue) : `${formatDayCount(result.daysUntilDue)} ago`})
+          {result.status === 'no_plan'
+            ? `(Due in ${formatDayCount(result.daysUntilDue)})`
+            : `(${result.daysUntilDue > 0 ? formatDayCount(result.daysUntilDue) : `${formatDayCount(Math.abs(result.daysUntilDue))} ago`})`
+          }
         </span>
       )}
     </span>

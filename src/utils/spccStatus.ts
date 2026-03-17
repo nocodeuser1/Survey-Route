@@ -265,7 +265,7 @@ export function getStatusBadgeConfig(status: SPCCPlanStatus): StatusBadgeConfig 
         colorClass: 'bg-blue-50 text-blue-600',
         darkColorClass: 'bg-blue-900/30 text-blue-400',
         icon: 'clock',
-        label: 'Pending',
+        label: 'Upcoming',
       };
     case 'no_ip_date':
       return {
@@ -293,7 +293,7 @@ export function getSPCCPlanStatusText(facility: SPCCStatusFacility): string {
     case 'expired': return 'Expired';
     case 'initial_due': return 'Due Soon';
     case 'initial_overdue': return 'Overdue';
-    case 'no_plan': return 'Pending';
+    case 'no_plan': return 'Upcoming';
     case 'no_ip_date': return 'No Date';
     case 'renewal_due': return 'Renewal Due';
   }
