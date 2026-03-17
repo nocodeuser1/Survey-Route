@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, RotateCw, Monitor, LogIn, Sparkles } from 'lucide-react';
@@ -10,6 +10,8 @@ export default function MobileSignaturePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const sigCanvas = useRef<SignatureCanvas>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const savedSignatureData = useRef<string | null>(null);
 
   const [state, setState] = useState<PageState>('loading');
   const [fullName, setFullName] = useState('');
@@ -17,6 +19,7 @@ export default function MobileSignaturePage() {
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
   const [isLandscape, setIsLandscape] = useState(false);
+  const [canvasReady, setCanvasReady] = useState(false);
 
   // Validate token on mount
   useEffect(() => {
@@ -56,19 +59,87 @@ export default function MobileSignaturePage() {
     validateToken();
   }, [token]);
 
-  // Orientation detection
-  useEffect(() => {
-    const checkOrientation = () => {
-      setIsLandscape(window.matchMedia('(orientation: landscape)').matches);
-    };
-    checkOrientation();
-    const mq = window.matchMedia('(orientation: landscape)');
-    mq.addEventListener('change', checkOrientation);
-    return () => mq.removeEventListener('change', checkOrientation);
+  // Save signature data before orientation change destroys canvas
+  const saveSignatureData = useCallback(() => {
+    if (sigCanvas.current && !sigCanvas.current.isEmpty()) {
+      savedSignatureData.current = sigCanvas.current.toDataURL();
+    }
   }, []);
+
+  // Restore signature data after canvas is re-rendered
+  const restoreSignatureData = useCallback(() => {
+    if (savedSignatureData.current && sigCanvas.current) {
+      // Small delay to let the canvas resize first
+      setTimeout(() => {
+        if (sigCanvas.current && savedSignatureData.current) {
+          sigCanvas.current.fromDataURL(savedSignatureData.current, {
+            ratio: 1,
+            width: sigCanvas.current.getCanvas().width,
+            height: sigCanvas.current.getCanvas().height,
+          });
+        }
+      }, 100);
+    }
+  }, []);
+
+  // Resize canvas to match container
+  const resizeCanvas = useCallback(() => {
+    if (!sigCanvas.current || !canvasContainerRef.current) return;
+
+    // Save before resize
+    saveSignatureData();
+
+    const container = canvasContainerRef.current;
+    const canvas = sigCanvas.current.getCanvas();
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+
+    canvas.width = container.offsetWidth * ratio;
+    canvas.height = container.offsetHeight * ratio;
+    canvas.style.width = `${container.offsetWidth}px`;
+    canvas.style.height = `${container.offsetHeight}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.scale(ratio, ratio);
+    }
+
+    // Restore after resize
+    restoreSignatureData();
+    setCanvasReady(true);
+  }, [saveSignatureData, restoreSignatureData]);
+
+  // Orientation detection + canvas resize
+  useEffect(() => {
+    const handleResize = () => {
+      const landscape = window.innerWidth > window.innerHeight;
+      saveSignatureData();
+      setIsLandscape(landscape);
+      // Resize canvas after layout settles
+      setTimeout(resizeCanvas, 150);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', () => {
+      // orientationchange fires before the resize happens, so delay
+      setTimeout(handleResize, 300);
+    });
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [state, saveSignatureData, resizeCanvas]);
+
+  // Initial canvas setup when state becomes ready
+  useEffect(() => {
+    if (state === 'ready') {
+      setTimeout(resizeCanvas, 200);
+    }
+  }, [state, resizeCanvas]);
 
   const handleClear = () => {
     sigCanvas.current?.clear();
+    savedSignatureData.current = null;
   };
 
   const handleSave = async () => {
@@ -83,7 +154,6 @@ export default function MobileSignaturePage() {
     try {
       const signatureData = sigCanvas.current.toDataURL();
 
-      // Insert signature using anon access (RLS policy allows this)
       const { error: sigError } = await supabase
         .from('user_signatures')
         .insert({
@@ -149,7 +219,6 @@ export default function MobileSignaturePage() {
   if (state === 'success') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex flex-col items-center justify-center p-4">
-        {/* Animated success header */}
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
           {/* Green success banner */}
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-8 text-center">
@@ -214,40 +283,75 @@ export default function MobileSignaturePage() {
     );
   }
 
-  // Landscape fullscreen mode
+  // ====== SIGNING STATES (ready / saving) ======
+
+  // Landscape: fullscreen canvas with floating buttons
   if (isLandscape) {
     return (
-      <div className="fixed inset-0 bg-white flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
-          <div className="flex items-center gap-2">
-            <MapPin className="w-5 h-5 text-green-600" />
-            <span className="font-semibold text-gray-900">Sign as: {fullName}</span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleClear}
-              className="px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={state === 'saving'}
-              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
-            >
-              {state === 'saving' ? 'Saving...' : 'Save Signature'}
-            </button>
-          </div>
-        </div>
-        {error && (
-          <div className="px-4 py-2 bg-red-50 text-red-700 text-sm">{error}</div>
-        )}
-        <div className="flex-1 border-2 border-gray-200">
+      <div className="fixed inset-0 bg-white overflow-hidden" style={{ touchAction: 'none' }}>
+        {/* Signature canvas - takes full screen */}
+        <div
+          ref={canvasContainerRef}
+          className="absolute inset-0"
+          style={{ touchAction: 'none' }}
+        >
           <SignatureCanvas
             ref={sigCanvas}
-            canvasProps={{ className: 'w-full h-full touch-action-none' }}
+            penColor="#1a1a2e"
+            minWidth={1.5}
+            maxWidth={3}
+            canvasProps={{
+              style: {
+                touchAction: 'none',
+                WebkitTouchCallout: 'none',
+                WebkitUserSelect: 'none',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+              },
+            }}
           />
         </div>
+
+        {/* Signing line hint */}
+        <div className="absolute left-8 right-8 bottom-16 pointer-events-none">
+          <div className="border-b-2 border-dashed border-gray-300" />
+          <p className="text-xs text-gray-400 mt-1 text-center">Sign above this line</p>
+        </div>
+
+        {/* Top-left: name badge */}
+        <div className="absolute top-3 left-3 z-10 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-md border border-gray-200">
+          <div className="flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-green-600" />
+            <span className="text-xs font-medium text-gray-700">{fullName}</span>
+          </div>
+        </div>
+
+        {/* Top-right: action buttons */}
+        <div className="absolute top-3 right-3 z-10 flex gap-2">
+          <button
+            onClick={handleClear}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white/90 backdrop-blur-sm border border-gray-300 text-gray-700 rounded-lg shadow-md text-sm font-medium active:bg-gray-100"
+          >
+            <Trash2 className="w-4 h-4" />
+            Clear
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={state === 'saving'}
+            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600/95 backdrop-blur-sm text-white rounded-lg shadow-md text-sm font-semibold disabled:opacity-50 active:bg-blue-700"
+          >
+            <Save className="w-4 h-4" />
+            {state === 'saving' ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+
+        {/* Error toast */}
+        {error && (
+          <div className="absolute bottom-4 left-4 right-4 z-10 p-3 bg-red-500 text-white text-sm rounded-lg shadow-lg text-center font-medium">
+            {error}
+          </div>
+        )}
       </div>
     );
   }
@@ -288,18 +392,38 @@ export default function MobileSignaturePage() {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Draw your signature below
           </label>
-          <div className="border-2 border-gray-300 rounded-lg bg-white overflow-hidden">
+          <div
+            ref={!isLandscape ? canvasContainerRef : undefined}
+            className="border-2 border-gray-300 rounded-lg bg-white overflow-hidden relative"
+            style={{ height: '200px', touchAction: 'none' }}
+          >
             <SignatureCanvas
               ref={sigCanvas}
-              canvasProps={{ className: 'w-full h-48 touch-action-none' }}
+              penColor="#1a1a2e"
+              minWidth={1.5}
+              maxWidth={3}
+              canvasProps={{
+                style: {
+                  touchAction: 'none',
+                  WebkitTouchCallout: 'none',
+                  WebkitUserSelect: 'none',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                },
+              }}
             />
+            {/* Sign line hint */}
+            <div className="absolute left-4 right-4 bottom-6 pointer-events-none">
+              <div className="border-b border-dashed border-gray-300" />
+            </div>
           </div>
         </div>
 
         <div className="flex gap-3 mt-4">
           <button
             onClick={handleClear}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg active:bg-gray-50 transition-colors"
           >
             <Trash2 className="w-4 h-4" />
             Clear
@@ -307,7 +431,7 @@ export default function MobileSignaturePage() {
           <button
             onClick={handleSave}
             disabled={state === 'saving'}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg active:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
           >
             <Save className="w-4 h-4" />
             {state === 'saving' ? 'Saving...' : 'Save Signature'}
