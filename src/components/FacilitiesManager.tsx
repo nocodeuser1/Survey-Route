@@ -3023,17 +3023,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     </TouchTooltipButton>
                     <TouchTooltipButton
                       id="tb-bulk-download"
-                      tooltip="Download All SPCC Plans as ZIP"
+                      tooltip={`Download ${filteredFacilities.filter(f => f.spcc_plan_url).length} SPCC Plans as ZIP`}
                       activeTooltipId={mobileTooltipId}
                       onTooltipShow={setMobileTooltipId}
                       onClick={() => { if (!isBulkDownloading) handleBulkPdfDownload(); }}
                       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${isBulkDownloading
                         ? 'text-gray-400 dark:text-gray-500 cursor-wait'
-                        : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'
+                        : filteredFacilities.some(f => f.spcc_plan_url)
+                          ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'
+                          : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
                         }`}
                     >
                       {isBulkDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      <span className="hidden sm:inline">{isBulkDownloading ? 'Zipping...' : 'Download All'}</span>
+                      <span className="hidden sm:inline">
+                        {isBulkDownloading
+                          ? 'Zipping...'
+                          : `Download (${filteredFacilities.filter(f => f.spcc_plan_url).length})`
+                        }
+                      </span>
                     </TouchTooltipButton>
                   </>
                 )}
