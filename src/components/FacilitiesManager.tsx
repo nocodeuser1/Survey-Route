@@ -19,6 +19,7 @@ import CompletionTypeModal from './CompletionTypeModal';
 import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
+import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, formatDayCount } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
@@ -308,6 +309,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showBulkSPCCUpload, setShowBulkSPCCUpload] = useState(false);
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
   const [showReportTypePicker, setShowReportTypePicker] = useState(false);
+  const [showPlansOverview, setShowPlansOverview] = useState(false);
+  const [showOverviewTypePicker, setShowOverviewTypePicker] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
@@ -3085,10 +3088,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     </TouchTooltipButton>
                     <TouchTooltipButton
                       id="tb-overview"
-                      tooltip="Inspection Overview"
+                      tooltip={
+                        spccMode === 'plan'
+                          ? 'SPCC Plans Overview'
+                          : spccMode === 'inspection'
+                            ? 'Inspections Overview'
+                            : 'Overview'
+                      }
                       activeTooltipId={mobileTooltipId}
                       onTooltipShow={setMobileTooltipId}
-                      onClick={() => setShowInspectionOverview(true)}
+                      onClick={() => {
+                        if (spccMode === 'plan') {
+                          setShowPlansOverview(true);
+                        } else if (spccMode === 'inspection') {
+                          setShowInspectionOverview(true);
+                        } else {
+                          setShowOverviewTypePicker(true);
+                        }
+                      }}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
                     >
                       <ClipboardList className="w-3.5 h-3.5" />
@@ -3934,6 +3951,72 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         facilities={facilities}
         accountId={accountId}
       />
+
+      {/* SPCC Plans Overview Modal */}
+      <SPCCPlansOverviewModal
+        isOpen={showPlansOverview}
+        onClose={() => setShowPlansOverview(false)}
+        facilities={facilities}
+        accountId={accountId}
+      />
+
+      {/* Overview Type Picker (All mode) */}
+      {showOverviewTypePicker && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+          onClick={() => setShowOverviewTypePicker(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-sm w-full transition-colors duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Overview</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose which overview to view.</p>
+            </div>
+            <div className="p-4 space-y-2">
+              <button
+                onClick={() => {
+                  setShowOverviewTypePicker(false);
+                  setShowPlansOverview(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-600 transition-colors text-left"
+              >
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">SPCC Plans</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Plan status, compliance, and renewal dates</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowOverviewTypePicker(false);
+                  setShowInspectionOverview(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left"
+              >
+                <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">SPCC Inspections</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Findings, flagged items, and action items</p>
+                </div>
+              </button>
+            </div>
+            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setShowOverviewTypePicker(false)}
+                className="w-full px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SPCC Plan Manager Modal */}
       {
