@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download } from 'lucide-react';
+import JSZip from 'jszip';
 import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
 import SurveyTypeSelector from './SurveyTypeSelector';
 import FacilitySurveyView from './FacilitySurveyView';
@@ -305,6 +306,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showInspectionOverview, setShowInspectionOverview] = useState(false);
   const [showSPCCPlanManager, setShowSPCCPlanManager] = useState(false);
   const [showBulkSPCCUpload, setShowBulkSPCCUpload] = useState(false);
+  const [isBulkDownloading, setIsBulkDownloading] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
@@ -1602,6 +1604,78 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     document.body.removeChild(link);
 
     setShowExportColumnSelector(false);
+  };
+
+  // Bulk download all SPCC plan PDFs as a zip
+  const handleBulkPdfDownload = async () => {
+    const facilitiesWithPlans = filteredFacilities.filter(f => f.spcc_plan_url);
+    if (facilitiesWithPlans.length === 0) {
+      setError('No facilities with SPCC plans to download.');
+      return;
+    }
+
+    setIsBulkDownloading(true);
+    setError(null);
+
+    try {
+      const zip = new JSZip();
+      let successCount = 0;
+      let failCount = 0;
+
+      await Promise.all(
+        facilitiesWithPlans.map(async (facility) => {
+          try {
+            const response = await fetch(facility.spcc_plan_url!);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const blob = await response.blob();
+
+            // Sanitize facility name for filename
+            const safeName = facility.name
+              .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+              .replace(/\s+/g, '_')
+              .substring(0, 80);
+
+            // Detect extension from content type or URL
+            const contentType = response.headers.get('content-type') || '';
+            let ext = 'pdf';
+            if (contentType.includes('pdf')) ext = 'pdf';
+            else {
+              const urlExt = facility.spcc_plan_url!.split('.').pop()?.split('?')[0]?.toLowerCase();
+              if (urlExt && ['pdf', 'png', 'jpg', 'jpeg'].includes(urlExt)) ext = urlExt;
+            }
+
+            zip.file(`${safeName}.${ext}`, blob);
+            successCount++;
+          } catch (err) {
+            console.warn(`Failed to download plan for ${facility.name}:`, err);
+            failCount++;
+          }
+        })
+      );
+
+      if (successCount === 0) {
+        setError('Failed to download any SPCC plans. Check your connection and try again.');
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = `SPCC_Plans_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      if (failCount > 0) {
+        setError(`Downloaded ${successCount} plans. ${failCount} failed to download.`);
+      }
+    } catch (err) {
+      console.error('Bulk PDF download error:', err);
+      setError('Failed to create zip file. Please try again.');
+    } finally {
+      setIsBulkDownloading(false);
+    }
   };
 
   // Open column modal: snapshot current state into drafts
@@ -2935,17 +3009,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <span className="hidden sm:inline">Import</span>
                 </TouchTooltipButton>
                 {spccMode === 'plan' && (
-                  <TouchTooltipButton
-                    id="tb-bulk"
-                    tooltip="Bulk Upload SPCC Plans"
-                    activeTooltipId={mobileTooltipId}
-                    onTooltipShow={setMobileTooltipId}
-                    onClick={() => setShowBulkSPCCUpload(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Bulk PDFs</span>
-                  </TouchTooltipButton>
+                  <>
+                    <TouchTooltipButton
+                      id="tb-bulk"
+                      tooltip="Bulk Upload SPCC Plans"
+                      activeTooltipId={mobileTooltipId}
+                      onTooltipShow={setMobileTooltipId}
+                      onClick={() => setShowBulkSPCCUpload(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Bulk Upload</span>
+                    </TouchTooltipButton>
+                    <TouchTooltipButton
+                      id="tb-bulk-download"
+                      tooltip="Download All SPCC Plans as ZIP"
+                      activeTooltipId={mobileTooltipId}
+                      onTooltipShow={setMobileTooltipId}
+                      onClick={() => { if (!isBulkDownloading) handleBulkPdfDownload(); }}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${isBulkDownloading
+                        ? 'text-gray-400 dark:text-gray-500 cursor-wait'
+                        : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'
+                        }`}
+                    >
+                      {isBulkDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      <span className="hidden sm:inline">{isBulkDownloading ? 'Zipping...' : 'Download All'}</span>
+                    </TouchTooltipButton>
+                  </>
                 )}
               </div>
 
