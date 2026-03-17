@@ -237,8 +237,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
     setSpccModeInternal(mode);
     userChangedMode.current = true;
+    // Sync the report type filter to match the mode
+    const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
+    setSelectedReportType(mapped as any);
     if (onGlobalSurveyTypeChange) {
-      const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
       onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
     }
   };
@@ -581,7 +583,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [initialFacilityToEdit]);
 
   // Determine if any filter is active (for indicator badge)
-  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all';
+  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all' || showSoldFacilities;
 
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
@@ -2897,21 +2899,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
               {/* View controls group */}
               <div className="flex items-center gap-1">
-                <TouchTooltipButton
-                  id="tb-sold"
-                  tooltip={showSoldFacilities ? "Show Active Facilities" : "Show Sold Facilities"}
-                  activeTooltipId={mobileTooltipId}
-                  onTooltipShow={setMobileTooltipId}
-                  onClick={() => setShowSoldFacilities(!showSoldFacilities)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium ${showSoldFacilities
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200'
-                    }`}
-                >
-                  <DollarSign className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{showSoldFacilities ? 'Active' : 'Sold'}</span>
-                </TouchTooltipButton>
-
                 <div className="relative">
                   <TouchTooltipButton
                     id="tb-filters"
@@ -2956,10 +2943,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           title="Filter by report type"
                         >
                           <option value="all">Report Type: All</option>
-                          <option value="spcc_plan">Report Type: SPCC Plan</option>
-                          <option value="spcc_inspection">Report Type: SPCC Inspection</option>
-                          <option value="spcc_inspection_internal">Report Type: SPCC Inspection Internal</option>
-                          <option value="spcc_inspection_external">Report Type: SPCC Inspection External</option>
+                          {spccMode !== 'inspection' && (
+                            <option value="spcc_plan">Report Type: SPCC Plan</option>
+                          )}
+                          {spccMode !== 'plan' && (
+                            <>
+                              <option value="spcc_inspection">Report Type: SPCC Inspection</option>
+                              <option value="spcc_inspection_internal">Report Type: SPCC Inspection Internal</option>
+                              <option value="spcc_inspection_external">Report Type: SPCC Inspection External</option>
+                            </>
+                          )}
                         </select>
                         <select
                           value={sortColumn || 'name'}
@@ -2972,6 +2965,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           <option value="spcc_status">Sort by SPCC Status</option>
                           <option value="inspection_status">Sort by Inspection Status</option>
                         </select>
+                        {/* Sold toggle */}
+                        <button
+                          onClick={() => setShowSoldFacilities(!showSoldFacilities)}
+                          className={`flex items-center justify-between w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${showSoldFacilities
+                            ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <DollarSign className="w-3.5 h-3.5" />
+                            Show Sold Facilities
+                          </span>
+                          <div className={`w-8 h-4.5 rounded-full relative transition-colors ${showSoldFacilities ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                            <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${showSoldFacilities ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          </div>
+                        </button>
                       </div>
                     </>
                   )}
