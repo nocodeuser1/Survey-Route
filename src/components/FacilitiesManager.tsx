@@ -307,6 +307,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showSPCCPlanManager, setShowSPCCPlanManager] = useState(false);
   const [showBulkSPCCUpload, setShowBulkSPCCUpload] = useState(false);
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
+  const [showReportTypePicker, setShowReportTypePicker] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
@@ -1607,7 +1608,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   // Bulk download all SPCC plan PDFs as a zip
-  const handleBulkPdfDownload = async () => {
+  // Optional subfolder param nests files inside a folder in the zip (used for "All" mode)
+  const handleBulkPdfDownload = async (subfolder?: string) => {
     const facilitiesWithPlans = filteredFacilities.filter(f => f.spcc_plan_url);
     if (facilitiesWithPlans.length === 0) {
       setError('No facilities with SPCC plans to download.');
@@ -1644,7 +1646,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               if (urlExt && ['pdf', 'png', 'jpg', 'jpeg'].includes(urlExt)) ext = urlExt;
             }
 
-            zip.file(`${safeName}.${ext}`, blob);
+            const filePath = subfolder
+              ? `${subfolder}_${new Date().toISOString().split('T')[0]}/${safeName}.${ext}`
+              : `${safeName}.${ext}`;
+            zip.file(filePath, blob);
             successCount++;
           } catch (err) {
             console.warn(`Failed to download plan for ${facility.name}:`, err);
@@ -3021,27 +3026,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <FileText className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Bulk Upload</span>
                     </TouchTooltipButton>
-                    <TouchTooltipButton
-                      id="tb-bulk-download"
-                      tooltip={`Download ${filteredFacilities.filter(f => f.spcc_plan_url).length} SPCC Plans as ZIP`}
-                      activeTooltipId={mobileTooltipId}
-                      onTooltipShow={setMobileTooltipId}
-                      onClick={() => { if (!isBulkDownloading) handleBulkPdfDownload(); }}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${isBulkDownloading
-                        ? 'text-gray-400 dark:text-gray-500 cursor-wait'
-                        : filteredFacilities.some(f => f.spcc_plan_url)
-                          ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'
-                          : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                        }`}
-                    >
-                      {isBulkDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      <span className="hidden sm:inline">
-                        {isBulkDownloading
-                          ? 'Zipping...'
-                          : `Download (${filteredFacilities.filter(f => f.spcc_plan_url).length})`
-                        }
-                      </span>
-                    </TouchTooltipButton>
                   </>
                 )}
               </div>
@@ -3065,14 +3049,39 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     </TouchTooltipButton>
                     <TouchTooltipButton
                       id="tb-reports"
-                      tooltip="Export Inspection Reports"
+                      tooltip={
+                        spccMode === 'plan'
+                          ? `Download ${filteredFacilities.filter(f => f.spcc_plan_url).length} SPCC Plans`
+                          : spccMode === 'inspection'
+                            ? 'Export Inspection Reports'
+                            : 'Export Reports'
+                      }
                       activeTooltipId={mobileTooltipId}
                       onTooltipShow={setMobileTooltipId}
-                      onClick={() => setShowExportPopup(true)}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                      onClick={() => {
+                        if (isBulkDownloading) return;
+                        if (spccMode === 'plan') {
+                          handleBulkPdfDownload();
+                        } else if (spccMode === 'inspection') {
+                          setShowExportPopup(true);
+                        } else {
+                          setShowReportTypePicker(true);
+                        }
+                      }}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${isBulkDownloading
+                        ? 'text-gray-400 dark:text-gray-500 cursor-wait'
+                        : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                        }`}
                     >
-                      <FileDown className="w-3.5 h-3.5" />
-                      <span className="hidden md:inline">Reports</span>
+                      {isBulkDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                      <span className="hidden md:inline">
+                        {isBulkDownloading
+                          ? 'Zipping...'
+                          : spccMode === 'plan'
+                            ? `Plans (${filteredFacilities.filter(f => f.spcc_plan_url).length})`
+                            : 'Reports'
+                        }
+                      </span>
                     </TouchTooltipButton>
                     <TouchTooltipButton
                       id="tb-overview"
@@ -3782,6 +3791,85 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </div>
         )
       }
+
+      {/* Report Type Picker (All mode) */}
+      {showReportTypePicker && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+          onClick={() => setShowReportTypePicker(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-sm w-full transition-colors duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Reports</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose which reports to download.</p>
+            </div>
+            <div className="p-4 space-y-2">
+              <button
+                onClick={() => {
+                  setShowReportTypePicker(false);
+                  handleBulkPdfDownload();
+                }}
+                disabled={isBulkDownloading || !filteredFacilities.some(f => f.spcc_plan_url)}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">SPCC Plans</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{filteredFacilities.filter(f => f.spcc_plan_url).length} plan PDFs as ZIP</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowReportTypePicker(false);
+                  setShowExportPopup(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left"
+              >
+                <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Inspection Reports</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Generate HTML inspection reports</p>
+                </div>
+              </button>
+              <button
+                onClick={async () => {
+                  setShowReportTypePicker(false);
+                  // Download plans first, then open inspection modal
+                  if (filteredFacilities.some(f => f.spcc_plan_url)) {
+                    await handleBulkPdfDownload('Plans');
+                  }
+                  setShowExportPopup(true);
+                }}
+                disabled={isBulkDownloading}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 dark:hover:border-green-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">All Reports</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Plans ZIP + Inspection report selector</p>
+                </div>
+              </button>
+            </div>
+            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setShowReportTypePicker(false)}
+                className="w-full px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* mobileEditingField is no longer used for inline editing */}
 
