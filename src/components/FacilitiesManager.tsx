@@ -209,7 +209,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showUpload, setShowUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(facPrefs.search_query || '');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'inspected' | 'pending' | 'expired'>((facPrefs.status_filter as 'all' | 'inspected' | 'pending' | 'expired') || 'all');
+  const [statusFilter, setStatusFilter] = useState<string>((facPrefs.status_filter as string) || 'all');
   const [sortColumn, setSortColumn] = useState<ColumnId | null>((facPrefs.sort_column as ColumnId) || 'name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(facPrefs.sort_direction);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
@@ -240,6 +240,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // Sync the report type filter to match the mode
     const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
     setSelectedReportType(mapped as any);
+    // Reset status filter when switching modes (different modes have different statuses)
+    setStatusFilter('all');
+    setSpccPlanFilter('all');
     if (onGlobalSurveyTypeChange) {
       onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
     }
@@ -583,7 +586,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [initialFacilityToEdit]);
 
   // Determine if any filter is active (for indicator badge)
-  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all' || showSoldFacilities;
+  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all' || showSoldFacilities || spccPlanFilter !== 'all';
 
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
@@ -827,9 +830,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         facility.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         facility.address?.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const status = getInspectionStatus(facility);
-      const matchesStatus = statusFilter === 'all' || status === statusFilter;
-
       const matchesReportType = matchesReportTypeFilter(facility);
 
       // Status filter (Active vs Sold)
@@ -840,7 +840,49 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (isSold) return false;
       }
 
-      // SPCC plan overdue/current filter
+      // Status filter - mode-aware
+      let matchesStatus = true;
+      if (statusFilter !== 'all') {
+        if (spccMode === 'plan') {
+          // Plan-specific status filtering
+          const planResult = getSPCCPlanStatus(facility);
+          switch (statusFilter) {
+            case 'plan_overdue':
+              matchesStatus = planResult.status === 'initial_overdue';
+              break;
+            case 'plan_expired':
+              matchesStatus = planResult.status === 'expired';
+              break;
+            case 'plan_expiring':
+              matchesStatus = planResult.status === 'expiring' || planResult.status === 'renewal_due';
+              break;
+            case 'plan_upcoming':
+              matchesStatus = planResult.status === 'no_plan' || planResult.status === 'initial_due';
+              break;
+            case 'plan_valid':
+              matchesStatus = planResult.status === 'valid';
+              break;
+            case 'plan_recertified':
+              matchesStatus = planResult.status === 'recertified';
+              break;
+            case 'plan_no_ip':
+              matchesStatus = planResult.status === 'no_ip_date';
+              break;
+            case 'pending':
+              // Legacy: pending in plan mode = upcoming + due soon
+              matchesStatus = planResult.status === 'no_plan' || planResult.status === 'initial_due';
+              break;
+            default:
+              matchesStatus = true;
+          }
+        } else {
+          // Inspection-specific status filtering
+          const inspStatus = getInspectionStatus(facility);
+          matchesStatus = inspStatus === statusFilter;
+        }
+      }
+
+      // SPCC plan overdue/current filter (inline stat badges)
       if (spccPlanFilter !== 'all' && spccMode === 'plan') {
         const planStatus = getFacilityPlanStatus(facility);
         if (planStatus !== spccPlanFilter) return false;
@@ -2929,13 +2971,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-0 sm:top-auto w-auto sm:w-64 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3">
                         <select
                           value={statusFilter}
-                          onChange={(e) => setStatusFilter(e.target.value as any)}
+                          onChange={(e) => setStatusFilter(e.target.value)}
                           className="form-select w-full text-sm"
                         >
                           <option value="all">All Status</option>
-                          <option value="inspected">Inspected</option>
-                          <option value="pending">Pending</option>
-                          <option value="expired">Expired</option>
+                          {spccMode === 'plan' ? (
+                            <>
+                              <option value="plan_overdue">Overdue</option>
+                              <option value="plan_expired">Expired</option>
+                              <option value="plan_expiring">Expiring</option>
+                              <option value="plan_upcoming">Upcoming / Due Soon</option>
+                              <option value="plan_valid">SPCC Valid</option>
+                              <option value="plan_recertified">SPCC Recertified</option>
+                              <option value="plan_no_ip">No IP Date</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="inspected">Inspected</option>
+                              <option value="pending">Pending</option>
+                              <option value="expired">Expired</option>
+                            </>
+                          )}
                         </select>
                         <select
                           value={selectedReportType}
