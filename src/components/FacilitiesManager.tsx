@@ -740,7 +740,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (selectedReportType === 'all') return true;
 
     if (selectedReportType === 'spcc_plan') {
-      return !!facility.spcc_inspection_date;
+      // In plan mode, show ALL facilities — the status badge shows their plan status
+      return true;
     }
 
     if (selectedReportType === 'spcc_inspection') {
