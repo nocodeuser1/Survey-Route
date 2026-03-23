@@ -309,12 +309,32 @@ export default function FacilityDetailModal({
     if (ipDateValue && !isoDate) return;
     setSavingDate(true);
     try {
+      // Auto-calculate SPCC due date (first_prod_date + 6 months)
+      // Only auto-set if there's no existing manual spcc_due_date override
+      let spccDueDate: string | null | undefined = undefined;
+      if (isoDate && !facility.spcc_due_date) {
+        const d = parseLocalDate(isoDate);
+        d.setMonth(d.getMonth() + 6);
+        spccDueDate = d.toISOString().split('T')[0];
+      } else if (!isoDate) {
+        // Clearing the IP date - also clear auto-calculated due date
+        spccDueDate = null;
+      }
+
+      const updateData: Record<string, unknown> = { first_prod_date: isoDate };
+      if (spccDueDate !== undefined) {
+        updateData.spcc_due_date = spccDueDate;
+      }
+
       const { error } = await supabase
         .from('facilities')
-        .update({ first_prod_date: isoDate })
+        .update(updateData)
         .eq('id', facility.id);
       if (error) throw error;
       facility.first_prod_date = isoDate;
+      if (spccDueDate !== undefined) {
+        facility.spcc_due_date = spccDueDate;
+      }
       setEditingIpDate(false);
     } catch (err) {
       console.error('Error saving IP date:', err);

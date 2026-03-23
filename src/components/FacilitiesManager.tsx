@@ -965,8 +965,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return Number(facility.long_well_sheet) || 0;
           case 'first_prod_date':
             return facility.first_prod_date ? parseLocalDate(facility.first_prod_date).getTime() : 0;
-          case 'spcc_due_date':
-            return facility.spcc_due_date ? parseLocalDate(facility.spcc_due_date).getTime() : 0;
+          case 'spcc_due_date': {
+            if (facility.spcc_due_date) return parseLocalDate(facility.spcc_due_date).getTime();
+            if (facility.first_prod_date) {
+              const d = parseLocalDate(facility.first_prod_date);
+              d.setMonth(d.getMonth() + 6);
+              return d.getTime();
+            }
+            return 0;
+          }
           case 'spcc_inspection_date':
             return facility.spcc_inspection_date ? parseLocalDate(facility.spcc_inspection_date).getTime() : 0;
           case 'spcc_pe_stamp_date':
@@ -1593,8 +1600,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           if (columnId === 'spcc_status') {
             if (facility.spcc_inspection_date) return 'Completed';
             if (facility.spcc_external_completion) return 'External';
-            if (facility.spcc_due_date) {
-              const dueDate = parseLocalDate(facility.spcc_due_date);
+            const effectiveDueDate = facility.spcc_due_date || (facility.first_prod_date ? (() => {
+              const d = parseLocalDate(facility.first_prod_date!);
+              d.setMonth(d.getMonth() + 6);
+              return d.toISOString().split('T')[0];
+            })() : null);
+            if (effectiveDueDate) {
+              const dueDate = parseLocalDate(effectiveDueDate);
               const today = new Date();
               const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
               if (daysDiff < 0) return 'Overdue';
@@ -2052,8 +2064,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.long_well_sheet ? Number(facility.long_well_sheet).toFixed(6) : '-';
       case 'first_prod_date':
         return facility.first_prod_date || '-';
-      case 'spcc_due_date':
-        return facility.spcc_due_date || '-';
+      case 'spcc_due_date': {
+        if (facility.spcc_due_date) return facility.spcc_due_date;
+        // Fall back to calculating from first_prod_date + 6 months
+        if (facility.first_prod_date) {
+          const d = parseLocalDate(facility.first_prod_date);
+          d.setMonth(d.getMonth() + 6);
+          return d.toISOString().split('T')[0];
+        }
+        return '-';
+      }
       case 'spcc_pe_stamp_date':
         return facility.spcc_pe_stamp_date || '-';
       case 'spcc_inspection_date': {
