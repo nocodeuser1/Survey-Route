@@ -209,6 +209,16 @@ function App() {
       return 0;
     }
 
+    // When custom selection is active, just count all facilities in the optimization routes
+    // since they are already pre-filtered to only the selected facilities
+    if (showOnlyRouteFacilities && routeFacilityIds) {
+      let count = 0;
+      optimizationResult.routes.forEach(route => {
+        count += route.facilities.length;
+      });
+      return count;
+    }
+
     const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
     // Helper: check if a facility needs SPCC inspection (expired, expiring within 90d, or pending)
@@ -296,7 +306,7 @@ function App() {
     });
 
     return visibleCount;
-  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType]);
+  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType, showOnlyRouteFacilities, routeFacilityIds]);
 
   // Apply team filtering to optimization results and facilities
   // Default to team 1 if user has no assignment
@@ -1656,12 +1666,12 @@ function App() {
           .eq('is_last_viewed', true);
       }
 
-      // Save the route
+      // Save the route (include facility selection in plan_data)
       const { data: newRoute } = await supabase.from('route_plans').insert({
         user_id: DEMO_USER_ID,
         account_id: currentAccount?.id,
         upload_batch_id: facilities[0]?.upload_batch_id,
-        plan_data: result,
+        plan_data: { ...result, _routeFacilityIds: facilityIds },
         total_days: result.totalDays,
         total_miles: result.totalMiles,
         total_facilities: result.totalFacilities,
@@ -1826,6 +1836,16 @@ function App() {
 
     setOptimizationResult(updatedResult);
     setCurrentRouteId(route.id);
+
+    // Restore custom facility selection if saved with the route
+    const savedFacilityIds = route.plan_data._routeFacilityIds;
+    if (savedFacilityIds && Array.isArray(savedFacilityIds) && savedFacilityIds.length > 0) {
+      setRouteFacilityIds(savedFacilityIds);
+      setShowOnlyRouteFacilities(true);
+    } else {
+      setRouteFacilityIds(null);
+      setShowOnlyRouteFacilities(false);
+    }
 
     // Always load current settings from database, not saved settings from route
     if (currentAccount) {
@@ -2452,12 +2472,17 @@ function App() {
           .eq('account_id', currentAccount.id);
       }
 
+      // Include routeFacilityIds in plan_data so custom selections persist
+      const planDataToSave = routeFacilityIds
+        ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
+        : optimizationResult;
+
       // Update the current route with the new name
       await supabase
         .from('route_plans')
         .update({
           name,
-          plan_data: optimizationResult,
+          plan_data: planDataToSave,
           total_days: optimizationResult.totalDays,
           total_miles: optimizationResult.totalMiles,
           total_facilities: optimizationResult.totalFacilities,
@@ -3017,6 +3042,28 @@ function App() {
                       showOnlySettings={true}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                     />
+                  )}
+
+                  {showOnlyRouteFacilities && routeFacilityIds && (
+                    <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-2.5">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Custom Route: {routeFacilityIds.length} facilities selected</span>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setRouteFacilityIds(null);
+                          setShowOnlyRouteFacilities(false);
+                          if (lastUsedSettings) {
+                            await handleGenerateRoutes(lastUsedSettings);
+                          }
+                        }}
+                        className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 py-1 rounded transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                        Reset to All
+                      </button>
+                    </div>
                   )}
 
                   <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
