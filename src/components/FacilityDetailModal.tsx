@@ -1396,15 +1396,15 @@ export default function FacilityDetailModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center overflow-y-auto p-4"
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center overflow-y-auto md:p-4"
       style={{ zIndex: 999999 }}
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-6xl my-8 transition-colors duration-200"
+        className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl w-full max-w-6xl md:my-8 min-h-screen md:min-h-0 transition-colors duration-200"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 rounded-t-lg overflow-hidden">
+        <div className="sticky top-0 z-10 md:rounded-t-lg overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
@@ -1476,7 +1476,7 @@ export default function FacilityDetailModal({
           </div>
 
           <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-700 px-3 sm:px-5">
-            <div className="flex items-center gap-1 overflow-x-auto py-2">
+            <div className="flex items-center gap-1 overflow-x-auto py-2 -mx-1 px-1 scrollbar-hide">
               {tabItems.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -1485,7 +1485,7 @@ export default function FacilityDetailModal({
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap ${
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5 text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                       isActive
                         ? 'bg-blue-600 text-white shadow-sm'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -1500,7 +1500,7 @@ export default function FacilityDetailModal({
           </div>
         </div>
 
-        <div className="p-6 bg-gray-50 dark:bg-gray-900/40 rounded-b-lg">
+        <div className="p-4 sm:p-6 bg-gray-50 dark:bg-gray-900/40 md:rounded-b-lg pb-20 md:pb-6">
           {activeTab === 'general' && renderGeneralTab()}
           {activeTab === 'spcc' && renderSPCCPlanTab()}
           {activeTab === 'inspections' && renderInspectionsTab()}
