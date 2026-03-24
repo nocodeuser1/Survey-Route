@@ -209,9 +209,10 @@ function App() {
       return 0;
     }
 
-    // When custom selection is active, just count all facilities in the optimization routes
-    // since they are already pre-filtered to only the selected facilities
-    if (showOnlyRouteFacilities && routeFacilityIds) {
+    // When custom selection is active AND viewing 'all' mode, count all facilities in routes
+    // (they are already pre-filtered to selected facilities). But when a survey type filter
+    // is active, we still need to apply that filter below.
+    if (showOnlyRouteFacilities && routeFacilityIds && surveyType === 'all') {
       let count = 0;
       optimizationResult.routes.forEach(route => {
         count += route.facilities.length;
