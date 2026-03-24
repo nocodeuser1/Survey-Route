@@ -277,10 +277,12 @@ export function getStatusBadgeConfig(status: SPCCPlanStatus): StatusBadgeConfig 
   }
 }
 
-/** Returns true if the facility needs SPCC plan attention (for filtering) */
+/** Returns true if the facility needs SPCC plan attention (for filtering).
+ *  Includes upcoming plans (no_plan = has IP date but plan not yet due) so they
+ *  appear in SPCC Plans mode counts, day lists, and map when selected for a route. */
 export function facilityNeedsSPCCPlan(facility: SPCCStatusFacility): boolean {
   const { status } = getSPCCPlanStatus(facility);
-  return ['initial_overdue', 'initial_due', 'expired', 'expiring', 'renewal_due'].includes(status);
+  return ['no_plan', 'initial_overdue', 'initial_due', 'expired', 'expiring', 'renewal_due'].includes(status);
 }
 
 /** Returns a CSV-friendly status string */
