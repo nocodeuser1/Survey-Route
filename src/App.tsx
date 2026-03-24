@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList } from 'lucide-react';
+import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList, User } from 'lucide-react';
 import OfflineIndicator from './components/OfflineIndicator';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
 import FacilitiesManager from './components/FacilitiesManager';
@@ -18,6 +18,7 @@ import SettingsTabs, { getSettingsIcon } from './components/SettingsTabs';
 import RoutePlanningSettings from './components/RoutePlanningSettings';
 import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
+import ProfileModal from './components/ProfileModal';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
 import SPCCExtractionSettings from './components/SPCCExtractionSettings';
@@ -178,6 +179,9 @@ function App() {
   const [activeSettingsTab, setActiveSettingsTab] = useState('route-planning');
   const [isInspectionFormActive, setIsInspectionFormActive] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
   const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>('all');
   const [routeFacilityIds, setRouteFacilityIds] = useState<string[] | null>(null);
   const [showOnlyRouteFacilities, setShowOnlyRouteFacilities] = useState(false);
@@ -2589,6 +2593,35 @@ function App() {
     }
   };
 
+  // Close profile dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+        setShowProfileDropdown(false);
+      }
+    }
+    if (showProfileDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showProfileDropdown]);
+
+  // Get user initials for avatar
+  const userInitials = useMemo(() => {
+    if (user?.fullName) {
+      return user.fullName
+        .split(' ')
+        .map(n => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    if (user?.email) {
+      return user.email.charAt(0).toUpperCase();
+    }
+    return '?';
+  }, [user?.fullName, user?.email]);
+
   async function handleSignOut() {
     await signOut();
     navigate('/login');
@@ -2668,13 +2701,55 @@ function App() {
                     <span className="hidden sm:inline">Back to Agency</span>
                   </button>
                 )}
-                <button
-                  onClick={handleSignOut}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sign Out</span>
-                </button>
+
+                {/* Profile Avatar + Dropdown */}
+                <div className="relative" ref={profileDropdownRef}>
+                  <button
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+                    title={user?.fullName || user?.email || 'Profile'}
+                  >
+                    {userInitials}
+                  </button>
+
+                  {showProfileDropdown && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
+                      {/* User info header */}
+                      <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                          {user?.fullName || 'User'}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {user?.email}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setShowProfileDropdown(false);
+                          setShowProfileModal(true);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        <User className="w-4 h-4" />
+                        Profile Settings
+                      </button>
+
+                      <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+
+                      <button
+                        onClick={() => {
+                          setShowProfileDropdown(false);
+                          handleSignOut();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -3823,6 +3898,13 @@ function App() {
           onClose={() => setShowHomeBaseModal(false)}
         />
       )}
+
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        userEmail={user?.email || ''}
+        userFullName={user?.fullName || null}
+      />
 
       <OfflineIndicator />
     </div>
