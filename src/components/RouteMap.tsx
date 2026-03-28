@@ -1027,6 +1027,65 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               `;
             }
 
+            // Build field visit quick-actions for Plans mode
+            let fieldVisitHtml = '';
+            if (surveyType === 'spcc_plan' && fullFacility) {
+              const photosTaken = fullFacility.photos_taken || false;
+              const visitDate = fullFacility.field_visit_date || '';
+              const todayStr = new Date().toISOString().split('T')[0];
+
+              fieldVisitHtml = `
+                <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F0FDF4; border-radius: 6px; border: 1px solid #BBF7D0;">
+                  <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">Field Visit</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <button
+                      id="toggle-photos-btn-${facility.index}"
+                      data-facility-id="${fullFacility.id}"
+                      data-current="${photosTaken}"
+                      style="
+                        display: flex; align-items: center; gap: 6px;
+                        padding: 6px 8px; border-radius: 4px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
+                        background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
+                        font-size: 11px; width: 100%; text-align: left;
+                      "
+                    >
+                      <span style="font-size: 14px;">${photosTaken ? '✅' : '📷'}</span>
+                      <span style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 500;">
+                        ${photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
+                      </span>
+                    </button>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <input
+                        type="date"
+                        id="visit-date-input-${facility.index}"
+                        data-facility-id="${fullFacility.id}"
+                        value="${visitDate}"
+                        style="
+                          flex: 1; padding: 4px 6px; border-radius: 4px; border: 1px solid #D1D5DB;
+                          font-size: 11px; background: white; color: #374151;
+                        "
+                      />
+                      <button
+                        id="set-today-btn-${facility.index}"
+                        data-facility-id="${fullFacility.id}"
+                        style="
+                          padding: 4px 8px; border-radius: 4px; border: 1px solid #2563EB;
+                          background: #EFF6FF; color: #2563EB; cursor: pointer;
+                          font-size: 10px; font-weight: 600; white-space: nowrap;
+                        "
+                      >Today</button>
+                    </div>
+                    ${visitDate ? `
+                      <div style="display: flex; justify-content: space-between; color: #6B7280;">
+                        <span>Last visited:</span>
+                        <span style="font-weight: 500; color: #374151;">${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            }
+
             // Calculate sunset time (approximate based on facility location)
             const calculateSunset = (lat: number) => {
               const today = new Date();
@@ -1142,6 +1201,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 </div>
                 <div style="font-size: 11px; color: #6b7280;">Visit: ${facility.visitDuration} mins</div>
                 ${planInfoHtml}
+                ${fieldVisitHtml}
                 <div style="font-size: 11px; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e5e7eb;">
                   <div style="font-weight: 600; margin-bottom: 2px;">Day ${route.day} Schedule:</div>
                   <div>Start: ${dayStartTime}</div>
@@ -1339,6 +1399,73 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     }
                   };
                   btn.addEventListener('click', clickHandler);
+                });
+              }
+
+              // Field visit quick-action handlers (Plans mode)
+              const togglePhotosBtn = document.getElementById(`toggle-photos-btn-${facility.index}`);
+              if (togglePhotosBtn) {
+                togglePhotosBtn.addEventListener('click', async () => {
+                  const facId = togglePhotosBtn.dataset.facilityId;
+                  const current = togglePhotosBtn.dataset.current === 'true';
+                  const newVal = !current;
+                  try {
+                    const { error } = await supabase
+                      .from('facilities')
+                      .update({ photos_taken: newVal })
+                      .eq('id', facId);
+                    if (error) throw error;
+                    // Update button appearance immediately
+                    togglePhotosBtn.dataset.current = String(newVal);
+                    togglePhotosBtn.style.border = `1px solid ${newVal ? '#059669' : '#D1D5DB'}`;
+                    togglePhotosBtn.style.background = newVal ? '#ECFDF5' : '#F9FAFB';
+                    togglePhotosBtn.innerHTML = `
+                      <span style="font-size: 14px;">${newVal ? '✅' : '📷'}</span>
+                      <span style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 500;">
+                        ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
+                      </span>
+                    `;
+                    if (onFacilitiesChange) onFacilitiesChange();
+                  } catch (err) {
+                    console.error('Error toggling photos_taken:', err);
+                  }
+                });
+              }
+
+              const visitDateInput = document.getElementById(`visit-date-input-${facility.index}`) as HTMLInputElement;
+              if (visitDateInput) {
+                visitDateInput.addEventListener('change', async () => {
+                  const facId = visitDateInput.dataset.facilityId;
+                  const newDate = visitDateInput.value || null;
+                  try {
+                    const { error } = await supabase
+                      .from('facilities')
+                      .update({ field_visit_date: newDate })
+                      .eq('id', facId);
+                    if (error) throw error;
+                    if (onFacilitiesChange) onFacilitiesChange();
+                  } catch (err) {
+                    console.error('Error updating field_visit_date:', err);
+                  }
+                });
+              }
+
+              const setTodayBtn = document.getElementById(`set-today-btn-${facility.index}`);
+              if (setTodayBtn) {
+                setTodayBtn.addEventListener('click', async () => {
+                  const facId = setTodayBtn.dataset.facilityId;
+                  const today = new Date().toISOString().split('T')[0];
+                  try {
+                    const { error } = await supabase
+                      .from('facilities')
+                      .update({ field_visit_date: today })
+                      .eq('id', facId);
+                    if (error) throw error;
+                    if (visitDateInput) visitDateInput.value = today;
+                    if (onFacilitiesChange) onFacilitiesChange();
+                  } catch (err) {
+                    console.error('Error setting today as visit date:', err);
+                  }
                 });
               }
             });
@@ -1603,6 +1730,64 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             nonRouteStatusHtml = `<span style="font-size: 12px; color: #6b7280;">${isManuallyRemoved ? 'Manually Removed' : hasAnyValidCompletion ? 'Completed' : 'Not in Current Route'}</span>`;
           }
 
+          // Build field visit quick-actions for non-route facilities in Plans mode
+          let nonRouteFieldVisitHtml = '';
+          if (surveyType === 'spcc_plan' && !isManuallyRemoved) {
+            const photosTaken = facility.photos_taken || false;
+            const visitDate = facility.field_visit_date || '';
+
+            nonRouteFieldVisitHtml = `
+              <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F0FDF4; border-radius: 6px; border: 1px solid #BBF7D0;">
+                <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">Field Visit</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <button
+                    id="toggle-photos-btn-nr-${idx}"
+                    data-facility-id="${facility.id}"
+                    data-current="${photosTaken}"
+                    style="
+                      display: flex; align-items: center; gap: 6px;
+                      padding: 6px 8px; border-radius: 4px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
+                      background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
+                      font-size: 11px; width: 100%; text-align: left;
+                    "
+                  >
+                    <span style="font-size: 14px;">${photosTaken ? '✅' : '📷'}</span>
+                    <span style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 500;">
+                      ${photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
+                    </span>
+                  </button>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <input
+                      type="date"
+                      id="visit-date-input-nr-${idx}"
+                      data-facility-id="${facility.id}"
+                      value="${visitDate}"
+                      style="
+                        flex: 1; padding: 4px 6px; border-radius: 4px; border: 1px solid #D1D5DB;
+                        font-size: 11px; background: white; color: #374151;
+                      "
+                    />
+                    <button
+                      id="set-today-btn-nr-${idx}"
+                      data-facility-id="${facility.id}"
+                      style="
+                        padding: 4px 8px; border-radius: 4px; border: 1px solid #2563EB;
+                        background: #EFF6FF; color: #2563EB; cursor: pointer;
+                        font-size: 10px; font-weight: 600; white-space: nowrap;
+                      "
+                    >Today</button>
+                  </div>
+                  ${visitDate ? `
+                    <div style="display: flex; justify-content: space-between; color: #6B7280;">
+                      <span>Last visited:</span>
+                      <span style="font-weight: 500; color: #374151;">${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }
+
           // Simple popup for non-route facilities
           const popupContent = `
             <div style="min-width: 180px; max-width: 280px;">
@@ -1611,6 +1796,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 ${nonRouteStatusHtml}
               </div>
               ${nonRoutePlanInfoHtml}
+              ${nonRouteFieldVisitHtml}
               ${isUnassigned && availableDays.length > 0 ? `
                 <div style="margin-bottom: 8px;">
                   <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Assign to Day:</div>
@@ -1737,6 +1923,72 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               restoreBtn.addEventListener('click', () => {
                 handleRestoreFacility(facility);
                 marker.closePopup();
+              });
+            }
+
+            // Field visit quick-action handlers for non-route facilities (Plans mode)
+            const togglePhotosNR = document.getElementById(`toggle-photos-btn-nr-${idx}`);
+            if (togglePhotosNR) {
+              togglePhotosNR.addEventListener('click', async () => {
+                const facId = togglePhotosNR.dataset.facilityId;
+                const current = togglePhotosNR.dataset.current === 'true';
+                const newVal = !current;
+                try {
+                  const { error } = await supabase
+                    .from('facilities')
+                    .update({ photos_taken: newVal })
+                    .eq('id', facId);
+                  if (error) throw error;
+                  togglePhotosNR.dataset.current = String(newVal);
+                  togglePhotosNR.style.border = `1px solid ${newVal ? '#059669' : '#D1D5DB'}`;
+                  togglePhotosNR.style.background = newVal ? '#ECFDF5' : '#F9FAFB';
+                  togglePhotosNR.innerHTML = `
+                    <span style="font-size: 14px;">${newVal ? '✅' : '📷'}</span>
+                    <span style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 500;">
+                      ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
+                    </span>
+                  `;
+                  if (onFacilitiesChange) onFacilitiesChange();
+                } catch (err) {
+                  console.error('Error toggling photos_taken:', err);
+                }
+              });
+            }
+
+            const visitDateNR = document.getElementById(`visit-date-input-nr-${idx}`) as HTMLInputElement;
+            if (visitDateNR) {
+              visitDateNR.addEventListener('change', async () => {
+                const facId = visitDateNR.dataset.facilityId;
+                const newDate = visitDateNR.value || null;
+                try {
+                  const { error } = await supabase
+                    .from('facilities')
+                    .update({ field_visit_date: newDate })
+                    .eq('id', facId);
+                  if (error) throw error;
+                  if (onFacilitiesChange) onFacilitiesChange();
+                } catch (err) {
+                  console.error('Error updating field_visit_date:', err);
+                }
+              });
+            }
+
+            const setTodayNR = document.getElementById(`set-today-btn-nr-${idx}`);
+            if (setTodayNR) {
+              setTodayNR.addEventListener('click', async () => {
+                const facId = setTodayNR.dataset.facilityId;
+                const today = new Date().toISOString().split('T')[0];
+                try {
+                  const { error } = await supabase
+                    .from('facilities')
+                    .update({ field_visit_date: today })
+                    .eq('id', facId);
+                  if (error) throw error;
+                  if (visitDateNR) visitDateNR.value = today;
+                  if (onFacilitiesChange) onFacilitiesChange();
+                } catch (err) {
+                  console.error('Error setting today as visit date:', err);
+                }
               });
             }
           });
