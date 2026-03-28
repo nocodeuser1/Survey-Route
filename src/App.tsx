@@ -932,6 +932,28 @@ function App() {
         setOptimizationResult(loadedResult);
         setCurrentRouteId(lastRoutePlan.id);
         setRouteVersion(prev => prev + 1);
+
+        // Restore custom facility selection if saved with the route
+        const savedFacilityIds = lastRoutePlan.plan_data?._routeFacilityIds;
+        if (savedFacilityIds && Array.isArray(savedFacilityIds) && savedFacilityIds.length > 0) {
+          setRouteFacilityIds(savedFacilityIds);
+          setShowOnlyRouteFacilities(true);
+        } else {
+          // Even without saved IDs, if the route has facilities, derive the IDs
+          // so the map only shows route facilities (not all account facilities)
+          const routeFacIds: string[] = [];
+          loadedResult.routes?.forEach((route: any) => {
+            route.facilities?.forEach((rf: any) => {
+              const match = facilitiesData?.find((f: any) => f.name === rf.name);
+              if (match) routeFacIds.push(match.id);
+            });
+          });
+          if (routeFacIds.length > 0) {
+            setRouteFacilityIds(routeFacIds);
+            setShowOnlyRouteFacilities(true);
+          }
+        }
+
         // Cache route plan to IndexedDB for offline use
         cacheOfflineRoutePlans([lastRoutePlan]).catch(() => {});
 
@@ -1014,6 +1036,25 @@ function App() {
             setOptimizationResult(lastViewed.plan_data);
             setCurrentRouteId(lastViewed.id);
             setRouteVersion(prev => prev + 1);
+
+            // Restore custom facility selection from cached route
+            const savedIds = lastViewed.plan_data?._routeFacilityIds;
+            if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
+              setRouteFacilityIds(savedIds);
+              setShowOnlyRouteFacilities(true);
+            } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
+              const routeFacIds: string[] = [];
+              lastViewed.plan_data.routes.forEach((route: any) => {
+                route.facilities?.forEach((rf: any) => {
+                  const match = cachedFacilities.find((f: any) => f.name === rf.name);
+                  if (match) routeFacIds.push(match.id);
+                });
+              });
+              if (routeFacIds.length > 0) {
+                setRouteFacilityIds(routeFacIds);
+                setShowOnlyRouteFacilities(true);
+              }
+            }
           }
         } catch (cacheErr) {
           console.error('Error loading offline cache:', cacheErr);
