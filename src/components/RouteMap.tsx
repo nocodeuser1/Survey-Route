@@ -874,8 +874,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               : color;
           const markerFinalOpacity = isManuallyRemoved ? '0.6' : markerOpacity;
 
+          // Add camera badge when photos are taken in SPCC plan mode
+          const showPhotoBadge = surveyType === 'spcc_plan' && latestFacilityData?.photos_taken;
+          const photoBadgeHtml = showPhotoBadge
+            ? `<div style="position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: #059669; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </div>`
+            : '';
+
           const markerIcon = L.divIcon({
-            html: `<div style="position: relative; background-color: ${markerBgColor}; color: white; width: ${markerSize}px; height: ${markerSize}px; border-radius: 50%; border: ${borderWidth} solid ${borderColor}; box-shadow: ${boxShadow}; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; opacity: ${markerFinalOpacity}; transition: opacity 0.3s ease;">${markerContent}</div>`,
+            html: `<div style="position: relative; background-color: ${markerBgColor}; color: white; width: ${markerSize}px; height: ${markerSize}px; border-radius: 50%; border: ${borderWidth} solid ${borderColor}; box-shadow: ${boxShadow}; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; opacity: ${markerFinalOpacity}; transition: opacity 0.3s ease;">${markerContent}${photoBadgeHtml}</div>`,
             className: '',
             iconSize: [markerSize, markerSize],
             iconAnchor: [markerAnchor, markerAnchor],
