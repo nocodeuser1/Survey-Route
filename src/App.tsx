@@ -182,9 +182,18 @@ function App() {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
-  const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>('all');
+  const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>(() => {
+    const saved = localStorage.getItem('surveyType');
+    if (saved === 'spcc_inspection' || saved === 'spcc_plan') return saved;
+    return 'all';
+  });
   const [routeFacilityIds, setRouteFacilityIds] = useState<string[] | null>(null);
   const [showOnlyRouteFacilities, setShowOnlyRouteFacilities] = useState(false);
+
+  // Persist surveyType to localStorage
+  useEffect(() => {
+    localStorage.setItem('surveyType', surveyType);
+  }, [surveyType]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(() => {
     // Initialize as loading if we're starting on route-planning view
     const savedView = localStorage.getItem('currentView');
