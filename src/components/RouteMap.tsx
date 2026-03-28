@@ -2973,68 +2973,48 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     let interactionTimer: NodeJS.Timeout | null = null;
 
     const handleDragStart = () => {
-      // Set dragging flag immediately to prevent any location updates during drag
       isDraggingRef.current = true;
-
-      // Only trigger on significant interactions, not continuous drag events
       if (interactionTimer) return;
-
-      userInteractedWithMapRef.current = true;
-      setAutoCentering(false);
-
-      // Don't kill location tracking on drag — just pause auto-centering.
-      // The user can freely pan the map and tracking resumes after inactivity.
-
-      // Clear existing timeout
-      if (autoCenteringTimeoutRef.current) {
-        clearTimeout(autoCenteringTimeoutRef.current);
-      }
-
-      // Debounce rapid interactions
-      interactionTimer = setTimeout(() => {
-        interactionTimer = null;
-      }, 500);
+      interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
     };
 
     const handleDragEnd = () => {
-      // Clear dragging flag
       isDraggingRef.current = false;
 
-      // Re-enable auto-centering after 5 seconds of inactivity
-      // Re-enable if navigation mode OR location tracking is active
-      autoCenteringTimeoutRef.current = setTimeout(() => {
-        if (navigationMode || locationTracking) {
+      // In navigation mode: keep tracking but pause auto-center for 5s
+      if (navigationMode) {
+        userInteractedWithMapRef.current = true;
+        setAutoCentering(false);
+        if (autoCenteringTimeoutRef.current) clearTimeout(autoCenteringTimeoutRef.current);
+        autoCenteringTimeoutRef.current = setTimeout(() => {
           setAutoCentering(true);
           userInteractedWithMapRef.current = false;
-        }
-      }, 5000);
+        }, 5000);
+      } else if (locationTracking) {
+        // Location tracking mode: turn it OFF completely when user pans
+        // User must tap the button again to re-enable
+        setAutoCentering(false);
+        autoCenteringRef.current = false;
+        if (onLocationTrackingChange) onLocationTrackingChange(false);
+        else setInternalLocationTracking(false);
+      }
     };
 
     const handleZoomStart = () => {
-      // Only trigger on significant interactions, not continuous zoom events
       if (interactionTimer) return;
+      interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
 
-      userInteractedWithMapRef.current = true;
-      setAutoCentering(false);
-
-      // Clear existing timeout
-      if (autoCenteringTimeoutRef.current) {
-        clearTimeout(autoCenteringTimeoutRef.current);
-      }
-
-      // Debounce rapid interactions
-      interactionTimer = setTimeout(() => {
-        interactionTimer = null;
-      }, 500);
-
-      // Re-enable auto-centering after 5 seconds of inactivity
-      // Re-enable if navigation mode OR location tracking is active
-      autoCenteringTimeoutRef.current = setTimeout(() => {
-        if (navigationMode || locationTracking) {
+      if (navigationMode) {
+        userInteractedWithMapRef.current = true;
+        setAutoCentering(false);
+        if (autoCenteringTimeoutRef.current) clearTimeout(autoCenteringTimeoutRef.current);
+        autoCenteringTimeoutRef.current = setTimeout(() => {
           setAutoCentering(true);
           userInteractedWithMapRef.current = false;
-        }
-      }, 5000);
+        }, 5000);
+      }
+      // For location tracking: pinch-to-zoom shouldn't kill tracking
+      // Only drag/pan kills it
     };
 
     // Listen for drag and zoom interactions
@@ -3148,18 +3128,32 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       alert(errorMessage);
     };
 
-    // Two-stage approach: try high accuracy first, fall back to cached position
+    // Two-stage approach: use cached position FIRST for instant centering,
+    // then refine with high accuracy in the background
     navigator.geolocation.getCurrentPosition(
-      handleSuccess,
+      (position) => {
+        console.log('[goToCurrentLocation] Got cached/fast position, centering immediately');
+        handleSuccess(position);
+        // Then request high accuracy to refine
+        navigator.geolocation.getCurrentPosition(
+          (refinedPosition) => {
+            console.log('[goToCurrentLocation] Got refined high-accuracy position');
+            updateUserLocation(refinedPosition);
+            centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, locationTrackingZoom, true);
+          },
+          () => {}, // Ignore errors on refinement - we already have a position
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      },
       (error) => {
-        console.warn('[goToCurrentLocation] High accuracy failed, trying fallback:', error.message);
+        console.warn('[goToCurrentLocation] Fast position failed, trying high accuracy:', error.message);
         navigator.geolocation.getCurrentPosition(
           handleSuccess,
           handleError,
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
     );
   };
 
