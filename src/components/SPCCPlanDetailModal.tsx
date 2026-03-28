@@ -22,6 +22,126 @@ const statusIconMap = {
   file: FileText,
 };
 
+function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
+  const [photosSaving, setPhotosSaving] = useState(false);
+  const [dateSaving, setDateSaving] = useState(false);
+
+  const handleTogglePhotos = async () => {
+    if (photosSaving) return;
+    setPhotosSaving(true);
+    try {
+      const newVal = !facility.photos_taken;
+      const today = new Date().toISOString().split('T')[0];
+      const updateData: any = { photos_taken: newVal };
+      if (newVal) {
+        updateData.field_visit_date = today;
+      }
+      const { error } = await supabase
+        .from('facilities')
+        .update(updateData)
+        .eq('id', facility.id);
+      if (error) throw error;
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error toggling photos_taken:', err);
+    } finally {
+      setPhotosSaving(false);
+    }
+  };
+
+  const handleDateChange = async (newDate: string) => {
+    if (dateSaving) return;
+    setDateSaving(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ field_visit_date: newDate || null })
+        .eq('id', facility.id);
+      if (error) throw error;
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error updating field_visit_date:', err);
+    } finally {
+      setDateSaving(false);
+    }
+  };
+
+  return (
+    <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+      <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+        <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+          Field Operations
+        </h3>
+      </div>
+      <div className="divide-y divide-gray-200 dark:divide-gray-700">
+        {/* Photos Taken - Toggle Button */}
+        <div className="px-4 py-3">
+          <button
+            onClick={handleTogglePhotos}
+            disabled={photosSaving}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
+              facility.photos_taken
+                ? (darkMode ? 'border-green-600 bg-green-900/30' : 'border-green-500 bg-green-50')
+                : (darkMode ? 'border-gray-600 bg-gray-700/50 hover:border-gray-500' : 'border-gray-300 bg-white hover:border-gray-400')
+            }`}
+          >
+            <span className="text-xl">{facility.photos_taken ? '✅' : '📷'}</span>
+            <div className="flex-1 text-left">
+              <div className={`text-sm font-semibold ${
+                facility.photos_taken
+                  ? (darkMode ? 'text-green-400' : 'text-green-700')
+                  : (darkMode ? 'text-gray-300' : 'text-gray-700')
+              }`}>
+                {facility.photos_taken ? 'Photos Taken' : 'Mark Photos Taken'}
+              </div>
+              {facility.photos_taken && facility.field_visit_date && (
+                <div className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  Visited: {formatDate(facility.field_visit_date)}
+                </div>
+              )}
+            </div>
+            {photosSaving && (
+              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+            )}
+          </button>
+        </div>
+
+        {/* Field Visit Date - Editable */}
+        <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Calendar className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+            <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Visit Date</span>
+          </div>
+          <input
+            type="date"
+            value={facility.field_visit_date || ''}
+            onChange={(e) => handleDateChange(e.target.value)}
+            disabled={dateSaving}
+            className={`text-sm font-medium px-2 py-1 rounded border ${
+              darkMode
+                ? 'bg-gray-700 border-gray-600 text-white'
+                : 'bg-white border-gray-300 text-gray-900'
+            }`}
+          />
+        </div>
+
+        {/* Estimated Oil Per Day */}
+        {facility.estimated_oil_per_day != null && (
+          <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Droplets className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+              <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Est. Oil/Day</span>
+            </div>
+            <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {facility.estimated_oil_per_day} bbl
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function getStatusGradient(status: SPCCPlanStatus, darkMode: boolean): string {
   switch (status) {
     case 'valid':
@@ -542,51 +662,11 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
           )}
 
           {/* Field Operations */}
-          {(facility.photos_taken || facility.field_visit_date || facility.estimated_oil_per_day != null) && (
-            <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
-              <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Field Operations
-                </h3>
-              </div>
-              <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {facility.field_visit_date && (
-                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Calendar className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Field Visit</span>
-                    </div>
-                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {formatDate(facility.field_visit_date)}
-                    </span>
-                  </div>
-                )}
-                <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Camera className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                    <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Photos Taken</span>
-                  </div>
-                  <span className={`text-sm font-medium ${facility.photos_taken
-                    ? (darkMode ? 'text-green-400' : 'text-green-600')
-                    : (darkMode ? 'text-gray-500' : 'text-gray-400')
-                  }`}>
-                    {facility.photos_taken ? 'Yes' : 'No'}
-                  </span>
-                </div>
-                {facility.estimated_oil_per_day != null && (
-                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Droplets className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Est. Oil/Day</span>
-                    </div>
-                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {facility.estimated_oil_per_day} bbl
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          <FieldOperationsSection
+            facility={facility}
+            darkMode={darkMode}
+            onFacilitiesChange={onFacilitiesChange}
+          />
 
           {/* Berm Measurements */}
           {(facility.berm_depth_inches != null || facility.berm_length != null || facility.berm_width != null) && (

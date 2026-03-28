@@ -3638,7 +3638,14 @@ function App() {
             <SurveyMode
               key={`survey-${currentAccount.id}`}
               result={filteredOptimizationResult}
-              facilities={filteredFacilities.filter(f => f.status !== 'sold')}
+              facilities={(() => {
+                let surveyFacilities = filteredFacilities.filter(f => f.status !== 'sold');
+                // When a custom route is loaded, only show route facilities in Survey mode
+                if (showOnlyRouteFacilities && routeFacilityIds && routeFacilityIds.length > 0) {
+                  surveyFacilities = surveyFacilities.filter(f => routeFacilityIds.includes(f.id));
+                }
+                return surveyFacilities;
+              })()}
               userId={currentAccount.id}
               teamNumber={1}
               accountId={currentAccount.id}
