@@ -1032,56 +1032,28 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             if (surveyType === 'spcc_plan' && fullFacility) {
               const photosTaken = fullFacility.photos_taken || false;
               const visitDate = fullFacility.field_visit_date || '';
-              const todayStr = new Date().toISOString().split('T')[0];
 
               fieldVisitHtml = `
-                <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F0FDF4; border-radius: 6px; border: 1px solid #BBF7D0;">
-                  <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">Field Visit</div>
-                  <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <button
-                      id="toggle-photos-btn-${facility.index}"
-                      data-facility-id="${fullFacility.id}"
-                      data-current="${photosTaken}"
-                      style="
-                        display: flex; align-items: center; gap: 6px;
-                        padding: 6px 8px; border-radius: 4px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
-                        background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
-                        font-size: 11px; width: 100%; text-align: left;
-                      "
-                    >
-                      <span style="font-size: 14px;">${photosTaken ? '✅' : '📷'}</span>
-                      <span style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 500;">
+                <div style="margin-top: 4px;">
+                  <button
+                    id="toggle-photos-btn-${facility.index}"
+                    data-facility-id="${fullFacility.id}"
+                    data-current="${photosTaken}"
+                    style="
+                      display: flex; align-items: center; gap: 6px; width: 100%;
+                      padding: 8px 10px; border-radius: 6px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
+                      background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
+                      font-size: 12px; text-align: left;
+                    "
+                  >
+                    <span style="font-size: 16px;">${photosTaken ? '✅' : '📷'}</span>
+                    <div>
+                      <div style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 600;">
                         ${photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
-                      </span>
-                    </button>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <input
-                        type="date"
-                        id="visit-date-input-${facility.index}"
-                        data-facility-id="${fullFacility.id}"
-                        value="${visitDate}"
-                        style="
-                          flex: 1; padding: 4px 6px; border-radius: 4px; border: 1px solid #D1D5DB;
-                          font-size: 11px; background: white; color: #374151;
-                        "
-                      />
-                      <button
-                        id="set-today-btn-${facility.index}"
-                        data-facility-id="${fullFacility.id}"
-                        style="
-                          padding: 4px 8px; border-radius: 4px; border: 1px solid #2563EB;
-                          background: #EFF6FF; color: #2563EB; cursor: pointer;
-                          font-size: 10px; font-weight: 600; white-space: nowrap;
-                        "
-                      >Today</button>
-                    </div>
-                    ${visitDate ? `
-                      <div style="display: flex; justify-content: space-between; color: #6B7280;">
-                        <span>Last visited:</span>
-                        <span style="font-weight: 500; color: #374151;">${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                       </div>
-                    ` : ''}
-                  </div>
+                      ${visitDate ? `<div style="font-size: 10px; color: #6B7280; margin-top: 1px;">Visited: ${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : ''}
+                    </div>
+                  </button>
                 </div>
               `;
             }
@@ -1402,69 +1374,42 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 });
               }
 
-              // Field visit quick-action handlers (Plans mode)
+              // Field visit quick-action handler (Plans mode)
               const togglePhotosBtn = document.getElementById(`toggle-photos-btn-${facility.index}`);
               if (togglePhotosBtn) {
                 togglePhotosBtn.addEventListener('click', async () => {
                   const facId = togglePhotosBtn.dataset.facilityId;
                   const current = togglePhotosBtn.dataset.current === 'true';
                   const newVal = !current;
+                  const today = new Date().toISOString().split('T')[0];
                   try {
+                    // When marking photos taken, also set visit date to today
+                    const updateData: any = { photos_taken: newVal };
+                    if (newVal) {
+                      updateData.field_visit_date = today;
+                    }
                     const { error } = await supabase
                       .from('facilities')
-                      .update({ photos_taken: newVal })
+                      .update(updateData)
                       .eq('id', facId);
                     if (error) throw error;
                     // Update button appearance immediately
                     togglePhotosBtn.dataset.current = String(newVal);
                     togglePhotosBtn.style.border = `1px solid ${newVal ? '#059669' : '#D1D5DB'}`;
                     togglePhotosBtn.style.background = newVal ? '#ECFDF5' : '#F9FAFB';
+                    const visitLabel = newVal ? `<div style="font-size: 10px; color: #6B7280; margin-top: 1px;">Visited: ${new Date(today + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : '';
                     togglePhotosBtn.innerHTML = `
-                      <span style="font-size: 14px;">${newVal ? '✅' : '📷'}</span>
-                      <span style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 500;">
-                        ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
-                      </span>
+                      <span style="font-size: 16px;">${newVal ? '✅' : '📷'}</span>
+                      <div>
+                        <div style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 600;">
+                          ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
+                        </div>
+                        ${visitLabel}
+                      </div>
                     `;
                     if (onFacilitiesChange) onFacilitiesChange();
                   } catch (err) {
                     console.error('Error toggling photos_taken:', err);
-                  }
-                });
-              }
-
-              const visitDateInput = document.getElementById(`visit-date-input-${facility.index}`) as HTMLInputElement;
-              if (visitDateInput) {
-                visitDateInput.addEventListener('change', async () => {
-                  const facId = visitDateInput.dataset.facilityId;
-                  const newDate = visitDateInput.value || null;
-                  try {
-                    const { error } = await supabase
-                      .from('facilities')
-                      .update({ field_visit_date: newDate })
-                      .eq('id', facId);
-                    if (error) throw error;
-                    if (onFacilitiesChange) onFacilitiesChange();
-                  } catch (err) {
-                    console.error('Error updating field_visit_date:', err);
-                  }
-                });
-              }
-
-              const setTodayBtn = document.getElementById(`set-today-btn-${facility.index}`);
-              if (setTodayBtn) {
-                setTodayBtn.addEventListener('click', async () => {
-                  const facId = setTodayBtn.dataset.facilityId;
-                  const today = new Date().toISOString().split('T')[0];
-                  try {
-                    const { error } = await supabase
-                      .from('facilities')
-                      .update({ field_visit_date: today })
-                      .eq('id', facId);
-                    if (error) throw error;
-                    if (visitDateInput) visitDateInput.value = today;
-                    if (onFacilitiesChange) onFacilitiesChange();
-                  } catch (err) {
-                    console.error('Error setting today as visit date:', err);
                   }
                 });
               }
@@ -1737,53 +1682,26 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const visitDate = facility.field_visit_date || '';
 
             nonRouteFieldVisitHtml = `
-              <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F0FDF4; border-radius: 6px; border: 1px solid #BBF7D0;">
-                <div style="font-weight: 600; margin-bottom: 4px; color: #374151;">Field Visit</div>
-                <div style="display: flex; flex-direction: column; gap: 6px;">
-                  <button
-                    id="toggle-photos-btn-nr-${idx}"
-                    data-facility-id="${facility.id}"
-                    data-current="${photosTaken}"
-                    style="
-                      display: flex; align-items: center; gap: 6px;
-                      padding: 6px 8px; border-radius: 4px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
-                      background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
-                      font-size: 11px; width: 100%; text-align: left;
-                    "
-                  >
-                    <span style="font-size: 14px;">${photosTaken ? '✅' : '📷'}</span>
-                    <span style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 500;">
+              <div style="margin-top: 4px;">
+                <button
+                  id="toggle-photos-btn-nr-${idx}"
+                  data-facility-id="${facility.id}"
+                  data-current="${photosTaken}"
+                  style="
+                    display: flex; align-items: center; gap: 6px; width: 100%;
+                    padding: 8px 10px; border-radius: 6px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
+                    background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
+                    font-size: 12px; text-align: left;
+                  "
+                >
+                  <span style="font-size: 16px;">${photosTaken ? '✅' : '📷'}</span>
+                  <div>
+                    <div style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 600;">
                       ${photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
-                    </span>
-                  </button>
-                  <div style="display: flex; align-items: center; gap: 6px;">
-                    <input
-                      type="date"
-                      id="visit-date-input-nr-${idx}"
-                      data-facility-id="${facility.id}"
-                      value="${visitDate}"
-                      style="
-                        flex: 1; padding: 4px 6px; border-radius: 4px; border: 1px solid #D1D5DB;
-                        font-size: 11px; background: white; color: #374151;
-                      "
-                    />
-                    <button
-                      id="set-today-btn-nr-${idx}"
-                      data-facility-id="${facility.id}"
-                      style="
-                        padding: 4px 8px; border-radius: 4px; border: 1px solid #2563EB;
-                        background: #EFF6FF; color: #2563EB; cursor: pointer;
-                        font-size: 10px; font-weight: 600; white-space: nowrap;
-                      "
-                    >Today</button>
-                  </div>
-                  ${visitDate ? `
-                    <div style="display: flex; justify-content: space-between; color: #6B7280;">
-                      <span>Last visited:</span>
-                      <span style="font-weight: 500; color: #374151;">${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     </div>
-                  ` : ''}
-                </div>
+                    ${visitDate ? `<div style="font-size: 10px; color: #6B7280; margin-top: 1px;">Visited: ${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : ''}
+                  </div>
+                </button>
               </div>
             `;
           }
@@ -1926,68 +1844,40 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               });
             }
 
-            // Field visit quick-action handlers for non-route facilities (Plans mode)
+            // Field visit quick-action handler for non-route facilities (Plans mode)
             const togglePhotosNR = document.getElementById(`toggle-photos-btn-nr-${idx}`);
             if (togglePhotosNR) {
               togglePhotosNR.addEventListener('click', async () => {
                 const facId = togglePhotosNR.dataset.facilityId;
                 const current = togglePhotosNR.dataset.current === 'true';
                 const newVal = !current;
+                const today = new Date().toISOString().split('T')[0];
                 try {
+                  const updateData: any = { photos_taken: newVal };
+                  if (newVal) {
+                    updateData.field_visit_date = today;
+                  }
                   const { error } = await supabase
                     .from('facilities')
-                    .update({ photos_taken: newVal })
+                    .update(updateData)
                     .eq('id', facId);
                   if (error) throw error;
                   togglePhotosNR.dataset.current = String(newVal);
                   togglePhotosNR.style.border = `1px solid ${newVal ? '#059669' : '#D1D5DB'}`;
                   togglePhotosNR.style.background = newVal ? '#ECFDF5' : '#F9FAFB';
+                  const visitLabel = newVal ? `<div style="font-size: 10px; color: #6B7280; margin-top: 1px;">Visited: ${new Date(today + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : '';
                   togglePhotosNR.innerHTML = `
-                    <span style="font-size: 14px;">${newVal ? '✅' : '📷'}</span>
-                    <span style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 500;">
-                      ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
-                    </span>
+                    <span style="font-size: 16px;">${newVal ? '✅' : '📷'}</span>
+                    <div>
+                      <div style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 600;">
+                        ${newVal ? 'Photos Taken' : 'Mark Photos Taken'}
+                      </div>
+                      ${visitLabel}
+                    </div>
                   `;
                   if (onFacilitiesChange) onFacilitiesChange();
                 } catch (err) {
                   console.error('Error toggling photos_taken:', err);
-                }
-              });
-            }
-
-            const visitDateNR = document.getElementById(`visit-date-input-nr-${idx}`) as HTMLInputElement;
-            if (visitDateNR) {
-              visitDateNR.addEventListener('change', async () => {
-                const facId = visitDateNR.dataset.facilityId;
-                const newDate = visitDateNR.value || null;
-                try {
-                  const { error } = await supabase
-                    .from('facilities')
-                    .update({ field_visit_date: newDate })
-                    .eq('id', facId);
-                  if (error) throw error;
-                  if (onFacilitiesChange) onFacilitiesChange();
-                } catch (err) {
-                  console.error('Error updating field_visit_date:', err);
-                }
-              });
-            }
-
-            const setTodayNR = document.getElementById(`set-today-btn-nr-${idx}`);
-            if (setTodayNR) {
-              setTodayNR.addEventListener('click', async () => {
-                const facId = setTodayNR.dataset.facilityId;
-                const today = new Date().toISOString().split('T')[0];
-                try {
-                  const { error } = await supabase
-                    .from('facilities')
-                    .update({ field_visit_date: today })
-                    .eq('id', facId);
-                  if (error) throw error;
-                  if (visitDateNR) visitDateNR.value = today;
-                  if (onFacilitiesChange) onFacilitiesChange();
-                } catch (err) {
-                  console.error('Error setting today as visit date:', err);
                 }
               });
             }
@@ -2423,6 +2313,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     // Skip initial geolocation if viewing a specific facility
     if (targetCoords) return;
 
+    // Track if this is the first position after enabling tracking
+    let isFirstPosition = true;
+
     const handlePosition = (position: GeolocationPosition) => {
       updateUserLocation(position);
 
@@ -2461,7 +2354,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // Auto-center based on mode:
       // - Navigation mode (Drive Mode): ALWAYS center (unless dragging) - user expects continuous tracking
       // - Manual location tracking: Only center if autoCentering is true (respect user's map interaction)
-      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && autoCentering));
+      // Force center on first position when location tracking is freshly enabled
+      const forceCenter = isFirstPosition && locationTracking;
+      if (forceCenter) {
+        isFirstPosition = false;
+        setAutoCentering(true);
+      }
+
+      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && (autoCentering || forceCenter)));
 
       if (!shouldAutoCenter) {
         console.log('[RouteMap] Auto-center SKIPPED:', {
@@ -2470,6 +2370,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           navigationMode,
           locationTracking,
           autoCentering,
+          forceCenter,
           reason: !mapRef.current ? 'no map ref' :
             isDraggingRef.current ? 'user dragging' :
               !navigationMode && !locationTracking ? 'no tracking mode active' :
@@ -2479,7 +2380,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         console.log('[RouteMap] Auto-center ENABLED:', {
           navigationMode,
           locationTracking,
-          autoCentering
+          autoCentering,
+          forceCenter
         });
       }
 

@@ -2139,21 +2139,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                         </span>
                                       );
                                     })()}
-                                    {/* Field visit date indicator - show in plans mode */}
-                                    {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
-                                      const facility = getFacilityForStop(segment.to);
-                                      if (!facility || !facility.field_visit_date) return null;
-                                      const visitDate = new Date(facility.field_visit_date + 'T00:00:00');
-                                      const dateStr = visitDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                                      return (
-                                        <span
-                                          title={`Visited: ${dateStr}`}
-                                          className="text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded-full flex-shrink-0"
-                                        >
-                                          {dateStr}
-                                        </span>
-                                      );
-                                    })()}
+
                                     {/* Standard inspection icons - show when not filtering by spcc_plan */}
                                     {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
                                       <span title="Verified - Inspection within last year">
