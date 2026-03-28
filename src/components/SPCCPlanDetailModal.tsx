@@ -23,19 +23,28 @@ const statusIconMap = {
 };
 
 function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
-  const [photosSaving, setPhotosSaving] = useState(false);
-  const [dateSaving, setDateSaving] = useState(false);
+  // Optimistic local state - updates instantly on tap
+  const [photosTaken, setPhotosTaken] = useState(facility.photos_taken || false);
+  const [visitDate, setVisitDate] = useState(facility.field_visit_date || '');
+
+  // Sync with parent if facility prop changes
+  useEffect(() => {
+    setPhotosTaken(facility.photos_taken || false);
+    setVisitDate(facility.field_visit_date || '');
+  }, [facility.photos_taken, facility.field_visit_date]);
 
   const handleTogglePhotos = async () => {
-    if (photosSaving) return;
-    setPhotosSaving(true);
+    const newVal = !photosTaken;
+    const today = new Date().toISOString().split('T')[0];
+
+    // Update UI instantly (optimistic)
+    setPhotosTaken(newVal);
+    if (newVal) setVisitDate(today);
+
+    // Save to DB in background
     try {
-      const newVal = !facility.photos_taken;
-      const today = new Date().toISOString().split('T')[0];
       const updateData: any = { photos_taken: newVal };
-      if (newVal) {
-        updateData.field_visit_date = today;
-      }
+      if (newVal) updateData.field_visit_date = today;
       const { error } = await supabase
         .from('facilities')
         .update(updateData)
@@ -44,14 +53,15 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
       onFacilitiesChange();
     } catch (err) {
       console.error('Error toggling photos_taken:', err);
-    } finally {
-      setPhotosSaving(false);
+      // Revert on failure
+      setPhotosTaken(!newVal);
+      if (newVal) setVisitDate(facility.field_visit_date || '');
     }
   };
 
   const handleDateChange = async (newDate: string) => {
-    if (dateSaving) return;
-    setDateSaving(true);
+    const oldDate = visitDate;
+    setVisitDate(newDate); // Optimistic
     try {
       const { error } = await supabase
         .from('facilities')
@@ -61,8 +71,7 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
       onFacilitiesChange();
     } catch (err) {
       console.error('Error updating field_visit_date:', err);
-    } finally {
-      setDateSaving(false);
+      setVisitDate(oldDate); // Revert
     }
   };
 
@@ -78,31 +87,31 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
         <div className="px-4 py-3">
           <button
             onClick={handleTogglePhotos}
-            disabled={photosSaving}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
-              facility.photos_taken
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-all duration-200 ${
+              photosTaken
                 ? (darkMode ? 'border-green-600 bg-green-900/30' : 'border-green-500 bg-green-50')
                 : (darkMode ? 'border-gray-600 bg-gray-700/50 hover:border-gray-500' : 'border-gray-300 bg-white hover:border-gray-400')
             }`}
           >
-            <span className="text-xl">{facility.photos_taken ? '✅' : '📷'}</span>
+            {photosTaken ? (
+              <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
+            ) : (
+              <Camera className="w-6 h-6 text-gray-400 flex-shrink-0" />
+            )}
             <div className="flex-1 text-left">
               <div className={`text-sm font-semibold ${
-                facility.photos_taken
+                photosTaken
                   ? (darkMode ? 'text-green-400' : 'text-green-700')
                   : (darkMode ? 'text-gray-300' : 'text-gray-700')
               }`}>
-                {facility.photos_taken ? 'Photos Taken' : 'Mark Photos Taken'}
+                {photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
               </div>
-              {facility.photos_taken && facility.field_visit_date && (
+              {photosTaken && visitDate && (
                 <div className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Visited: {formatDate(facility.field_visit_date)}
+                  Visited: {formatDate(visitDate)}
                 </div>
               )}
             </div>
-            {photosSaving && (
-              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-            )}
           </button>
         </div>
 
@@ -114,9 +123,8 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
           </div>
           <input
             type="date"
-            value={facility.field_visit_date || ''}
+            value={visitDate}
             onChange={(e) => handleDateChange(e.target.value)}
-            disabled={dateSaving}
             className={`text-sm font-medium px-2 py-1 rounded border ${
               darkMode
                 ? 'bg-gray-700 border-gray-600 text-white'
