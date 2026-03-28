@@ -95,6 +95,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [selectedFacilityNames, setSelectedFacilityNames] = useState<Set<string>>(new Set());
   const [bulkReassignTargetDay, setBulkReassignTargetDay] = useState<number>(1);
   const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
+  const [pendingReoptimize, setPendingReoptimize] = useState(false);
 
   // Per-day start times
   const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
@@ -169,6 +170,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     setExcludedCount(facilities.filter(f => f.day_assignment === -1).length);
     checkRemovedFacilities();
   }, [facilities]);
+
+  // Auto re-optimize routes after facility day reassignment
+  useEffect(() => {
+    if (pendingReoptimize && settings && homeBase && accountId) {
+      setPendingReoptimize(false);
+      handleReoptimizeDays();
+    }
+  }, [pendingReoptimize, facilities]);
 
   useEffect(() => {
     if (showRefreshOptions && settings) {
@@ -871,7 +880,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onFacilitiesUpdated) {
         await onFacilitiesUpdated();
       }
-      onRefresh();
+      // Auto re-optimize affected days instead of full page refresh
+      setPendingReoptimize(true);
     } catch (err) {
       console.error('Error bulk reassigning facilities:', err);
       alert('Failed to reassign facilities');
@@ -1035,6 +1045,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       const facility = facilities.find(f => f.name === draggedFacility.name);
       if (!facility) return;
 
+      // Skip if dropping on the same day
+      if (draggedFacility.fromDay === targetDay) {
+        setDraggedFacility(null);
+        return;
+      }
+
       const { error } = await supabase
         .from('facilities')
         .update({ day_assignment: targetDay })
@@ -1047,7 +1063,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onFacilitiesUpdated) {
         await onFacilitiesUpdated();
       }
-      onRefresh();
+      // Auto re-optimize affected days instead of full page refresh
+      setPendingReoptimize(true);
     } catch (err) {
       console.error('Error reassigning facility:', err);
       alert('Failed to reassign facility');
