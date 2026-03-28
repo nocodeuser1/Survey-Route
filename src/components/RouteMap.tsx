@@ -193,12 +193,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const previousPositionRef = useRef<GeolocationPosition | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
   const [autoCentering, setAutoCentering] = useState(true);
+  const autoCenteringRef = useRef(true);
   const [isLocating, setIsLocating] = useState(false);
   const headingHistoryRef = useRef<number[]>([]);
   const rotationAnimationRef = useRef<number | null>(null);
   const autoCenteringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userInteractedWithMapRef = useRef(false);
   const isDraggingRef = useRef(false);
+
+  // Keep ref in sync with autoCentering state so polling closures see latest value
+  useEffect(() => {
+    autoCenteringRef.current = autoCentering;
+  }, [autoCentering]);
   const [nextFacility, setNextFacility] = useState<{ facility: any, distance: number, routeIndex: number, facilityIndex: number } | null>(null);
   const [internalLocationTracking, setInternalLocationTracking] = useState(false);
   const locationTracking = externalLocationTracking !== undefined ? externalLocationTracking : internalLocationTracking;
@@ -2369,7 +2375,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         setAutoCentering(true);
       }
 
-      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && (autoCentering || forceCenter)));
+      // Use ref for autoCentering so polling closures always see the latest value
+      const currentAutoCentering = autoCenteringRef.current;
+      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && (currentAutoCentering || forceCenter)));
 
       if (!shouldAutoCenter) {
         console.log('[RouteMap] Auto-center SKIPPED:', {
@@ -2377,18 +2385,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           isDragging: isDraggingRef.current,
           navigationMode,
           locationTracking,
-          autoCentering,
+          autoCentering: currentAutoCentering,
           forceCenter,
           reason: !mapRef.current ? 'no map ref' :
             isDraggingRef.current ? 'user dragging' :
               !navigationMode && !locationTracking ? 'no tracking mode active' :
-                !navigationMode && locationTracking && !autoCentering ? 'location tracking disabled by user interaction' : 'unknown'
+                !navigationMode && locationTracking && !currentAutoCentering ? 'location tracking disabled by user interaction' : 'unknown'
         });
       } else {
         console.log('[RouteMap] Auto-center ENABLED:', {
           navigationMode,
           locationTracking,
-          autoCentering,
+          autoCentering: currentAutoCentering,
           forceCenter
         });
       }
