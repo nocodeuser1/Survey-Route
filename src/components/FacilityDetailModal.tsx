@@ -855,18 +855,6 @@ export default function FacilityDetailModal({
                   Structured facility information and production metadata.
                 </p>
               </div>
-              {onEdit && (
-                <button
-                  onClick={() => {
-                    onEdit();
-                    onClose();
-                  }}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
-                >
-                  <Edit2 className="w-4 h-4" />
-                  Edit Facility
-                </button>
-              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1458,6 +1446,18 @@ export default function FacilityDetailModal({
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {onEdit && (
+                  <button
+                    onClick={() => {
+                      onEdit();
+                      onClose();
+                    }}
+                    className="p-2 hover:bg-blue-800 rounded-full transition-colors"
+                    title="Edit facility details"
+                  >
+                    <Edit2 className="w-5 h-5" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowNavigationPopup(true)}
                   className="p-2 hover:bg-blue-800 rounded-full transition-colors"
