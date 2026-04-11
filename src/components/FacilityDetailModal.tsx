@@ -764,8 +764,8 @@ export default function FacilityDetailModal({
                     </div>
                   )}
                   <button
-                    onClick={(event) => handleDeleteInspection(inspection.id, event)}
-                    className="p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 rounded transition-colors flex-shrink-0"
+                    onClick={() => handleDeleteInspection(inspection.id, event)}
+                    className="w-10 h-10 flex items-center justify-center text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 rounded transition-colors flex-shrink-0"
                     title="Delete inspection"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1074,7 +1074,7 @@ export default function FacilityDetailModal({
                   </p>
                   <button
                     onClick={() => setEditingIpDate(true)}
-                    className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
                     title="Edit IP date"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -1119,7 +1119,7 @@ export default function FacilityDetailModal({
                   </p>
                   <button
                     onClick={() => setEditingPeDate(true)}
-                    className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
                     title="Edit PE stamp date"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -1471,11 +1471,11 @@ export default function FacilityDetailModal({
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 sm:gap-2">
                 {onEdit && (
                   <button
                     onClick={onEdit}
-                    className="p-2 hover:bg-blue-800 rounded-full transition-colors"
+                    className="w-10 h-10 flex items-center justify-center hover:bg-blue-800 rounded-full transition-colors"
                     title="Edit facility details"
                   >
                     <Edit2 className="w-5 h-5" />
@@ -1483,14 +1483,14 @@ export default function FacilityDetailModal({
                 )}
                 <button
                   onClick={() => setShowNavigationPopup(true)}
-                  className="p-2 hover:bg-blue-800 rounded-full transition-colors"
+                  className="w-10 h-10 flex items-center justify-center hover:bg-blue-800 rounded-full transition-colors"
                   title="Navigate to this facility"
                 >
                   <Navigation className="w-5 h-5" />
                 </button>
                 <button
                   onClick={onClose}
-                  className="p-2 hover:bg-blue-800 rounded-full transition-colors"
+                  className="w-10 h-10 flex items-center justify-center hover:bg-blue-800 rounded-full transition-colors"
                 >
                   <X className="w-6 h-6" />
                 </button>
