@@ -1206,6 +1206,36 @@ export default function FacilityDetailModal({
                 </p>
               )}
             </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <Droplets className="w-3.5 h-3.5" />
+                Permitted Oil
+              </p>
+              <p className="text-base font-medium text-gray-900 dark:text-white">
+                {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <CalendarDays className="w-3.5 h-3.5" />
+                Field Visit
+              </p>
+              <p className="text-base font-medium text-gray-900 dark:text-white">
+                {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
+                <Camera className="w-3.5 h-3.5" />
+                Photos Taken
+              </p>
+              <p className="text-base font-medium text-gray-900 dark:text-white">
+                {facility.photos_taken ? 'Yes' : 'No'}
+              </p>
+            </div>
           </div>
         </div>
 
