@@ -879,6 +879,12 @@ export default function FacilityDetailModal({
                 </p>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not available'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Component Count</p>
                 <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{wells.length}</p>
               </div>
