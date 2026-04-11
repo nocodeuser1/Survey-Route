@@ -227,8 +227,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
+  const isRestoring = useRef(false);
+
   // Sync UI state to URL
   useEffect(() => {
+    if (isRestoring.current) return;
     const params = new URLSearchParams(window.location.search);
     let changed = false;
 
@@ -283,8 +286,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const inspectionId = params.get('inspection');
 
     if (facilityId && facilities.length > 0) {
+      isRestoring.current = true;
       const facility = facilities.find(f => f.id === facilityId);
-      console.log('[Persistence] Found facility from URL:', facility?.name, 'Modal:', modal);
+      console.log('[Persistence] Restoring facility from URL:', facility?.name, 'Modal:', modal);
       if (facility) {
         if (modal === 'plan') {
           setSpccPlanDetailFacility(facility);
@@ -307,6 +311,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           setSelectedFacility(facility);
         }
       }
+      // Give React a moment to flush state updates before allowing sync to overwrite
+      setTimeout(() => {
+        isRestoring.current = false;
+      }, 500);
     }
   }, [facilities]);
 
