@@ -226,42 +226,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   });
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
-  // Restore UI state from URL on mount
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const facilityId = params.get('facility');
-    const modal = params.get('modal');
-    const tab = params.get('tab');
-    const inspectionId = params.get('inspection');
-
-    if (facilityId) {
-      const facility = facilities.find(f => f.id === facilityId);
-      if (facility) {
-        if (modal === 'plan') {
-          setSpccPlanDetailFacility(facility);
-        } else if (modal === 'inspection' && inspectionId) {
-          // We need to fetch the specific inspection or wait for inspections to load
-          const loadAndViewInspection = async () => {
-            const { data, error } = await supabase
-              .from('inspections')
-              .select('*')
-              .eq('id', inspectionId)
-              .single();
-            if (data && !error) {
-              setViewingInspection(data);
-            }
-          };
-          loadAndViewInspection();
-        } else {
-          if (tab === 'general' || tab === 'inspections' || tab === 'documents' || tab === 'spcc') {
-            setForcedTab(tab as any);
-          }
-          setSelectedFacility(facility);
-        }
-      }
-    }
-  }, [facilities.length > 0]);
-
   // Sync UI state to URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -308,6 +272,42 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       window.history.replaceState({}, '', newUrl);
     }
   }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
+
+  // Restore UI state from URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const facilityId = params.get('facility');
+    const modal = params.get('modal');
+    const tab = params.get('tab');
+    const inspectionId = params.get('inspection');
+
+    if (facilityId) {
+      const facility = facilities.find(f => f.id === facilityId);
+      if (facility) {
+        if (modal === 'plan') {
+          setSpccPlanDetailFacility(facility);
+        } else if (modal === 'inspection' && inspectionId) {
+          // We need to fetch the specific inspection or wait for inspections to load
+          const loadAndViewInspection = async () => {
+            const { data, error } = await supabase
+              .from('inspections')
+              .select('*')
+              .eq('id', inspectionId)
+              .single();
+            if (data && !error) {
+              setViewingInspection(data);
+            }
+          };
+          loadAndViewInspection();
+        } else {
+          if (tab === 'general' || tab === 'inspections' || tab === 'documents' || tab === 'spcc') {
+            setForcedTab(tab as any);
+          }
+          setSelectedFacility(facility);
+        }
+      }
+    }
+  }, [facilities.length > 0]);
 
   // Wrapper: when local mode changes, notify parent
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
