@@ -1213,9 +1213,52 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       // Trigger refresh to show updated data immediately
       onFacilitiesChange();
 
-      // Close modal and clear form
-      setMobileEditingFacility(null);
+      // Clear form
       setMobileEditFormData({} as Record<ColumnId, string>);
+
+      // Keep the facility overview modal open if it was open
+      if (selectedFacility && selectedFacility.id === mobileEditingFacility.id) {
+        // Find the updated facility values from our form data to update the view immediately
+        setSelectedFacility({
+          ...selectedFacility,
+          name: mobileEditFormData.name.trim(),
+          latitude: lat,
+          longitude: lng,
+          visit_duration_minutes: visitDuration,
+          county: mobileEditFormData.county?.trim() || null,
+          camino_facility_id: mobileEditFormData.camino_facility_id?.trim() || null,
+          photos_taken: mobileEditFormData.photos_taken === 'true',
+          field_visit_date: mobileEditFormData.field_visit_date?.trim() || null,
+          estimated_oil_per_day: estimatedOil,
+          berm_depth_inches: bermDepth,
+          berm_length: bermLength,
+          berm_width: bermWidth,
+          initial_inspection_completed: mobileEditFormData.initial_inspection_completed?.trim() || null,
+          spcc_pe_stamp_date: mobileEditFormData.spcc_pe_stamp_date?.trim() || null,
+          company_signature_date: mobileEditFormData.company_signature_date?.trim() || null,
+          recertified_date: mobileEditFormData.recertified_date?.trim() || null,
+          matched_facility_name: mobileEditFormData.matched_facility_name?.trim() || null,
+          well_name_1: mobileEditFormData.well_name_1?.trim() || null,
+          well_name_2: mobileEditFormData.well_name_2?.trim() || null,
+          well_name_3: mobileEditFormData.well_name_3?.trim() || null,
+          well_name_4: mobileEditFormData.well_name_4?.trim() || null,
+          well_name_5: mobileEditFormData.well_name_5?.trim() || null,
+          well_name_6: mobileEditFormData.well_name_6?.trim() || null,
+          well_api_1: mobileEditFormData.well_api_1?.trim() || null,
+          well_api_2: mobileEditFormData.well_api_2?.trim() || null,
+          well_api_3: mobileEditFormData.well_api_3?.trim() || null,
+          well_api_4: mobileEditFormData.well_api_4?.trim() || null,
+          well_api_5: mobileEditFormData.well_api_5?.trim() || null,
+          well_api_6: mobileEditFormData.well_api_6?.trim() || null,
+          api_numbers_combined: mobileEditFormData.api_numbers_combined?.trim() || null,
+          lat_well_sheet: latWellSheet,
+          long_well_sheet: longWellSheet,
+          first_prod_date: mobileEditFormData.first_prod_date?.trim() || null,
+          spcc_inspection_date: mobileEditFormData.spcc_inspection_date?.trim() || null,
+        });
+      }
+      
+      setMobileEditingFacility(null);
 
       if (coordsChanged) {
         localStorage.setItem('facilities_coords_updated', Date.now().toString());
