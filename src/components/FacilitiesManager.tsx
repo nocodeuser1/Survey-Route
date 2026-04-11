@@ -316,8 +316,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     if (changed) {
+      const currentUrl = window.location.pathname + window.location.search;
       const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
-      window.history.replaceState({}, '', newUrl);
+      
+      // Only push state if the URL actually changed to avoid triggering unnecessary re-renders
+      if (currentUrl !== newUrl) {
+        window.history.replaceState({}, '', newUrl);
+      }
     }
   }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
 
