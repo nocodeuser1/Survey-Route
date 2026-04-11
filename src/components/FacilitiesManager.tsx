@@ -227,69 +227,23 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
-  const isRestoring = useRef(false);
-
-  // Sync UI state to URL
-  useEffect(() => {
-    if (isRestoring.current) return;
-    const params = new URLSearchParams(window.location.search);
-    let changed = false;
-
-    const setParam = (key: string, value: string | null) => {
-      if (value) {
-        if (params.get(key) !== value) {
-          params.set(key, value);
-          changed = true;
-        }
-      } else {
-        if (params.has(key)) {
-          params.delete(key);
-          changed = true;
-        }
-      }
-    };
-
-    if (spccPlanDetailFacility) {
-      setParam('facility', spccPlanDetailFacility.id);
-      setParam('modal', 'plan');
-      setParam('tab', null);
-      setParam('inspection', null);
-    } else if (viewingInspection) {
-      setParam('facility', viewingInspection.facility_id);
-      setParam('modal', 'inspection');
-      setParam('inspection', viewingInspection.id);
-      setParam('tab', null);
-    } else if (selectedFacility) {
-      setParam('facility', selectedFacility.id);
-      setParam('modal', 'detail');
-      setParam('tab', forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general'));
-      setParam('inspection', null);
-    } else {
-      setParam('facility', null);
-      setParam('modal', null);
-      setParam('tab', null);
-      setParam('inspection', null);
-    }
-
-    if (changed) {
-      const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
-      window.history.replaceState({}, '', newUrl);
-    }
-  }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
+  const isRestored = useRef(false);
 
   // Restore UI state from URL on mount
   useEffect(() => {
+    if (isRestored.current || isLoading || facilities.length === 0) return;
+
     const params = new URLSearchParams(window.location.search);
     const facilityId = params.get('facility');
     const modal = params.get('modal');
     const tab = params.get('tab');
     const inspectionId = params.get('inspection');
 
-    if (facilityId && facilities.length > 0) {
-      isRestoring.current = true;
+    if (facilityId) {
       const facility = facilities.find(f => f.id === facilityId);
-      console.log('[Persistence] Restoring facility from URL:', facility?.name, 'Modal:', modal);
+      console.log('[Persistence] Found facility, restoring UI:', facility?.name, modal);
       if (facility) {
+        isRestored.current = true;
         if (modal === 'plan') {
           setSpccPlanDetailFacility(facility);
         } else if (modal === 'inspection' && inspectionId) {
@@ -311,12 +265,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           setSelectedFacility(facility);
         }
       }
-      // Give React a moment to flush state updates before allowing sync to overwrite
-      setTimeout(() => {
-        isRestoring.current = false;
-      }, 500);
+    } else {
+      // No facility in URL, nothing to restore
+      isRestored.current = true;
     }
-  }, [facilities]);
+  }, [facilities, isLoading]);
+
+  // Sync UI state to URL
+  useEffect(() => {
+    // Only allow syncing to URL AFTER we've finished the initial restoration attempt
+    if (!isRestored.current || isLoading) return;
+
+    const params = new URLSearchParams(window.location.search);
+    let changed = false;
 
   // Wrapper: when local mode changes, notify parent
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
