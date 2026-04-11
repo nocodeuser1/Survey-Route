@@ -282,13 +282,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const tab = params.get('tab');
     const inspectionId = params.get('inspection');
 
-    if (facilityId) {
+    if (facilityId && facilities.length > 0) {
       const facility = facilities.find(f => f.id === facilityId);
+      console.log('[Persistence] Found facility from URL:', facility?.name, 'Modal:', modal);
       if (facility) {
         if (modal === 'plan') {
           setSpccPlanDetailFacility(facility);
         } else if (modal === 'inspection' && inspectionId) {
-          // We need to fetch the specific inspection or wait for inspections to load
           const loadAndViewInspection = async () => {
             const { data, error } = await supabase
               .from('inspections')
@@ -308,7 +308,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         }
       }
     }
-  }, [facilities.length > 0]);
+  }, [facilities]);
 
   // Wrapper: when local mode changes, notify parent
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
