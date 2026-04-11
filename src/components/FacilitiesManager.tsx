@@ -279,6 +279,48 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const params = new URLSearchParams(window.location.search);
     let changed = false;
 
+    const setParam = (key: string, value: string | null) => {
+      if (value) {
+        if (params.get(key) !== value) {
+          params.set(key, value);
+          changed = true;
+        }
+      } else {
+        if (params.has(key)) {
+          params.delete(key);
+          changed = true;
+        }
+      }
+    };
+
+    if (spccPlanDetailFacility) {
+      setParam('facility', spccPlanDetailFacility.id);
+      setParam('modal', 'plan');
+      setParam('tab', null);
+      setParam('inspection', null);
+    } else if (viewingInspection) {
+      setParam('facility', viewingInspection.facility_id);
+      setParam('modal', 'inspection');
+      setParam('inspection', viewingInspection.id);
+      setParam('tab', null);
+    } else if (selectedFacility) {
+      setParam('facility', selectedFacility.id);
+      setParam('modal', 'detail');
+      setParam('tab', forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general'));
+      setParam('inspection', null);
+    } else {
+      setParam('facility', null);
+      setParam('modal', null);
+      setParam('tab', null);
+      setParam('inspection', null);
+    }
+
+    if (changed) {
+      const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
+
   // Wrapper: when local mode changes, notify parent
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
     setSpccModeInternal(mode);
