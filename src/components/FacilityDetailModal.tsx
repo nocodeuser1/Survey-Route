@@ -1454,10 +1454,7 @@ export default function FacilityDetailModal({
               <div className="flex items-center gap-2">
                 {onEdit && (
                   <button
-                    onClick={() => {
-                      onEdit();
-                      onClose();
-                    }}
+                    onClick={onEdit}
                     className="p-2 hover:bg-blue-800 rounded-full transition-colors"
                     title="Edit facility details"
                   >
