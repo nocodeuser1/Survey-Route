@@ -24,6 +24,7 @@ import {
   Calendar,
   Droplets,
   Camera,
+  RotateCw,
 } from 'lucide-react';
 import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
@@ -1164,7 +1165,10 @@ export default function FacilityDetailModal({
                   <p className="text-base font-medium text-gray-900 dark:text-white">
                     {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
                   </p>
-                  <button onClick={() => setEditingOil(true)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400">
+                  <button
+                    onClick={() => setEditingOil(true)}
+                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1194,7 +1198,10 @@ export default function FacilityDetailModal({
                   <p className="text-base font-medium text-gray-900 dark:text-white">
                     {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
                   </p>
-                  <button onClick={() => setEditingVisitDate(true)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400">
+                  <button
+                    onClick={() => setEditingVisitDate(true)}
+                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1212,10 +1219,10 @@ export default function FacilityDetailModal({
                 </p>
                 <button
                   onClick={togglePhotosTaken}
-                  className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
                   title={facility.photos_taken ? 'Change to No' : 'Change to Yes'}
                 >
-                  <Edit2 className="w-3.5 h-3.5" />
+                  <RotateCw className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
