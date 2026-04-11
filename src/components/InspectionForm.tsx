@@ -1162,25 +1162,6 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           </button>
         </div>
       </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleSave('draft')}
-              disabled={isSaving}
-              className="flex-1 py-3 px-4 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:bg-gray-400 font-medium"
-            >
-              Save Draft
-            </button>
-            <button
-              onClick={() => handleSave('completed')}
-              disabled={isSaving || !signature}
-              className="flex-1 py-3 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 font-medium"
-            >
-              <Save className="w-5 h-5 inline mr-2" />
-              Complete
-            </button>
-          </div>
-        </div>
-      </div>
 
       {showCloseWarning && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4">
