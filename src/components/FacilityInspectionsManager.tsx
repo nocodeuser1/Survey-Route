@@ -102,7 +102,7 @@ export default function FacilityInspectionsManager({
             </div>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+              className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
             >
               <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
             </button>
