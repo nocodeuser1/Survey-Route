@@ -127,6 +127,10 @@ export default function FacilityDetailModal({
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDate(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : '');
+  const [editingOil, setEditingOil] = useState(false);
+  const [oilValue, setOilValue] = useState(facility.estimated_oil_per_day?.toString() || '');
+  const [editingVisitDate, setEditingVisitDate] = useState(false);
+  const [visitDateValue, setVisitDateValue] = useState(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
   const [savingDate, setSavingDate] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -357,6 +361,62 @@ export default function FacilityDetailModal({
       setEditingPeDate(false);
     } catch (err) {
       console.error('Error saving PE stamp date:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const handleSaveOil = async () => {
+    const val = oilValue.trim();
+    const numericOil = val === '' ? null : parseInt(val, 10);
+    if (val !== '' && isNaN(numericOil!)) return;
+    setSavingDate(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ estimated_oil_per_day: numericOil })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.estimated_oil_per_day = numericOil;
+      setEditingOil(false);
+    } catch (err) {
+      console.error('Error saving oil:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const handleSaveVisitDate = async () => {
+    const isoDate = visitDateValue ? parseDateInput(visitDateValue) : null;
+    if (visitDateValue && !isoDate) return;
+    setSavingDate(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ field_visit_date: isoDate })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.field_visit_date = isoDate;
+      setEditingVisitDate(false);
+    } catch (err) {
+      console.error('Error saving visit date:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const togglePhotosTaken = async () => {
+    const newVal = !facility.photos_taken;
+    setSavingDate(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ photos_taken: newVal })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.photos_taken = newVal;
+    } catch (err) {
+      console.error('Error toggling photos taken:', err);
     } finally {
       setSavingDate(false);
     }
@@ -1212,9 +1272,28 @@ export default function FacilityDetailModal({
                 <Droplets className="w-3.5 h-3.5" />
                 Permitted Oil
               </p>
-              <p className="text-base font-medium text-gray-900 dark:text-white">
-                {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
-              </p>
+              {editingOil ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={oilValue}
+                    onChange={(e) => setOilValue(e.target.value)}
+                    className="text-sm px-2 py-1 rounded border w-20 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
+                    autoFocus
+                  />
+                  <button onClick={handleSaveOil} className="px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button>
+                  <button onClick={() => { setEditingOil(false); setOilValue(facility.estimated_oil_per_day?.toString() || ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className="text-base font-medium text-gray-900 dark:text-white">
+                    {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
+                  </p>
+                  <button onClick={() => setEditingOil(true)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400">
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
@@ -1222,9 +1301,29 @@ export default function FacilityDetailModal({
                 <CalendarDays className="w-3.5 h-3.5" />
                 Field Visit
               </p>
-              <p className="text-base font-medium text-gray-900 dark:text-white">
-                {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
-              </p>
+              {editingVisitDate ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="mm/dd/yy"
+                    value={visitDateValue}
+                    onChange={(e) => setVisitDateValue(e.target.value)}
+                    className="text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
+                    autoFocus
+                  />
+                  <button onClick={handleSaveVisitDate} className="px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button>
+                  <button onClick={() => { setEditingVisitDate(false); setVisitDateValue(facility.field_visit_date ? formatDate(facility.field_visit_date) : ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className="text-base font-medium text-gray-900 dark:text-white">
+                    {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
+                  </p>
+                  <button onClick={() => setEditingVisitDate(true)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400">
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
@@ -1232,9 +1331,21 @@ export default function FacilityDetailModal({
                 <Camera className="w-3.5 h-3.5" />
                 Photos Taken
               </p>
-              <p className="text-base font-medium text-gray-900 dark:text-white">
-                {facility.photos_taken ? 'Yes' : 'No'}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-base font-medium text-gray-900 dark:text-white">
+                  {facility.photos_taken ? 'Yes' : 'No'}
+                </p>
+                <button
+                  onClick={togglePhotosTaken}
+                  className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                    facility.photos_taken 
+                      ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300' 
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {facility.photos_taken ? 'Mark No' : 'Mark Yes'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1243,24 +1354,6 @@ export default function FacilityDetailModal({
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Compliance Records</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
-                <p className="text-base font-medium mt-1 text-gray-900 dark:text-white">
-                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Field Visit Date</p>
-                <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">
-                  {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Photos Taken</p>
-                <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">
-                  {facility.photos_taken ? 'Yes' : 'No'}
-                </p>
-              </div>
               {facility.initial_inspection_completed && (
                 <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Initial Inspection</p>
