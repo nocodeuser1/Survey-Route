@@ -2293,7 +2293,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       {/* Edit Facility Modal */}
       {mobileEditingFacility && (
         <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-[10000] p-0 sm:p-4"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-[1000000] p-0 sm:p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setMobileEditingFacility(null);
