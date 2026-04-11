@@ -22,6 +22,8 @@ import {
   LocateFixed,
   ShieldCheck,
   Calendar,
+  Droplets,
+  Camera,
 } from 'lucide-react';
 import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
