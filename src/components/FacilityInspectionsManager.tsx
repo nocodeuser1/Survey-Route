@@ -93,9 +93,9 @@ export default function FacilityInspectionsManager({
 
   return createPortal(
     <>
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999999] p-4 overflow-y-auto">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full my-8">
-          <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between rounded-t-lg">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999999] p-0 md:p-4">
+        <div className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl max-w-4xl w-full h-full md:h-[90vh] flex flex-col overflow-hidden">
+          <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between transition-colors">
             <div>
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inspection History</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{facility.name}</p>
@@ -108,7 +108,7 @@ export default function FacilityInspectionsManager({
             </button>
           </div>
 
-          <div className="p-6">
+          <div className="flex-1 overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-6">
               <div className="flex gap-2">
                 <div className="flex items-center gap-2 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full text-sm font-medium">

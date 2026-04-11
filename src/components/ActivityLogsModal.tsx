@@ -230,10 +230,10 @@ export default function ActivityLogsModal({ accountId, accountName, onClose }: A
   const activeFilterCount = selectedUsers.length + selectedActions.length;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full my-8">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-0 md:p-4 z-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full h-full md:h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
+        <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <div>
             <h3 className="text-xl font-bold text-gray-900">Activity Logs</h3>
             <p className="text-sm text-gray-600 mt-1">
@@ -253,7 +253,7 @@ export default function ActivityLogsModal({ accountId, accountName, onClose }: A
         </div>
 
         {/* Controls */}
-        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+        <div className="flex-shrink-0 px-6 py-4 bg-gray-50 border-b border-gray-200 overflow-y-auto max-h-[40vh]">
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -363,7 +363,7 @@ export default function ActivityLogsModal({ accountId, accountName, onClose }: A
         </div>
 
         {/* Logs Table */}
-        <div className="p-6 max-h-[calc(90vh-300px)] overflow-y-auto">
+        <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>

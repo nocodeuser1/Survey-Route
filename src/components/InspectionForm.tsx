@@ -916,8 +916,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const { flaggedCount, actionsCount } = calculateCounts();
 
   const formContent = (
-    <div className="fixed inset-0 bg-white dark:bg-gray-900 overflow-y-auto overflow-x-hidden" style={{ zIndex: 99999 }}>
-      <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 z-[101]">
+    <div className="fixed inset-0 bg-white dark:bg-gray-900 flex flex-col overflow-hidden" style={{ zIndex: 99999 }}>
+      <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 z-[101]">
         {accountBranding.logo_url && (
           <div className="flex justify-center mb-4 bg-white dark:bg-gray-800 rounded-lg p-2">
             <img
@@ -977,7 +977,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         </div>
       </div>
 
-      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4 max-w-full">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 max-w-full">
         {template.questions.map((question: any, index: number) => {
           const response = responses.find(r => r.question_id === question.id);
           if (!response) return null;
@@ -1141,8 +1141,27 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
             </div>
           </div>
         )}
+      </div>
 
-        <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t-2 border-gray-200 dark:border-gray-700 pt-4 pb-2 -mx-4 px-4 transition-colors">
+      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-t-2 border-gray-200 dark:border-gray-700 p-4 transition-colors">
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleSave('draft')}
+            disabled={isSaving}
+            className="flex-1 py-3 px-4 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:bg-gray-400 font-medium"
+          >
+            Save Draft
+          </button>
+          <button
+            onClick={() => handleSave('completed')}
+            disabled={isSaving || !signature}
+            className="flex-1 py-3 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 font-medium"
+          >
+            <Save className="w-5 h-5 inline mr-2" />
+            Complete
+          </button>
+        </div>
+      </div>
           <div className="flex gap-2">
             <button
               onClick={() => handleSave('draft')}

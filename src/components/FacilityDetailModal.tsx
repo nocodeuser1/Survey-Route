@@ -1396,15 +1396,15 @@ export default function FacilityDetailModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center overflow-y-auto md:p-4"
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-0 md:p-4"
       style={{ zIndex: 999999 }}
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl w-full max-w-6xl md:my-8 min-h-screen md:min-h-0 transition-colors duration-200"
+        className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl w-full max-w-6xl h-full md:h-[90vh] flex flex-col overflow-hidden transition-colors duration-200"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 md:rounded-t-lg overflow-hidden">
+        <div className="flex-shrink-0">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
@@ -1500,13 +1500,15 @@ export default function FacilityDetailModal({
           </div>
         </div>
 
-        <div className="p-4 sm:p-6 bg-gray-50 dark:bg-gray-900/40 md:rounded-b-lg pb-20 md:pb-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50 dark:bg-gray-900/40 md:rounded-b-lg">
           {activeTab === 'general' && renderGeneralTab()}
           {activeTab === 'spcc' && renderSPCCPlanTab()}
           {activeTab === 'inspections' && renderInspectionsTab()}
           {activeTab === 'documents' && renderDocumentsTab()}
+          <div className="h-20 md:h-6" /> {/* Spacer for mobile bottom padding */}
         </div>
       </div>
+
 
       {showNavigationPopup && settings && (
         <NavigationPopup

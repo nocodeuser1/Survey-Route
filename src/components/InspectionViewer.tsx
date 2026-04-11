@@ -501,14 +501,14 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000000] p-4 overflow-y-auto"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000000] p-0 md:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full my-8 transition-colors duration-200"
+        className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl max-w-4xl w-full h-full md:h-[90vh] flex flex-col overflow-hidden transition-colors duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 rounded-t-lg z-20 transition-colors duration-200">
+        <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 transition-colors duration-200">
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 transition-colors z-10"
@@ -597,21 +597,20 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           </div>
         </div>
 
-        {isEditMode && (
-          <div className="bg-orange-50 border-y border-orange-200 px-6 py-3">
-            <div className="flex items-start gap-3">
-              <AlertTriangleIcon className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-orange-900">Edit Mode Active</p>
-                <p className="text-xs text-orange-700 mt-1">
-                  You are editing this completed inspection. The original inspection date ({formatInspectionTimestamp(conductedDate, hideReportTimestamps)}) will not be changed.
-                </p>
+        <div className="flex-1 overflow-y-auto p-6">
+          {isEditMode && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg px-6 py-3 mb-6">
+              <div className="flex items-start gap-3">
+                <AlertTriangleIcon className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-orange-900">Edit Mode Active</p>
+                  <p className="text-xs text-orange-700 mt-1">
+                    You are editing this completed inspection. The original inspection date ({formatInspectionTimestamp(conductedDate, hideReportTimestamps)}) will not be changed.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-
-        <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">
               <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300 mb-1">
