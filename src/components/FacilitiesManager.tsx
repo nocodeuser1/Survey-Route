@@ -226,12 +226,88 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   });
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
-  // Sync: when global surveyType changes externally, update local spccMode
+  // Restore UI state from URL on mount
   useEffect(() => {
-    if (!globalSurveyType) return;
-    const mapped = globalSurveyType === 'spcc_plan' ? 'plan' : globalSurveyType === 'spcc_inspection' ? 'inspection' : 'all';
-    if (mapped !== spccMode) setSpccModeInternal(mapped);
-  }, [globalSurveyType]);
+    const params = new URLSearchParams(window.location.search);
+    const facilityId = params.get('facility');
+    const modal = params.get('modal');
+    const tab = params.get('tab');
+    const inspectionId = params.get('inspection');
+
+    if (facilityId) {
+      const facility = facilities.find(f => f.id === facilityId);
+      if (facility) {
+        if (modal === 'plan') {
+          setSpccPlanDetailFacility(facility);
+        } else if (modal === 'inspection' && inspectionId) {
+          // We need to fetch the specific inspection or wait for inspections to load
+          const loadAndViewInspection = async () => {
+            const { data, error } = await supabase
+              .from('inspections')
+              .select('*')
+              .eq('id', inspectionId)
+              .single();
+            if (data && !error) {
+              setViewingInspection(data);
+            }
+          };
+          loadAndViewInspection();
+        } else {
+          if (tab === 'general' || tab === 'inspections' || tab === 'documents' || tab === 'spcc') {
+            setForcedTab(tab as any);
+          }
+          setSelectedFacility(facility);
+        }
+      }
+    }
+  }, [facilities.length > 0]);
+
+  // Sync UI state to URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    let changed = false;
+
+    const setParam = (key: string, value: string | null) => {
+      if (value) {
+        if (params.get(key) !== value) {
+          params.set(key, value);
+          changed = true;
+        }
+      } else {
+        if (params.has(key)) {
+          params.delete(key);
+          changed = true;
+        }
+      }
+    };
+
+    if (spccPlanDetailFacility) {
+      setParam('facility', spccPlanDetailFacility.id);
+      setParam('modal', 'plan');
+      setParam('tab', null);
+      setParam('inspection', null);
+    } else if (viewingInspection) {
+      setParam('facility', viewingInspection.facility_id);
+      setParam('modal', 'inspection');
+      setParam('inspection', viewingInspection.id);
+      setParam('tab', null);
+    } else if (selectedFacility) {
+      setParam('facility', selectedFacility.id);
+      setParam('modal', 'detail');
+      setParam('tab', forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general'));
+      setParam('inspection', null);
+    } else {
+      setParam('facility', null);
+      setParam('modal', null);
+      setParam('tab', null);
+      setParam('inspection', null);
+    }
+
+    if (changed) {
+      const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
 
   // Wrapper: when local mode changes, notify parent
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
