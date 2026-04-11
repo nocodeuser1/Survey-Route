@@ -1213,6 +1213,24 @@ export default function FacilityDetailModal({
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Compliance Records</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
+                <p className="text-base font-medium mt-1 text-gray-900 dark:text-white">
+                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not set'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Field Visit Date</p>
+                <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">
+                  {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Photos Taken</p>
+                <p className="text-sm font-medium mt-1 text-gray-900 dark:text-white">
+                  {facility.photos_taken ? 'Yes' : 'No'}
+                </p>
+              </div>
               {facility.initial_inspection_completed && (
                 <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Initial Inspection</p>
