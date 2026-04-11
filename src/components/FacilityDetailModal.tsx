@@ -1206,19 +1206,16 @@ export default function FacilityDetailModal({
                 <Camera className="w-3.5 h-3.5" />
                 Photos Taken
               </p>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <p className="text-base font-medium text-gray-900 dark:text-white">
                   {facility.photos_taken ? 'Yes' : 'No'}
                 </p>
                 <button
                   onClick={togglePhotosTaken}
-                  className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
-                    facility.photos_taken 
-                      ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
-                  }`}
+                  className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                  title={facility.photos_taken ? 'Change to No' : 'Change to Yes'}
                 >
-                  {facility.photos_taken ? 'Mark No' : 'Mark Yes'}
+                  <Edit2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
