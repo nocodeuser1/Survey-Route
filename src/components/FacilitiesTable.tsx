@@ -247,7 +247,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setSelectedFacility(facility)}
-                        className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900 rounded transition-colors"
+                        className="w-8 h-8 flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900 rounded transition-colors"
                         title="View Details"
                       >
                         <Eye className="w-4 h-4" />
@@ -255,7 +255,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
                       {facilityInspection && (
                         <button
                           onClick={() => setViewingInspection(facilityInspection)}
-                          className="p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900 rounded transition-colors"
+                          className="w-8 h-8 flex items-center justify-center text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900 rounded transition-colors"
                           title="View Inspection"
                         >
                           <Maximize2 className="w-4 h-4" />
