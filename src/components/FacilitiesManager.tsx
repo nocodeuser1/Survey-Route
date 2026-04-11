@@ -224,6 +224,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (globalSurveyType === 'spcc_inspection') return 'inspection';
     return 'all';
   });
+  const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
   // Sync UI state to URL
@@ -399,7 +400,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [notesOverrides, setNotesOverrides] = useState<Record<string, string | null>>({});
   const [showNotesSymbols, setShowNotesSymbols] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
   const [isImporting, setIsImporting] = useState(false);
