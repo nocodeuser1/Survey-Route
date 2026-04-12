@@ -777,6 +777,10 @@ function App() {
     // only if we have 0 facilities to allow for the "loading" state to persist
     if (facilities.length === 0) {
       setIsLoadingFacilities(true);
+    } else {
+      // If we already have facilities, don't show the full white loading screen
+      // but still update things in the background
+      console.log('[loadData] Background refresh (facilities already exist)');
     }
     const loadStartTime = Date.now();
     console.log('[loadData] Starting data load for account:', currentAccount.id);
