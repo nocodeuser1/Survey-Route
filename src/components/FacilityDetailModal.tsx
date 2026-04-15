@@ -4,6 +4,7 @@ import {
   X,
   FileText,
   Plus,
+  Check,
   CheckCircle,
   AlertTriangle,
   Clock,
@@ -25,8 +26,9 @@ import {
   Droplets,
   Camera,
   RotateCw,
+  MessageSquare,
 } from 'lucide-react';
-import { supabase, Facility, Inspection, UserSettings } from '../lib/supabase';
+import { supabase, Facility, FacilityComment, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
@@ -39,6 +41,7 @@ import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { formatDayCount, getSPCCPlanStatus } from '../utils/spccStatus';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
+import { useAuth } from '../contexts/AuthContext';
 
 interface FacilityDetailModalProps {
   facility: Facility;
@@ -115,7 +118,15 @@ export default function FacilityDetailModal({
   onViewSPCCPlan,
   initialTab = 'general'
 }: FacilityDetailModalProps) {
+  const { user } = useAuth();
   const [inspections, setInspections] = useState<Inspection[]>([]);
+  const [facilityComments, setFacilityComments] = useState<FacilityComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentBody, setEditingCommentBody] = useState('');
   const [showInspectionForm, setShowInspectionForm] = useState(false);
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
   const [showNavigationPopup, setShowNavigationPopup] = useState(false);
@@ -150,6 +161,11 @@ export default function FacilityDetailModal({
   useEffect(() => {
     loadInspections();
     loadSettings();
+    loadComments();
+    setCommentsExpanded(false);
+    setNewComment('');
+    setEditingCommentId(null);
+    setEditingCommentBody('');
   }, [facility.id]);
 
   useEffect(() => {
@@ -200,6 +216,120 @@ export default function FacilityDetailModal({
       setInspections(data || []);
     } catch (err) {
       console.error('Error loading inspections:', err);
+    }
+  };
+
+  const loadComments = async () => {
+    try {
+      setCommentsLoading(true);
+      const { data, error } = await supabase
+        .from('facility_comments')
+        .select('*')
+        .eq('facility_id', facility.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setFacilityComments(data || []);
+    } catch (err) {
+      console.error('Error loading facility comments:', err);
+      setFacilityComments([]);
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  const currentAuthorName = user?.fullName || user?.email || 'User';
+  const latestComment = facilityComments[0] || null;
+  const commentCount = facilityComments.length;
+
+  const formatCommentTimestamp = (value: string) => {
+    const date = new Date(value);
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
+  const handleAddComment = async () => {
+    const body = newComment.trim();
+    if (!body || submittingComment) return;
+
+    try {
+      setSubmittingComment(true);
+      const { data, error } = await supabase
+        .from('facility_comments')
+        .insert({
+          facility_id: facility.id,
+          user_id: userId,
+          author_name: currentAuthorName,
+          body,
+        })
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      setFacilityComments((prev) => (data ? [data, ...prev] : prev));
+      setNewComment('');
+      setCommentsExpanded(true);
+    } catch (err) {
+      console.error('Error adding facility comment:', err);
+      alert('Failed to save comment. Please try again.');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const handleSaveCommentEdit = async (commentId: string) => {
+    const body = editingCommentBody.trim();
+    if (!body || submittingComment) return;
+
+    try {
+      setSubmittingComment(true);
+      const { data, error } = await supabase
+        .from('facility_comments')
+        .update({ body })
+        .eq('id', commentId)
+        .eq('user_id', userId)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      setFacilityComments((prev) => prev.map((comment) => comment.id === commentId ? data : comment));
+      setEditingCommentId(null);
+      setEditingCommentBody('');
+    } catch (err) {
+      console.error('Error updating facility comment:', err);
+      alert('Failed to update comment. Please try again.');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!window.confirm('Delete this comment?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('facility_comments')
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      setFacilityComments((prev) => prev.filter((comment) => comment.id !== commentId));
+      if (editingCommentId === commentId) {
+        setEditingCommentId(null);
+        setEditingCommentBody('');
+      }
+    } catch (err) {
+      console.error('Error deleting facility comment:', err);
+      alert('Failed to delete comment. Please try again.');
     }
   };
 
@@ -783,6 +913,197 @@ export default function FacilityDetailModal({
     <div className="space-y-6">
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-6">
         <div className="space-y-6">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                    <MessageSquare className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Facility Comments</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Quick team notes with timestamps, edit history, and author names.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCommentsExpanded((prev) => !prev)}
+                className="inline-flex items-center gap-2 self-start rounded-full border border-gray-200 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <span className="rounded-full bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 text-blue-700 dark:text-blue-300">
+                  {commentCount}
+                </span>
+                {commentsExpanded ? 'Hide thread' : 'View thread'}
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4">
+              <textarea
+                value={newComment}
+                onChange={(event) => setNewComment(event.target.value)}
+                placeholder="Leave a facility comment for your team..."
+                rows={3}
+                className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Comments are stamped with author name and date.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAddComment}
+                  disabled={!newComment.trim() || submittingComment}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  {submittingComment ? 'Saving...' : 'Add comment'}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCommentsExpanded(true)}
+              className="mt-4 w-full rounded-lg border border-transparent bg-gray-50 dark:bg-gray-700/40 p-4 text-left hover:border-gray-200 dark:hover:border-gray-600 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span className="font-semibold uppercase tracking-wide">Latest comment</span>
+                    <span>•</span>
+                    <span>{commentCount} total</span>
+                  </div>
+                  {latestComment ? (
+                    <>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {latestComment.author_name}
+                      </p>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">
+                        {latestComment.body}
+                      </p>
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        {formatCommentTimestamp(latestComment.created_at)}
+                        {latestComment.updated_at !== latestComment.created_at ? ' (edited)' : ''}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No comments yet. Add the first note for this facility.
+                    </p>
+                  )}
+                </div>
+                {commentsExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                )}
+              </div>
+            </button>
+
+            {commentsExpanded && (
+              <div className="mt-4 space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                {commentsLoading ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    Loading comments...
+                  </div>
+                ) : facilityComments.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    No comments yet for this facility.
+                  </div>
+                ) : (
+                  facilityComments.map((comment) => {
+                    const isEditing = editingCommentId === comment.id;
+                    const isOwner = comment.user_id === userId;
+
+                    return (
+                      <div
+                        key={comment.id}
+                        className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white">{comment.author_name}</p>
+                              <span className="text-xs text-gray-400">•</span>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {formatCommentTimestamp(comment.created_at)}
+                                {comment.updated_at !== comment.created_at ? ' (edited)' : ''}
+                              </p>
+                            </div>
+
+                            {isEditing ? (
+                              <div className="mt-3 space-y-3">
+                                <textarea
+                                  value={editingCommentBody}
+                                  onChange={(event) => setEditingCommentBody(event.target.value)}
+                                  rows={3}
+                                  className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/40 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveCommentEdit(comment.id)}
+                                    disabled={!editingCommentBody.trim() || submittingComment}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingCommentId(null);
+                                      setEditingCommentBody('');
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                  >
+                                    <X className="w-4 h-4" />
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                {comment.body}
+                              </p>
+                            )}
+                          </div>
+
+                          {isOwner && !isEditing && (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCommentId(comment.id);
+                                  setEditingCommentBody(comment.body);
+                                }}
+                                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                                title="Edit comment"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteComment(comment.id)}
+                                className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                title="Delete comment"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
               <div>

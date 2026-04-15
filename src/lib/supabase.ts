@@ -99,6 +99,16 @@ export interface FacilityDocument {
   uploaded_at: string;
 }
 
+export interface FacilityComment {
+  id: string;
+  facility_id: string;
+  user_id: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HomeBase {
   id: string;
   user_id: string;
