@@ -3180,17 +3180,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         {/* Sold toggle */}
                         <button
                           onClick={() => setShowSoldFacilities(!showSoldFacilities)}
-                          className={`flex items-center justify-between w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${showSoldFacilities
+                          className={`flex min-h-[56px] w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-colors ${showSoldFacilities
                             ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            : 'bg-gray-50 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                         >
-                          <span className="flex items-center gap-2">
-                            <DollarSign className="w-3.5 h-3.5" />
-                            Show Sold Facilities
+                          <span className="flex min-w-0 items-center gap-2.5 text-left">
+                            <DollarSign className="h-4 w-4 flex-shrink-0" />
+                            <span className="leading-none">Show Sold Facilities</span>
                           </span>
-                          <div className={`w-8 h-4.5 rounded-full relative transition-colors ${showSoldFacilities ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                            <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${showSoldFacilities ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          <div
+                            className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${showSoldFacilities ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          >
+                            <div
+                              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${showSoldFacilities ? 'translate-x-4' : 'translate-x-0'}`}
+                            />
                           </div>
                         </button>
                       </div>
