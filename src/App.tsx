@@ -556,7 +556,7 @@ function App() {
     };
   }, [currentAccount?.id, isInspectionFormActive, navigationMode]);
 
-  // Real-time subscription for facility changes (SPCC plan uploads, status updates)
+  // Real-time subscription for facility changes (SPCC plan uploads, status updates, new/deleted)
   useEffect(() => {
     if (!currentAccount?.id) return;
 
@@ -565,17 +565,33 @@ function App() {
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'facilities',
           filter: `account_id=eq.${currentAccount.id}`,
         },
         (payload) => {
-          console.log('[App] Real-time facility change:', payload.new.id);
-          setFacilities(prev =>
-            prev.map(f => f.id === payload.new.id ? { ...f, ...payload.new as Facility } : f)
-          );
-          setRouteVersion(prev => prev + 1);
+          if (payload.eventType === 'INSERT') {
+            console.log('[App] Real-time facility INSERT:', payload.new.id);
+            setFacilities(prev => {
+              // Guard against duplicate if optimistic update already added it
+              if (prev.some(f => f.id === payload.new.id)) {
+                return prev.map(f => f.id === payload.new.id ? { ...f, ...payload.new as Facility } : f);
+              }
+              return [...prev, payload.new as Facility];
+            });
+            setRouteVersion(prev => prev + 1);
+          } else if (payload.eventType === 'UPDATE') {
+            console.log('[App] Real-time facility UPDATE:', payload.new.id);
+            setFacilities(prev =>
+              prev.map(f => f.id === payload.new.id ? { ...f, ...payload.new as Facility } : f)
+            );
+            setRouteVersion(prev => prev + 1);
+          } else if (payload.eventType === 'DELETE') {
+            console.log('[App] Real-time facility DELETE:', payload.old.id);
+            setFacilities(prev => prev.filter(f => f.id !== payload.old.id));
+            setRouteVersion(prev => prev + 1);
+          }
         }
       )
       .subscribe();

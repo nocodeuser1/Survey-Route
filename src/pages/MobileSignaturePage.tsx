@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, MapPin, CheckCircle, AlertTriangle, Trash2, Monitor, LogIn, Sparkles, Route, RotateCcw } from 'lucide-react';
+import { Save, CheckCircle, AlertTriangle, Trash2, Monitor, LogIn, Sparkles, Route, RotateCcw } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 type PageState = 'loading' | 'ready' | 'saving' | 'success' | 'expired' | 'error';
@@ -116,7 +116,6 @@ export default function MobileSignaturePage() {
       const canvas = sc.getCanvas();
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        const dpr = window.devicePixelRatio || 1;
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = '#fff';

@@ -1,6 +1,6 @@
 import { CheckCircle, Clock, AlertTriangle, FileText } from 'lucide-react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getStatusBadgeConfig, formatDayCount, type SPCCStatusFacility } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, shouldShowSPCCWorkflowStatus, type SPCCStatusFacility } from '../utils/spccStatus';
 
 interface SPCCStatusBadgeProps {
   facility: SPCCStatusFacility;
@@ -25,22 +25,38 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
   const config = getStatusBadgeConfig(result.status);
   const Icon = iconMap[config.icon];
   const colors = darkMode ? config.darkColorClass : config.colorClass;
+  const workflowVisible = shouldShowSPCCWorkflowStatus(facility);
+  const workflowConfig = facility.spcc_workflow_status
+    ? getSPCCWorkflowBadgeConfig(facility.spcc_workflow_status)
+    : null;
+  const workflowColors = workflowConfig
+    ? darkMode
+      ? workflowConfig.darkColorClass
+      : workflowConfig.colorClass
+    : '';
 
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colors} ${className}`}
-      title={result.message}
-    >
-      <Icon className="w-3 h-3" />
-      <span>{config.label}</span>
-      {showMessage && result.daysUntilDue !== null && result.status !== 'valid' && result.status !== 'recertified' && result.status !== 'no_ip_date' && (
-        <span className="opacity-75">
-          {result.status === 'no_plan'
-            ? `(Due in ${formatDayCount(result.daysUntilDue)})`
-            : `(${result.daysUntilDue > 0 ? formatDayCount(result.daysUntilDue) : `${formatDayCount(Math.abs(result.daysUntilDue))} ago`})`
-          }
+    <div className={`inline-flex flex-col items-start gap-1 ${className}`}>
+      <span
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colors}`}
+        title={result.message}
+      >
+        <Icon className="w-3 h-3" />
+        <span>{config.label}</span>
+        {showMessage && result.daysUntilDue !== null && result.status !== 'valid' && result.status !== 'recertified' && result.status !== 'no_ip_date' && (
+          <span className="opacity-75">
+            {result.status === 'no_plan'
+              ? `(Due in ${formatDayCount(result.daysUntilDue)})`
+              : `(${result.daysUntilDue > 0 ? formatDayCount(result.daysUntilDue) : `${formatDayCount(Math.abs(result.daysUntilDue))} ago`})`
+            }
+          </span>
+        )}
+      </span>
+      {workflowVisible && workflowConfig && (
+        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium ${workflowColors}`}>
+          <span>{workflowConfig.label}</span>
         </span>
       )}
-    </span>
+    </div>
   );
 }

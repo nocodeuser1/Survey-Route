@@ -81,6 +81,7 @@ export default function SPCCPlanUploadModal({ isOpen, onClose, facility, onUploa
                 .update({
                     spcc_plan_url: publicUrl,
                     spcc_pe_stamp_date: peStampDate,
+                    spcc_workflow_status: 'pe_stamped',
                 })
                 .eq('id', facility.id);
 

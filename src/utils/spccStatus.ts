@@ -26,11 +26,50 @@ export interface SPCCStatusResult {
   hasPlan: boolean;
 }
 
+export type SPCCWorkflowStatus =
+  | 'awaiting_pe_stamp'
+  | 'pe_stamped'
+  | 'completed_uploaded';
+
 export interface SPCCStatusFacility {
   first_prod_date?: string | null;
   spcc_plan_url?: string | null;
   spcc_pe_stamp_date?: string | null;
   recertified_date?: string | null;
+  spcc_workflow_status?: SPCCWorkflowStatus | null;
+}
+
+export interface SPCCWorkflowBadgeConfig {
+  label: string;
+  colorClass: string;
+  darkColorClass: string;
+}
+
+export function getSPCCWorkflowBadgeConfig(status: SPCCWorkflowStatus): SPCCWorkflowBadgeConfig {
+  switch (status) {
+    case 'awaiting_pe_stamp':
+      return {
+        label: 'Awaiting PE Stamp',
+        colorClass: 'bg-blue-100 text-blue-700',
+        darkColorClass: 'bg-blue-900/30 text-blue-300',
+      };
+    case 'pe_stamped':
+      return {
+        label: 'PE Stamped',
+        colorClass: 'bg-violet-100 text-violet-700',
+        darkColorClass: 'bg-violet-900/30 text-violet-300',
+      };
+    case 'completed_uploaded':
+      return {
+        label: 'Completed / Uploaded',
+        colorClass: 'bg-emerald-100 text-emerald-700',
+        darkColorClass: 'bg-emerald-900/30 text-emerald-300',
+      };
+  }
+}
+
+export function shouldShowSPCCWorkflowStatus(facility: SPCCStatusFacility): boolean {
+  return !!facility.spcc_workflow_status;
 }
 
 /** Format a day count into a readable duration (e.g. "2y 45d" or "23d") */

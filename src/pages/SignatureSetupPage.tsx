@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Save, RefreshCw, CheckCircle, AlertCircle, ArrowLeft, MapPin, Shield, Smartphone, RotateCw, Trash2, Clock, QrCode, X } from 'lucide-react';
+import { Save, CheckCircle, MapPin, Shield, Smartphone, RotateCw, Trash2, Clock, QrCode, X } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';

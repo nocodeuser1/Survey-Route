@@ -428,6 +428,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   } | null>(null);
   const [mobileTooltipId, setMobileTooltipId] = useState<string | null>(null);
   const [surveyViewFacility, setSurveyViewFacility] = useState<Facility | null>(null);
+  const effectiveReportType = spccMode === 'plan'
+    ? 'spcc_plan'
+    : spccMode === 'inspection' && (selectedReportType === 'all' || selectedReportType === 'spcc_plan')
+      ? 'spcc_inspection'
+      : selectedReportType;
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
 
@@ -707,6 +712,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       console.error('Error saving report type preference:', err);
     }
   };
+
+  useEffect(() => {
+    if (spccMode === 'plan' && selectedReportType !== 'spcc_plan') {
+      setSelectedReportType('spcc_plan');
+      return;
+    }
+
+    if (spccMode === 'inspection' && (selectedReportType === 'all' || selectedReportType === 'spcc_plan')) {
+      setSelectedReportType('spcc_inspection');
+    }
+  }, [spccMode, selectedReportType]);
 
   useEffect(() => {
     loadInspections();
@@ -3149,7 +3165,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           )}
                         </select>
                         <select
-                          value={selectedReportType}
+                          value={effectiveReportType}
                           onChange={(e) => handleReportTypeChange(e.target.value as any)}
                           className="form-select w-full text-sm"
                           title="Filter by report type"
@@ -3174,8 +3190,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           <option value="name">Sort by Name</option>
                           <option value="latitude">Sort by Latitude</option>
                           <option value="longitude">Sort by Longitude</option>
-                          <option value="spcc_status">Sort by SPCC Status</option>
-                          <option value="inspection_status">Sort by Inspection Status</option>
+                          {spccMode !== 'inspection' && <option value="spcc_due_date">Sort by SPCC Due Date</option>}
+                          {spccMode !== 'inspection' && <option value="spcc_status">Sort by SPCC Status</option>}
+                          {spccMode !== 'plan' && <option value="spcc_inspection_date">Sort by SPCC Inspection Date</option>}
+                          {spccMode !== 'plan' && <option value="inspection_status">Sort by Inspection Status</option>}
                         </select>
                         {/* Sold toggle */}
                         <button

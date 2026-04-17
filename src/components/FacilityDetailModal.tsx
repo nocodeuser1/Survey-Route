@@ -38,7 +38,7 @@ import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
 import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
-import { formatDayCount, getSPCCPlanStatus } from '../utils/spccStatus';
+import { formatDayCount, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import { useAuth } from '../contexts/AuthContext';
@@ -141,6 +141,8 @@ export default function FacilityDetailModal({
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDate(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : '');
+  const [workflowStatus, setWorkflowStatus] = useState<SPCCWorkflowStatus | ''>(facility.spcc_workflow_status || '');
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [editingOil, setEditingOil] = useState(false);
   const [oilValue, setOilValue] = useState(facility.estimated_oil_per_day?.toString() || '');
   const [editingVisitDate, setEditingVisitDate] = useState(false);
@@ -167,6 +169,10 @@ export default function FacilityDetailModal({
     setEditingCommentId(null);
     setEditingCommentBody('');
   }, [facility.id]);
+
+  useEffect(() => {
+    setWorkflowStatus(facility.spcc_workflow_status || '');
+  }, [facility.spcc_workflow_status]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -485,17 +491,45 @@ export default function FacilityDetailModal({
     if (peDateValue && !isoDate) return;
     setSavingDate(true);
     try {
+      const nextWorkflowStatus = isoDate
+        ? (facility.spcc_workflow_status === 'completed_uploaded' ? 'completed_uploaded' : 'pe_stamped')
+        : (facility.spcc_workflow_status === 'pe_stamped' ? null : facility.spcc_workflow_status ?? null);
+
       const { error } = await supabase
         .from('facilities')
-        .update({ spcc_pe_stamp_date: isoDate })
+        .update({
+          spcc_pe_stamp_date: isoDate,
+          spcc_workflow_status: nextWorkflowStatus,
+        })
         .eq('id', facility.id);
       if (error) throw error;
       facility.spcc_pe_stamp_date = isoDate;
+      facility.spcc_workflow_status = nextWorkflowStatus;
+      setWorkflowStatus(nextWorkflowStatus || '');
       setEditingPeDate(false);
     } catch (err) {
       console.error('Error saving PE stamp date:', err);
     } finally {
       setSavingDate(false);
+    }
+  };
+
+  const handleSaveWorkflowStatus = async (nextStatus: string) => {
+    const normalizedStatus = (nextStatus || null) as SPCCWorkflowStatus | null;
+    setWorkflowStatus((nextStatus as SPCCWorkflowStatus) || '');
+    setSavingWorkflow(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ spcc_workflow_status: normalizedStatus })
+        .eq('id', facility.id);
+      if (error) throw error;
+      facility.spcc_workflow_status = normalizedStatus;
+    } catch (err) {
+      console.error('Error saving SPCC workflow status:', err);
+      setWorkflowStatus(facility.spcc_workflow_status || '');
+    } finally {
+      setSavingWorkflow(false);
     }
   };
 
@@ -1340,6 +1374,7 @@ export default function FacilityDetailModal({
     };
     const statusKey = spccStatus.status as keyof typeof statusConfig;
     const config = statusConfig[statusKey] || statusConfig.no_plan;
+    const workflowConfig = workflowStatus ? getSPCCWorkflowBadgeConfig(workflowStatus) : null;
     const StatusIcon = config.icon;
 
     return (
@@ -1356,6 +1391,35 @@ export default function FacilityDetailModal({
             <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${config.color}`}>
               {config.label}
             </span>
+          </div>
+
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-700/40">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Workflow Status</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {workflowConfig ? (
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${workflowConfig.colorClass} dark:bg-transparent ${workflowConfig.darkColorClass}`}>
+                      {workflowConfig.label}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Not set</span>
+                  )}
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Manual workflow only. Renewal status still updates automatically from the PE stamp date.</span>
+                </div>
+              </div>
+              <select
+                value={workflowStatus}
+                onChange={(e) => handleSaveWorkflowStatus(e.target.value)}
+                disabled={savingWorkflow}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white disabled:opacity-60"
+              >
+                <option value="">Workflow Status - None</option>
+                <option value="awaiting_pe_stamp">Awaiting PE Stamp</option>
+                <option value="pe_stamped">PE Stamped</option>
+                <option value="completed_uploaded">Completed / Uploaded</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

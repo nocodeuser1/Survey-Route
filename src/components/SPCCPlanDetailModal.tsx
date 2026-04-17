@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import SPCCPlanUploadModal from './SPCCPlanUploadModal';
 
@@ -230,6 +230,8 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
+  const [workflowStatus, setWorkflowStatus] = useState<SPCCWorkflowStatus | ''>(facility.spcc_workflow_status || '');
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedIpDate, setSavedIpDate] = useState<string | null>(null);
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
@@ -247,6 +249,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     setSavedPeDate(null);
   }, [facility.spcc_pe_stamp_date]);
 
+  useEffect(() => {
+    setWorkflowStatus(facility.spcc_workflow_status || '');
+  }, [facility.spcc_workflow_status]);
+
   // Use optimistic values so status/badge update immediately after save
   const effectiveFacility = {
     ...facility,
@@ -255,6 +261,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   };
   const status = getSPCCPlanStatus(effectiveFacility);
   const badgeConfig = getStatusBadgeConfig(status.status);
+  const workflowConfig = workflowStatus ? getSPCCWorkflowBadgeConfig(workflowStatus) : null;
   const StatusIcon = statusIconMap[badgeConfig.icon];
 
   const copyViewerLink = () => {
@@ -290,18 +297,45 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     if (peDateValue && !isoDate) return; // invalid format, don't save
     setSaving(true);
     try {
+      const nextWorkflowStatus = isoDate
+        ? (facility.spcc_workflow_status === 'completed_uploaded' ? 'completed_uploaded' : 'pe_stamped')
+        : (facility.spcc_workflow_status === 'pe_stamped' ? null : facility.spcc_workflow_status ?? null);
+
       const { error } = await supabase
         .from('facilities')
-        .update({ spcc_pe_stamp_date: isoDate })
+        .update({
+          spcc_pe_stamp_date: isoDate,
+          spcc_workflow_status: nextWorkflowStatus,
+        })
         .eq('id', facility.id);
       if (error) throw error;
       setSavedPeDate(isoDate);
+      setWorkflowStatus(nextWorkflowStatus || '');
       setEditingPeDate(false);
       onFacilitiesChange();
     } catch (err) {
       console.error('Error saving PE stamp date:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleWorkflowStatusChange = async (nextStatus: string) => {
+    const normalizedStatus = (nextStatus || null) as SPCCWorkflowStatus | null;
+    setWorkflowStatus((nextStatus as SPCCWorkflowStatus) || '');
+    setSavingWorkflow(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ spcc_workflow_status: normalizedStatus })
+        .eq('id', facility.id);
+      if (error) throw error;
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error saving SPCC workflow status:', err);
+      setWorkflowStatus(facility.spcc_workflow_status || '');
+    } finally {
+      setSavingWorkflow(false);
     }
   };
 
@@ -343,7 +377,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               )}
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+                className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -358,6 +392,34 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
             <div>
               <div className="text-lg font-bold">{badgeConfig.label}</div>
               <div className="text-sm opacity-90">{status.message}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl bg-white/10 p-3 backdrop-blur-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider opacity-80">Workflow Status</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {workflowConfig ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white">
+                      {workflowConfig.label}
+                    </span>
+                  ) : (
+                    <span className="text-sm opacity-80">Not set</span>
+                  )}
+                </div>
+              </div>
+              <select
+                value={workflowStatus}
+                onChange={(e) => handleWorkflowStatusChange(e.target.value)}
+                disabled={savingWorkflow}
+                className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none transition disabled:opacity-60"
+              >
+                <option value="" className="text-gray-900">Workflow Status - None</option>
+                <option value="awaiting_pe_stamp" className="text-gray-900">Awaiting PE Stamp</option>
+                <option value="pe_stamped" className="text-gray-900">PE Stamped</option>
+                <option value="completed_uploaded" className="text-gray-900">Completed / Uploaded</option>
+              </select>
             </div>
           </div>
         </div>
@@ -492,7 +554,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                     })()}
                     <button
                       onClick={() => setEditingIpDate(true)}
-                      className={`p-1 rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                      className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
                       title="Edit IP date"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -563,7 +625,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                     })()}
                     <button
                       onClick={() => setEditingPeDate(true)}
-                      className={`p-1 rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                      className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
                       title="Edit PE stamp date"
                     >
                       <Edit2 className="w-3.5 h-3.5" />

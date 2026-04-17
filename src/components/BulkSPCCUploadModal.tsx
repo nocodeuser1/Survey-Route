@@ -265,6 +265,7 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
           .update({
             spcc_plan_url: publicUrl,
             spcc_pe_stamp_date: peDate,
+            spcc_workflow_status: 'pe_stamped',
           })
           .eq('id', facilityId);
         if (updateError) throw updateError;
