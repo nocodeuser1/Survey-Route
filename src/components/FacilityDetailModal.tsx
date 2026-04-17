@@ -977,8 +977,186 @@ export default function FacilityDetailModal({
     <div className="space-y-6">
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-6">
         <div className="space-y-6">
+
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Facility Details</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Structured facility information and production metadata.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Coordinates</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Region / County</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.county || 'Not available'}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Camino Facility ID</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.camino_facility_id || 'Not available'}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Startup / First Production Date</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not available'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not available'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Well Count</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{wells.length}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Address</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.address || 'No address available'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Well Numbers</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Wells and API identifiers associated with this facility.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300">
+                {wells.length} listed
+              </span>
+            </div>
+
+            {wells.length > 0 ? (
+              <div className="space-y-3">
+                {wells.map((well) => (
+                  <div
+                    key={well.index}
+                    className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{well.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Well {well.index}</p>
+                      </div>
+                      <div className="text-sm text-gray-700 dark:text-gray-200">
+                        API: <span className="font-mono">{well.api || 'Not available'}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                No well numbers are available for this facility.
+              </div>
+            )}
+          </div>
+
+          {(facility.matched_facility_name || facility.api_numbers_combined || facility.field_visit_date || facility.notes) && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+              <button
+                onClick={() => setShowExtendedDetails(!showExtendedDetails)}
+                className="w-full flex items-center justify-between gap-3 text-left"
+              >
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Additional Details</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Supplemental facility metadata from imported records.
+                  </p>
+                </div>
+                {showExtendedDetails ? (
+                  <ChevronUp className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                )}
+              </button>
+
+              {showExtendedDetails && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {facility.matched_facility_name && (
+                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Matched Name</p>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.matched_facility_name}</p>
+                    </div>
+                  )}
+                  {facility.api_numbers_combined && (
+                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Combined API</p>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white font-mono break-all">{facility.api_numbers_combined}</p>
+                    </div>
+                  )}
+                  {facility.field_visit_date && (
+                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Field Visit Date</p>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{formatDate(facility.field_visit_date)}</p>
+                    </div>
+                  )}
+                  {facility.notes && (
+                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Notes</p>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white whitespace-pre-wrap">{facility.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Regulations</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Applicable compliance records for this facility.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {derivedRegulations.map((regulation) => (
+                <div
+                  key={regulation.name}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{regulation.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{regulation.notes}</p>
+                    </div>
+                    <span className="px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">
+                      {regulation.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <CalendarDays className="w-4 h-4" />
+                    <span>
+                      Effective Date:{' '}
+                      {regulation.effectiveDate ? formatDate(regulation.effectiveDate) : 'Not available'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
               <div>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
@@ -1166,183 +1344,6 @@ export default function FacilityDetailModal({
                 )}
               </div>
             )}
-          </div>
-
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Facility Details</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Structured facility information and production metadata.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Coordinates</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                  {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Region / County</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.county || 'Not available'}</p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Camino Facility ID</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.camino_facility_id || 'Not available'}</p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Startup / First Production Date</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                  {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not available'}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not available'}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Well Count</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{wells.length}</p>
-              </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Address</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.address || 'No address available'}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-4 mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Well Numbers</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Wells and API identifiers associated with this facility.
-                </p>
-              </div>
-              <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300">
-                {wells.length} listed
-              </span>
-            </div>
-
-            {wells.length > 0 ? (
-              <div className="space-y-3">
-                {wells.map((well) => (
-                  <div
-                    key={well.index}
-                    className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{well.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Well {well.index}</p>
-                      </div>
-                      <div className="text-sm text-gray-700 dark:text-gray-200">
-                        API: <span className="font-mono">{well.api || 'Not available'}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                No well numbers are available for this facility.
-              </div>
-            )}
-          </div>
-
-          {(facility.matched_facility_name || facility.api_numbers_combined || facility.field_visit_date || facility.notes) && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-              <button
-                onClick={() => setShowExtendedDetails(!showExtendedDetails)}
-                className="w-full flex items-center justify-between gap-3 text-left"
-              >
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Additional Details</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Supplemental facility metadata from imported records.
-                  </p>
-                </div>
-                {showExtendedDetails ? (
-                  <ChevronUp className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                )}
-              </button>
-
-              {showExtendedDetails && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {facility.matched_facility_name && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Matched Name</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.matched_facility_name}</p>
-                    </div>
-                  )}
-                  {facility.api_numbers_combined && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Combined API</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white font-mono break-all">{facility.api_numbers_combined}</p>
-                    </div>
-                  )}
-                  {facility.field_visit_date && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Field Visit Date</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{formatDate(facility.field_visit_date)}</p>
-                    </div>
-                  )}
-                  {facility.notes && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Notes</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white whitespace-pre-wrap">{facility.notes}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-6">
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-blue-600 dark:text-blue-300" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Regulations</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Applicable compliance records for this facility.</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {derivedRegulations.map((regulation) => (
-                <div
-                  key={regulation.name}
-                  className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{regulation.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{regulation.notes}</p>
-                    </div>
-                    <span className="px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">
-                      {regulation.status}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <CalendarDays className="w-4 h-4" />
-                    <span>
-                      Effective Date:{' '}
-                      {regulation.effectiveDate ? formatDate(regulation.effectiveDate) : 'Not available'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
