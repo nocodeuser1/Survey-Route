@@ -209,7 +209,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showUpload, setShowUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(facPrefs.search_query || '');
-  const [statusFilter, setStatusFilter] = useState<string>((facPrefs.status_filter as string) || 'all');
+  const [statusFilters, setStatusFilters] = useState<string[]>(() => {
+    const stored = (facPrefs.status_filter as string) || 'all';
+    if (!stored || stored === 'all') return [];
+    try { const p = JSON.parse(stored); return Array.isArray(p) ? p : [stored]; } catch { return [stored]; }
+  });
   const [sortColumn, setSortColumn] = useState<ColumnId | null>((facPrefs.sort_column as ColumnId) || 'name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(facPrefs.sort_direction);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
@@ -683,7 +687,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [initialFacilityToEdit]);
 
   // Determine if any filter is active (for indicator badge)
-  const hasActiveFilter = statusFilter !== 'all' || selectedReportType !== 'all' || showSoldFacilities || spccPlanFilter !== 'all';
+  const hasActiveFilter = statusFilters.length > 0 || selectedReportType !== 'all' || showSoldFacilities || spccPlanFilter !== 'all';
+
+  const toggleStatusFilter = (value: string) => {
+    setStatusFilters(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
+  };
 
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
@@ -762,11 +770,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   useEffect(() => {
     updateFacPrefs({
       search_query: searchQuery,
-      status_filter: statusFilter,
+      status_filter: statusFilters.length > 0 ? JSON.stringify(statusFilters) : 'all',
       spcc_plan_filter: spccPlanFilter,
       show_sold_facilities: showSoldFacilities,
     });
-  }, [searchQuery, statusFilter, spccPlanFilter, showSoldFacilities]);
+  }, [searchQuery, statusFilters, spccPlanFilter, showSoldFacilities]);
 
   // Close edit modal on Escape key
   useEffect(() => {
@@ -948,45 +956,26 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (isSold) return false;
       }
 
-      // Status filter - mode-aware
+      // Status filter - mode-aware, multi-select (empty = all)
       let matchesStatus = true;
-      if (statusFilter !== 'all') {
+      if (statusFilters.length > 0) {
         if (spccMode === 'plan') {
-          // Plan-specific status filtering
           const planResult = getSPCCPlanStatus(facility);
-          switch (statusFilter) {
-            case 'plan_overdue':
-              matchesStatus = planResult.status === 'initial_overdue';
-              break;
-            case 'plan_expired':
-              matchesStatus = planResult.status === 'expired';
-              break;
-            case 'plan_expiring':
-              matchesStatus = planResult.status === 'expiring' || planResult.status === 'renewal_due';
-              break;
-            case 'plan_upcoming':
-              matchesStatus = planResult.status === 'no_plan' || planResult.status === 'initial_due';
-              break;
-            case 'plan_valid':
-              matchesStatus = planResult.status === 'valid';
-              break;
-            case 'plan_recertified':
-              matchesStatus = planResult.status === 'recertified';
-              break;
-            case 'plan_no_ip':
-              matchesStatus = planResult.status === 'no_ip_date';
-              break;
-            case 'pending':
-              // Legacy: pending in plan mode = upcoming + due soon
-              matchesStatus = planResult.status === 'no_plan' || planResult.status === 'initial_due';
-              break;
-            default:
-              matchesStatus = true;
-          }
+          matchesStatus = statusFilters.some(sf => {
+            switch (sf) {
+              case 'plan_overdue': return planResult.status === 'initial_overdue';
+              case 'plan_expired': return planResult.status === 'expired';
+              case 'plan_expiring': return planResult.status === 'expiring' || planResult.status === 'renewal_due';
+              case 'plan_upcoming': return planResult.status === 'no_plan' || planResult.status === 'initial_due';
+              case 'plan_valid': return planResult.status === 'valid';
+              case 'plan_recertified': return planResult.status === 'recertified';
+              case 'plan_no_ip': return planResult.status === 'no_ip_date';
+              default: return false;
+            }
+          });
         } else {
-          // Inspection-specific status filtering
           const inspStatus = getInspectionStatus(facility);
-          matchesStatus = inspStatus === statusFilter;
+          matchesStatus = statusFilters.includes(inspStatus);
         }
       }
 
@@ -3140,61 +3129,74 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         onClick={() => setShowFilters(false)}
                       />
                       <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-0 sm:top-auto w-auto sm:w-64 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3">
-                        <select
-                          value={statusFilter}
-                          onChange={(e) => setStatusFilter(e.target.value)}
-                          className="form-select w-full text-sm"
-                        >
-                          <option value="all">All Status</option>
-                          {spccMode === 'plan' ? (
-                            <>
-                              <option value="plan_overdue">Overdue</option>
-                              <option value="plan_expired">Expired</option>
-                              <option value="plan_expiring">Expiring</option>
-                              <option value="plan_upcoming">Upcoming / Due Soon</option>
-                              <option value="plan_valid">SPCC Valid</option>
-                              <option value="plan_recertified">SPCC Recertified</option>
-                              <option value="plan_no_ip">No IP Date</option>
-                            </>
-                          ) : (
-                            <>
-                              <option value="inspected">Inspected</option>
-                              <option value="pending">Pending</option>
-                              <option value="expired">Expired</option>
-                            </>
-                          )}
-                        </select>
-                        <select
-                          value={effectiveReportType}
-                          onChange={(e) => handleReportTypeChange(e.target.value as any)}
-                          className="form-select w-full text-sm"
-                          title="Filter by report type"
-                        >
-                          <option value="all">Report Type: All</option>
-                          {spccMode !== 'inspection' && (
-                            <option value="spcc_plan">Report Type: SPCC Plan</option>
-                          )}
-                          {spccMode !== 'plan' && (
-                            <>
-                              <option value="spcc_inspection">Report Type: SPCC Inspection</option>
-                              <option value="spcc_inspection_internal">Report Type: SPCC Inspection Internal</option>
-                              <option value="spcc_inspection_external">Report Type: SPCC Inspection External</option>
-                            </>
-                          )}
-                        </select>
-                        <select
-                          value={sortColumn || 'name'}
-                          onChange={(e) => setSortColumn(e.target.value as ColumnId)}
-                          className="form-select w-full text-sm"
-                        >
-                          <option value="name">Sort by Name</option>
-                          <option value="latitude">Sort by Latitude</option>
-                          <option value="longitude">Sort by Longitude</option>
-                          {spccMode !== 'inspection' && <option value="spcc_due_date">Sort by SPCC Due Date</option>}
-                          {spccMode !== 'inspection' && <option value="spcc_status">Sort by SPCC Status</option>}
-                          {spccMode !== 'plan' && <option value="spcc_inspection_date">Sort by SPCC Inspection Date</option>}
-                          {spccMode !== 'plan' && <option value="inspection_status">Sort by Inspection Status</option>}
-                        </select>
+                        {/* Status — multi-select checkboxes */}
+                        <div className="flex flex-col gap-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</p>
+                          <div className="flex flex-col gap-1">
+                            {(spccMode === 'plan' ? [
+                              { value: 'plan_overdue', label: 'Overdue' },
+                              { value: 'plan_expired', label: 'Expired' },
+                              { value: 'plan_expiring', label: 'Expiring' },
+                              { value: 'plan_upcoming', label: 'Upcoming / Due Soon' },
+                              { value: 'plan_valid', label: 'SPCC Valid' },
+                              { value: 'plan_recertified', label: 'SPCC Recertified' },
+                              { value: 'plan_no_ip', label: 'No IP Date' },
+                            ] : [
+                              { value: 'inspected', label: 'Inspected' },
+                              { value: 'pending', label: 'Pending' },
+                              { value: 'expired', label: 'Expired' },
+                            ]).map(opt => (
+                              <label key={opt.value} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200 cursor-pointer select-none rounded px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700">
+                                <input
+                                  type="checkbox"
+                                  checked={statusFilters.includes(opt.value)}
+                                  onChange={() => toggleStatusFilter(opt.value)}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                {opt.label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Report Type */}
+                        <div className="flex flex-col gap-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Report Type</p>
+                          <select
+                            value={effectiveReportType}
+                            onChange={(e) => handleReportTypeChange(e.target.value as any)}
+                            className="form-select w-full text-sm"
+                            title="Filter by report type"
+                          >
+                            <option value="all">All</option>
+                            {spccMode !== 'inspection' && (
+                              <option value="spcc_plan">SPCC Plan</option>
+                            )}
+                            {spccMode !== 'plan' && (
+                              <>
+                                <option value="spcc_inspection">SPCC Inspection</option>
+                                <option value="spcc_inspection_internal">SPCC Inspection Internal</option>
+                                <option value="spcc_inspection_external">SPCC Inspection External</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+                        {/* Sort By */}
+                        <div className="flex flex-col gap-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Sort By</p>
+                          <select
+                            value={sortColumn || 'name'}
+                            onChange={(e) => setSortColumn(e.target.value as ColumnId)}
+                            className="form-select w-full text-sm"
+                          >
+                            <option value="name">Name</option>
+                            <option value="latitude">Latitude</option>
+                            <option value="longitude">Longitude</option>
+                            {spccMode !== 'inspection' && <option value="spcc_due_date">SPCC Due Date</option>}
+                            {spccMode !== 'inspection' && <option value="spcc_status">SPCC Status</option>}
+                            {spccMode !== 'plan' && <option value="spcc_inspection_date">SPCC Inspection Date</option>}
+                            {spccMode !== 'plan' && <option value="inspection_status">Inspection Status</option>}
+                          </select>
+                        </div>
                         {/* Sold toggle */}
                         <button
                           onClick={() => setShowSoldFacilities(!showSoldFacilities)}
