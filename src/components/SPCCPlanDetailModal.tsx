@@ -357,7 +357,22 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 <ShieldCheck className="w-5 h-5 flex-shrink-0 opacity-80" />
                 <span className="text-xs font-medium uppercase tracking-wider opacity-80">SPCC Plan</span>
               </div>
-              <h2 className="text-xl font-bold truncate">{facility.name}</h2>
+              <h2
+                className="text-xl font-bold truncate cursor-default select-text"
+                title={facility.name}
+                onClick={(e) => {
+                  const el = e.currentTarget;
+                  if (el.classList.contains('truncate')) {
+                    el.classList.remove('truncate');
+                    el.classList.add('whitespace-normal', 'break-words');
+                  } else {
+                    el.classList.add('truncate');
+                    el.classList.remove('whitespace-normal', 'break-words');
+                  }
+                }}
+              >
+                {facility.name}
+              </h2>
               <p className="text-sm opacity-80 mt-0.5">
                 {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
               </p>

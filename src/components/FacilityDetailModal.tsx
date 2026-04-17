@@ -1861,7 +1861,23 @@ export default function FacilityDetailModal({
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-2xl font-bold">{facility.name}</h2>
+                  <h2
+                    className="text-2xl font-bold truncate max-w-[16rem] sm:max-w-xs md:max-w-sm lg:max-w-md cursor-default select-text"
+                    title={facility.name}
+                    onClick={(e) => {
+                      // Mobile: tap once to expand/collapse full name
+                      const el = e.currentTarget;
+                      if (el.classList.contains('truncate')) {
+                        el.classList.remove('truncate');
+                        el.classList.add('whitespace-normal', 'break-words');
+                      } else {
+                        el.classList.add('truncate');
+                        el.classList.remove('whitespace-normal', 'break-words');
+                      }
+                    }}
+                  >
+                    {facility.name}
+                  </h2>
                   
                   {onViewSPCCPlan ? (
                     <button 
