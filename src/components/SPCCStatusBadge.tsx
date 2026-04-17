@@ -52,11 +52,7 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
           </span>
         )}
       </span>
-      {workflowVisible && workflowConfig && (
-        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium ${workflowColors}`}>
-          <span>{workflowConfig.label}</span>
-        </span>
-      )}
+
     </div>
   );
 }
