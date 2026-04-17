@@ -57,7 +57,8 @@ export interface Facility {
   spcc_completion_type?: 'internal' | 'external' | null;
   spcc_plan_url?: string | null;
   spcc_pe_stamp_date?: string | null;
-  spcc_workflow_status?: 'awaiting_pe_stamp' | 'pe_stamped' | 'completed_uploaded' | null;
+  spcc_workflow_status?: 'awaiting_pe_stamp' | 'site_visited' | 'pe_stamped' | 'completed_uploaded' | null;
+  spcc_workflow_status_overridden?: boolean | null;
   // Detail fields
   photos_taken?: boolean;
   field_visit_date?: string | null;

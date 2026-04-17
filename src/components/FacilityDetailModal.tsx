@@ -38,7 +38,7 @@ import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
 import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
-import { formatDayCount, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, type SPCCWorkflowStatus } from '../utils/spccStatus';
+import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import { useAuth } from '../contexts/AuthContext';
@@ -142,6 +142,7 @@ export default function FacilityDetailModal({
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : '');
   const [workflowStatus, setWorkflowStatus] = useState<SPCCWorkflowStatus | ''>(facility.spcc_workflow_status || '');
+  const [workflowOverridden, setWorkflowOverridden] = useState<boolean>(!!facility.spcc_workflow_status_overridden);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [editingOil, setEditingOil] = useState(false);
   const [oilValue, setOilValue] = useState(facility.estimated_oil_per_day?.toString() || '');
@@ -170,9 +171,27 @@ export default function FacilityDetailModal({
     setEditingCommentBody('');
   }, [facility.id]);
 
+  // Sync workflow status from facility prop; auto-apply computed status when not overridden
   useEffect(() => {
-    setWorkflowStatus(facility.spcc_workflow_status || '');
-  }, [facility.spcc_workflow_status]);
+    const autoStatus = getAutoWorkflowStatus(facility);
+    const isOverridden = !!facility.spcc_workflow_status_overridden;
+    setWorkflowOverridden(isOverridden);
+
+    if (!isOverridden && autoStatus && autoStatus !== facility.spcc_workflow_status) {
+      // Auto-apply: silently persist the computed status
+      const next = autoStatus as SPCCWorkflowStatus;
+      setWorkflowStatus(next);
+      supabase
+        .from('facilities')
+        .update({ spcc_workflow_status: next, spcc_workflow_status_overridden: false })
+        .eq('id', facility.id)
+        .then(({ error }) => {
+          if (!error) facility.spcc_workflow_status = next;
+        });
+    } else {
+      setWorkflowStatus(facility.spcc_workflow_status || '');
+    }
+  }, [facility.spcc_workflow_status, facility.spcc_workflow_status_overridden, facility.spcc_plan_url, facility.spcc_pe_stamp_date, facility.field_visit_date, facility.photos_taken]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -514,23 +533,34 @@ export default function FacilityDetailModal({
     }
   };
 
-  const handleSaveWorkflowStatus = async (nextStatus: string) => {
+  const handleSaveWorkflowStatus = async (nextStatus: string, forceOverride = true) => {
     const normalizedStatus = (nextStatus || null) as SPCCWorkflowStatus | null;
+    const autoStatus = getAutoWorkflowStatus(facility);
+    // It's an override only when the user explicitly chose something different from auto
+    const isOverride = forceOverride && normalizedStatus !== autoStatus;
     setWorkflowStatus((nextStatus as SPCCWorkflowStatus) || '');
+    setWorkflowOverridden(isOverride);
     setSavingWorkflow(true);
     try {
       const { error } = await supabase
         .from('facilities')
-        .update({ spcc_workflow_status: normalizedStatus })
+        .update({ spcc_workflow_status: normalizedStatus, spcc_workflow_status_overridden: isOverride })
         .eq('id', facility.id);
       if (error) throw error;
       facility.spcc_workflow_status = normalizedStatus;
+      facility.spcc_workflow_status_overridden = isOverride;
     } catch (err) {
       console.error('Error saving SPCC workflow status:', err);
       setWorkflowStatus(facility.spcc_workflow_status || '');
+      setWorkflowOverridden(!!facility.spcc_workflow_status_overridden);
     } finally {
       setSavingWorkflow(false);
     }
+  };
+
+  const handleResetWorkflowStatus = async () => {
+    const autoStatus = getAutoWorkflowStatus(facility);
+    await handleSaveWorkflowStatus(autoStatus || '', false);
   };
 
   const handleSaveOil = async () => {
@@ -1375,6 +1405,8 @@ export default function FacilityDetailModal({
     const statusKey = spccStatus.status as keyof typeof statusConfig;
     const config = statusConfig[statusKey] || statusConfig.no_plan;
     const workflowConfig = workflowStatus ? getSPCCWorkflowBadgeConfig(workflowStatus) : null;
+    const autoWorkflowStatus = getAutoWorkflowStatus(facility);
+    const showOverrideIndicator = workflowOverridden && workflowStatus !== (autoWorkflowStatus ?? '');
     const StatusIcon = config.icon;
 
     return (
@@ -1405,7 +1437,27 @@ export default function FacilityDetailModal({
                   ) : (
                     <span className="text-sm text-gray-500 dark:text-gray-400">Not set</span>
                   )}
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Manual workflow only. Renewal status still updates automatically from the PE stamp date.</span>
+                  {showOverrideIndicator && (
+                    <button
+                      type="button"
+                      onClick={handleResetWorkflowStatus}
+                      disabled={savingWorkflow}
+                      title={`Manually overridden. Auto status: ${autoWorkflowStatus ? getSPCCWorkflowBadgeConfig(autoWorkflowStatus).label : 'None'}. Click to reset.`}
+                      className="group relative inline-flex items-center gap-1 text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 disabled:opacity-50 transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                      </svg>
+                      <span className="text-xs opacity-70">overridden</span>
+                      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-max max-w-xs rounded bg-gray-900 dark:bg-gray-700 px-2.5 py-1.5 text-xs text-white shadow-lg z-50">
+                        Auto would set: <strong>{autoWorkflowStatus ? getSPCCWorkflowBadgeConfig(autoWorkflowStatus).label : 'None'}</strong><br/>
+                        <span className="text-gray-300">Click to reset to auto</span>
+                      </span>
+                    </button>
+                  )}
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Auto-updates from field data. Renewal still tracks PE stamp date.</span>
                 </div>
               </div>
               <select
@@ -1415,7 +1467,8 @@ export default function FacilityDetailModal({
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white disabled:opacity-60"
               >
                 <option value="">Workflow Status - None</option>
-                <option value="awaiting_pe_stamp">Awaiting PE Stamp</option>
+                <option value="awaiting_pe_stamp">Awaiting PE Stamp (manual)</option>
+                <option value="site_visited">Site Visited</option>
                 <option value="pe_stamped">PE Stamped</option>
                 <option value="completed_uploaded">Completed / Uploaded</option>
               </select>

@@ -28,6 +28,7 @@ export interface SPCCStatusResult {
 
 export type SPCCWorkflowStatus =
   | 'awaiting_pe_stamp'
+  | 'site_visited'
   | 'pe_stamped'
   | 'completed_uploaded';
 
@@ -37,6 +38,27 @@ export interface SPCCStatusFacility {
   spcc_pe_stamp_date?: string | null;
   recertified_date?: string | null;
   spcc_workflow_status?: SPCCWorkflowStatus | null;
+  spcc_workflow_status_overridden?: boolean | null;
+  field_visit_date?: string | null;
+  photos_taken?: boolean | null;
+}
+
+/**
+ * Derives the workflow status that the system would automatically assign
+ * based on facility field values. Priority (highest wins):
+ *   1. completed_uploaded  — plan URL is present
+ *   2. pe_stamped          — PE stamp date is set
+ *   3. site_visited        — visit date OR photos_taken flag is set
+ *   4. null                — nothing qualifying is set
+ * `awaiting_pe_stamp` is never auto-assigned; it is always a manual selection.
+ */
+export function getAutoWorkflowStatus(
+  facility: Pick<SPCCStatusFacility, 'spcc_plan_url' | 'spcc_pe_stamp_date' | 'field_visit_date' | 'photos_taken'>
+): SPCCWorkflowStatus | null {
+  if (facility.spcc_plan_url) return 'completed_uploaded';
+  if (facility.spcc_pe_stamp_date) return 'pe_stamped';
+  if (facility.field_visit_date || facility.photos_taken) return 'site_visited';
+  return null;
 }
 
 export interface SPCCWorkflowBadgeConfig {
@@ -52,6 +74,12 @@ export function getSPCCWorkflowBadgeConfig(status: SPCCWorkflowStatus): SPCCWork
         label: 'Awaiting PE Stamp',
         colorClass: 'bg-blue-100 text-blue-700',
         darkColorClass: 'bg-blue-900/30 text-blue-300',
+      };
+    case 'site_visited':
+      return {
+        label: 'Site Visited',
+        colorClass: 'bg-amber-100 text-amber-700',
+        darkColorClass: 'bg-amber-900/30 text-amber-300',
       };
     case 'pe_stamped':
       return {
