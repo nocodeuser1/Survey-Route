@@ -1173,7 +1173,7 @@ export default function FacilityDetailModal({
               <button
                 type="button"
                 onClick={() => setCommentsExpanded((prev) => !prev)}
-                className="inline-flex items-center gap-2 self-start rounded-full border border-gray-200 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="inline-flex items-center gap-2 self-start rounded-full border border-gray-200 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
               >
                 <span className="rounded-full bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 text-blue-700 dark:text-blue-300">
                   {commentCount}
@@ -1198,7 +1198,7 @@ export default function FacilityDetailModal({
                   type="button"
                   onClick={handleAddComment}
                   disabled={!newComment.trim() || submittingComment}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
                   {submittingComment ? 'Saving...' : 'Add comment'}
