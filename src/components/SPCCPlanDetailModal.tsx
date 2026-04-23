@@ -6,6 +6,7 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import SPCCPlanUploadModal from './SPCCPlanUploadModal';
+import { compressPDF, formatBytesMB } from '../utils/compressPDF';
 
 interface SPCCPlanDetailModalProps {
   facility: Facility;
@@ -224,26 +225,97 @@ function formatDateDisplay(isoDate: string): string {
 
 const INLINE_MAX_FILE_SIZE_MB = 2;
 const INLINE_MAX_FILE_SIZE_BYTES = INLINE_MAX_FILE_SIZE_MB * 1024 * 1024;
+const INLINE_MAX_INPUT_MB = 15;
+const INLINE_MAX_INPUT_BYTES = INLINE_MAX_INPUT_MB * 1024 * 1024;
+
+interface StagedFile {
+  name: string;
+  /** The blob we'll actually upload — compressed if compression helped, otherwise original. */
+  blob: Blob;
+  /** Size of original dropped file. */
+  originalBytes: number;
+  /** Size of the blob we'll upload. */
+  finalBytes: number;
+  compressionApplied: boolean;
+}
 
 function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [peStampDate, setPeStampDate] = useState('');
+  const [staged, setStaged] = useState<StagedFile | null>(null);
+  // If the facility already has a PE Stamp Date saved, pre-fill it so the user
+  // isn't forced to re-enter it on every plan upload. They can still override.
+  const [peStampDate, setPeStampDate] = useState(facility.spcc_pe_stamp_date || '');
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState<'loading-wasm' | 'compressing' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (selectedFile: File) => {
+  const handleFileSelect = async (selectedFile: File) => {
+    setError(null);
+
     if (selectedFile.type !== 'application/pdf') {
       setError('Please select a PDF file.');
       return;
     }
-    if (selectedFile.size > INLINE_MAX_FILE_SIZE_BYTES) {
-      setError(`File too large (${(selectedFile.size / 1024 / 1024).toFixed(1)}MB). Max ${INLINE_MAX_FILE_SIZE_MB}MB.`);
+
+    if (selectedFile.size > INLINE_MAX_INPUT_BYTES) {
+      setError(`File too large (${formatBytesMB(selectedFile.size)} MB). Max ${INLINE_MAX_INPUT_MB} MB before compression.`);
       return;
     }
-    setFile(selectedFile);
-    setError(null);
+
+    // If already ≤ 2MB, skip compression entirely.
+    if (selectedFile.size <= INLINE_MAX_FILE_SIZE_BYTES) {
+      setStaged({
+        name: selectedFile.name,
+        blob: selectedFile,
+        originalBytes: selectedFile.size,
+        finalBytes: selectedFile.size,
+        compressionApplied: false,
+      });
+      return;
+    }
+
+    // Run compression.
+    setIsProcessing(true);
+    setProcessingStage('loading-wasm');
+    try {
+      const result = await compressPDF(selectedFile, {
+        skipBelowBytes: INLINE_MAX_FILE_SIZE_BYTES,
+        maxInputBytes: INLINE_MAX_INPUT_BYTES,
+        onProgress: (stage) => {
+          if (stage === 'loading-wasm') setProcessingStage('loading-wasm');
+          else if (stage === 'compressing') setProcessingStage('compressing');
+        },
+      });
+
+      if (result.reason === 'encrypted') {
+        setError('This PDF is password-protected and cannot be compressed. Please remove the password and try again.');
+        return;
+      }
+
+      if (result.compressedBytes > INLINE_MAX_FILE_SIZE_BYTES) {
+        setError(
+          `File is still ${formatBytesMB(result.compressedBytes)} MB after compression (max ${INLINE_MAX_FILE_SIZE_MB} MB). ` +
+          `Try "File → Save As Other → Reduced Size PDF" in Adobe Acrobat first.`
+        );
+        return;
+      }
+
+      setStaged({
+        name: selectedFile.name,
+        blob: result.blob,
+        originalBytes: result.originalBytes,
+        finalBytes: result.compressedBytes,
+        compressionApplied: result.usedCompressed,
+      });
+    } catch (err: any) {
+      console.error('Compression pipeline failed:', err);
+      setError('Could not process this PDF. Please try a different file.');
+    } finally {
+      setIsProcessing(false);
+      setProcessingStage(null);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -254,16 +326,18 @@ function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { faci
   };
 
   const handleUpload = async () => {
-    if (!file || !peStampDate) {
+    if (!staged || !peStampDate) {
       setError('Please select a file and enter the PE Stamp Date.');
       return;
     }
     setIsUploading(true);
     setError(null);
     try {
-      const fileExt = file.name.split('.').pop();
+      const fileExt = staged.name.split('.').pop() || 'pdf';
       const fileName = `${facility.id}/spcc-plan-${Date.now()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from('spcc-plans').upload(fileName, file);
+      const { error: uploadError } = await supabase.storage.from('spcc-plans').upload(fileName, staged.blob, {
+        contentType: 'application/pdf',
+      });
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('spcc-plans').getPublicUrl(fileName);
       const { error: updateError } = await supabase
@@ -284,8 +358,29 @@ function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { faci
     }
   };
 
+  // Still processing a newly-dropped file → show a spinner state in the drop zone
+  if (isProcessing) {
+    return (
+      <div
+        className={`text-center py-8 px-4 border-2 border-dashed rounded-lg ${
+          darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-300 bg-gray-50'
+        }`}
+      >
+        <div className={`inline-block w-6 h-6 border-2 rounded-full animate-spin mb-2 ${
+          darkMode ? 'border-gray-600 border-t-blue-400' : 'border-gray-300 border-t-blue-600'
+        }`} />
+        <p className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          {processingStage === 'loading-wasm' ? 'Loading compressor…' : 'Optimizing PDF…'}
+        </p>
+        <p className={`text-xs mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+          Can take a few seconds for large files
+        </p>
+      </div>
+    );
+  }
+
   // No file staged → drop zone
-  if (!file) {
+  if (!staged) {
     return (
       <div
         onClick={() => fileInputRef.current?.click()}
@@ -312,7 +407,7 @@ function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { faci
           {isDragging ? 'Drop to upload' : 'Drag & drop SPCC plan PDF'}
         </p>
         <p className={`text-xs mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-          or click to browse · max {INLINE_MAX_FILE_SIZE_MB}MB
+          or click to browse · auto-compresses up to {INLINE_MAX_INPUT_MB} MB
         </p>
         {error && (
           <p className="mt-3 text-xs text-red-500 dark:text-red-400">{error}</p>
@@ -329,12 +424,19 @@ function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { faci
           <FileText className="w-4 h-4" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium truncate ${darkMode ? 'text-white' : 'text-gray-900'}`}>{file.name}</p>
-          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+          <p className={`text-sm font-medium truncate ${darkMode ? 'text-white' : 'text-gray-900'}`}>{staged.name}</p>
+          {staged.compressionApplied ? (
+            <p className={`text-xs ${darkMode ? 'text-green-400' : 'text-green-600'}`}>
+              {formatBytesMB(staged.originalBytes)} MB → {formatBytesMB(staged.finalBytes)} MB
+              {' '}(saved {Math.round((1 - staged.finalBytes / staged.originalBytes) * 100)}%)
+            </p>
+          ) : (
+            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{formatBytesMB(staged.finalBytes)} MB</p>
+          )}
         </div>
         <button
           type="button"
-          onClick={() => { setFile(null); setError(null); }}
+          onClick={() => { setStaged(null); setError(null); }}
           disabled={isUploading}
           className={`p-1.5 rounded-lg transition-colors ${darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-50`}
           title="Remove file"
