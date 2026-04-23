@@ -22,3 +22,7 @@ dist-ssr
 *.sw?
 .env
 .github/workflows/
+
+# Per-Claude local config (launch.json for preview MCP, worktrees cache, etc.)
+# Collaboration rules live in CLAUDE.md, not here.
+.claude/

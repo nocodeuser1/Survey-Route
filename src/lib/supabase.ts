@@ -83,6 +83,38 @@ export interface Facility {
   notes?: string | null;
 }
 
+/**
+ * One row per berm on a facility.
+ *
+ * Facilities with a single berm have a single row; facilities with multiple
+ * berms have one row per berm. Each row tracks its own PDF, PE stamp date,
+ * workflow status, and which wells on the parent facility it covers.
+ *
+ * A DB trigger (`sync_facility_from_spcc_plans`) mirrors the worst-case berm
+ * (earliest PE date, least-advanced workflow status) back onto the legacy
+ * `facilities.spcc_*` columns so compliance calculations, route filters, and
+ * reports keep working unchanged during the transition.
+ */
+export interface SPCCPlan {
+  id: string;
+  facility_id: string;
+  /** 1-based ordinal within the facility (Berm 1, Berm 2, ...). 1..6. */
+  berm_index: number;
+  /** Optional user-supplied label (e.g. "North Berm"). Display-only. */
+  berm_label: string | null;
+  plan_url: string | null;
+  pe_stamp_date: string | null;
+  workflow_status: 'awaiting_pe_stamp' | 'site_visited' | 'pe_stamped' | 'completed_uploaded' | null;
+  workflow_status_overridden: boolean;
+  /** Array of well ordinals (1..6) on the parent facility this plan covers. */
+  assigned_well_indices: number[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** Max berms supported per facility (matches the 6 well column cap). */
+export const MAX_BERMS_PER_FACILITY = 6;
+
 export interface FacilityRegulation {
   id: string;
   facility_id: string;

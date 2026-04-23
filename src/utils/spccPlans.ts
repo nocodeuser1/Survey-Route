@@ -1,0 +1,108 @@
+/**
+ * Helpers for the multi-berm SPCC plan model.
+ *
+ * See: supabase/migrations/20260423000000_create_spcc_plans_table.sql
+ */
+
+import type { Facility, SPCCPlan } from '../lib/supabase';
+
+export interface FacilityWell {
+  /** 1-based index (matches well_name_N / well_api_N columns). */
+  index: number;
+  /** Display name ("Well 1" fallback if the column is populated but blank). */
+  name: string;
+  /** API number if available. */
+  api: string | null;
+}
+
+/**
+ * Returns the wells that actually exist on the facility, in index order.
+ * Skips the slots whose well_name_N is null/empty.
+ */
+export function getFacilityWells(facility: Facility): FacilityWell[] {
+  const wells: FacilityWell[] = [];
+  for (let i = 1; i <= 6; i++) {
+    const name = (facility as any)[`well_name_${i}`] as string | null | undefined;
+    const api = (facility as any)[`well_api_${i}`] as string | null | undefined;
+    if (name != null && String(name).trim() !== '') {
+      wells.push({
+        index: i,
+        name: String(name).trim(),
+        api: api && String(api).trim() !== '' ? String(api).trim() : null,
+      });
+    }
+  }
+  return wells;
+}
+
+/**
+ * Union of all well indices covered by any plan in the list.
+ */
+export function getAllAssignedWellIndices(plans: SPCCPlan[]): Set<number> {
+  const out = new Set<number>();
+  for (const plan of plans) {
+    for (const i of plan.assigned_well_indices || []) out.add(i);
+  }
+  return out;
+}
+
+/**
+ * Wells that exist on the facility but aren't assigned to any berm/plan.
+ * Only meaningful when there are ≥2 plans — with a single plan, all wells are
+ * assumed covered.
+ */
+export function getUnassignedWells(
+  facility: Facility,
+  plans: SPCCPlan[]
+): FacilityWell[] {
+  if (plans.length <= 1) return [];
+  const assigned = getAllAssignedWellIndices(plans);
+  return getFacilityWells(facility).filter((w) => !assigned.has(w.index));
+}
+
+/**
+ * Display label for a berm. "Berm 1" or "Berm 1 — North Berm" when labelled.
+ */
+export function getBermDisplayLabel(plan: Pick<SPCCPlan, 'berm_index' | 'berm_label'>): string {
+  const base = `Berm ${plan.berm_index}`;
+  const label = plan.berm_label?.trim();
+  return label ? `${base} — ${label}` : base;
+}
+
+/**
+ * Short display label — "Berm 1" (ignores any custom label). For places where
+ * space is tight.
+ */
+export function getBermShortLabel(plan: Pick<SPCCPlan, 'berm_index'>): string {
+  return `Berm ${plan.berm_index}`;
+}
+
+/**
+ * Storage object name for a plan upload. Berm-aware: plans are grouped under
+ * `{facility_id}/berm-{index}/` so it's obvious which PDF belongs to which
+ * berm when poking around the Supabase dashboard.
+ */
+export function buildPlanStoragePath(
+  facilityId: string,
+  bermIndex: number,
+  fileExt: string
+): string {
+  const safeExt = (fileExt || 'pdf').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'pdf';
+  return `${facilityId}/berm-${bermIndex}/spcc-plan-${Date.now()}.${safeExt}`;
+}
+
+/**
+ * Given a list of plans, returns the next berm_index to use when adding a new
+ * berm. Always one higher than the current max.
+ */
+export function nextBermIndex(plans: SPCCPlan[]): number {
+  if (plans.length === 0) return 1;
+  return Math.max(...plans.map((p) => p.berm_index)) + 1;
+}
+
+/**
+ * Sort plans by berm_index ascending — the UI renders in this order.
+ */
+export function sortPlansByBermIndex(plans: SPCCPlan[]): SPCCPlan[] {
+  return [...plans].sort((a, b) => a.berm_index - b.berm_index);
+}

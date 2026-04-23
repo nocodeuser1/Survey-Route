@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Upload, FileText, CheckCircle, AlertTriangle, AlertCircle, Search, Trash2, Loader } from 'lucide-react';
-import { Facility, supabase } from '../lib/supabase';
+import { Facility, SPCCPlan, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { extractTextFromPdfs, ExtractionConfig } from '../utils/pdfExtractor';
 import { matchPdfsToFacilities, PdfMatchResult } from '../utils/spccPdfMatcher';
+import { buildPlanStoragePath } from '../utils/spccPlans';
 
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -249,25 +250,63 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
         const facilityId = result.selectedFacilityId!;
         const peDate = parseDateInput(result.overridePeDate) || result.overridePeDate;
         const fileExt = result.file.name.split('.').pop() || 'pdf';
-        const fileName = `${facilityId}/spcc-plan-${Date.now()}.${fileExt}`;
 
+        // Bulk uploads always target Berm 1 (the default single-berm row that
+        // the spcc_plans backfill guarantees exists for every facility). If
+        // the facility turns out to have multiple berms and the PDF belongs
+        // to a different berm, the user will see the upload on Berm 1 and
+        // can reassign it from the plan-detail modal afterwards. See
+        // MULTI_BERM_BULK_UPLOAD_PLAN.md for the planned phase-2 review flow.
+        const { data: planRow, error: planLookupErr } = await supabase
+          .from('spcc_plans')
+          .select('id, berm_index')
+          .eq('facility_id', facilityId)
+          .order('berm_index', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (planLookupErr) throw planLookupErr;
+
+        let targetPlan: Pick<SPCCPlan, 'id' | 'berm_index'> | null = planRow
+          ? { id: planRow.id, berm_index: planRow.berm_index }
+          : null;
+
+        // Safety net: if the backfill somehow missed this facility, create
+        // the berm-1 row on the fly so bulk upload still works.
+        if (!targetPlan) {
+          const { data: created, error: createErr } = await supabase
+            .from('spcc_plans')
+            .insert({
+              facility_id: facilityId,
+              berm_index: 1,
+              assigned_well_indices: [],
+            })
+            .select('id, berm_index')
+            .single();
+          if (createErr) throw createErr;
+          targetPlan = { id: created.id, berm_index: created.berm_index };
+        }
+
+        const fileName = buildPlanStoragePath(facilityId, targetPlan.berm_index, fileExt);
         const { error: uploadError } = await supabase.storage
           .from('spcc-plans')
           .upload(fileName, result.file);
         if (uploadError) throw uploadError;
 
-        const { data: { publicUrl } } = supabase.storage
-          .from('spcc-plans')
-          .getPublicUrl(fileName);
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from('spcc-plans').getPublicUrl(fileName);
 
+        // Write to spcc_plans (NOT facilities). The mirror trigger handles
+        // propagating plan_url / pe_stamp_date / workflow_status back to
+        // the legacy facilities.spcc_* columns for legacy readers.
         const { error: updateError } = await supabase
-          .from('facilities')
+          .from('spcc_plans')
           .update({
-            spcc_plan_url: publicUrl,
-            spcc_pe_stamp_date: peDate,
-            spcc_workflow_status: 'pe_stamped',
+            plan_url: publicUrl,
+            pe_stamp_date: peDate,
+            workflow_status: 'pe_stamped',
           })
-          .eq('id', facilityId);
+          .eq('id', targetPlan.id);
         if (updateError) throw updateError;
 
         completed++;

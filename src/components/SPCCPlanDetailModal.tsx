@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, Calendar, AlertTriangle, CheckCircle, Clock, Upload, Download, Link, Check, ExternalLink, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler } from 'lucide-react';
-import { Facility, supabase } from '../lib/supabase';
+import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet } from 'lucide-react';
+import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
-import SPCCPlanUploadModal from './SPCCPlanUploadModal';
-import { compressPDF, formatBytesMB } from '../utils/compressPDF';
+import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
+import BermPlanCard from './BermPlanCard';
+import BermWellAssignmentModal from './BermWellAssignmentModal';
 
 interface SPCCPlanDetailModalProps {
   facility: Facility;
@@ -223,265 +224,8 @@ function formatDateDisplay(isoDate: string): string {
   return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
 }
 
-const INLINE_MAX_FILE_SIZE_MB = 2;
-const INLINE_MAX_FILE_SIZE_BYTES = INLINE_MAX_FILE_SIZE_MB * 1024 * 1024;
-const INLINE_MAX_INPUT_MB = 15;
-const INLINE_MAX_INPUT_BYTES = INLINE_MAX_INPUT_MB * 1024 * 1024;
-
-interface StagedFile {
-  name: string;
-  /** The blob we'll actually upload — compressed if compression helped, otherwise original. */
-  blob: Blob;
-  /** Size of original dropped file. */
-  originalBytes: number;
-  /** Size of the blob we'll upload. */
-  finalBytes: number;
-  compressionApplied: boolean;
-}
-
-function InlineSPCCPlanUpload({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
-  const [staged, setStaged] = useState<StagedFile | null>(null);
-  // If the facility already has a PE Stamp Date saved, pre-fill it so the user
-  // isn't forced to re-enter it on every plan upload. They can still override.
-  const [peStampDate, setPeStampDate] = useState(facility.spcc_pe_stamp_date || '');
-  const [isUploading, setIsUploading] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStage, setProcessingStage] = useState<'loading-wasm' | 'compressing' | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileSelect = async (selectedFile: File) => {
-    setError(null);
-
-    if (selectedFile.type !== 'application/pdf') {
-      setError('Please select a PDF file.');
-      return;
-    }
-
-    if (selectedFile.size > INLINE_MAX_INPUT_BYTES) {
-      setError(`File too large (${formatBytesMB(selectedFile.size)} MB). Max ${INLINE_MAX_INPUT_MB} MB before compression.`);
-      return;
-    }
-
-    // If already ≤ 2MB, skip compression entirely.
-    if (selectedFile.size <= INLINE_MAX_FILE_SIZE_BYTES) {
-      setStaged({
-        name: selectedFile.name,
-        blob: selectedFile,
-        originalBytes: selectedFile.size,
-        finalBytes: selectedFile.size,
-        compressionApplied: false,
-      });
-      return;
-    }
-
-    // Run compression.
-    setIsProcessing(true);
-    setProcessingStage('loading-wasm');
-    try {
-      const result = await compressPDF(selectedFile, {
-        skipBelowBytes: INLINE_MAX_FILE_SIZE_BYTES,
-        maxInputBytes: INLINE_MAX_INPUT_BYTES,
-        onProgress: (stage) => {
-          if (stage === 'loading-wasm') setProcessingStage('loading-wasm');
-          else if (stage === 'compressing') setProcessingStage('compressing');
-        },
-      });
-
-      if (result.reason === 'encrypted') {
-        setError('This PDF is password-protected and cannot be compressed. Please remove the password and try again.');
-        return;
-      }
-
-      if (result.compressedBytes > INLINE_MAX_FILE_SIZE_BYTES) {
-        setError(
-          `File is still ${formatBytesMB(result.compressedBytes)} MB after compression (max ${INLINE_MAX_FILE_SIZE_MB} MB). ` +
-          `Try "File → Save As Other → Reduced Size PDF" in Adobe Acrobat first.`
-        );
-        return;
-      }
-
-      setStaged({
-        name: selectedFile.name,
-        blob: result.blob,
-        originalBytes: result.originalBytes,
-        finalBytes: result.compressedBytes,
-        compressionApplied: result.usedCompressed,
-      });
-    } catch (err: any) {
-      console.error('Compression pipeline failed:', err);
-      setError('Could not process this PDF. Please try a different file.');
-    } finally {
-      setIsProcessing(false);
-      setProcessingStage(null);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const dropped = e.dataTransfer.files?.[0];
-    if (dropped) handleFileSelect(dropped);
-  };
-
-  const handleUpload = async () => {
-    if (!staged || !peStampDate) {
-      setError('Please select a file and enter the PE Stamp Date.');
-      return;
-    }
-    setIsUploading(true);
-    setError(null);
-    try {
-      const fileExt = staged.name.split('.').pop() || 'pdf';
-      const fileName = `${facility.id}/spcc-plan-${Date.now()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from('spcc-plans').upload(fileName, staged.blob, {
-        contentType: 'application/pdf',
-      });
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('spcc-plans').getPublicUrl(fileName);
-      const { error: updateError } = await supabase
-        .from('facilities')
-        .update({
-          spcc_plan_url: publicUrl,
-          spcc_pe_stamp_date: peStampDate,
-          spcc_workflow_status: 'pe_stamped',
-        })
-        .eq('id', facility.id);
-      if (updateError) throw updateError;
-      onFacilitiesChange();
-    } catch (err: any) {
-      console.error('Error uploading SPCC plan:', err);
-      setError(err.message || 'Failed to upload plan.');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  // Still processing a newly-dropped file → show a spinner state in the drop zone
-  if (isProcessing) {
-    return (
-      <div
-        className={`text-center py-8 px-4 border-2 border-dashed rounded-lg ${
-          darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-300 bg-gray-50'
-        }`}
-      >
-        <div className={`inline-block w-6 h-6 border-2 rounded-full animate-spin mb-2 ${
-          darkMode ? 'border-gray-600 border-t-blue-400' : 'border-gray-300 border-t-blue-600'
-        }`} />
-        <p className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          {processingStage === 'loading-wasm' ? 'Loading compressor…' : 'Optimizing PDF…'}
-        </p>
-        <p className={`text-xs mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-          Can take a few seconds for large files
-        </p>
-      </div>
-    );
-  }
-
-  // No file staged → drop zone
-  if (!staged) {
-    return (
-      <div
-        onClick={() => fileInputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        className={`cursor-pointer text-center py-8 px-4 border-2 border-dashed rounded-lg transition-colors ${
-          isDragging
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-            : darkMode
-              ? 'border-gray-700 hover:border-blue-500 hover:bg-gray-800/50'
-              : 'border-gray-300 hover:border-blue-500 hover:bg-gray-50'
-        }`}
-      >
-        <input
-          type="file"
-          ref={fileInputRef}
-          accept="application/pdf"
-          onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
-          className="hidden"
-        />
-        <Upload className={`w-8 h-8 mx-auto mb-2 ${isDragging ? 'text-blue-500' : darkMode ? 'text-gray-600' : 'text-gray-400'}`} />
-        <p className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          {isDragging ? 'Drop to upload' : 'Drag & drop SPCC plan PDF'}
-        </p>
-        <p className={`text-xs mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-          or click to browse · auto-compresses up to {INLINE_MAX_INPUT_MB} MB
-        </p>
-        {error && (
-          <p className="mt-3 text-xs text-red-500 dark:text-red-400">{error}</p>
-        )}
-      </div>
-    );
-  }
-
-  // File staged → show file + PE stamp date input + save
-  return (
-    <div className={`space-y-3 rounded-lg border p-3 ${darkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
-      <div className="flex items-center gap-2.5">
-        <div className={`p-2 rounded ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
-          <FileText className="w-4 h-4" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium truncate ${darkMode ? 'text-white' : 'text-gray-900'}`}>{staged.name}</p>
-          {staged.compressionApplied ? (
-            <p className={`text-xs ${darkMode ? 'text-green-400' : 'text-green-600'}`}>
-              {formatBytesMB(staged.originalBytes)} MB → {formatBytesMB(staged.finalBytes)} MB
-              {' '}(saved {Math.round((1 - staged.finalBytes / staged.originalBytes) * 100)}%)
-            </p>
-          ) : (
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{formatBytesMB(staged.finalBytes)} MB</p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => { setStaged(null); setError(null); }}
-          disabled={isUploading}
-          className={`p-1.5 rounded-lg transition-colors ${darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-50`}
-          title="Remove file"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-      <div>
-        <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          PE Stamp Date
-        </label>
-        <div className="relative">
-          <Calendar className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-          <input
-            type="date"
-            value={peStampDate}
-            onChange={(e) => setPeStampDate(e.target.value)}
-            disabled={isUploading}
-            className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none ${
-              darkMode ? 'bg-gray-900 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-            }`}
-          />
-        </div>
-      </div>
-      {error && (
-        <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
-      )}
-      <button
-        type="button"
-        onClick={handleUpload}
-        disabled={isUploading || !peStampDate}
-        className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-white transition-colors ${
-          isUploading || !peStampDate ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-        }`}
-      >
-        {isUploading ? 'Uploading…' : 'Save Plan'}
-      </button>
-    </div>
-  );
-}
-
 export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onViewInspectionDetails, onViewFacilityDetails }: SPCCPlanDetailModalProps) {
   const { darkMode } = useDarkMode();
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [editingIpDate, setEditingIpDate] = useState(false);
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
@@ -493,6 +237,71 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
   const ipDatePickerRef = useRef<HTMLInputElement>(null);
   const peDatePickerRef = useRef<HTMLInputElement>(null);
+
+  // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
+  // fetch every plan for this facility and subscribe to realtime changes so
+  // any mutation from the berm cards or another tab updates the UI live.
+  const [plans, setPlans] = useState<SPCCPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
+
+  // Well-assignment modal state. `mode` is either null (closed), "reassign"
+  // (rebalance existing berms), or "add-berm" (creating berm N+1 with an
+  // initial wells set).
+  const [wellAssignmentMode, setWellAssignmentMode] = useState<
+    | { kind: 'add-berm'; newBermIndex: number }
+    | { kind: 'reassign' }
+    | null
+  >(null);
+
+  const refetchPlans = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('spcc_plans')
+        .select('*')
+        .eq('facility_id', facility.id)
+        .order('berm_index', { ascending: true });
+      if (error) throw error;
+      setPlans((data || []) as SPCCPlan[]);
+      setPlansError(null);
+    } catch (err: any) {
+      console.error('Error loading SPCC plans:', err);
+      setPlansError(err?.message || 'Could not load SPCC plans for this facility.');
+    } finally {
+      setPlansLoading(false);
+    }
+  }, [facility.id]);
+
+  useEffect(() => {
+    setPlansLoading(true);
+    refetchPlans();
+
+    // Realtime subscription — any change to this facility's plan rows refetches.
+    const channel = supabase
+      .channel(`spcc_plans_${facility.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'spcc_plans',
+          filter: `facility_id=eq.${facility.id}`,
+        },
+        () => {
+          refetchPlans();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [facility.id, refetchPlans]);
+
+  const sortedPlans = sortPlansByBermIndex(plans);
+  const unassignedWells = getUnassignedWells(facility, sortedPlans);
+  const singlePlan = sortedPlans.length === 1 ? sortedPlans[0] : null;
+  const canAddBerm = !plansLoading && sortedPlans.length < MAX_BERMS_PER_FACILITY;
 
   // Sync local state when facility prop updates from parent refetch
   useEffect(() => {
@@ -520,14 +329,6 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const workflowConfig = workflowStatus ? getSPCCWorkflowBadgeConfig(workflowStatus) : null;
   const StatusIcon = statusIconMap[badgeConfig.icon];
 
-  const copyViewerLink = () => {
-    const url = `${window.location.origin}/spcc-plan/${facility.id}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    });
-  };
-
   const handleSaveIpDate = async () => {
     const isoDate = ipDateValue ? parseDateInput(ipDateValue) : null;
     if (ipDateValue && !isoDate) return; // invalid format, don't save
@@ -548,26 +349,36 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     }
   };
 
+  // When there's a single berm, the top-level PE Stamp Date edits the plan
+  // row (the trigger mirrors it back to the facility). When there are 2+
+  // berms, the top-level date is a read-only aggregate and editing is done
+  // per-berm in the BermPlanCard. This guard keeps the writes consistent so
+  // the mirror trigger doesn't later overwrite a direct facility edit.
   const handleSavePeDate = async () => {
     const isoDate = peDateValue ? parseDateInput(peDateValue) : null;
     if (peDateValue && !isoDate) return; // invalid format, don't save
+    if (!singlePlan) return; // guard: UI disables the editor in multi-berm mode
     setSaving(true);
     try {
+      // Keep the workflow-status side-effect that existed in the old facility
+      // write — now applied to the single plan row. The mirror trigger will
+      // propagate both fields back to facilities.spcc_*.
       const nextWorkflowStatus = isoDate
-        ? (facility.spcc_workflow_status === 'completed_uploaded' ? 'completed_uploaded' : 'pe_stamped')
-        : (facility.spcc_workflow_status === 'pe_stamped' ? null : facility.spcc_workflow_status ?? null);
+        ? (singlePlan.workflow_status === 'completed_uploaded' ? 'completed_uploaded' : 'pe_stamped')
+        : (singlePlan.workflow_status === 'pe_stamped' ? null : singlePlan.workflow_status ?? null);
 
       const { error } = await supabase
-        .from('facilities')
+        .from('spcc_plans')
         .update({
-          spcc_pe_stamp_date: isoDate,
-          spcc_workflow_status: nextWorkflowStatus,
+          pe_stamp_date: isoDate,
+          workflow_status: nextWorkflowStatus,
         })
-        .eq('id', facility.id);
+        .eq('id', singlePlan.id);
       if (error) throw error;
       setSavedPeDate(isoDate);
       setWorkflowStatus(nextWorkflowStatus || '');
       setEditingPeDate(false);
+      await refetchPlans();
       onFacilitiesChange();
     } catch (err) {
       console.error('Error saving PE stamp date:', err);
@@ -576,16 +387,24 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     }
   };
 
+  // Same pattern as PE date — single berm routes to the plan row (trigger
+  // mirrors). Multi-berm UI disables this dropdown so writes always flow
+  // through the plan row.
   const handleWorkflowStatusChange = async (nextStatus: string) => {
+    if (!singlePlan) return; // UI disables the dropdown in multi-berm mode
     const normalizedStatus = (nextStatus || null) as SPCCWorkflowStatus | null;
     setWorkflowStatus((nextStatus as SPCCWorkflowStatus) || '');
     setSavingWorkflow(true);
     try {
       const { error } = await supabase
-        .from('facilities')
-        .update({ spcc_workflow_status: normalizedStatus })
-        .eq('id', facility.id);
+        .from('spcc_plans')
+        .update({
+          workflow_status: normalizedStatus,
+          workflow_status_overridden: true,
+        })
+        .eq('id', singlePlan.id);
       if (error) throw error;
+      await refetchPlans();
       onFacilitiesChange();
     } catch (err) {
       console.error('Error saving SPCC workflow status:', err);
@@ -593,6 +412,97 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     } finally {
       setSavingWorkflow(false);
     }
+  };
+
+  // --- Add / remove / reassign berm handlers ------------------------------
+
+  const handleAddBerm = () => {
+    if (!canAddBerm) return;
+    setWellAssignmentMode({
+      kind: 'add-berm',
+      newBermIndex: nextBermIndex(sortedPlans),
+    });
+  };
+
+  const handleRemoveBerm = async (plan: SPCCPlan) => {
+    const ok = window.confirm(
+      `Remove ${getBermShortLabel(plan)} from this facility? ` +
+        `The plan record will be deleted. Wells previously assigned to it will become unassigned ` +
+        `(you can move them to another berm afterwards).`
+    );
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from('spcc_plans').delete().eq('id', plan.id);
+      if (error) throw error;
+      await refetchPlans();
+      onFacilitiesChange();
+    } catch (err: any) {
+      console.error('Error removing berm:', err);
+      alert(err?.message || 'Could not remove this berm. Please try again.');
+    }
+  };
+
+  // Single save handler used by both "add berm" (mode.kind === 'add-berm') and
+  // "reassign" flows. The modal passes back a complete `assignments` map of
+  // wellIndex → bermIndex covering every well on the facility; we split that
+  // back out into per-plan `assigned_well_indices` arrays and write them.
+  const handleWellAssignmentSave = async ({
+    assignments,
+    newBermIndex,
+  }: {
+    assignments: Record<number, number>;
+    newBermIndex?: number;
+  }) => {
+    // Build wellsForBerm: { [bermIndex]: number[] }
+    const wellsForBerm: Record<number, number[]> = {};
+    for (const [wellIdxStr, bermIdx] of Object.entries(assignments)) {
+      const wellIdx = Number(wellIdxStr);
+      if (!wellsForBerm[bermIdx]) wellsForBerm[bermIdx] = [];
+      wellsForBerm[bermIdx].push(wellIdx);
+    }
+    // Sort so the integer[] is deterministic (nicer in the DB, easier to diff).
+    for (const k of Object.keys(wellsForBerm)) {
+      wellsForBerm[Number(k)].sort((a, b) => a - b);
+    }
+
+    // If we're adding a new berm, ensure the new index has an entry (even if empty)
+    if (newBermIndex != null && !wellsForBerm[newBermIndex]) {
+      wellsForBerm[newBermIndex] = [];
+    }
+
+    // 1. Update each existing plan with its new assigned_well_indices.
+    for (const plan of sortedPlans) {
+      const next = wellsForBerm[plan.berm_index] ?? [];
+      // Skip the write if unchanged — cheaper and avoids noisy realtime churn.
+      const same =
+        next.length === plan.assigned_well_indices.length &&
+        next.every((v, i) => v === plan.assigned_well_indices[i]);
+      if (same) continue;
+      const { error } = await supabase
+        .from('spcc_plans')
+        .update({ assigned_well_indices: next })
+        .eq('id', plan.id);
+      if (error) throw error;
+    }
+
+    // 2. If adding a new berm, insert the new row AFTER existing updates so
+    //    the mirror trigger only sees the aggregate once everything lands.
+    if (newBermIndex != null) {
+      const { error } = await supabase.from('spcc_plans').insert({
+        facility_id: facility.id,
+        berm_index: newBermIndex,
+        berm_label: null,
+        plan_url: null,
+        pe_stamp_date: null,
+        workflow_status: null,
+        workflow_status_overridden: false,
+        assigned_well_indices: wellsForBerm[newBermIndex] ?? [],
+      });
+      if (error) throw error;
+    }
+
+    await refetchPlans();
+    onFacilitiesChange();
   };
 
   const modalContent = (
@@ -678,19 +588,30 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   ) : (
                     <span className="text-sm opacity-80">Not set</span>
                   )}
+                  {sortedPlans.length >= 2 && (
+                    <span className="text-xs opacity-80 italic">
+                      (least-advanced berm shown — edit per berm below)
+                    </span>
+                  )}
                 </div>
               </div>
-              <select
-                value={workflowStatus}
-                onChange={(e) => handleWorkflowStatusChange(e.target.value)}
-                disabled={savingWorkflow}
-                className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none transition disabled:opacity-60"
-              >
-                <option value="" className="text-gray-900">Workflow Status - None</option>
-                <option value="awaiting_pe_stamp" className="text-gray-900">Awaiting PE Stamp</option>
-                <option value="pe_stamped" className="text-gray-900">PE Stamped</option>
-                <option value="completed_uploaded" className="text-gray-900">Completed / Uploaded</option>
-              </select>
+              {/* Dropdown edits the single-plan row; the mirror trigger then
+                  propagates to facilities.spcc_workflow_status. When there
+                  are 2+ berms, the aggregate is read-only and the user
+                  edits individual berms in their card below. */}
+              {singlePlan ? (
+                <select
+                  value={workflowStatus}
+                  onChange={(e) => handleWorkflowStatusChange(e.target.value)}
+                  disabled={savingWorkflow}
+                  className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none transition disabled:opacity-60"
+                >
+                  <option value="" className="text-gray-900">Workflow Status - None</option>
+                  <option value="awaiting_pe_stamp" className="text-gray-900">Awaiting PE Stamp</option>
+                  <option value="pe_stamped" className="text-gray-900">PE Stamped</option>
+                  <option value="completed_uploaded" className="text-gray-900">Completed / Uploaded</option>
+                </select>
+              ) : null}
             </div>
           </div>
         </div>
@@ -888,19 +809,27 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                           : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
                           }`}>
                           {effectiveDate
-                            ? formatDate(effectiveDate)
+                            ? sortedPlans.length >= 2
+                              ? `earliest: ${formatDate(effectiveDate)}`
+                              : formatDate(effectiveDate)
                             : 'Not set'
                           }
                         </span>
                       );
                     })()}
-                    <button
-                      onClick={() => setEditingPeDate(true)}
-                      className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
-                      title="Edit PE stamp date"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Only allow inline-edit when there's one berm. When
+                        multi-berm, the top-level date is a read-only
+                        aggregate (earliest PE date across berms); users edit
+                        per berm below. */}
+                    {singlePlan && (
+                      <button
+                        onClick={() => setEditingPeDate(true)}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                        title="Edit PE stamp date"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1070,82 +999,151 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
             </div>
           )}
 
-          {/* Plan document section */}
-          <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
-            <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-              <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Plan Document
+          {/* Plan Documents — one card per berm. One facility can have 1..6
+              berms; each berm tracks its own PDF, PE stamp date, workflow
+              status, and the subset of wells it covers. */}
+          <div
+            className={`rounded-xl border ${
+              darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'
+            }`}
+          >
+            <div
+              className={`flex items-center justify-between gap-2 px-4 py-3 border-b ${
+                darkMode ? 'border-gray-700' : 'border-gray-200'
+              }`}
+            >
+              <h3
+                className={`text-sm font-semibold uppercase tracking-wider ${
+                  darkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}
+              >
+                {sortedPlans.length >= 2
+                  ? `Plan Documents · ${sortedPlans.length} berms`
+                  : 'Plan Document'}
               </h3>
+              <button
+                type="button"
+                onClick={handleAddBerm}
+                disabled={!canAddBerm}
+                title={
+                  canAddBerm
+                    ? 'Add another berm'
+                    : sortedPlans.length >= MAX_BERMS_PER_FACILITY
+                      ? `Max ${MAX_BERMS_PER_FACILITY} berms per facility`
+                      : 'Loading…'
+                }
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  canAddBerm
+                    ? darkMode
+                      ? 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60'
+                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : darkMode
+                      ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Berm
+              </button>
             </div>
-            <div className="p-4">
-              {facility.spcc_plan_url ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2.5 rounded-lg ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
-                      <FileText className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-medium text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        SPCC Plan on File
-                      </p>
-                      {(facility.spcc_pe_stamp_date || savedPeDate) && (
-                        <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          PE Stamped: {formatDate((facility.spcc_pe_stamp_date || savedPeDate)!)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="flex gap-2">
-                    <a
-                      href={facility.spcc_plan_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${darkMode
-                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                        : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
-                        }`}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      View Plan
-                    </a>
-                    <button
-                      onClick={copyViewerLink}
-                      className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${linkCopied
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : darkMode
-                          ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                          : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
-                        }`}
-                      title="Copy sharable viewer link"
-                    >
-                      {linkCopied ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
-                      {linkCopied ? 'Copied' : 'Share'}
-                    </button>
-                  </div>
+            <div className="p-4 space-y-3">
+              {plansLoading ? (
+                <div
+                  className={`text-center text-sm py-6 ${
+                    darkMode ? 'text-gray-500' : 'text-gray-400'
+                  }`}
+                >
+                  Loading plans…
+                </div>
+              ) : plansError ? (
+                <div
+                  className={`flex items-start gap-2 rounded-lg p-3 text-sm ${
+                    darkMode ? 'bg-red-900/30 text-red-200' : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <div>{plansError}</div>
                 </div>
               ) : (
-                <InlineSPCCPlanUpload
-                  facility={facility}
-                  darkMode={darkMode}
-                  onFacilitiesChange={onFacilitiesChange}
-                />
+                <>
+                  {/* Soft alert: wells on the facility but not assigned to any
+                      plan. Only meaningful when there are ≥2 plans — a single
+                      plan is assumed to cover everything. */}
+                  {unassignedWells.length > 0 && (
+                    <div
+                      className={`flex items-start gap-2 rounded-lg p-3 text-xs ${
+                        darkMode ? 'bg-amber-900/30 text-amber-200' : 'bg-amber-50 text-amber-800'
+                      }`}
+                    >
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="font-semibold mb-0.5">Well(s) Unassigned</div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span>
+                            {unassignedWells.length === 1 ? 'This well is' : 'These wells are'} not
+                            on any berm:
+                          </span>
+                          {unassignedWells.map((w) => (
+                            <span
+                              key={w.index}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                                darkMode ? 'bg-amber-900/60' : 'bg-amber-100'
+                              }`}
+                            >
+                              <Droplet className="w-3 h-3" />
+                              {w.name}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setWellAssignmentMode({ kind: 'reassign' })}
+                          className={`mt-1.5 underline text-xs ${
+                            darkMode ? 'text-amber-200' : 'text-amber-800'
+                          }`}
+                        >
+                          Reassign wells
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {sortedPlans.map((plan) => (
+                    <BermPlanCard
+                      key={plan.id}
+                      plan={plan}
+                      facility={facility}
+                      darkMode={darkMode}
+                      isOnlyBerm={sortedPlans.length === 1}
+                      onPlanChange={() => {
+                        refetchPlans();
+                        onFacilitiesChange();
+                      }}
+                      onOpenWellAssignment={() =>
+                        setWellAssignmentMode({ kind: 'reassign' })
+                      }
+                      onRemove={() => handleRemoveBerm(plan)}
+                    />
+                  ))}
+
+                  {sortedPlans.length === 0 && (
+                    <div
+                      className={`text-center text-sm py-6 ${
+                        darkMode ? 'text-gray-500' : 'text-gray-400'
+                      }`}
+                    >
+                      No berms on file yet. Click{' '}
+                      <span className="font-medium">+ Add Berm</span> to create one.
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
 
           {/* Action buttons */}
           <div className="space-y-2">
-            {facility.spcc_plan_url && (
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white font-medium transition-colors bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
-              >
-                <Upload className="w-4 h-4" />
-                Upload New Plan Version
-              </button>
-            )}
-
             {onViewFacilityDetails && (
               <button
                 onClick={() => {
@@ -1181,18 +1179,15 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
         </div>
       </div>
 
-      {showUploadModal && (
-        <div onClick={(e) => e.stopPropagation()}>
-          <SPCCPlanUploadModal
-            isOpen={showUploadModal}
-            onClose={() => setShowUploadModal(false)}
-            facility={facility}
-            onUploadComplete={() => {
-              onFacilitiesChange();
-              setShowUploadModal(false);
-            }}
-          />
-        </div>
+      {wellAssignmentMode && (
+        <BermWellAssignmentModal
+          facility={facility}
+          existingPlans={sortedPlans}
+          mode={wellAssignmentMode}
+          darkMode={darkMode}
+          onSave={handleWellAssignmentSave}
+          onClose={() => setWellAssignmentMode(null)}
+        />
       )}
     </div>
   );
