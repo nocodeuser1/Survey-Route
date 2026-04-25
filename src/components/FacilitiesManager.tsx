@@ -3447,56 +3447,68 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
         {
           showAddForm && (
-            <div className="px-6 py-4 bg-blue-50 border-b border-blue-200">
-              <form onSubmit={handleAddFacility} className="space-y-3">
+            <div className="px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+              <form onSubmit={handleAddFacility}>
+                {/* Header + close on one row, then a single horizontal row of
+                    inputs + the submit button. text-sm everywhere matches
+                    the surrounding facilities table chrome. type="text" with
+                    inputMode="decimal" on lat/lng kills the browser's number
+                    spinner arrows (which were oversized and not useful for
+                    free-form coordinate entry) while keeping the numeric
+                    keypad on mobile. */}
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-gray-900 dark:text-white">Add New Facility</h3>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Add New Facility</h3>
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddForm(false);
                       setEditForm({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
                     }}
-                    className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:hover:text-gray-300"
+                    className="p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:text-gray-400 dark:hover:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+                    aria-label="Close add facility form"
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     placeholder="Facility Name"
                     value={editForm.name}
                     onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                    className="form-input"
+                    className="flex-1 min-w-[160px] text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 outline-none"
                     required
                   />
                   <input
-                    type="number"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Latitude"
                     value={editForm.latitude}
                     onChange={(e) => setEditForm({ ...editForm, latitude: e.target.value })}
-                    className="form-input"
+                    pattern="^-?\d*\.?\d*$"
+                    title="Decimal latitude, e.g. 35.46349"
+                    className="w-32 text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 outline-none"
                     required
                   />
                   <input
-                    type="number"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Longitude"
                     value={editForm.longitude}
                     onChange={(e) => setEditForm({ ...editForm, longitude: e.target.value })}
-                    className="form-input"
+                    pattern="^-?\d*\.?\d*$"
+                    title="Decimal longitude, e.g. -98.01434"
+                    className="w-32 text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 outline-none"
                     required
                   />
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Facility
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Facility
-                </button>
               </form>
             </div>
           )
