@@ -1289,61 +1289,65 @@ export default function FacilityDetailModal({
           </div>
 
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                    <MessageSquare className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Facility Comments</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Quick team notes with timestamps, edit history, and author names.
-                    </p>
-                  </div>
-                </div>
+            {/* Compact header — count baked into the title as a small chip
+                so we don't need a top-right "View thread" button that
+                kept overflowing. The latest-comment preview below toggles
+                the full thread instead. */}
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                <MessageSquare className="w-4 h-4 text-gray-600 dark:text-gray-300" />
               </div>
-              <button
-                type="button"
-                onClick={() => setCommentsExpanded((prev) => !prev)}
-                className="inline-flex items-center gap-2 self-start rounded-full border border-gray-200 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
-              >
-                <span className="rounded-full bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 text-blue-700 dark:text-blue-300">
-                  {commentCount}
-                </span>
-                {commentsExpanded ? 'Hide thread' : 'View thread'}
-              </button>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white">Facility Comments</h3>
+                  {commentCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs font-medium text-blue-700 dark:text-blue-300">
+                      {commentCount}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Team notes with author + timestamp.
+                </p>
+              </div>
             </div>
 
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-3">
               <textarea
                 value={newComment}
                 onChange={(event) => setNewComment(event.target.value)}
-                placeholder="Leave a facility comment for your team..."
+                placeholder="Leave a comment for your team…"
                 rows={3}
                 className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
               />
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Comments are stamped with author name and date.
+              {/* Helper + button on one row when there's room, stacked on
+                  narrow widths so the button never gets clipped. The button
+                  drops to icon + "Add" so it stays narrow regardless. */}
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mr-auto">
+                  Stamped with your name + date.
                 </p>
                 <button
                   type="button"
                   onClick={handleAddComment}
                   disabled={!newComment.trim() || submittingComment}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                  {submittingComment ? 'Saving...' : 'Add comment'}
+                  <Plus className="w-3.5 h-3.5" />
+                  {submittingComment ? 'Saving…' : 'Add'}
                 </button>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setCommentsExpanded(true)}
-              className="mt-4 w-full rounded-lg border border-transparent bg-gray-50 dark:bg-gray-700/40 p-4 text-left hover:border-gray-200 dark:hover:border-gray-600 transition-colors"
-            >
+            {/* Latest-comment preview is now the single toggle for the
+                full thread. Click → expand; click again → collapse.
+                Hidden entirely when there are no comments yet. */}
+            {commentCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setCommentsExpanded((prev) => !prev)}
+                className="mt-3 w-full rounded-lg border border-transparent bg-gray-50 dark:bg-gray-700/40 p-3 text-left hover:border-gray-200 dark:hover:border-gray-600 transition-colors"
+              >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -1351,23 +1355,19 @@ export default function FacilityDetailModal({
                     <span>•</span>
                     <span>{commentCount} total</span>
                   </div>
-                  {latestComment ? (
+                  {latestComment && (
                     <>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                         {latestComment.author_name}
                       </p>
-                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">
+                      <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">
                         {latestComment.body}
                       </p>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                         {formatCommentTimestamp(latestComment.created_at)}
                         {latestComment.updated_at !== latestComment.created_at ? ' (edited)' : ''}
                       </p>
                     </>
-                  ) : (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      No comments yet. Add the first note for this facility.
-                    </p>
                   )}
                 </div>
                 {commentsExpanded ? (
@@ -1377,6 +1377,7 @@ export default function FacilityDetailModal({
                 )}
               </div>
             </button>
+            )}
 
             {commentsExpanded && (
               <div className="mt-4 space-y-3 max-h-[420px] overflow-y-auto pr-1">
