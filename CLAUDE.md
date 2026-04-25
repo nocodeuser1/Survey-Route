@@ -60,6 +60,14 @@ Israel approved pushing any branch, including `main`. Use judgment:
 
 No tokens, API keys, passwords, or auth material in commits, in CLAUDE.md, or anywhere else in the repo. `.gitignore` and `.git/info/exclude` already cover most of this. On 2026-04-17 a classic PAT was pasted into chat and revoked — that's the working memory of why this rule matters.
 
+### 5. Migrations are not auto-applied — say so explicitly
+
+The harness blocks production database writes from the agent (CLI install + service-role connections both deny). That means a Supabase migration file landing in `supabase/migrations/` and being pushed to `main` does **not** change the live database. Israel has to paste it into the SQL editor at https://supabase.com/dashboard/project/rbjvcwgmqnubxixneitb/sql/new and click Run.
+
+When you write a migration, default to also pasting the SQL inline in the chat reply (saves Israel from opening the file). End the reply with the literal action: **"To apply: paste this block into the SQL editor and run."**
+
+Don't say "shipped" or "applied" or "the data is fixed" until Israel confirms he ran it. Until then say "pushed the migration file" — that's what actually happened. Lesson learned 2026-04-25 when Israel reported a bad facility name was still showing up after I'd "fixed" it; the migration existed but hadn't been run.
+
 ---
 
 ## Credentials
