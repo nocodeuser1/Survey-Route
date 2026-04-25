@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useReducer } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -41,6 +41,7 @@ import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
+import InlineEditField from './InlineEditField';
 import { useAuth } from '../contexts/AuthContext';
 
 interface FacilityDetailModalProps {
@@ -465,6 +466,31 @@ export default function FacilityDetailModal({
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
+
+  // Force re-render after we mutate the facility prop in place — matches the
+  // existing handleSaveIpDate / handleSaveOil pattern of mutating
+  // `facility.<field> = …` rather than threading state through the parent.
+  // Lets the InlineEditField cards re-render with the new value after save.
+  const [, bumpFacilityRender] = useReducer((n: number) => n + 1, 0);
+
+  /**
+   * Generic per-field save used by all the General-tab InlineEditField cards.
+   * Writes one column to `public.facilities`, mutates the local facility in
+   * place, and bumps a render counter so display values refresh. Errors are
+   * thrown so InlineEditField can surface them without dismissing edit mode.
+   */
+  const updateFacilityField = async <K extends keyof Facility>(
+    field: K,
+    value: Facility[K] | null
+  ) => {
+    const { error } = await supabase
+      .from('facilities')
+      .update({ [field]: value as Facility[K] | null })
+      .eq('id', facility.id);
+    if (error) throw error;
+    (facility as any)[field] = value;
+    bumpFacilityRender();
+  };
 
   const handleSaveIpDate = async () => {
     const isoDate = ipDateValue ? parseDateInput(ipDateValue) : null;
@@ -996,32 +1022,67 @@ export default function FacilityDetailModal({
                 </p>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Region / County</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.county || 'Not available'}</p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Region / County</p>
+                <InlineEditField
+                  value={facility.county ?? null}
+                  type="text"
+                  emptyPlaceholder="Not available"
+                  ariaLabel="county"
+                  displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                  onSave={(next) => updateFacilityField('county', (next as string | null) || null)}
+                />
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Camino Facility ID</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.camino_facility_id || 'Not available'}</p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Camino Facility ID</p>
+                <InlineEditField
+                  value={facility.camino_facility_id ?? null}
+                  type="text"
+                  emptyPlaceholder="Not available"
+                  ariaLabel="Camino Facility ID"
+                  displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                  onSave={(next) => updateFacilityField('camino_facility_id', (next as string | null) || null)}
+                />
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Startup / First Production Date</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Startup / First Production Date</p>
+                {/* Editing IP date here would skip the auto-calc of spcc_due_date
+                    that handleSaveIpDate does. Stays read-only on the General tab —
+                    the SPCC Plan tab is the place to edit it. */}
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
                   {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not available'}
                 </p>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Permitted Oil</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                  {facility.estimated_oil_per_day ? `${facility.estimated_oil_per_day} bbl/day` : 'Not available'}
-                </p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Permitted Oil</p>
+                <InlineEditField
+                  value={facility.estimated_oil_per_day ?? null}
+                  type="number"
+                  suffix="bbl/day"
+                  emptyPlaceholder="Not available"
+                  ariaLabel="permitted oil"
+                  displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                  onSave={(next) =>
+                    updateFacilityField(
+                      'estimated_oil_per_day',
+                      next === null || next === '' ? null : Number(next)
+                    )
+                  }
+                />
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Well Count</p>
                 <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{wells.length}</p>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Address</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.address || 'No address available'}</p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Address</p>
+                <InlineEditField
+                  value={facility.address ?? null}
+                  type="text"
+                  emptyPlaceholder="No address available"
+                  ariaLabel="address"
+                  displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                  onSave={(next) => updateFacilityField('address', (next as string | null) || null)}
+                />
               </div>
             </div>
           </div>
@@ -1039,81 +1100,153 @@ export default function FacilityDetailModal({
               </span>
             </div>
 
-            {wells.length > 0 ? (
-              <div className="space-y-3">
-                {wells.map((well) => (
+            <div className="space-y-3">
+              {(() => {
+                // Show slots 1..(lastFilled + 1), capped at 6, so the user
+                // always has one empty "next slot" to add to but we don't
+                // pollute the list with all six slots when the facility only
+                // has one well. Empty intermediate slots are still rendered
+                // so the user can fill them in without skipping.
+                let lastFilled = 0;
+                for (const n of WELL_NUMBERS) {
+                  const name = facility[`well_name_${n}` as keyof Facility];
+                  const api = facility[`well_api_${n}` as keyof Facility];
+                  if (name || api) lastFilled = n;
+                }
+                const showThrough = Math.min(lastFilled + 1, WELL_NUMBERS.length);
+                return WELL_NUMBERS.slice(0, showThrough);
+              })().map((num) => {
+                const wellName = facility[`well_name_${num}` as keyof Facility] as string | null | undefined;
+                const wellApi = facility[`well_api_${num}` as keyof Facility] as string | null | undefined;
+                const hasAny = !!wellName || !!wellApi;
+                return (
                   <div
-                    key={well.index}
-                    className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-4"
+                    key={num}
+                    className={`rounded-lg border p-4 ${
+                      hasAny
+                        ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40'
+                        : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-700/20'
+                    }`}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Well {num}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{well.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Well {well.index}</p>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Name</p>
+                        <InlineEditField
+                          value={wellName ?? null}
+                          type="text"
+                          emptyPlaceholder="Not set"
+                          ariaLabel={`Well ${num} name`}
+                          displayClassName="text-sm font-semibold text-gray-900 dark:text-white"
+                          onSave={(next) =>
+                            updateFacilityField(
+                              `well_name_${num}` as keyof Facility,
+                              ((next as string | null) || null) as any
+                            )
+                          }
+                        />
                       </div>
-                      <div className="text-sm text-gray-700 dark:text-gray-200">
-                        API: <span className="font-mono">{well.api || 'Not available'}</span>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">API</p>
+                        <InlineEditField
+                          value={wellApi ?? null}
+                          type="text"
+                          emptyPlaceholder="Not set"
+                          ariaLabel={`Well ${num} API`}
+                          displayClassName="text-sm text-gray-700 dark:text-gray-200 font-mono break-all"
+                          onSave={(next) =>
+                            updateFacilityField(
+                              `well_api_${num}` as keyof Facility,
+                              ((next as string | null) || null) as any
+                            )
+                          }
+                        />
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+              })}
+              {wells.length === 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center pt-1">
+                  Click the pencil on Well 1 above to add the first well.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <button
+              onClick={() => setShowExtendedDetails(!showExtendedDetails)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Additional Details</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Supplemental facility metadata, free-text notes.
+                </p>
               </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                No well numbers are available for this facility.
+              {showExtendedDetails ? (
+                <ChevronUp className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              )}
+            </button>
+
+            {showExtendedDetails && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Matched Name</p>
+                  <InlineEditField
+                    value={facility.matched_facility_name ?? null}
+                    type="text"
+                    emptyPlaceholder="Not set"
+                    ariaLabel="matched facility name"
+                    displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                    onSave={(next) => updateFacilityField('matched_facility_name', (next as string | null) || null)}
+                  />
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Combined API</p>
+                  <InlineEditField
+                    value={facility.api_numbers_combined ?? null}
+                    type="text"
+                    emptyPlaceholder="Not set"
+                    ariaLabel="combined API numbers"
+                    displayClassName="text-sm font-medium text-gray-900 dark:text-white font-mono break-all"
+                    onSave={(next) => updateFacilityField('api_numbers_combined', (next as string | null) || null)}
+                  />
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Field Visit Date</p>
+                  {/* Read-only here — the SPCC Plan tab's Field Visit input
+                      does extra work (auto-toggles Photos Taken). Edit there. */}
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {facility.field_visit_date ? formatDate(facility.field_visit_date) : 'Not set'}
+                  </p>
+                </div>
+                {facility.historical_name && (
+                  <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Historical Name</p>
+                    <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white italic">{facility.historical_name}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Prior name preserved by data import (read-only).</p>
+                  </div>
+                )}
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                  <InlineEditField
+                    value={facility.notes ?? null}
+                    type="textarea"
+                    rows={4}
+                    placeholder="Free-text notes about this facility…"
+                    emptyPlaceholder="No notes yet"
+                    ariaLabel="notes"
+                    displayClassName="text-sm font-medium text-gray-900 dark:text-white whitespace-pre-wrap"
+                    onSave={(next) => updateFacilityField('notes', (next as string | null) || null)}
+                  />
+                </div>
               </div>
             )}
           </div>
-
-          {(facility.matched_facility_name || facility.api_numbers_combined || facility.field_visit_date || facility.notes) && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-              <button
-                onClick={() => setShowExtendedDetails(!showExtendedDetails)}
-                className="w-full flex items-center justify-between gap-3 text-left"
-              >
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Additional Details</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Supplemental facility metadata from imported records.
-                  </p>
-                </div>
-                {showExtendedDetails ? (
-                  <ChevronUp className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                )}
-              </button>
-
-              {showExtendedDetails && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {facility.matched_facility_name && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Matched Name</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{facility.matched_facility_name}</p>
-                    </div>
-                  )}
-                  {facility.api_numbers_combined && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Combined API</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white font-mono break-all">{facility.api_numbers_combined}</p>
-                    </div>
-                  )}
-                  {facility.field_visit_date && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Field Visit Date</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{formatDate(facility.field_visit_date)}</p>
-                    </div>
-                  )}
-                  {facility.notes && (
-                    <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4 md:col-span-2">
-                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Notes</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white whitespace-pre-wrap">{facility.notes}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <div className="space-y-6">
