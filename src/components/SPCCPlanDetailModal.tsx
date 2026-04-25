@@ -27,26 +27,41 @@ const statusIconMap = {
 function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
   // Optimistic local state - updates instantly on tap
   const [photosTaken, setPhotosTaken] = useState(facility.photos_taken || false);
-  const [visitDate, setVisitDate] = useState(facility.field_visit_date || '');
+  // Visit date is edited as free-form text in mm/dd/yy or mm/dd/yyyy format,
+  // matching the IP / PE date editors in this modal. The underlying value on
+  // the facility row is still ISO YYYY-MM-DD; we display + parse via the
+  // formatDateDisplay / parseDateInput helpers from this file.
+  // Why not <input type="date">: Chrome's native date picker commits partial
+  // year input on tab/blur — typing "2025" and tabbing can land you on year
+  // "0202", which is what the user hit before this fix.
+  const [visitDateInput, setVisitDateInput] = useState(
+    facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : ''
+  );
 
   // Sync with parent if facility prop changes
   useEffect(() => {
     setPhotosTaken(facility.photos_taken || false);
-    setVisitDate(facility.field_visit_date || '');
+    setVisitDateInput(facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : '');
   }, [facility.photos_taken, facility.field_visit_date]);
 
   const handleTogglePhotos = async () => {
     const newVal = !photosTaken;
     const today = new Date().toISOString().split('T')[0];
 
+    // Photos Taken seeds the visit date with today's date ONLY when there's
+    // no date already on file. Don't clobber a date the user already typed.
+    const existingIso =
+      facility.field_visit_date || (visitDateInput ? parseDateInput(visitDateInput) : null);
+    const seedDate = newVal && !existingIso ? today : null;
+
     // Update UI instantly (optimistic)
     setPhotosTaken(newVal);
-    if (newVal) setVisitDate(today);
+    if (seedDate) setVisitDateInput(formatDateDisplay(seedDate));
 
     // Save to DB in background
     try {
       const updateData: any = { photos_taken: newVal };
-      if (newVal) updateData.field_visit_date = today;
+      if (seedDate) updateData.field_visit_date = seedDate;
       const { error } = await supabase
         .from('facilities')
         .update(updateData)
@@ -57,23 +72,68 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
       console.error('Error toggling photos_taken:', err);
       // Revert on failure
       setPhotosTaken(!newVal);
-      if (newVal) setVisitDate(facility.field_visit_date || '');
+      if (seedDate) {
+        setVisitDateInput(facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : '');
+      }
     }
   };
 
-  const handleDateChange = async (newDate: string) => {
-    const oldDate = visitDate;
-    setVisitDate(newDate); // Optimistic
+  // Commit visit date on blur or Enter. Saves immediately AND toggles Photos
+  // Taken on as a side effect (per spec: "Once the visit date has changed, it
+  // needs to immediately save to the database and immediately toggle on the
+  // photos taken"). Invalid input is left in the field with a red border —
+  // we don't save garbage, but we don't lose what the user typed either.
+  const commitVisitDate = async () => {
+    const trimmed = visitDateInput.trim();
+    const parsedIso = trimmed ? parseDateInput(trimmed) : null;
+
+    // Empty input → clear the date if one was set, but don't touch photos.
+    if (trimmed === '') {
+      if (!facility.field_visit_date) return; // nothing to save
+      try {
+        const { error } = await supabase
+          .from('facilities')
+          .update({ field_visit_date: null })
+          .eq('id', facility.id);
+        if (error) throw error;
+        onFacilitiesChange();
+      } catch (err) {
+        console.error('Error clearing visit date:', err);
+        setVisitDateInput(facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : '');
+      }
+      return;
+    }
+
+    // Invalid format → leave value in field for user to fix; the red border
+    // (driven off `parseDateInput(visitDateInput)` in the JSX) signals it.
+    if (!parsedIso) return;
+
+    // No-op when the parsed value matches what's already saved.
+    if (parsedIso === facility.field_visit_date && photosTaken) {
+      // Normalize the displayed text in case they typed a 2-digit year.
+      setVisitDateInput(formatDateDisplay(parsedIso));
+      return;
+    }
+
+    // Optimistic UI update — re-display in canonical format and flip Photos Taken.
+    setVisitDateInput(formatDateDisplay(parsedIso));
+    const wasPhotosOn = photosTaken;
+    if (!wasPhotosOn) setPhotosTaken(true);
+
+    const updateData: Record<string, any> = { field_visit_date: parsedIso };
+    if (!wasPhotosOn) updateData.photos_taken = true;
+
     try {
       const { error } = await supabase
         .from('facilities')
-        .update({ field_visit_date: newDate || null })
+        .update(updateData)
         .eq('id', facility.id);
       if (error) throw error;
       onFacilitiesChange();
     } catch (err) {
       console.error('Error updating field_visit_date:', err);
-      setVisitDate(oldDate); // Revert
+      setVisitDateInput(facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : '');
+      setPhotosTaken(facility.photos_taken || false);
     }
   };
 
@@ -108,11 +168,15 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
               }`}>
                 {photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
               </div>
-              {photosTaken && visitDate && (
-                <div className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Visited: {formatDate(visitDate)}
-                </div>
-              )}
+              {photosTaken && (() => {
+                const iso = parseDateInput(visitDateInput) || facility.field_visit_date;
+                if (!iso) return null;
+                return (
+                  <div className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    Visited: {formatDate(iso)}
+                  </div>
+                );
+              })()}
             </div>
           </button>
         </div>
@@ -124,14 +188,23 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
             <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Visit Date</span>
           </div>
           <input
-            type="date"
-            value={visitDate}
-            onChange={(e) => handleDateChange(e.target.value)}
-            className={`text-sm font-medium px-2 py-1 rounded border ${
+            type="text"
+            inputMode="numeric"
+            placeholder="mm/dd/yy"
+            value={visitDateInput}
+            onChange={(e) => setVisitDateInput(e.target.value)}
+            onBlur={commitVisitDate}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className={`text-sm font-medium px-2 py-1 rounded border w-28 ${
               darkMode
                 ? 'bg-gray-700 border-gray-600 text-white'
                 : 'bg-white border-gray-300 text-gray-900'
-            }`}
+            } ${visitDateInput && !parseDateInput(visitDateInput) ? 'border-red-400' : ''}`}
           />
         </div>
 
