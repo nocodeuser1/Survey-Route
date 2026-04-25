@@ -126,6 +126,11 @@ export default function FacilityDetailModal({
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  // When the user clicks "+ Add Well", we reveal the next empty slot. After
+  // they fill it (the slot now has data) the value is reset to null so the
+  // slot once again has to be explicitly revealed via the button.
+  const [revealedExtraWell, setRevealedExtraWell] = useState<number | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState('');
   const [showInspectionForm, setShowInspectionForm] = useState(false);
@@ -285,11 +290,17 @@ export default function FacilityDetailModal({
 
     try {
       setSubmittingComment(true);
+      setCommentError(null);
+      // Use the public.users.id from auth context, NOT the userId prop —
+      // the prop carries auth.uid() (different convention across the app)
+      // but RLS for facility_comments expects user_id to be a public.users.id
+      // whose auth_user_id matches auth.uid(). Without this we get a 403.
+      const commentUserId = user?.id ?? userId;
       const { data, error } = await supabase
         .from('facility_comments')
         .insert({
           facility_id: facility.id,
-          user_id: userId,
+          user_id: commentUserId,
           author_name: currentAuthorName,
           body,
         })
@@ -301,9 +312,13 @@ export default function FacilityDetailModal({
       setFacilityComments((prev) => (data ? [data, ...prev] : prev));
       setNewComment('');
       setCommentsExpanded(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding facility comment:', err);
-      alert('Failed to save comment. Please try again.');
+      // Surface the actual Postgres / RLS error inline rather than a generic
+      // alert — the previous "Failed to save comment. Please try again."
+      // alert hid useful info like RLS-rejection messages.
+      const msg = err?.message || err?.error_description || 'Could not save comment.';
+      setCommentError(msg);
     } finally {
       setSubmittingComment(false);
     }
@@ -1102,19 +1117,25 @@ export default function FacilityDetailModal({
 
             <div className="space-y-3">
               {(() => {
-                // Show slots 1..(lastFilled + 1), capped at 6, so the user
-                // always has one empty "next slot" to add to but we don't
-                // pollute the list with all six slots when the facility only
-                // has one well. Empty intermediate slots are still rendered
-                // so the user can fill them in without skipping.
-                let lastFilled = 0;
+                // Filled slots only by default. The "+ Add Well" button below
+                // reveals the next empty slot when the user explicitly asks
+                // for it (revealedExtraWell), so a freshly-loaded facility
+                // doesn't show empty placeholders.
+                const filledNums: number[] = [];
                 for (const n of WELL_NUMBERS) {
                   const name = facility[`well_name_${n}` as keyof Facility];
                   const api = facility[`well_api_${n}` as keyof Facility];
-                  if (name || api) lastFilled = n;
+                  if (name || api) filledNums.push(n);
                 }
-                const showThrough = Math.min(lastFilled + 1, WELL_NUMBERS.length);
-                return WELL_NUMBERS.slice(0, showThrough);
+                const slots = [...filledNums];
+                if (
+                  revealedExtraWell !== null &&
+                  !filledNums.includes(revealedExtraWell)
+                ) {
+                  slots.push(revealedExtraWell);
+                  slots.sort((a, b) => a - b);
+                }
+                return slots;
               })().map((num) => {
                 const wellName = facility[`well_name_${num}` as keyof Facility] as string | null | undefined;
                 const wellApi = facility[`well_api_${num}` as keyof Facility] as string | null | undefined;
@@ -1138,12 +1159,17 @@ export default function FacilityDetailModal({
                           emptyPlaceholder="Not set"
                           ariaLabel={`Well ${num} name`}
                           displayClassName="text-sm font-semibold text-gray-900 dark:text-white"
-                          onSave={(next) =>
-                            updateFacilityField(
+                          onSave={async (next) => {
+                            await updateFacilityField(
                               `well_name_${num}` as keyof Facility,
                               ((next as string | null) || null) as any
-                            )
-                          }
+                            );
+                            // Once the slot has any data, it's now "filled" —
+                            // collapse the reveal flag so the next "Add Well"
+                            // click goes to the next empty slot rather than
+                            // the one we just filled.
+                            if (revealedExtraWell === num) setRevealedExtraWell(null);
+                          }}
                         />
                       </div>
                       <div>
@@ -1154,23 +1180,50 @@ export default function FacilityDetailModal({
                           emptyPlaceholder="Not set"
                           ariaLabel={`Well ${num} API`}
                           displayClassName="text-sm text-gray-700 dark:text-gray-200 font-mono break-all"
-                          onSave={(next) =>
-                            updateFacilityField(
+                          onSave={async (next) => {
+                            await updateFacilityField(
                               `well_api_${num}` as keyof Facility,
                               ((next as string | null) || null) as any
-                            )
-                          }
+                            );
+                            if (revealedExtraWell === num) setRevealedExtraWell(null);
+                          }}
                         />
                       </div>
                     </div>
                   </div>
                 );
               })}
-              {wells.length === 0 && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 text-center pt-1">
-                  Click the pencil on Well 1 above to add the first well.
-                </p>
-              )}
+              {(() => {
+                // Compute the next empty slot for the "+ Add Well" button.
+                let nextEmpty: number | null = null;
+                for (const n of WELL_NUMBERS) {
+                  const name = facility[`well_name_${n}` as keyof Facility];
+                  const api = facility[`well_api_${n}` as keyof Facility];
+                  if (!name && !api) {
+                    nextEmpty = n;
+                    break;
+                  }
+                }
+                const cap = WELL_NUMBERS[WELL_NUMBERS.length - 1];
+                if (nextEmpty === null) {
+                  return (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center pt-1">
+                      All {cap} well slots are filled.
+                    </p>
+                  );
+                }
+                if (revealedExtraWell !== null) return null; // button hidden while editing the new slot
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setRevealedExtraWell(nextEmpty)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-sm font-medium text-blue-600 dark:text-blue-400 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Well {nextEmpty}
+                  </button>
+                );
+              })()}
             </div>
           </div>
 
@@ -1337,6 +1390,11 @@ export default function FacilityDetailModal({
                   {submittingComment ? 'Saving…' : 'Add'}
                 </button>
               </div>
+              {commentError && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400 break-words">
+                  {commentError}
+                </p>
+              )}
             </div>
 
             {/* Latest-comment preview is now the single toggle for the
