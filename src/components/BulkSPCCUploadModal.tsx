@@ -6,10 +6,16 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { extractTextFromPdfs, ExtractionConfig } from '../utils/pdfExtractor';
 import { matchPdfsToFacilities, PdfMatchResult } from '../utils/spccPdfMatcher';
 import { buildPlanStoragePath } from '../utils/spccPlans';
+import { compressPDF, formatBytesMB } from '../utils/compressPDF';
 
-const MAX_FILE_SIZE_MB = 10;
+// 15 MB matches the inline single-file uploader's input cap. Anything
+// larger needs a manual "Save As → Reduced Size PDF" pass in Acrobat
+// before it can be brought into the system.
+const MAX_FILE_SIZE_MB = 15;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const MAX_FILE_COUNT = 50;
+// Storage target after compression — same threshold as the inline flow.
+const COMPRESSION_TARGET_BYTES = 2 * 1024 * 1024;
+const MAX_FILE_COUNT = 200;
 
 /** Parse mm/dd/yy or mm/dd/yyyy into YYYY-MM-DD */
 function parseDateInput(input: string): string | null {
@@ -312,10 +318,33 @@ export default function BulkSPCCUploadModal({
           targetPlan = { id: created.id, berm_index: created.berm_index };
         }
 
+        // Compress the PDF in-browser if it's over the 2 MB storage target.
+        // Mirrors the InlineSPCCPlanUpload pipeline so big bulk-imported PDFs
+        // shrink the same way single uploads do (e.g. 50 MB → ~1 MB).
+        let uploadBlob: Blob = result.file;
+        if (result.file.size > COMPRESSION_TARGET_BYTES) {
+          const compressed = await compressPDF(result.file, {
+            skipBelowBytes: COMPRESSION_TARGET_BYTES,
+            maxInputBytes: MAX_FILE_SIZE_BYTES,
+          });
+          if (compressed.reason === 'encrypted') {
+            throw new Error('PDF is password-protected; remove the password and re-try');
+          }
+          if (compressed.compressedBytes > COMPRESSION_TARGET_BYTES) {
+            // Compression couldn't get it under 2 MB — Supabase storage will
+            // accept it (no hard cap) but it's worth surfacing so the user
+            // knows. Continue with the larger blob; not fatal.
+            console.warn(
+              `${result.file.name}: still ${formatBytesMB(compressed.compressedBytes)} MB after compression`
+            );
+          }
+          uploadBlob = compressed.blob;
+        }
+
         const fileName = buildPlanStoragePath(facilityId, targetPlan.berm_index, fileExt);
         const { error: uploadError } = await supabase.storage
           .from('spcc-plans')
-          .upload(fileName, result.file);
+          .upload(fileName, uploadBlob, { contentType: 'application/pdf' });
         if (uploadError) throw uploadError;
 
         const {
