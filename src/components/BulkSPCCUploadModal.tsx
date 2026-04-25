@@ -176,6 +176,9 @@ export default function BulkSPCCUploadModal({
   const [phase, setPhase] = useState<'select' | 'processing' | 'review' | 'uploading' | 'done'>('select');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [matchResults, setMatchResults] = useState<PdfMatchResult[]>([]);
+  // Optional filter on the review table — toggle by clicking the
+  // matched/unmatched/error chips at the top of the review screen.
+  const [reviewFilter, setReviewFilter] = useState<'matched' | 'unmatched' | 'error' | null>(null);
   const [processProgress, setProcessProgress] = useState({ completed: 0, total: 0 });
   const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 });
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -252,6 +255,7 @@ export default function BulkSPCCUploadModal({
     const nonSoldFacilities = facilities.filter(f => f.status !== 'sold');
     const results = matchPdfsToFacilities(extractions, nonSoldFacilities);
     setMatchResults(results);
+    setReviewFilter(null);
     setPhase('review');
   };
 
@@ -515,24 +519,72 @@ export default function BulkSPCCUploadModal({
           {/* Phase 3: Review */}
           {phase === 'review' && (
             <div className="space-y-4">
-              {/* Summary bar */}
+              {/* Summary bar — chips double as filter toggles. Clicking an
+                  inactive chip filters the table to that status. Clicking
+                  the active chip (or its X) clears the filter. */}
               <div className="flex items-center gap-4 flex-wrap">
-                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${darkMode ? 'bg-green-900/30 text-green-400' : 'bg-green-100 text-green-700'}`}>
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  {matchedCount} matched
-                </span>
-                {unmatchedCount > 0 && (
-                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${darkMode ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    {unmatchedCount} unmatched
-                  </span>
-                )}
-                {errorCount > 0 && (
-                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${darkMode ? 'bg-red-900/30 text-red-400' : 'bg-red-100 text-red-700'}`}>
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    {errorCount} error{errorCount !== 1 ? 's' : ''}
-                  </span>
-                )}
+                {([
+                  {
+                    key: 'matched' as const,
+                    count: matchedCount,
+                    label: 'matched',
+                    icon: CheckCircle,
+                    activeClass: darkMode
+                      ? 'bg-green-900/60 text-green-300 ring-2 ring-green-500/50'
+                      : 'bg-green-200 text-green-800 ring-2 ring-green-500/50',
+                    inactiveClass: darkMode
+                      ? 'bg-green-900/30 text-green-400 hover:bg-green-900/50'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200',
+                  },
+                  {
+                    key: 'unmatched' as const,
+                    count: unmatchedCount,
+                    label: 'unmatched',
+                    icon: AlertTriangle,
+                    activeClass: darkMode
+                      ? 'bg-amber-900/60 text-amber-300 ring-2 ring-amber-500/50'
+                      : 'bg-amber-200 text-amber-800 ring-2 ring-amber-500/50',
+                    inactiveClass: darkMode
+                      ? 'bg-amber-900/30 text-amber-400 hover:bg-amber-900/50'
+                      : 'bg-amber-100 text-amber-700 hover:bg-amber-200',
+                  },
+                  {
+                    key: 'error' as const,
+                    count: errorCount,
+                    label: errorCount === 1 ? 'error' : 'errors',
+                    icon: AlertCircle,
+                    activeClass: darkMode
+                      ? 'bg-red-900/60 text-red-300 ring-2 ring-red-500/50'
+                      : 'bg-red-200 text-red-800 ring-2 ring-red-500/50',
+                    inactiveClass: darkMode
+                      ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50'
+                      : 'bg-red-100 text-red-700 hover:bg-red-200',
+                  },
+                ])
+                  .filter((chip) => chip.count > 0)
+                  .map((chip) => {
+                    const Icon = chip.icon;
+                    const active = reviewFilter === chip.key;
+                    return (
+                      <button
+                        key={chip.key}
+                        type="button"
+                        onClick={() => setReviewFilter(active ? null : chip.key)}
+                        className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                          active ? chip.activeClass : chip.inactiveClass
+                        }`}
+                        title={
+                          active
+                            ? `Showing only ${chip.label} — click to clear filter`
+                            : `Filter to ${chip.label} only`
+                        }
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {chip.count} {chip.label}
+                        {active && <X className="w-3 h-3 ml-0.5 -mr-0.5" />}
+                      </button>
+                    );
+                  })}
               </div>
 
               {/* Review table */}
@@ -549,8 +601,21 @@ export default function BulkSPCCUploadModal({
                       </tr>
                     </thead>
                     <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-100'}`}>
-                      {matchResults.map((result, index) => (
+                      {matchResults
+                        .map((result, index) => ({ result, index }))
+                        .filter(({ result }) => {
+                          if (!reviewFilter) return true;
+                          if (reviewFilter === 'error') return result.status === 'error';
+                          if (reviewFilter === 'matched')
+                            return !!result.selectedFacilityId;
+                          // unmatched
+                          return result.status !== 'error' && !result.selectedFacilityId;
+                        })
+                        .map(({ result, index }) => (
                         <tr key={index} className={darkMode ? 'bg-gray-800' : 'bg-white'}>
+                          {/* Note: `index` is the absolute index into matchResults
+                              even when filtered, so updateResult/removeResult
+                              keep targeting the right row. */}
                           {/* Status icon */}
                           <td className="px-3 py-2">
                             {result.status === 'error' ? (
