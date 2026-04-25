@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Upload, FileText, CheckCircle, AlertTriangle, AlertCircle, Search, Trash2, Loader } from 'lucide-react';
 import { Facility, SPCCPlan, supabase } from '../lib/supabase';
@@ -50,7 +50,12 @@ interface FacilitySelectProps {
 function FacilitySelect({ facilities, selectedId, onChange, darkMode }: FacilitySelectProps) {
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  // Position the dropdown relative to the trigger button. We portal the
+  // dropdown to document.body so it isn't clipped by the modal's
+  // overflow-hidden table wrapper, which was the original bug.
+  const [popupPos, setPopupPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const selectedFacility = selectedId ? facilities.find(f => f.id === selectedId) : null;
 
@@ -58,15 +63,54 @@ function FacilitySelect({ facilities, selectedId, onChange, darkMode }: Facility
     .filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
     .slice(0, 50);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+  // Recompute position whenever we open. The popup is rendered with `fixed`
+  // positioning so this runs once per open; if the user scrolls the modal
+  // body, we close (matches macOS native popover behavior — re-clicking the
+  // trigger gets fresh coordinates).
+  useLayoutEffect(() => {
+    if (!isOpen || !containerRef.current) {
+      setPopupPos(null);
+      return;
+    }
+    const updatePos = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const popupWidth = Math.max(rect.width, 256); // 256 ~ 16rem (w-64)
+      const popupHeight = 240;
+      // Prefer below the trigger; flip above if there's no room.
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const top = spaceBelow < popupHeight + 12 && rect.top > popupHeight + 12
+        ? rect.top - popupHeight - 4
+        : rect.bottom + 4;
+      // Keep within the viewport horizontally.
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - popupWidth - 8));
+      setPopupPos({ top, left, width: popupWidth });
     };
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    return () => window.removeEventListener('resize', updatePos);
+  }, [isOpen]);
+
+  // Close on outside click — must check both the trigger AND the portaled popup.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const inTrigger = containerRef.current?.contains(target);
+      const inPopup = popupRef.current?.contains(target);
+      if (!inTrigger && !inPopup) setIsOpen(false);
+    };
+    // Close on scroll within ANY ancestor (modal body, page, etc.) — the
+    // popup is fixed to viewport coords so it'd otherwise drift away from
+    // the trigger as the user scrolls.
+    const handleScroll = () => setIsOpen(false);
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [isOpen]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -80,12 +124,20 @@ function FacilitySelect({ facilities, selectedId, onChange, darkMode }: Facility
       >
         {selectedFacility?.name || 'Select facility...'}
       </button>
-      {isOpen && (
-        <div className={`absolute z-50 mt-1 w-64 rounded-lg shadow-xl border ${darkMode
-          ? 'bg-gray-800 border-gray-600'
-          : 'bg-white border-gray-200'
-          }`}
-          style={{ maxHeight: '240px' }}
+      {isOpen && popupPos && createPortal(
+        <div
+          ref={popupRef}
+          className={`fixed rounded-lg shadow-xl border ${darkMode
+            ? 'bg-gray-800 border-gray-600'
+            : 'bg-white border-gray-200'
+            }`}
+          style={{
+            top: popupPos.top,
+            left: popupPos.left,
+            width: popupPos.width,
+            maxHeight: 240,
+            zIndex: 10000, // above the modal (z-50)
+          }}
         >
           <div className="p-1.5">
             <div className="relative">
@@ -133,7 +185,8 @@ function FacilitySelect({ facilities, selectedId, onChange, darkMode }: Facility
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
