@@ -130,12 +130,101 @@ check their work over time.
   out of scope. The user uploads one PDF per berm if they have separate
   plans.
 
+## Phase 3 — bulk actions history tab (deferred, design only)
+
+User requested: "afterwards I've done a bulk upload I can click on like a
+bulk actions tab and see the progress for one of the bulk upload like if any
+errors occurred and which errors occurred on which files and a workflow to
+connect the matched wells for each facility one by one."
+
+Phase 2's post-upload receipt screen already covers the within-session view.
+A persistent **Bulk Actions** tab covers the across-session need: open the
+app the next morning, click the tab, see "yesterday I uploaded 30 plans, 2
+errored, here are the matched-wells workflows still pending."
+
+### Schema sketch
+
+```sql
+-- Header row per bulk run.
+CREATE TABLE bulk_upload_runs (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id      uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id         uuid NOT NULL REFERENCES users(id),
+  kind            text NOT NULL CHECK (kind IN ('spcc_pdf')),
+  status          text NOT NULL CHECK (status IN ('in_progress','done','aborted')),
+  files_attempted int  NOT NULL DEFAULT 0,
+  files_succeeded int  NOT NULL DEFAULT 0,
+  files_errored   int  NOT NULL DEFAULT 0,
+  started_at      timestamptz NOT NULL DEFAULT now(),
+  finished_at     timestamptz
+);
+
+-- One row per file the user attempted to upload in a run.
+CREATE TABLE bulk_upload_items (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id        uuid NOT NULL REFERENCES bulk_upload_runs(id) ON DELETE CASCADE,
+  pdf_filename  text NOT NULL,
+  facility_id   uuid REFERENCES facilities(id) ON DELETE SET NULL,
+  berm_index    int,
+  match_source  text,  -- 'camino_id_filename' | 'filename_text' | 'pdf_text' | manual
+  status        text NOT NULL CHECK (status IN ('uploaded','error','skipped')),
+  error_message text,
+  -- For the well-assignment workflow:
+  wells_review_state text NOT NULL DEFAULT 'pending'
+    CHECK (wells_review_state IN ('pending','reviewed','skipped')),
+  reviewed_at   timestamptz
+);
+
+CREATE INDEX bulk_upload_items_run ON bulk_upload_items(run_id);
+CREATE INDEX bulk_upload_items_pending_wells
+  ON bulk_upload_items(facility_id) WHERE wells_review_state = 'pending';
+```
+
+RLS mirrors `account_users` pattern.
+
+### UI sketch
+
+Add a **Bulk Actions** entry to the FacilitiesManager top-bar menu (next to
+the Bulk SPCC Upload entry). Opens a modal with a list of recent runs:
+
+```
+2026-04-25 14:32 · 30 PDFs · ✅ 28 uploaded · ⚠ 2 errors · 4 facilities awaiting wells review
+
+  [Continue review]   [View errors]   [Re-run 2 errored]
+```
+
+Click into a run → list of items grouped by status. The "wells review"
+column shows the workflow: clicking a `pending` item opens the
+`SPCCPlanDetailModal` for that facility; closing the modal marks the item
+`reviewed` (or "skip for now" leaves it `pending` with a flag). The
+workflow loops: when item N is closed, the next pending item auto-opens
+unless the user dismissed the loop.
+
+### Wiring
+
+- The current `handleApply` in `BulkSPCCUploadModal` would create a
+  `bulk_upload_runs` row at the start, an `items` row per file as it
+  succeeds/errors, and update the run's counts at the end.
+- The phase-2 receipt screen becomes a thin shell over the run detail —
+  same data, just rendered in two contexts (just-finished vs. historical).
+- Errored items become re-runnable: a "Retry" button on the row re-opens
+  the file picker with that one file pre-loaded.
+
+### Why deferred
+
+This needs a new schema + new UI surface and a polished workflow loop. It's
+high value for users running weekly batches but not blocking for the
+initial Camino import. Worth one focused branch on its own.
+
 ## Open checklist
 
 - [x] Phase 1: bulk upload writes to `spcc_plans` (berm 1) — shipped.
-- [ ] Phase 2A: berm picker in review table.
+- [x] Phase 2A: filename-based matching with Camino ID + filename text — shipped.
+- [ ] Phase 2A: berm picker in review table for multi-berm facilities.
 - [ ] Phase 2A: extend `PdfMatchResult` with `overrideBermIndex`.
 - [ ] Phase 2A: update `handleApply` to honor the override.
-- [ ] Phase 2B: post-upload receipt screen with per-facility rows.
-- [ ] Phase 2B: "Review assignments" shortcut filters to multi-berm rows.
-- [ ] Phase 2C: FacilitiesManager "Last bulk upload" column (optional).
+- [x] Phase 2B: post-upload receipt screen with per-facility rows — shipped.
+- [x] Phase 2B: "Review berms" deep-link from receipt to plan-detail modal — shipped.
+- [ ] Phase 3: persistent `bulk_upload_runs` schema + Bulk Actions tab.
+- [ ] Phase 3: workflow loop (auto-advance through pending wells reviews).
+- [ ] Phase 3: errored-item retry.

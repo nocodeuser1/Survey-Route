@@ -139,9 +139,33 @@ interface BulkSPCCUploadModalProps {
   facilities: Facility[];
   accountId: string;
   onUploadComplete: () => void;
+  /**
+   * Optional. When provided, the post-upload "done" screen renders a
+   * "Review" button per touched facility that calls this with the
+   * facility id. Parent is expected to close this modal and open the
+   * SPCCPlanDetailModal for that facility so the user can step through
+   * multi-berm well assignments.
+   */
+  onOpenFacilityPlanDetail?: (facilityId: string) => void;
 }
 
-export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accountId, onUploadComplete }: BulkSPCCUploadModalProps) {
+interface UploadedFacilitySummary {
+  facilityId: string;
+  facilityName: string;
+  bermIndex: number;
+  pdfFilename: string;
+  /** From the spcc_plans count fetched after upload — drives "Review berm assignments" prominence. */
+  bermCount: number;
+}
+
+export default function BulkSPCCUploadModal({
+  isOpen,
+  onClose,
+  facilities,
+  accountId,
+  onUploadComplete,
+  onOpenFacilityPlanDetail,
+}: BulkSPCCUploadModalProps) {
   const { darkMode } = useDarkMode();
   const [phase, setPhase] = useState<'select' | 'processing' | 'review' | 'uploading' | 'done'>('select');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -150,6 +174,7 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
   const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 });
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [uploadedSummaries, setUploadedSummaries] = useState<UploadedFacilitySummary[]>([]);
   const [rejectedFiles, setRejectedFiles] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [extractionConfig, setExtractionConfig] = useState<ExtractionConfig | null>(null);
@@ -243,6 +268,7 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
     setPhase('uploading');
     setUploadProgress({ completed: 0, total: validResults.length });
     const errors: string[] = [];
+    const summaries: UploadedFacilitySummary[] = [];
     let completed = 0;
 
     for (const result of validResults) {
@@ -309,6 +335,23 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
           .eq('id', targetPlan.id);
         if (updateError) throw updateError;
 
+        // Record this facility for the post-upload review screen. The
+        // bermCount is fetched here (a small per-facility round-trip) so
+        // the review screen can prioritize multi-berm facilities at the top.
+        const { count: bermCount } = await supabase
+          .from('spcc_plans')
+          .select('*', { count: 'exact', head: true })
+          .eq('facility_id', facilityId);
+
+        const facility = facilities.find((f) => f.id === facilityId);
+        summaries.push({
+          facilityId,
+          facilityName: facility?.name || '(unknown facility)',
+          bermIndex: targetPlan.berm_index,
+          pdfFilename: result.file.name,
+          bermCount: bermCount ?? 1,
+        });
+
         completed++;
         setUploadProgress({ completed, total: validResults.length });
       } catch (err: any) {
@@ -318,6 +361,7 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
 
     setUploadedCount(completed);
     setUploadErrors(errors);
+    setUploadedSummaries(summaries);
     setPhase('done');
     if (completed > 0) onUploadComplete();
   };
@@ -578,21 +622,101 @@ export default function BulkSPCCUploadModal({ isOpen, onClose, facilities, accou
 
           {/* Phase 5: Done */}
           {phase === 'done' && (
-            <div className="flex flex-col items-center justify-center py-12 space-y-4">
-              <CheckCircle className={`w-12 h-12 ${uploadErrors.length > 0 ? 'text-amber-500' : 'text-green-500'}`} />
-              <p className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                {uploadedCount} plan{uploadedCount !== 1 ? 's' : ''} uploaded successfully
-              </p>
+            <div className="space-y-4">
+              {/* Hero summary */}
+              <div className="flex flex-col items-center justify-center pt-4 pb-2 space-y-2">
+                <CheckCircle className={`w-10 h-10 ${uploadErrors.length > 0 ? 'text-amber-500' : 'text-green-500'}`} />
+                <p className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {uploadedCount} plan{uploadedCount !== 1 ? 's' : ''} uploaded
+                </p>
+                {uploadErrors.length === 0 ? (
+                  <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    No errors. Review berm assignments below for any multi-berm facility.
+                  </p>
+                ) : (
+                  <p className={`text-sm ${darkMode ? 'text-amber-400' : 'text-amber-700'}`}>
+                    {uploadErrors.length} error{uploadErrors.length !== 1 ? 's' : ''} — see details below.
+                  </p>
+                )}
+              </div>
+
+              {/* Errors */}
               {uploadErrors.length > 0 && (
-                <div className={`rounded-lg border p-3 w-full max-w-md ${darkMode ? 'border-red-900/50 bg-red-900/20' : 'border-red-200 bg-red-50'}`}>
+                <div className={`rounded-lg border p-3 ${darkMode ? 'border-red-900/50 bg-red-900/20' : 'border-red-200 bg-red-50'}`}>
                   <p className={`text-sm font-medium mb-1 ${darkMode ? 'text-red-400' : 'text-red-700'}`}>
                     {uploadErrors.length} error{uploadErrors.length !== 1 ? 's' : ''}
                   </p>
-                  {uploadErrors.map((msg, i) => (
-                    <p key={i} className={`text-xs ${darkMode ? 'text-red-400/80' : 'text-red-600'}`}>{msg}</p>
-                  ))}
+                  <div className="space-y-1">
+                    {uploadErrors.map((msg, i) => (
+                      <p key={i} className={`text-xs ${darkMode ? 'text-red-400/80' : 'text-red-600'}`}>{msg}</p>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              {/* Per-facility receipt + multi-berm review prompts.
+                  Multi-berm rows float to the top so the user can immediately
+                  step through wells assignment for each one. Single-berm rows
+                  list afterwards as a sanity-check trail. */}
+              {uploadedSummaries.length > 0 && (() => {
+                const sorted = [...uploadedSummaries].sort((a, b) =>
+                  // Multi-berm first, then alpha by name within each group.
+                  (b.bermCount > 1 ? 1 : 0) - (a.bermCount > 1 ? 1 : 0) ||
+                  a.facilityName.localeCompare(b.facilityName)
+                );
+                const multi = sorted.filter((s) => s.bermCount > 1);
+                return (
+                  <div className={`rounded-lg border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                    <div className={`flex items-center justify-between gap-2 px-3 py-2 border-b ${darkMode ? 'border-gray-700 bg-gray-700/40' : 'border-gray-200 bg-gray-50'}`}>
+                      <div>
+                        <p className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                          Facilities updated · {sorted.length}
+                        </p>
+                        {multi.length > 0 && (
+                          <p className={`text-xs ${darkMode ? 'text-amber-400' : 'text-amber-700'}`}>
+                            {multi.length} have multiple berms — review well assignments to confirm the upload landed on the right berm.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-72 overflow-y-auto">
+                      {sorted.map((s) => (
+                        <div
+                          key={`${s.facilityId}-${s.pdfFilename}`}
+                          className={`flex items-center gap-3 px-3 py-2 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium truncate ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {s.facilityName}
+                            </p>
+                            <p className={`text-xs truncate ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                              {s.pdfFilename} → Berm {s.bermIndex}
+                              {s.bermCount > 1 && ` of ${s.bermCount}`}
+                            </p>
+                          </div>
+                          {s.bermCount > 1 && onOpenFacilityPlanDetail && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onOpenFacilityPlanDetail(s.facilityId);
+                                onClose();
+                              }}
+                              className={`flex-shrink-0 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                                darkMode
+                                  ? 'bg-amber-900/40 text-amber-200 hover:bg-amber-900/60'
+                                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                              }`}
+                              title="Open the plan-detail modal to review berm assignments"
+                            >
+                              Review berms →
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

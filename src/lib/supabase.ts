@@ -71,6 +71,13 @@ export interface Facility {
   recertified_date?: string | null;
   county?: string | null;
   camino_facility_id?: string | null;
+  /**
+   * Prior facility name preserved when a rename happens (manual edit or a
+   * data import like the 2026-04-25 Camino backfill). Display-only — the
+   * `name` column is the source of truth. Toggleable column in
+   * `FacilitiesManager`.
+   */
+  historical_name?: string | null;
   // Inspection tracking
   inspection_frequency_days?: number;
   last_inspection_date?: string | null;

@@ -121,7 +121,7 @@ function TouchTooltipButton({
   );
 }
 
-type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' |
+type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'historical_name' |
   'spcc_status' | 'inspection_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
@@ -136,7 +136,7 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 's
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
-  'name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
+  'name', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
   'status', 'day_assignment', 'team_assignment',
   'spcc_status', 'inspection_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
@@ -158,6 +158,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   visit_duration: 'Visit Duration',
   county: 'County',
   camino_facility_id: 'Camino Facility ID',
+  historical_name: 'Historical Name',
   status: 'Status',
   day_assignment: 'Day Assignment',
   team_assignment: 'Team Assignment',
@@ -1095,6 +1096,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.county || '';
           case 'camino_facility_id':
             return facility.camino_facility_id || '';
+          case 'historical_name':
+            return facility.historical_name || '';
           case 'visit_duration':
             return facility.visit_duration_minutes || 0;
           case 'photos_taken':
@@ -2254,6 +2257,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.county || '-';
       case 'camino_facility_id':
         return facility.camino_facility_id || '-';
+      case 'historical_name':
+        return facility.historical_name || '-';
       case 'visit_duration':
         return `${facility.visit_duration_minutes} min`;
       case 'photos_taken':
@@ -4299,6 +4304,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           onUploadComplete={() => {
             setShowBulkSPCCUpload(false);
             onFacilitiesChange();
+          }}
+          onOpenFacilityPlanDetail={(facilityId) => {
+            // Bulk modal closes itself before invoking this; open the
+            // multi-berm SPCCPlanDetailModal so the user can step through
+            // well assignments for the just-uploaded facility.
+            const facility = facilities.find((f) => f.id === facilityId);
+            if (facility) setSpccPlanDetailFacility(facility);
           }}
         />
       )}

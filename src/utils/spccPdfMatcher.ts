@@ -9,10 +9,58 @@ export interface PdfMatchResult {
   matchConfidence: 'exact' | 'partial' | 'none';
   matchedSubstring: string | null;
   detectedPeDate: string | null; // YYYY-MM-DD
+  /**
+   * How the matcher arrived at its choice. Surfaced in the review UI so the
+   * user can quickly tell e.g. "this one matched on Camino ID — trust it"
+   * vs "this one is a fuzzy text match — double-check".
+   */
+  matchSource: 'camino_id_filename' | 'filename_text' | 'pdf_text' | 'none';
   // Mutable fields for the review UI
   selectedFacilityId: string | null;
   overridePeDate: string; // YYYY-MM-DD or empty
   status: 'matched' | 'unmatched' | 'error';
+}
+
+/**
+ * Pull a Camino facility id (like `OC20180067`) out of a PDF filename. The
+ * Camino export format is `<Facility Name> - <CaminoID> - SPCC Plan/Renewal
+ * (mm-dd-yy).pdf`. Returns null if no id pattern is present.
+ */
+export function extractCaminoIdFromFilename(filename: string): string | null {
+  // OC followed by 6-12 digits — accommodates the OC[YYYY][NNN] convention.
+  const m = filename.match(/\b(OC\d{6,12})\b/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Pull a date from a parenthesized filename suffix like `(01-13-25)`. Used to
+ * pre-populate the PE-stamp / recertified date field in the review UI when
+ * the PDF text extraction is noisy or empty.
+ */
+export function extractDateFromFilename(filename: string): string | null {
+  const m = filename.match(/\((\d{1,2})[-/](\d{1,2})[-/](\d{2,4})\)/);
+  if (!m) return null;
+  const month = parseInt(m[1], 10);
+  const day = parseInt(m[2], 10);
+  let year = parseInt(m[3], 10);
+  if (year < 100) year += 2000;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Try to match a filename's leading text (before " - OC..."). */
+export function matchFacilityFromFilename(
+  filename: string,
+  facilities: Facility[]
+): { facility: Facility | null; matchedSubstring: string | null } {
+  // Strip extension + the "- OC..." suffix to get just the facility-name prefix.
+  const base = filename.replace(/\.[a-z0-9]+$/i, '');
+  const prefix = base.split(/\s*-\s*OC\d{6,12}\b/i)[0].trim();
+  if (!prefix) return { facility: null, matchedSubstring: null };
+  return {
+    ...matchFacilityFromText(prefix, facilities),
+    matchedSubstring: prefix,
+  };
 }
 
 export function matchFacilityFromText(
@@ -99,42 +147,51 @@ export function matchPdfsToFacilities(
   extractions: PdfExtractionResult[],
   facilities: Facility[]
 ): PdfMatchResult[] {
+  // Pre-build a lookup so the per-PDF Camino-ID match is O(1).
+  const byCaminoId = new Map<string, Facility>();
+  for (const f of facilities) {
+    if (f.camino_facility_id) byCaminoId.set(f.camino_facility_id.toUpperCase(), f);
+  }
+
   return extractions.map(extraction => {
-    if (extraction.error || !extraction.text) {
-      return {
-        file: extraction.file,
-        extractedText: extraction.text,
-        extractionError: extraction.error,
-        matchedFacility: null,
-        matchConfidence: 'none' as const,
-        matchedSubstring: null,
-        detectedPeDate: null,
-        selectedFacilityId: null,
-        overridePeDate: '',
-        status: 'error' as const,
-      };
+    // Filename-based matching is tried first AND survives PDF-extraction
+    // errors — when the file is named in the Camino export convention
+    // (`<Facility> - OC<id> - SPCC Plan (mm-dd-yy).pdf`), both the id and
+    // date are deterministic, so an unparseable PDF body doesn't block
+    // matching the file to its destination facility.
+    const filename = extraction.file.name;
+    const caminoId = extractCaminoIdFromFilename(filename);
+    let matched: Facility | null = null;
+    let confidence: 'exact' | 'partial' | 'none' = 'none';
+    let matchedSubstring: string | null = null;
+    let matchSource: PdfMatchResult['matchSource'] = 'none';
+
+    if (caminoId && byCaminoId.has(caminoId)) {
+      matched = byCaminoId.get(caminoId)!;
+      confidence = 'exact';
+      matchedSubstring = caminoId;
+      matchSource = 'camino_id_filename';
     }
 
-    // If region-based extraction provided specific text, use that for matching
-    let facilityMatchText = extraction.text;
-    let peDateText = extraction.text;
-
-    if (extraction.regionTexts) {
-      if (extraction.regionTexts.facilityName) {
-        facilityMatchText = extraction.regionTexts.facilityName;
-      }
-      if (extraction.regionTexts.peStampDate) {
-        peDateText = extraction.regionTexts.peStampDate;
+    if (!matched) {
+      const fnMatch = matchFacilityFromFilename(filename, facilities);
+      if (fnMatch.facility) {
+        matched = fnMatch.facility;
+        confidence = 'exact';
+        matchedSubstring = fnMatch.matchedSubstring;
+        matchSource = 'filename_text';
       }
     }
 
-    const { facility, confidence, matchedSubstring } = matchFacilityFromText(facilityMatchText, facilities);
+    // PE date: filename's parenthesized date is the most reliable source
+    // (Camino exports include it). Fall through to region-text + keyword
+    // searching through extracted PDF text only when the filename has no date.
+    let detectedPeDate: string | null = extractDateFromFilename(filename);
 
-    // For PE date: if region text is available, try to parse it directly as a date first
-    let detectedPeDate: string | null = null;
-    if (extraction.regionTexts?.peStampDate) {
-      // Try direct date parse from region text
-      const dateMatch = peDateText.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (!detectedPeDate && extraction.regionTexts?.peStampDate) {
+      const dateMatch = extraction.regionTexts.peStampDate.match(
+        /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/
+      );
       if (dateMatch) {
         const month = parseInt(dateMatch[1], 10);
         const day = parseInt(dateMatch[2], 10);
@@ -145,21 +202,49 @@ export function matchPdfsToFacilities(
         }
       }
     }
-    if (!detectedPeDate) {
+    if (!detectedPeDate && extraction.text) {
       detectedPeDate = extractPeStampDate(extraction.text);
     }
+
+    // If neither filename matching nor the user-side extraction worked, we're
+    // left with no facility match. Fall back to PDF-text matching when text
+    // is available; otherwise return an unmatched/error result.
+    if (!matched && extraction.text) {
+      let facilityMatchText = extraction.text;
+      if (extraction.regionTexts?.facilityName) {
+        facilityMatchText = extraction.regionTexts.facilityName;
+      }
+      const r = matchFacilityFromText(facilityMatchText, facilities);
+      if (r.facility) {
+        matched = r.facility;
+        confidence = r.confidence;
+        matchedSubstring = r.matchedSubstring;
+        matchSource = 'pdf_text';
+      }
+    }
+
+    // Status: 'error' only when the extraction failed AND filename matching
+    // also failed (i.e. there's nothing the user can act on without manual
+    // facility selection). 'matched'/'unmatched' when filename matching gave
+    // us at least a destination, even if the PDF body is unreadable.
+    const status: PdfMatchResult['status'] = matched
+      ? 'matched'
+      : (extraction.error || !extraction.text)
+        ? 'error'
+        : 'unmatched';
 
     return {
       file: extraction.file,
       extractedText: extraction.text,
-      extractionError: null,
-      matchedFacility: facility,
+      extractionError: extraction.error,
+      matchedFacility: matched,
       matchConfidence: confidence,
       matchedSubstring,
       detectedPeDate,
-      selectedFacilityId: facility?.id || null,
+      matchSource,
+      selectedFacilityId: matched?.id || null,
       overridePeDate: detectedPeDate || '',
-      status: facility ? 'matched' as const : 'unmatched' as const,
+      status,
     };
   });
 }
