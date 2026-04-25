@@ -10,6 +10,7 @@ import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NavigationPopup from './NavigationPopup';
+import SearchInput from './SearchInput';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
@@ -3666,27 +3667,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       {showSearch && isFullScreen && (
         <div className="px-6 py-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-[80px] left-0 right-0 z-[9998]">
-          <div className="relative">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search facilities by name..."
-              className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
-              autoFocus
-            />
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="Clear search"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
-          </div>
+          <SearchInput
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search facilities by name..."
+            size="lg"
+            autoFocus
+          />
         </div>
       )}
 

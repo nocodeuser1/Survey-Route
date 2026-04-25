@@ -406,8 +406,15 @@ export default function BulkSPCCUploadModal({
 
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      {/*
+        min-h-[70vh] keeps the modal a stable size regardless of how many
+        rows are showing — applying the matched/unmatched filters used to
+        collapse the modal down to a single short row, which then made the
+        facility-select dropdown clip past the modal's bottom edge. Now
+        the body always has ~500px of vertical space.
+      */}
       <div
-        className={`w-full max-w-5xl max-h-[90vh] rounded-xl shadow-2xl flex flex-col ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
+        className={`w-full max-w-5xl min-h-[70vh] max-h-[90vh] rounded-xl shadow-2xl flex flex-col ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -603,6 +610,15 @@ export default function BulkSPCCUploadModal({
                     <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-100'}`}>
                       {matchResults
                         .map((result, index) => ({ result, index }))
+                        // Alphabetical by PDF filename — easier to scan when
+                        // reviewing 100+ files, and lines up with how the
+                        // user has them sorted in Finder.
+                        .sort((a, b) =>
+                          a.result.file.name.localeCompare(b.result.file.name, undefined, {
+                            sensitivity: 'base',
+                            numeric: true,
+                          })
+                        )
                         .filter(({ result }) => {
                           if (!reviewFilter) return true;
                           if (reviewFilter === 'error') return result.status === 'error';
@@ -614,7 +630,7 @@ export default function BulkSPCCUploadModal({
                         .map(({ result, index }) => (
                         <tr key={index} className={darkMode ? 'bg-gray-800' : 'bg-white'}>
                           {/* Note: `index` is the absolute index into matchResults
-                              even when filtered, so updateResult/removeResult
+                              even when sorted/filtered, so updateResult/removeResult
                               keep targeting the right row. */}
                           {/* Status icon */}
                           <td className="px-3 py-2">
