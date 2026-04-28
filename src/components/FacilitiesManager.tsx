@@ -123,7 +123,7 @@ function TouchTooltipButton({
 }
 
 type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'historical_name' |
-  'spcc_status' | 'inspection_status' | 'notes' |
+  'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
   'berm_depth_inches' | 'berm_length' | 'berm_width' |
@@ -139,7 +139,7 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 's
 const ALL_COLUMNS_ORDER: ColumnId[] = [
   'name', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
   'status', 'day_assignment', 'team_assignment',
-  'spcc_status', 'inspection_status', 'notes',
+  'spcc_status', 'spcc_plan_uploaded', 'inspection_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
   'photos_taken', 'field_visit_date', 'estimated_oil_per_day',
   'berm_depth_inches', 'berm_length', 'berm_width',
@@ -164,6 +164,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   day_assignment: 'Day Assignment',
   team_assignment: 'Team Assignment',
   spcc_status: 'SPCC Status',
+  spcc_plan_uploaded: 'SPCC Plan Uploaded',
   inspection_status: 'SPCC Inspection',
   notes: 'Notes',
   first_prod_date: 'Initial Production',
@@ -1030,6 +1031,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             const order = { pending: 0, expired: 1, expiring: 2, inspected: 3 };
             return order[status];
           }
+          case 'spcc_plan_uploaded':
+            // Asc → "Not uploaded" first, then "Uploaded"; flip via header click.
+            return facility.spcc_plan_url ? 1 : 0;
           case 'matched_facility_name':
             return facility.matched_facility_name || '';
           case 'well_name_1':
@@ -2172,6 +2176,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return Number(facility.longitude).toFixed(6);
       case 'spcc_status':
         return <SPCCStatusBadge facility={facility} showMessage />;
+      case 'spcc_plan_uploaded': {
+        // Green for uploaded (the mirror trigger keeps spcc_plan_url in sync
+        // with the worst-case berm's plan_url, so this also reflects
+        // multi-berm facilities), gray-outlined "Not uploaded" otherwise.
+        const uploaded = !!facility.spcc_plan_url;
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
+              uploaded
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+            }`}
+          >
+            {uploaded ? (
+              <>
+                <CheckCircle className="w-3 h-3" />
+                Uploaded
+              </>
+            ) : (
+              <>
+                <FileText className="w-3 h-3" />
+                Not uploaded
+              </>
+            )}
+          </span>
+        );
+      }
       case 'inspection_status':
         return getVerificationIcon(facility);
       case 'matched_facility_name':
