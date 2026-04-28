@@ -823,28 +823,70 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const inspection = inspections.get(facility.id);
     const expiry = getFacilityInspectionExpiry(facility, inspection);
 
-    if (expiry.status === 'expired') {
-      const label = facility.spcc_completion_type === 'external' ? 'External' : facility.spcc_completion_type === 'internal' ? 'Internal' : 'Inspection';
-      return <span title={`${label} completion expired - Reinspection needed`}><AlertCircle className="w-4 h-4 text-orange-500" /></span>;
-    }
-
-    if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
+    // Status pills for the SPCC Inspection column. Mirrors how
+    // SPCCStatusBadge renders plan status — same colour vocabulary
+    // (red overdue / amber expiring / green valid / gray pending) and a
+    // day-count chip so the user can see urgency at a glance, the way
+    // they can on the Plan Status column. The "expiring" threshold lives
+    // in INSPECTION_EXPIRING_DAYS (60 days; was 90 before user feedback).
+    if (expiry.status === 'expired' && expiry.daysUntilExpiry !== null) {
       return (
-        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400" title={`Expires in ${expiry.daysUntilExpiry}d - Reinspection due soon`}>
-          <Clock className="w-3.5 h-3.5" />
-          <span className="text-xs font-medium">{formatDayCount(expiry.daysUntilExpiry)}</span>
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 text-xs font-medium whitespace-nowrap"
+          title={`Inspection expired ${formatDayCount(Math.abs(expiry.daysUntilExpiry))} ago — re-inspection needed`}
+        >
+          <AlertCircle className="w-3 h-3" />
+          {formatDayCount(Math.abs(expiry.daysUntilExpiry))} overdue
         </span>
       );
     }
 
-    if (expiry.status === 'valid') {
-      if (facility.spcc_completion_type === 'external') {
-        return <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />;
-      }
-      return <SPCCInspectionBadge />;
+    if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 text-xs font-medium whitespace-nowrap"
+          title={`Inspection due in ${formatDayCount(expiry.daysUntilExpiry)} — re-inspection due soon`}
+        >
+          <Clock className="w-3 h-3" />
+          Due in {formatDayCount(expiry.daysUntilExpiry)}
+        </span>
+      );
     }
 
-    return null;
+    if (expiry.status === 'valid' && expiry.daysUntilExpiry !== null) {
+      // Match SPCCInspectionBadge's blue pill but add the days-remaining
+      // countdown so users can plan ahead. External-completion subtype keeps
+      // its dedicated badge for the source-of-record disambiguation.
+      if (facility.spcc_completion_type === 'external') {
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />
+            <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              {formatDayCount(expiry.daysUntilExpiry)} left
+            </span>
+          </span>
+        );
+      }
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs font-medium whitespace-nowrap"
+          title={`Inspected — ${formatDayCount(expiry.daysUntilExpiry)} until next annual inspection`}
+        >
+          <CheckCircle className="w-3 h-3" />
+          {formatDayCount(expiry.daysUntilExpiry)} left
+        </span>
+      );
+    }
+
+    // pending — no completion date or inspection record on file.
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 text-xs font-medium whitespace-nowrap"
+        title="No inspection on file"
+      >
+        Not inspected
+      </span>
+    );
   };
 
   const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' | 'expiring' => {
@@ -927,16 +969,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       return null; // No due date if no plan and no first prod date
     }
 
-    // Calculate renewal date (5 years from PE stamp date)
+    // Calculate recertification date (5 years from PE stamp date)
     const peStampDate = parseLocalDate(facility.spcc_pe_stamp_date);
-    const renewalDate = new Date(peStampDate);
-    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
-    return renewalDate;
+    const recertificationDate = new Date(peStampDate);
+    recertificationDate.setFullYear(recertificationDate.getFullYear() + 5);
+    return recertificationDate;
   };
 
   const getFacilityPlanStatus = (facility: Facility): 'overdue' | 'current' => {
     const { status } = getSPCCPlanStatus(facility);
-    // Only truly overdue statuses: initial_overdue (past 6-month deadline) and expired (past 5-year renewal)
+    // Only truly overdue statuses: initial_overdue (past 6-month deadline) and expired (past 5-year recertification)
     if (status === 'initial_overdue' || status === 'expired') {
       return 'overdue';
     }
@@ -4264,7 +4306,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-white">SPCC Plans</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Plan status, compliance, and renewal dates</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Plan status, compliance, and recertification dates</p>
                 </div>
               </button>
               <button

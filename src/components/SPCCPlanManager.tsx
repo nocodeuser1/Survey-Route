@@ -58,11 +58,11 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                                         <Calendar className="w-3 h-3" />
                                         Stamped: {formatDate(facility.spcc_pe_stamp_date!)}
                                     </span>
-                                    {status.renewalDate && (
+                                    {status.recertificationDate && (
                                         <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'
                                             }`}>
                                             <Calendar className="w-3 h-3" />
-                                            Renewal: {status.renewalDate.toLocaleDateString()}
+                                            Recertification: {status.recertificationDate.toLocaleDateString()}
                                         </span>
                                     )}
                                 </div>

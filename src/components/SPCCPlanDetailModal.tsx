@@ -719,7 +719,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${darkMode ? 'text-red-400' : 'text-red-600'}`} />
               <div>
                 <p className={`font-semibold text-sm ${darkMode ? 'text-red-300' : 'text-red-800'}`}>
-                  {status.status === 'expired' ? 'Plan Renewal Overdue' : 'Initial Plan Overdue'}
+                  {status.status === 'expired' ? 'Plan Recertification Overdue' : 'Initial Plan Overdue'}
                 </p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-red-400/80' : 'text-red-700'}`}>
                   {status.status === 'expired'
@@ -740,10 +740,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               <Clock className={`w-5 h-5 flex-shrink-0 mt-0.5 ${darkMode ? 'text-amber-400' : 'text-amber-600'}`} />
               <div>
                 <p className={`font-semibold text-sm ${darkMode ? 'text-amber-300' : 'text-amber-800'}`}>
-                  {status.status === 'expiring' ? 'Renewal Coming Up' : 'Initial Plan Due Soon'}
+                  {status.status === 'expiring' ? 'Recertification Coming Up' : 'Initial Plan Due Soon'}
                 </p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-amber-400/80' : 'text-amber-700'}`}>
-                  {formatDayCount(status.daysUntilDue!)} remaining until {status.status === 'expiring' ? '5-year renewal' : 'initial plan deadline'}.
+                  {formatDayCount(status.daysUntilDue!)} remaining until {status.status === 'expiring' ? '5-year recertification' : 'initial plan deadline'}.
                 </p>
               </div>
             </div>
@@ -907,12 +907,12 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 )}
               </div>
 
-              {/* Renewal Date (computed) */}
-              {status.renewalDate && (
+              {/* Recertification Date (computed) */}
+              {status.recertificationDate && (
                 <div className="px-4 py-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                    <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>5-Year Renewal</span>
+                    <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>5-Year Recertification</span>
                   </div>
                   <span className={`text-sm font-medium ${status.status === 'expired'
                     ? (darkMode ? 'text-red-400' : 'text-red-600')
@@ -920,7 +920,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       ? (darkMode ? 'text-amber-400' : 'text-amber-600')
                       : (darkMode ? 'text-white' : 'text-gray-900')
                     }`}>
-                    {status.renewalDate.toLocaleDateString('en-US')}
+                    {status.recertificationDate.toLocaleDateString('en-US')}
                     {status.daysUntilDue !== null && (
                       <span className="ml-1.5 opacity-75 text-xs">
                         ({status.daysUntilDue > 0 ? `${formatDayCount(status.daysUntilDue)} remaining` : `${formatDayCount(status.daysUntilDue)} overdue`})

@@ -961,7 +961,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   valid: 'Plan Valid',
                   recertified: 'Recertified',
                   expiring: 'Expiring',
-                  renewal_due: 'Renewal Due',
+                  renewal_due: 'Recertification Due',
                   expired: 'Expired',
                   initial_due: 'Due Soon',
                   initial_overdue: 'Overdue',
@@ -1001,8 +1001,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               const peDate = planStatus.peStampDate
                 ? planStatus.peStampDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                 : null;
-              const renewalDate = planStatus.renewalDate
-                ? planStatus.renewalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              const recertificationDate = planStatus.recertificationDate
+                ? planStatus.recertificationDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                 : null;
               const msgColor = planStatus.isUrgent ? (planStatus.isCompliant ? '#92400E' : '#991B1B') : '#065F46';
 
@@ -1020,10 +1020,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                         <span style="font-weight: 500;">${peDate}</span>
                       </div>
                     ` : ''}
-                    ${renewalDate ? `
+                    ${recertificationDate ? `
                       <div style="display: flex; justify-content: space-between;">
-                        <span style="color: #6B7280;">Renewal:</span>
-                        <span style="font-weight: 500;">${renewalDate}</span>
+                        <span style="color: #6B7280;">Recertification:</span>
+                        <span style="font-weight: 500;">${recertificationDate}</span>
                       </div>
                     ` : ''}
                     ${!planStatus.hasPlan && fullFacility.first_prod_date ? `
@@ -1623,7 +1623,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               valid: 'Plan Valid',
               recertified: 'Recertified',
               expiring: 'Expiring',
-              renewal_due: 'Renewal Due',
+              renewal_due: 'Recertification Due',
               expired: 'Expired',
               initial_due: 'Due Soon',
               initial_overdue: 'Overdue',
@@ -1640,8 +1640,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const peDate = planStatus.peStampDate
               ? planStatus.peStampDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : null;
-            const renewalDate = planStatus.renewalDate
-              ? planStatus.renewalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            const recertificationDate = planStatus.recertificationDate
+              ? planStatus.recertificationDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : null;
             const msgColor = planStatus.isUrgent ? (planStatus.isCompliant ? '#92400E' : '#991B1B') : '#065F46';
 
@@ -1659,10 +1659,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       <span style="font-weight: 500;">${peDate}</span>
                     </div>
                   ` : ''}
-                  ${renewalDate ? `
+                  ${recertificationDate ? `
                     <div style="display: flex; justify-content: space-between;">
-                      <span style="color: #6B7280;">Renewal:</span>
-                      <span style="font-weight: 500;">${renewalDate}</span>
+                      <span style="color: #6B7280;">Recertification:</span>
+                      <span style="font-weight: 500;">${recertificationDate}</span>
                     </div>
                   ` : ''}
                   ${!planStatus.hasPlan && facility.first_prod_date ? `

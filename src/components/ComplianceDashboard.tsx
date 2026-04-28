@@ -16,7 +16,7 @@ interface ComplianceStats {
   upcomingDue: number;
   overdue: number;
   spccInitialPending: number;
-  spccRenewalsDue: number;
+  spccRecertificationsDue: number;
   inspectionsDue: number;
 }
 
@@ -34,7 +34,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
     upcomingDue: 0,
     overdue: 0,
     spccInitialPending: 0,
-    spccRenewalsDue: 0,
+    spccRecertificationsDue: 0,
     inspectionsDue: 0,
   });
   const [facilitiesCompliance, setFacilitiesCompliance] = useState<FacilityCompliance[]>([]);
@@ -115,7 +115,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
       ).length;
 
       const spccInitialPending = spccData?.filter(s => s.compliance_status === 'initial_due').length || 0;
-      const spccRenewalsDue = spccData?.filter(s => s.compliance_status === 'renewal_due' || s.compliance_status === 'expiring').length || 0;
+      const spccRecertificationsDue = spccData?.filter(s => s.compliance_status === 'renewal_due' || s.compliance_status === 'expiring').length || 0;
       const inspectionsDue = facilitiesWithCompliance.filter(fc => fc.inspectionStatus === 'due_soon' || fc.inspectionStatus === 'overdue').length;
 
       setStats({
@@ -124,7 +124,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
         upcomingDue,
         overdue,
         spccInitialPending,
-        spccRenewalsDue,
+        spccRecertificationsDue,
         inspectionsDue,
       });
     } catch (error) {
@@ -306,10 +306,10 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
           </div>
 
           <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">SPCC Renewals</h3>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">SPCC Recertifications</h3>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.spccRenewalsDue}</span>
-              <span className="text-sm text-gray-500 dark:text-gray-400">renewals due or overdue</span>
+              <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.spccRecertificationsDue}</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">recertifications due or overdue</span>
             </div>
           </div>
 
@@ -431,8 +431,8 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
                             {fc.spccCompliance.compliance_status === 'not_started' && 'Not Started'}
                             {fc.spccCompliance.compliance_status === 'initial_due' && 'Initial Due'}
                             {fc.spccCompliance.compliance_status === 'initial_complete' && 'Initial Complete'}
-                            {fc.spccCompliance.compliance_status === 'renewal_due' && 'Renewal Due'}
-                            {fc.spccCompliance.compliance_status === 'renewal_complete' && 'Renewal Complete'}
+                            {fc.spccCompliance.compliance_status === 'renewal_due' && 'Recertification Due'}
+                            {fc.spccCompliance.compliance_status === 'renewal_complete' && 'Recertification Complete'}
                             {fc.spccCompliance.compliance_status === 'overdue' && 'Overdue'}
                             {fc.spccCompliance.compliance_status === 'expiring' && 'Expiring'}
                             {fc.spccCompliance.pe_stamp_date && (

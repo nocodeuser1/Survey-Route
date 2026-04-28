@@ -107,9 +107,9 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
       case 'initial_complete':
         return 'Initial Plan Complete';
       case 'renewal_due':
-        return 'Renewal Due';
+        return 'Recertification Due';
       case 'renewal_complete':
-        return 'Renewal Complete';
+        return 'Recertification Complete';
       case 'overdue':
         return 'Overdue';
       default:
@@ -154,7 +154,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
   if (compliance.current_renewal_due_date && compliance.renewal_cycle_number > 0) {
     timelineEvents.push({
       date: compliance.current_renewal_due_date,
-      label: `Renewal ${compliance.renewal_cycle_number} Due`,
+      label: `Recertification ${compliance.renewal_cycle_number} Due`,
       icon: <TrendingUp className="w-4 h-4" />,
       color: compliance.current_renewal_completed_date ? 'text-gray-400' : 'text-yellow-500',
     });
@@ -163,7 +163,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
   if (compliance.current_renewal_completed_date && compliance.renewal_cycle_number > 0) {
     timelineEvents.push({
       date: compliance.current_renewal_completed_date,
-      label: `Renewal ${compliance.renewal_cycle_number} Completed`,
+      label: `Recertification ${compliance.renewal_cycle_number} Completed`,
       icon: <CheckCircle className="w-4 h-4" />,
       color: 'text-green-500',
     });
@@ -234,9 +234,9 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
           <div className="flex items-start gap-2">
             <TrendingUp className="w-5 h-5 mt-0.5" />
             <div>
-              <div className="font-medium">Renewal Cycle {compliance.renewal_cycle_number}</div>
+              <div className="font-medium">Recertification Cycle {compliance.renewal_cycle_number}</div>
               <div className="text-sm mt-1">
-                This facility is on renewal cycle {compliance.renewal_cycle_number}. SPCC plans must be renewed every 5 years.
+                This facility is on recertification cycle {compliance.renewal_cycle_number}. SPCC plans must be renewed every 5 years.
               </div>
             </div>
           </div>

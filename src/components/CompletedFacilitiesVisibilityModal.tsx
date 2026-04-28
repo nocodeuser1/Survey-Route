@@ -226,7 +226,7 @@ export default function CompletedFacilitiesVisibilityModal({
                     Hide Valid Plans
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Facilities with a current, active SPCC plan (not due for renewal)
+                    Facilities with a current, active SPCC plan (not due for recertification)
                   </div>
                 </div>
               </label>
@@ -248,7 +248,7 @@ export default function CompletedFacilitiesVisibilityModal({
                     Hide Expiring Plans
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Facilities with plans expiring within 90 days (still valid but nearing renewal)
+                    Facilities with plans expiring within 90 days (still valid but nearing recertification)
                   </div>
                 </div>
               </label>

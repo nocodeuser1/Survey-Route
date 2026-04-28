@@ -36,10 +36,18 @@ export function getInspectionStatus(inspection: Inspection | undefined): {
 export type InspectionExpiryStatus = 'valid' | 'expiring' | 'expired' | 'pending';
 
 /**
+ * Days-out at which an inspection switches from "valid" → "expiring" in the
+ * UI. SPCC inspections are annual (40 CFR §112.7(c)) so we have one year of
+ * runway between inspections; this constant defines how early the expiring
+ * warning lights up.
+ */
+export const INSPECTION_EXPIRING_DAYS = 60;
+
+/**
  * Comprehensive inspection expiry check for a facility.
  * Considers both the facility's completion date (spcc_inspection_date)
  * and the latest inspection record from the inspections table.
- * Returns 'expiring' when within 90 days of 1-year expiry.
+ * Returns 'expiring' when within INSPECTION_EXPIRING_DAYS of 1-year expiry.
  */
 export function getFacilityInspectionExpiry(
   facility: { spcc_completion_type?: string | null; spcc_inspection_date?: string | null },
@@ -60,7 +68,7 @@ export function getFacilityInspectionExpiry(
     const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
     if (daysUntilExpiry <= 0) return { status: 'expired', daysUntilExpiry, expiryDate };
-    if (daysUntilExpiry <= 90) return { status: 'expiring', daysUntilExpiry, expiryDate };
+    if (daysUntilExpiry <= INSPECTION_EXPIRING_DAYS) return { status: 'expiring', daysUntilExpiry, expiryDate };
     return { status: 'valid', daysUntilExpiry, expiryDate };
   }
 
@@ -72,7 +80,7 @@ export function getFacilityInspectionExpiry(
     const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
     if (daysUntilExpiry <= 0) return { status: 'expired', daysUntilExpiry, expiryDate };
-    if (daysUntilExpiry <= 90) return { status: 'expiring', daysUntilExpiry, expiryDate };
+    if (daysUntilExpiry <= INSPECTION_EXPIRING_DAYS) return { status: 'expiring', daysUntilExpiry, expiryDate };
     return { status: 'valid', daysUntilExpiry, expiryDate };
   }
 

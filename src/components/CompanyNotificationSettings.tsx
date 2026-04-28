@@ -8,7 +8,7 @@ interface CompanyNotificationSettingsProps {
 
 interface CompanySettings {
     spcc_plan_creation_reminders: number[];
-    spcc_plan_renewal_reminders: number[];
+    spcc_plan_recertification_reminders: number[];
     spcc_annual_inspection_reminders: number[];
 }
 
@@ -41,7 +41,7 @@ export default function CompanyNotificationSettings({ accountId }: CompanyNotifi
                 // Default settings
                 setSettings({
                     spcc_plan_creation_reminders: [60, 30, 15, 1],
-                    spcc_plan_renewal_reminders: [60, 30, 15, 1],
+                    spcc_plan_recertification_reminders: [60, 30, 15, 1],
                     spcc_annual_inspection_reminders: [30, 14, 7, 1],
                 });
             }
@@ -163,9 +163,9 @@ export default function CompanyNotificationSettings({ accountId }: CompanyNotifi
                 )}
 
                 {renderIntervalSelector(
-                    "SPCC Plan Renewal",
-                    "Reminders for existing SPCC plans that need renewal (every 5 years).",
-                    "spcc_plan_renewal_reminders"
+                    "SPCC Plan Recertification",
+                    "Reminders for existing SPCC plans that need recertification (every 5 years).",
+                    "spcc_plan_recertification_reminders"
                 )}
 
                 {renderIntervalSelector(

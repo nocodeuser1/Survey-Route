@@ -23,7 +23,7 @@ export interface PdfMatchResult {
 
 /**
  * Pull a Camino facility id (like `OC20180067`) out of a PDF filename. The
- * Camino export format is `<Facility Name> - <CaminoID> - SPCC Plan/Renewal
+ * Camino export format is `<Facility Name> - <CaminoID> - SPCC Plan/Recertification
  * (mm-dd-yy).pdf`. Returns null if no id pattern is present.
  */
 export function extractCaminoIdFromFilename(filename: string): string | null {

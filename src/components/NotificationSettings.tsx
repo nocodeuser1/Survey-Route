@@ -153,7 +153,7 @@ export default function NotificationSettings({ userId, accountId }: Notification
             <div>
               <div className="font-medium">SPCC Compliance Reminders</div>
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                Receive notifications for SPCC plan due dates and renewals
+                Receive notifications for SPCC plan due dates and recertifications
               </div>
             </div>
           </label>

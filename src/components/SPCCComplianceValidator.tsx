@@ -12,7 +12,7 @@ interface ComplianceIssue {
   severity: 'error' | 'warning' | 'info';
   facility: ParsedFacility;
   message: string;
-  type: 'no_ip_date' | 'initial_overdue' | 'initial_due_soon' | 'renewal_overdue' | 'renewal_due_soon' | 'invalid_date' | 'late_completion';
+  type: 'no_ip_date' | 'initial_overdue' | 'initial_due_soon' | 'recertification_overdue' | 'renewal_due_soon' | 'invalid_date' | 'late_completion';
 }
 
 export default function SPCCComplianceValidator({ facilities, onProceed, onCancel }: SPCCComplianceValidatorProps) {
@@ -23,8 +23,8 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
     withoutIPDate: 0,
     initialOverdue: 0,
     initialDueSoon: 0,
-    renewalOverdue: 0,
-    renewalDueSoon: 0,
+    recertificationOverdue: 0,
+    recertificationDueSoon: 0,
     compliant: 0,
   });
 
@@ -40,8 +40,8 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
     let withoutIPDate = 0;
     let initialOverdue = 0;
     let initialDueSoon = 0;
-    let renewalOverdue = 0;
-    let renewalDueSoon = 0;
+    let recertificationOverdue = 0;
+    let recertificationDueSoon = 0;
     let compliant = 0;
 
     facilities.forEach(facility => {
@@ -106,25 +106,25 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
           });
         }
 
-        const renewalDueDate = new Date(spccCompletedDate);
-        renewalDueDate.setFullYear(renewalDueDate.getFullYear() + 5);
+        const recertificationDueDate = new Date(spccCompletedDate);
+        recertificationDueDate.setFullYear(recertificationDueDate.getFullYear() + 5);
 
-        const daysUntilRenewal = Math.floor((renewalDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const daysUntilRecertification = Math.floor((recertificationDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-        if (daysUntilRenewal < 0) {
-          renewalOverdue++;
+        if (daysUntilRecertification < 0) {
+          recertificationOverdue++;
           foundIssues.push({
             severity: 'error',
             facility,
-            message: `SPCC renewal overdue by ${Math.abs(daysUntilRenewal)} days (due: ${renewalDueDate.toLocaleDateString()})`,
-            type: 'renewal_overdue',
+            message: `SPCC recertification overdue by ${Math.abs(daysUntilRecertification)} days (due: ${recertificationDueDate.toLocaleDateString()})`,
+            type: 'recertification_overdue',
           });
-        } else if (daysUntilRenewal <= 90) {
-          renewalDueSoon++;
+        } else if (daysUntilRecertification <= 90) {
+          recertificationDueSoon++;
           foundIssues.push({
             severity: 'warning',
             facility,
-            message: `SPCC renewal due in ${daysUntilRenewal} days (${renewalDueDate.toLocaleDateString()})`,
+            message: `SPCC recertification due in ${daysUntilRecertification} days (${recertificationDueDate.toLocaleDateString()})`,
             type: 'renewal_due_soon',
           });
         } else {
@@ -140,8 +140,8 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
       withoutIPDate,
       initialOverdue,
       initialDueSoon,
-      renewalOverdue,
-      renewalDueSoon,
+      recertificationOverdue,
+      recertificationDueSoon,
       compliant,
     });
   };
@@ -179,7 +179,7 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
   const warningIssues = issues.filter(i => i.severity === 'warning');
   const infoIssues = issues.filter(i => i.severity === 'info');
 
-  const criticalCount = stats.initialOverdue + stats.renewalOverdue;
+  const criticalCount = stats.initialOverdue + stats.recertificationOverdue;
 
   return (
     <div className="space-y-4">
@@ -202,7 +202,7 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
 
           <div className="text-center p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
             <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-              {stats.initialDueSoon + stats.renewalDueSoon}
+              {stats.initialDueSoon + stats.recertificationDueSoon}
             </div>
             <div className="text-sm text-gray-600 dark:text-gray-400">Due Soon</div>
           </div>
@@ -237,11 +237,11 @@ export default function SPCCComplianceValidator({ facilities, onProceed, onCance
           </div>
         )}
 
-        {(stats.initialDueSoon + stats.renewalDueSoon) > 0 && (
+        {(stats.initialDueSoon + stats.recertificationDueSoon) > 0 && (
           <div className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 rounded-lg flex items-start gap-2">
             <Clock className="w-5 h-5 mt-0.5 flex-shrink-0" />
             <div>
-              <div className="font-medium">{stats.initialDueSoon + stats.renewalDueSoon} facilities have SPCC due soon</div>
+              <div className="font-medium">{stats.initialDueSoon + stats.recertificationDueSoon} facilities have SPCC due soon</div>
               <div className="text-sm mt-1">
                 These facilities will require SPCC plan updates within the next 30-90 days.
               </div>

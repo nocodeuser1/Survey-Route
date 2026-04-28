@@ -585,10 +585,10 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     // Check recertified_date first — if within 5 years, it's recertified
     if (facility.recertified_date) {
       const recertDate = parseLocalDate(facility.recertified_date);
-      const recertRenewal = new Date(recertDate);
-      recertRenewal.setFullYear(recertRenewal.getFullYear() + 5);
+      const recertRecertification = new Date(recertDate);
+      recertRecertification.setFullYear(recertRecertification.getFullYear() + 5);
       const today = new Date();
-      const daysUntil = Math.ceil((recertRenewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const daysUntil = Math.ceil((recertRecertification.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       if (daysUntil > 90) {
         return 'recertified';
       }
@@ -618,17 +618,17 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
       return 'missing';
     }
 
-    // Check Renewal (5 years)
+    // Check Recertification (5 years)
     const peStampDate = parseLocalDate(facility.spcc_pe_stamp_date);
-    const renewalDate = new Date(peStampDate);
-    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+    const recertificationDate = new Date(peStampDate);
+    recertificationDate.setFullYear(recertificationDate.getFullYear() + 5);
     const today = new Date();
 
-    if (today > renewalDate) {
+    if (today > recertificationDate) {
       return 'expired';
     }
 
-    const daysUntilExpire = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const daysUntilExpire = Math.ceil((recertificationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     if (daysUntilExpire <= 90) { // 3 month warning
       return 'expiring';
     }

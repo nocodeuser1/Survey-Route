@@ -9,10 +9,10 @@ export type SPCCPlanStatus =
   | 'no_plan'          // Has IP date, plan not yet due (>30 days out)
   | 'initial_due'      // Within 30 days of 6-month deadline, no plan
   | 'initial_overdue'  // Past 6-month deadline, no plan
-  | 'valid'            // Plan on file, >90 days until renewal
+  | 'valid'            // Plan on file, >90 days until recertification
   | 'recertified'      // Recertified within last 5 years
-  | 'expiring'         // Plan valid but <90 days until 5-year renewal
-  | 'expired'          // Plan past 5-year renewal date
+  | 'expiring'         // Plan valid but <90 days until 5-year recertification
+  | 'expired'          // Plan past 5-year recertification date
   | 'renewal_due';     // Alias for expiring (used in compliance tracking)
 
 export interface SPCCStatusResult {
@@ -22,7 +22,7 @@ export interface SPCCStatusResult {
   isUrgent: boolean;
   daysUntilDue: number | null;
   peStampDate: Date | null;
-  renewalDate: Date | null;
+  recertificationDate: Date | null;
   hasPlan: boolean;
 }
 
@@ -119,85 +119,85 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
   const hasPlan = !!(facility.spcc_plan_url && facility.spcc_pe_stamp_date);
   const peStampDate = facility.spcc_pe_stamp_date ? parseLocalDate(facility.spcc_pe_stamp_date) : null;
 
-  // Case 0: Has a recertified_date -> use recert date + 5 years as the renewal window
+  // Case 0: Has a recertified_date -> use recert date + 5 years as the recertification window
   if (facility.recertified_date) {
     const recertDate = parseLocalDate(facility.recertified_date);
-    const recertRenewalDate = new Date(recertDate);
-    recertRenewalDate.setFullYear(recertRenewalDate.getFullYear() + 5);
-    const daysUntilRecertRenewal = Math.ceil(
-      (recertRenewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    const recertRecertificationDate = new Date(recertDate);
+    recertRecertificationDate.setFullYear(recertRecertificationDate.getFullYear() + 5);
+    const daysUntilRecertRecertification = Math.ceil(
+      (recertRecertificationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    if (daysUntilRecertRenewal > 90) {
+    if (daysUntilRecertRecertification > 90) {
       return {
         status: 'recertified',
         message: 'SPCC Recertified',
         isCompliant: true,
         isUrgent: false,
-        daysUntilDue: daysUntilRecertRenewal,
+        daysUntilDue: daysUntilRecertRecertification,
         peStampDate,
-        renewalDate: recertRenewalDate,
+        recertificationDate: recertRecertificationDate,
         hasPlan,
       };
     }
 
-    // Recert is expiring or expired — use the recert renewal date for the countdown
-    if (daysUntilRecertRenewal < 0) {
+    // Recert is expiring or expired — use the recert recertification date for the countdown
+    if (daysUntilRecertRecertification < 0) {
       return {
         status: 'expired',
-        message: `Expired ${formatDayCount(daysUntilRecertRenewal)} ago`,
+        message: `Expired ${formatDayCount(daysUntilRecertRecertification)} ago`,
         isCompliant: false,
         isUrgent: true,
-        daysUntilDue: daysUntilRecertRenewal,
+        daysUntilDue: daysUntilRecertRecertification,
         peStampDate,
-        renewalDate: recertRenewalDate,
+        recertificationDate: recertRecertificationDate,
         hasPlan,
       };
     }
 
     return {
       status: 'expiring',
-      message: `Renewal in ${formatDayCount(daysUntilRecertRenewal)}`,
+      message: `Recertification in ${formatDayCount(daysUntilRecertRecertification)}`,
       isCompliant: true,
       isUrgent: true,
-      daysUntilDue: daysUntilRecertRenewal,
+      daysUntilDue: daysUntilRecertRecertification,
       peStampDate,
-      renewalDate: recertRenewalDate,
+      recertificationDate: recertRecertificationDate,
       hasPlan,
     };
   }
 
-  // Case 1: Has a PE stamp date -> check renewal status
+  // Case 1: Has a PE stamp date -> check recertification status
   if (facility.spcc_pe_stamp_date && peStampDate) {
-    const renewalDate = new Date(peStampDate);
-    renewalDate.setFullYear(renewalDate.getFullYear() + 5);
+    const recertificationDate = new Date(peStampDate);
+    recertificationDate.setFullYear(recertificationDate.getFullYear() + 5);
 
-    const daysUntilRenewal = Math.ceil(
-      (renewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    const daysUntilRecertification = Math.ceil(
+      (recertificationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    if (daysUntilRenewal < 0) {
+    if (daysUntilRecertification < 0) {
       return {
         status: 'expired',
-        message: `Expired ${formatDayCount(daysUntilRenewal)} ago`,
+        message: `Expired ${formatDayCount(daysUntilRecertification)} ago`,
         isCompliant: false,
         isUrgent: true,
-        daysUntilDue: daysUntilRenewal,
+        daysUntilDue: daysUntilRecertification,
         peStampDate,
-        renewalDate,
+        recertificationDate,
         hasPlan,
       };
     }
 
-    if (daysUntilRenewal <= 90) {
+    if (daysUntilRecertification <= 90) {
       return {
         status: 'expiring',
-        message: `Renewal in ${formatDayCount(daysUntilRenewal)}`,
+        message: `Recertification in ${formatDayCount(daysUntilRecertification)}`,
         isCompliant: true,
         isUrgent: true,
-        daysUntilDue: daysUntilRenewal,
+        daysUntilDue: daysUntilRecertification,
         peStampDate,
-        renewalDate,
+        recertificationDate,
         hasPlan,
       };
     }
@@ -207,9 +207,9 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
       message: 'Plan Active',
       isCompliant: true,
       isUrgent: false,
-      daysUntilDue: daysUntilRenewal,
+      daysUntilDue: daysUntilRecertification,
       peStampDate,
-      renewalDate,
+      recertificationDate,
       hasPlan,
     };
   }
@@ -223,7 +223,7 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
       isUrgent: false,
       daysUntilDue: null,
       peStampDate: null,
-      renewalDate: null,
+      recertificationDate: null,
       hasPlan: false,
     };
   }
@@ -245,7 +245,7 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
       isUrgent: true,
       daysUntilDue: daysUntilInitialDue,
       peStampDate: null,
-      renewalDate: null,
+      recertificationDate: null,
       hasPlan: false,
     };
   }
@@ -258,7 +258,7 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
       isUrgent: true,
       daysUntilDue: daysUntilInitialDue,
       peStampDate: null,
-      renewalDate: null,
+      recertificationDate: null,
       hasPlan: false,
     };
   }
@@ -270,7 +270,7 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
     isUrgent: false,
     daysUntilDue: daysUntilInitialDue,
     peStampDate: null,
-    renewalDate: null,
+    recertificationDate: null,
     hasPlan: false,
   };
 }
@@ -364,6 +364,6 @@ export function getSPCCPlanStatusText(facility: SPCCStatusFacility): string {
     case 'initial_overdue': return 'Overdue';
     case 'no_plan': return 'Upcoming';
     case 'no_ip_date': return 'No Date';
-    case 'renewal_due': return 'Renewal Due';
+    case 'renewal_due': return 'Recertification Due';
   }
 }

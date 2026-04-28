@@ -1650,7 +1650,7 @@ export default function FacilityDetailModal({
                       </span>
                     </button>
                   )}
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Auto-updates from field data. Renewal still tracks PE stamp date.</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Auto-updates from field data. Recertification still tracks PE stamp date.</span>
                 </div>
               </div>
               <select
@@ -1762,12 +1762,12 @@ export default function FacilityDetailModal({
             <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
               <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2">
                 <Clock className="w-3.5 h-3.5" />
-                5-Year Renewal
+                5-Year Recertification
               </p>
               <p className="text-base font-medium text-gray-900 dark:text-white">
-                {spccStatus.renewalDate ? spccStatus.renewalDate.toLocaleDateString('en-US') : 'N/A'}
+                {spccStatus.recertificationDate ? spccStatus.recertificationDate.toLocaleDateString('en-US') : 'N/A'}
               </p>
-              {spccStatus.renewalDate && spccStatus.daysUntilDue !== null && (
+              {spccStatus.recertificationDate && spccStatus.daysUntilDue !== null && (
                 <p className={`text-sm mt-1 ${spccStatus.daysUntilDue < 0 ? 'text-red-600 dark:text-red-400' : spccStatus.daysUntilDue <= 90 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
                   {spccStatus.daysUntilDue > 0 ? `${formatDayCount(spccStatus.daysUntilDue)} remaining` : `${formatDayCount(spccStatus.daysUntilDue)} overdue`}
                 </p>

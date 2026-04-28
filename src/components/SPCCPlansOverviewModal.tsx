@@ -22,7 +22,7 @@ interface PlanSummary {
   isUrgent: boolean;
   daysUntilDue: number | null;
   peStampDate: Date | null;
-  renewalDate: Date | null;
+  recertificationDate: Date | null;
   hasPlan: boolean;
 }
 
@@ -358,7 +358,7 @@ export default function SPCCPlansOverviewModal({
                         PE Stamp Date
                       </th>
                       <th className={`px-4 py-3 text-left text-sm font-semibold hidden lg:table-cell ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        Renewal Date
+                        Recertification Date
                       </th>
                       <th className={`px-4 py-3 text-center text-sm font-semibold hidden sm:table-cell ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                         Days Until Due
@@ -388,7 +388,7 @@ export default function SPCCPlansOverviewModal({
                           {item.peStampDate ? formatDate(item.facility.spcc_pe_stamp_date!) : '-'}
                         </td>
                         <td className={`px-4 py-3 hidden lg:table-cell ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                          {item.renewalDate ? item.renewalDate.toLocaleDateString() : '-'}
+                          {item.recertificationDate ? item.recertificationDate.toLocaleDateString() : '-'}
                         </td>
                         <td className={`px-4 py-3 text-center font-semibold hidden sm:table-cell ${item.status === 'expired' || item.status === 'initial_overdue'
                           ? 'text-red-600 dark:text-red-400'
@@ -566,8 +566,8 @@ function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: bo
             darkMode={darkMode}
           />
           <DetailRow
-            label="Renewal Date"
-            value={item.renewalDate ? item.renewalDate.toLocaleDateString() : 'N/A'}
+            label="Recertification Date"
+            value={item.recertificationDate ? item.recertificationDate.toLocaleDateString() : 'N/A'}
             darkMode={darkMode}
           />
           {facility.recertified_date && (
@@ -642,10 +642,10 @@ function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: bo
                   darkMode={darkMode}
                 />
               )}
-              {item.renewalDate && (
+              {item.recertificationDate && (
                 <TimelineItem
-                  label={item.daysUntilDue !== null && item.daysUntilDue < 0 ? 'Renewal Overdue' : 'Renewal Due'}
-                  date={item.renewalDate.toLocaleDateString()}
+                  label={item.daysUntilDue !== null && item.daysUntilDue < 0 ? 'Recertification Overdue' : 'Recertification Due'}
+                  date={item.recertificationDate.toLocaleDateString()}
                   icon={item.daysUntilDue !== null && item.daysUntilDue < 0
                     ? <AlertTriangle className="w-3.5 h-3.5" />
                     : <Clock className="w-3.5 h-3.5" />
