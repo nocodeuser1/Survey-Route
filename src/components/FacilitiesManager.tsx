@@ -21,7 +21,7 @@ import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
-import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
+import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, formatDayCount } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
@@ -854,16 +854,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     if (expiry.status === 'valid' && expiry.daysUntilExpiry !== null) {
-      // Match SPCCInspectionBadge's blue pill but add the days-remaining
-      // countdown so users can plan ahead. External-completion subtype keeps
-      // its dedicated badge for the source-of-record disambiguation.
+      // Show the days-remaining countdown only once expiry is within
+      // INSPECTION_COUNTDOWN_DAYS — far-out counts are noise. External-
+      // completion subtype keeps its dedicated badge regardless.
+      const showCountdown = expiry.daysUntilExpiry <= INSPECTION_COUNTDOWN_DAYS;
       if (facility.spcc_completion_type === 'external') {
         return (
           <span className="inline-flex items-center gap-1.5">
             <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />
-            <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {formatDayCount(expiry.daysUntilExpiry)} left
-            </span>
+            {showCountdown && (
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                {formatDayCount(expiry.daysUntilExpiry)} left
+              </span>
+            )}
           </span>
         );
       }
@@ -873,7 +876,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           title={`Inspected — ${formatDayCount(expiry.daysUntilExpiry)} until next annual inspection`}
         >
           <CheckCircle className="w-3 h-3" />
-          {formatDayCount(expiry.daysUntilExpiry)} left
+          {showCountdown ? `${formatDayCount(expiry.daysUntilExpiry)} left` : 'Inspected'}
         </span>
       );
     }

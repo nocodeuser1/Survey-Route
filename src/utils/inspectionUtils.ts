@@ -44,6 +44,13 @@ export type InspectionExpiryStatus = 'valid' | 'expiring' | 'expired' | 'pending
 export const INSPECTION_EXPIRING_DAYS = 60;
 
 /**
+ * Days-out at which the inspection-status pill starts showing a "X days left"
+ * countdown. Above this threshold the badge stays a plain "Inspected" pill —
+ * the count would just be visual noise that far out.
+ */
+export const INSPECTION_COUNTDOWN_DAYS = 90;
+
+/**
  * Comprehensive inspection expiry check for a facility.
  * Considers both the facility's completion date (spcc_inspection_date)
  * and the latest inspection record from the inspections table.
