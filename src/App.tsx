@@ -342,6 +342,12 @@ function App() {
       hasCurrentAccount: !!currentAccount,
       currentAccountId: currentAccount?.id
     });
+    // If account loading finished but there's no account, clear the facilities
+    // loading flag so the "No Account Access" screen can render instead of
+    // hanging forever on "Loading your workspace…"
+    if (!accountLoading && !currentAccount) {
+      setIsLoadingFacilities(false);
+    }
   }, [accountLoading, currentAccount]);
 
   // Load saved visibility settings when switching survey type, with sensible defaults for first use
