@@ -262,9 +262,14 @@ export default function RecertificationPagePickerModal({
         });
       if (uploadErr) throw uploadErr;
 
-      // 4. Default flow: mark berm recertified + clear the in-window decision
-      //    so the next 5-year cycle surfaces a fresh prompt at the right
-      //    time. Regenerate mode leaves both fields alone.
+      // 4. Update spcc_plans. Always stamps `recertification_pdf_generated_at`
+      //    — that's the canonical "this berm has a stamped recertification
+      //    page in its PDF" flag the BermPlanCard's Regenerate button gates
+      //    on. Default flow additionally marks the berm recertified and
+      //    clears the in-window decision so the next 5-year cycle surfaces
+      //    a fresh prompt. Regenerate mode leaves recertified_date and the
+      //    decision fields alone.
+      const generatedAt = new Date().toISOString();
       if (!regenerate) {
         const decisionDateOnly = decisionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
         const recertifiedIsoDate = decisionDateOnly
@@ -277,7 +282,14 @@ export default function RecertificationPagePickerModal({
             recertification_decision: null,
             recertification_decision_notes: null,
             recertification_decision_at: null,
+            recertification_pdf_generated_at: generatedAt,
           })
+          .eq('id', plan.id);
+        if (planUpdErr) throw planUpdErr;
+      } else {
+        const { error: planUpdErr } = await supabase
+          .from('spcc_plans')
+          .update({ recertification_pdf_generated_at: generatedAt })
           .eq('id', plan.id);
         if (planUpdErr) throw planUpdErr;
       }

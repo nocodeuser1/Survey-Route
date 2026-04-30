@@ -131,6 +131,12 @@ export interface SPCCPlan {
   recertification_decision_notes: string | null;
   recertification_decision_at: string | null;
   recertified_date: string | null;
+  /** Timestamp set by the in-app recertification workflow on successful
+   *  generate/regenerate. Null means no PDF generation has ever happened
+   *  through the workflow (a facility-level recertified_date may still be
+   *  mirrored onto this berm). Gates the "Regenerate Recertification PDF"
+   *  button. See migration 20260430030000_track_recertification_pdf_generated.sql. */
+  recertification_pdf_generated_at: string | null;
   created_at: string;
   updated_at: string;
 }

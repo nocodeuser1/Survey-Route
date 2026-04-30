@@ -344,13 +344,16 @@ export default function BermPlanCard({
               </button>
             </div>
 
-            {/* Regenerate link — appears once a berm has been recertified at
-                least once. Lets the user re-stamp the PDF (e.g. after a
-                template tweak or position fix) without starting a new
-                recertification cycle. Lives outside the in-window
-                Recertification Review card so it stays accessible after
-                the 90-day window has closed. */}
-            {plan.recertified_date && plan.plan_url && (
+            {/* Regenerate link — appears only after the in-app recertification
+                workflow has actually generated a PDF for this berm at least
+                once (gated on `recertification_pdf_generated_at`, NOT on
+                `recertified_date` — the latter can be set by backfill or
+                manual data entry without any stamped page existing). Lets
+                the user re-stamp the PDF (e.g. after a template tweak or
+                position fix) without starting a new recertification cycle.
+                Lives outside the in-window Recertification Review card so
+                it stays accessible after the 90-day window has closed. */}
+            {plan.recertification_pdf_generated_at && plan.plan_url && (
               <button
                 type="button"
                 onClick={() => setPickerMode('regenerate')}
