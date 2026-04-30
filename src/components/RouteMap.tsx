@@ -1439,15 +1439,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 });
               }
 
-              // Recertification "Set" button → delegates to the detail modal,
-              // which has the full dropdown + notes UI. Two-click by design —
+              // Recertification "Set"/"Edit" button → opens the SPCC Plan
+              // modal directly so the user lands on the per-berm cards
+              // (where editing actually lives now). Two-click by design —
               // safer than building React state inside Leaflet HTML.
               const recertBtn = document.getElementById(`recert-btn-${facility.index}`);
               if (recertBtn) {
                 recertBtn.addEventListener('click', (e) => {
                   e.stopPropagation();
                   if (facilityForThisMarker) {
-                    openFacilityModal(facilityForThisMarker);
+                    setSpccPlanDetailFacility(facilityForThisMarker);
                   } else {
                     alert('Could not find facility data. Please refresh the page.');
                   }

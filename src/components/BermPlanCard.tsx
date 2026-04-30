@@ -15,6 +15,8 @@ import { supabase, type Facility, type SPCCPlan } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
 import { formatDate } from '../utils/dateUtils';
 import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
+import { isPlanRecertificationActive } from '../utils/spccStatus';
+import RecertificationStatusField from './RecertificationStatusField';
 
 interface BermPlanCardProps {
   plan: SPCCPlan;
@@ -358,6 +360,39 @@ export default function BermPlanCard({
                 setReplaceMode(false);
                 onPlanChange();
               }}
+            />
+          </div>
+        )}
+
+        {/* Per-berm recertification self-cert (only when this berm's 5-year
+            clock is within 90 days, past, or recently rolled). */}
+        {isPlanRecertificationActive(plan) && (
+          <div
+            className={`rounded-lg border p-3 ${
+              darkMode
+                ? 'border-amber-700/40 bg-amber-900/10'
+                : 'border-amber-200 bg-amber-50/40'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <h4
+                  className={`text-xs font-semibold uppercase tracking-wider ${
+                    darkMode ? 'text-amber-300' : 'text-amber-700'
+                  }`}
+                >
+                  Recertification Review — {getBermShortLabel(plan)}
+                </h4>
+                <p className={`text-[11px] mt-0.5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  This berm's 5-year recertification window is open. Record your decision.
+                </p>
+              </div>
+            </div>
+            <RecertificationStatusField
+              kind="plan"
+              plan={plan}
+              mode="full"
+              onSaved={onPlanChange}
             />
           </div>
         )}

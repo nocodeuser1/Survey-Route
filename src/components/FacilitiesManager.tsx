@@ -2276,9 +2276,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       case 'recertification_status':
         return (
           <RecertificationStatusField
+            kind="facility"
             facility={facility}
             mode="compact"
-            onRequestEdit={() => setSelectedFacility(facility)}
+            // Open the SPCC Plan modal directly so the user lands on the
+            // per-berm cards where editing actually happens.
+            onRequestEdit={() => setSpccPlanDetailFacility(facility)}
           />
         );
       case 'matched_facility_name':

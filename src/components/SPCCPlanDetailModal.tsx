@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, isRecertificationActive, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
-import RecertificationStatusField from './RecertificationStatusField';
+import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
@@ -933,22 +932,11 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
             </div>
           </div>
 
-          {/* Recertification Review (visible from 90 days before through past-due) */}
-          {isRecertificationActive(effectiveFacility) && (
-            <div className={`rounded-xl border ${darkMode ? 'border-amber-700/40 bg-amber-900/10' : 'border-amber-200 bg-amber-50/40'}`}>
-              <div className={`px-4 py-3 border-b ${darkMode ? 'border-amber-700/40' : 'border-amber-200'}`}>
-                <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>
-                  Recertification Review
-                </h3>
-                <p className={`text-xs mt-1 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  5-year window — record whether the plan still applies as-is.
-                </p>
-              </div>
-              <div className="px-4 py-3">
-                <RecertificationStatusField facility={facility} mode="full" onSaved={onFacilitiesChange} />
-              </div>
-            </div>
-          )}
+          {/* Recertification editing now lives per-berm inside each
+              BermPlanCard rendered further down. The facility-level rollup
+              that used to sit here is redundant in this modal — keep the
+              per-berm cards as the single source of truth. The Facilities
+              tab and FacilityDetailModal still show the rollup summary. */}
 
           {/* Compliance Tracking */}
           {(facility.initial_inspection_completed || facility.company_signature_date || facility.recertified_date || (facility.spcc_pe_stamp_date || savedPeDate)) && (

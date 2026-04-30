@@ -1024,11 +1024,11 @@ export default function FacilityDetailModal({
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Recertification Review</h3>
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                This facility's SPCC plan is in (or past) the 5-year recertification window. Record your decision.
+                Roll-up across all berms on this facility. Record per-berm decisions inside the SPCC Plan modal.
               </p>
             </div>
           </div>
-          <RecertificationStatusField facility={facility} mode="full" onSaved={bumpFacilityRender} />
+          <RecertificationStatusField kind="facility" facility={facility} mode="full" onSaved={bumpFacilityRender} />
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-6">
@@ -1895,11 +1895,11 @@ export default function FacilityDetailModal({
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Recertification Review</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  This facility's SPCC plan is in (or past) the 5-year recertification window. Record your decision.
+                  Roll-up across all berms on this facility. Record per-berm decisions inside the SPCC Plan modal.
                 </p>
               </div>
             </div>
-            <RecertificationStatusField facility={facility} mode="full" onSaved={bumpFacilityRender} />
+            <RecertificationStatusField kind="facility" facility={facility} mode="full" onSaved={bumpFacilityRender} />
           </div>
         )}
 

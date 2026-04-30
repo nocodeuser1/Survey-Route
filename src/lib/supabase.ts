@@ -124,6 +124,13 @@ export interface SPCCPlan {
   workflow_status_overridden: boolean;
   /** Array of well ordinals (1..6) on the parent facility this plan covers. */
   assigned_well_indices: number[];
+  // Per-berm recertification (5-year cycle from pe_stamp_date). See migration
+  // 20260430010000_per_berm_recertification.sql. The mirror trigger rolls
+  // these up onto facilities.* as a worst-case summary; edits happen here.
+  recertification_decision: 'no_changes' | 'changes_found' | null;
+  recertification_decision_notes: string | null;
+  recertification_decision_at: string | null;
+  recertified_date: string | null;
   created_at: string;
   updated_at: string;
 }

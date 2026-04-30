@@ -61,6 +61,28 @@ export function isRecertificationActive(facility: SPCCStatusFacility): boolean {
   return result.status === 'expiring' || result.status === 'expired' || result.status === 'recertified';
 }
 
+/** Per-berm recertification window check. Mirrors `isRecertificationActive`
+ *  but operates on a single SPCCPlan row instead of the facility-level mirror.
+ *  In-window when a plan PDF exists AND the 5-year clock from the latest
+ *  recertification (or the original PE stamp) is within 90 days, past, or
+ *  recently rolled. */
+export function isPlanRecertificationActive(plan: {
+  plan_url: string | null;
+  pe_stamp_date: string | null;
+  recertified_date: string | null;
+}): boolean {
+  if (!plan.plan_url || !plan.pe_stamp_date) return false;
+  const baseStr = plan.recertified_date || plan.pe_stamp_date;
+  if (!baseStr) return false;
+  const base = parseLocalDate(baseStr);
+  const recertDate = new Date(base);
+  recertDate.setFullYear(recertDate.getFullYear() + 5);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysUntil = Math.ceil((recertDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return daysUntil <= 90;
+}
+
 /**
  * Derives the workflow status that the system would automatically assign
  * based on facility field values. Priority (highest wins):

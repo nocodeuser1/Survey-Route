@@ -1,34 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, AlertTriangle, Clock, ChevronDown, Edit2, Check, X } from 'lucide-react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import type { Facility } from '../lib/supabase';
+import type { Facility, SPCCPlan } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
-import { isRecertificationActive, type RecertificationDecision } from '../utils/spccStatus';
+import {
+  isRecertificationActive,
+  isPlanRecertificationActive,
+  type RecertificationDecision,
+} from '../utils/spccStatus';
 import { formatDate } from '../utils/dateUtils';
 
 /**
- * Click-to-edit dropdown + conditional notes for the SPCC recertification
- * self-certification ("no significant changes" vs "changes found"), plus an
- * editable site-visit confirmation date that produces the audit-friendly
- * line shown to the user:
+ * Recertification self-cert UI. Two operating modes:
  *
- *     Site visited, confirmed no changes on Apr 30, 2026
- *     Site visited, confirmed changes and new photos taken on Apr 30, 2026
+ *   kind="plan"      EDITABLE per-berm card. Source of truth for the
+ *                    decision/notes/site-visit-date. Writes to spcc_plans.
  *
- * Visibility is gated by `isRecertificationActive(facility)`. Renders nothing
- * (or "—" in compact mode) when the facility isn't in the recertification
- * window.
+ *   kind="facility"  READ-ONLY rollup. Reads from facilities (the mirror
+ *                    trigger keeps facilities.recertification_* in sync with
+ *                    the per-berm reality). Edits redirect to the SPCC Plan
+ *                    modal where per-berm editing lives.
  *
- * Two display modes:
- *   - compact   : pill-only (used in Facilities tab cells and map popup HTML
- *                 surrogates). Click → fires `onRequestEdit` so the parent
- *                 can open the detail modal.
- *   - full      : pill + dropdown + textarea + date, edits inline. The date
- *                 can be edited independently of the decision so a user can
- *                 backdate after the fact (the inspection often happens days
- *                 before the operator records it).
+ * Display variants:
+ *   compact : pill only, click → onRequestEdit (typically opens detail modal)
+ *   full    : pill + sentence + (plan-only) edit affordances
  *
- * Storage notes:
+ * Storage notes (plan kind):
  *   - `recertification_decision_at` is `timestamptz`. We store noon-UTC for
  *     the chosen local date so `formatDate()` (which reads the YYYY-MM-DD
  *     prefix) always returns the right date in any US timezone — avoids the
@@ -36,14 +33,17 @@ import { formatDate } from '../utils/dateUtils';
  *     `new Date().toISOString()`.
  */
 
-interface RecertificationStatusFieldProps {
-  facility: Facility;
+type Subject =
+  | { kind: 'facility'; facility: Facility }
+  | { kind: 'plan'; plan: SPCCPlan };
+
+type RecertificationStatusFieldProps = {
   mode: 'compact' | 'full';
   /** compact only: callback when the user clicks to edit. */
   onRequestEdit?: () => void;
   /** Optional save hook to refresh parent lists after a write. */
   onSaved?: () => void;
-}
+} & Subject;
 
 interface DecisionPillConfig {
   label: string;
@@ -78,8 +78,8 @@ function getDecisionPill(decision: RecertificationDecision | null): DecisionPill
 }
 
 /**
- * The audit-friendly sentence shown after a decision is recorded. Israel
- * specifically asked for these exact phrases — keep them stable.
+ * The audit-friendly sentence shown after a decision is recorded. Stable
+ * phrasing — Israel asked for these exact strings.
  */
 export function getRecertificationSiteVisitSentence(
   decision: RecertificationDecision,
@@ -135,20 +135,67 @@ function isoDateOnly(iso: string | null | undefined): string | null {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
-export default function RecertificationStatusField({
-  facility,
-  mode,
-  onRequestEdit,
-  onSaved,
-}: RecertificationStatusFieldProps) {
+/**
+ * Pulls the recertification fields out of either a facility or a plan
+ * subject so the rest of the component can stay shape-agnostic.
+ */
+function readSubject(subject: Subject) {
+  if (subject.kind === 'facility') {
+    return {
+      table: 'facilities' as const,
+      rowId: subject.facility.id,
+      decision: subject.facility.recertification_decision ?? null,
+      notes: subject.facility.recertification_decision_notes ?? null,
+      decidedAt: subject.facility.recertification_decision_at ?? null,
+      isActive: isRecertificationActive(subject.facility),
+      writable: false,
+      writeBack: (next: {
+        decision: RecertificationDecision | null;
+        notes: string | null;
+        decidedAt: string | null;
+      }) => {
+        // Mutate the facility in place so display refreshes if it ever becomes
+        // writable again. Currently unused (writable=false) but kept for parity.
+        subject.facility.recertification_decision = next.decision;
+        subject.facility.recertification_decision_notes = next.notes;
+        subject.facility.recertification_decision_at = next.decidedAt;
+      },
+    };
+  }
+  return {
+    table: 'spcc_plans' as const,
+    rowId: subject.plan.id,
+    decision: subject.plan.recertification_decision ?? null,
+    notes: subject.plan.recertification_decision_notes ?? null,
+    decidedAt: subject.plan.recertification_decision_at ?? null,
+    isActive: isPlanRecertificationActive(subject.plan),
+    writable: true,
+    writeBack: (next: {
+      decision: RecertificationDecision | null;
+      notes: string | null;
+      decidedAt: string | null;
+    }) => {
+      subject.plan.recertification_decision = next.decision;
+      subject.plan.recertification_decision_notes = next.notes;
+      subject.plan.recertification_decision_at = next.decidedAt;
+    },
+  };
+}
+
+export default function RecertificationStatusField(
+  props: RecertificationStatusFieldProps
+) {
+  const { mode, onRequestEdit, onSaved } = props;
   const { darkMode } = useDarkMode();
+  const subjectView = readSubject(props);
+
   const [isEditing, setIsEditing] = useState(false);
   const [draftDecision, setDraftDecision] = useState<RecertificationDecision | ''>(
-    facility.recertification_decision ?? ''
+    subjectView.decision ?? ''
   );
-  const [draftNotes, setDraftNotes] = useState<string>(facility.recertification_decision_notes ?? '');
+  const [draftNotes, setDraftNotes] = useState<string>(subjectView.notes ?? '');
   const [draftDate, setDraftDate] = useState<string>(
-    isoToMMDDYYYY(facility.recertification_decision_at) || isoToMMDDYYYY(todayLocalISODate())
+    isoToMMDDYYYY(subjectView.decidedAt) || isoToMMDDYYYY(todayLocalISODate())
   );
   const [editingDateOnly, setEditingDateOnly] = useState(false);
   const [dateOnlyDraft, setDateOnlyDraft] = useState<string>('');
@@ -156,32 +203,24 @@ export default function RecertificationStatusField({
   const [error, setError] = useState<string | null>(null);
   const notesRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Re-sync draft from props when not actively editing (parent refetch).
+  // Re-sync draft from subject when not editing (parent refetch).
   useEffect(() => {
     if (!isEditing && !editingDateOnly) {
-      setDraftDecision(facility.recertification_decision ?? '');
-      setDraftNotes(facility.recertification_decision_notes ?? '');
-      setDraftDate(
-        isoToMMDDYYYY(facility.recertification_decision_at) || isoToMMDDYYYY(todayLocalISODate())
-      );
+      setDraftDecision(subjectView.decision ?? '');
+      setDraftNotes(subjectView.notes ?? '');
+      setDraftDate(isoToMMDDYYYY(subjectView.decidedAt) || isoToMMDDYYYY(todayLocalISODate()));
     }
-  }, [
-    facility.recertification_decision,
-    facility.recertification_decision_notes,
-    facility.recertification_decision_at,
-    isEditing,
-    editingDateOnly,
-  ]);
+  }, [subjectView.decision, subjectView.notes, subjectView.decidedAt, isEditing, editingDateOnly]);
 
-  if (!isRecertificationActive(facility)) {
+  if (!subjectView.isActive) {
     return mode === 'compact' ? <span className="text-gray-400 dark:text-gray-500">—</span> : null;
   }
 
-  const decision = facility.recertification_decision ?? null;
+  const decision = subjectView.decision;
   const pill = getDecisionPill(decision);
   const Icon = pill.icon;
   const colors = darkMode ? pill.darkColorClass : pill.colorClass;
-  const decidedAtIsoDate = isoDateOnly(facility.recertification_decision_at);
+  const decidedAtIsoDate = isoDateOnly(subjectView.decidedAt);
 
   const renderPill = (extraClass = '') => (
     <span
@@ -209,14 +248,11 @@ export default function RecertificationStatusField({
     );
   }
 
-  // ---- Full (detail modal) ----------------------------------------------
+  // ---- Full (read-only when facility-kind; editable when plan-kind) -----
   const startEdit = () => {
-    setDraftDecision(facility.recertification_decision ?? '');
-    setDraftNotes(facility.recertification_decision_notes ?? '');
-    // Default to today if no prior date — matches "fill a new date field" intent.
-    setDraftDate(
-      isoToMMDDYYYY(facility.recertification_decision_at) || isoToMMDDYYYY(todayLocalISODate())
-    );
+    setDraftDecision(subjectView.decision ?? '');
+    setDraftNotes(subjectView.notes ?? '');
+    setDraftDate(isoToMMDDYYYY(subjectView.decidedAt) || isoToMMDDYYYY(todayLocalISODate()));
     setError(null);
     setIsEditing(true);
   };
@@ -227,9 +263,7 @@ export default function RecertificationStatusField({
   };
 
   const startEditDate = () => {
-    setDateOnlyDraft(
-      isoToMMDDYYYY(facility.recertification_decision_at) || isoToMMDDYYYY(todayLocalISODate())
-    );
+    setDateOnlyDraft(isoToMMDDYYYY(subjectView.decidedAt) || isoToMMDDYYYY(todayLocalISODate()));
     setError(null);
     setEditingDateOnly(true);
   };
@@ -250,11 +284,15 @@ export default function RecertificationStatusField({
     setError(null);
     try {
       const { error: updErr } = await supabase
-        .from('facilities')
+        .from(subjectView.table)
         .update({ recertification_decision_at: nextAt })
-        .eq('id', facility.id);
+        .eq('id', subjectView.rowId);
       if (updErr) throw updErr;
-      facility.recertification_decision_at = nextAt;
+      subjectView.writeBack({
+        decision: subjectView.decision,
+        notes: subjectView.notes,
+        decidedAt: nextAt,
+      });
       setEditingDateOnly(false);
       onSaved?.();
     } catch (err: any) {
@@ -283,17 +321,15 @@ export default function RecertificationStatusField({
     setError(null);
     try {
       const { error: updErr } = await supabase
-        .from('facilities')
+        .from(subjectView.table)
         .update({
           recertification_decision: nextDecision,
           recertification_decision_notes: nextNotes,
           recertification_decision_at: nextAt,
         })
-        .eq('id', facility.id);
+        .eq('id', subjectView.rowId);
       if (updErr) throw updErr;
-      facility.recertification_decision = nextDecision;
-      facility.recertification_decision_notes = nextNotes;
-      facility.recertification_decision_at = nextAt;
+      subjectView.writeBack({ decision: nextDecision, notes: nextNotes, decidedAt: nextAt });
       setIsEditing(false);
       onSaved?.();
     } catch (err: any) {
@@ -304,44 +340,50 @@ export default function RecertificationStatusField({
     }
   };
 
-  // Display mode (full)
+  // -- Display mode -------------------------------------------------------
   if (!isEditing) {
-    const notes = facility.recertification_decision_notes;
+    const notes = subjectView.notes;
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
           {renderPill()}
-          <button
-            type="button"
-            onClick={startEdit}
-            className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
-          >
-            {decision ? 'Change' : 'Set'}
-            <ChevronDown className="w-3 h-3" />
-          </button>
+          {subjectView.writable && (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
+            >
+              {decision ? 'Change' : 'Set'}
+              <ChevronDown className="w-3 h-3" />
+            </button>
+          )}
+          {!subjectView.writable && (
+            <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
+              Edit per-berm in the SPCC Plan tab
+            </span>
+          )}
         </div>
 
-        {/* Audit-friendly site-visit confirmation line. Date is independently
-            editable so the user can backdate after recording later. */}
         {decision && decidedAtIsoDate && !editingDateOnly && (
           <div className="flex items-center gap-2 flex-wrap rounded-lg bg-white/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 px-3 py-2">
             <p className="text-sm font-medium text-gray-900 dark:text-white">
               {getRecertificationSiteVisitSentence(decision, decidedAtIsoDate)}
             </p>
-            <button
-              type="button"
-              onClick={startEditDate}
-              className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-              title="Edit site-visit date"
-              aria-label="Edit site-visit date"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
+            {subjectView.writable && (
+              <button
+                type="button"
+                onClick={startEditDate}
+                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                title="Edit site-visit date"
+                aria-label="Edit site-visit date"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         )}
 
-        {/* Date-only editor */}
-        {decision && editingDateOnly && (
+        {decision && editingDateOnly && subjectView.writable && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/70 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 px-3 py-2">
             <span className="text-sm text-gray-700 dark:text-gray-200">
               {decision === 'no_changes'
@@ -400,7 +442,7 @@ export default function RecertificationStatusField({
     );
   }
 
-  // Edit mode (full)
+  // -- Edit mode (plan-kind only; facility-kind never enters this branch) -
   return (
     <div className="space-y-2">
       <select
