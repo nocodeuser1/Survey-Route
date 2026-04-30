@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Image, Upload, CheckCircle, AlertTriangle, Globe } from 'lucide-react';
+import { Image, Upload, CheckCircle, AlertTriangle, Globe, MapPin } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { US_STATES } from '../utils/usStates';
 
 interface AccountBrandingSettingsProps {
   accountId: string;
@@ -10,6 +11,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
   const [companyName, setCompanyName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [timezone, setTimezone] = useState('');
+  const [defaultStateCode, setDefaultStateCode] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingMessage, setBrandingMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -22,7 +24,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
     try {
       const { data, error } = await supabase
         .from('accounts')
-        .select('company_name, logo_url, timezone')
+        .select('company_name, logo_url, timezone, default_state_code')
         .eq('id', accountId)
         .single();
 
@@ -32,6 +34,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
         setCompanyName(data.company_name || '');
         setLogoUrl(data.logo_url || '');
         setTimezone(data.timezone || '');
+        setDefaultStateCode(data.default_state_code || '');
       }
     } catch (err) {
       console.error('Error loading branding:', err);
@@ -89,6 +92,7 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
           company_name: companyName,
           logo_url: logoUrl,
           timezone: timezone || null,
+          default_state_code: defaultStateCode || null,
         })
         .eq('id', accountId);
 
@@ -163,6 +167,28 @@ export default function AccountBrandingSettings({ accountId }: AccountBrandingSe
           </select>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             All dates and times across the account will be displayed in this timezone.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+            <div className="flex items-center gap-1.5">
+              <MapPin className="w-4 h-4" />
+              Default State for New Facilities
+            </div>
+          </label>
+          <select
+            value={defaultStateCode}
+            onChange={(e) => setDefaultStateCode(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+          >
+            <option value="">No default (set per facility)</option>
+            {US_STATES.map((s) => (
+              <option key={s.code} value={s.code}>{s.name} ({s.code})</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Auto-applied to new facilities (CSV uploads and manual adds). Always editable per facility.
           </p>
         </div>
 

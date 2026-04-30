@@ -40,6 +40,7 @@ import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/dista
 import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, isRecertificationActive, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
+import { US_STATES } from '../utils/usStates';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
@@ -1060,6 +1061,20 @@ export default function FacilityDetailModal({
                   displayClassName="text-sm font-medium text-gray-900 dark:text-white"
                   onSave={(next) => updateFacilityField('county', (next as string | null) || null)}
                 />
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">State</p>
+                <select
+                  value={facility.state_code ?? ''}
+                  onChange={(e) => updateFacilityField('state_code', e.target.value || null)}
+                  className="text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                  aria-label="State"
+                >
+                  <option value="">— None —</option>
+                  {US_STATES.map((s) => (
+                    <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Camino Facility ID</p>

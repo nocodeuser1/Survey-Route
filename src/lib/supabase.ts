@@ -76,6 +76,9 @@ export interface Facility {
   recertification_decision_notes?: string | null;
   recertification_decision_at?: string | null;
   county?: string | null;
+  /** 2-letter US state code (e.g. 'OK'). Auto-defaulted from
+   *  `accounts.default_state_code` on insert; editable per facility. */
+  state_code?: string | null;
   camino_facility_id?: string | null;
   /**
    * Prior facility name preserved when a rename happens (manual edit or a
@@ -342,6 +345,8 @@ export interface Account {
   company_name?: string;
   logo_url?: string;
   timezone?: string;
+  /** 2-letter US state code applied to new facilities by default. Editable per facility. */
+  default_state_code?: string | null;
   created_by: string | null;
   status: string;
   created_at: string;
