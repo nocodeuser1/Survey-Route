@@ -50,6 +50,18 @@ interface RecertificationPagePickerModalProps {
   onClose: () => void;
   /** Called after the workflow completes successfully (parent should refetch). */
   onComplete: () => void;
+  /**
+   * Regenerate mode — used to re-stamp a previously-recertified berm (e.g.
+   * to pick up an updated template or fixed text positioning) without
+   * starting a new recertification cycle.
+   *
+   * Default mode: reads the date from `recertification_decision_at`,
+   * clears the in-window decision after success, sets `recertified_date`.
+   *
+   * Regenerate mode: reads the date from `recertified_date`, leaves
+   * decision/recertified_date untouched, drops a different audit comment.
+   */
+  regenerate?: boolean;
 }
 
 export default function RecertificationPagePickerModal({
@@ -58,6 +70,7 @@ export default function RecertificationPagePickerModal({
   userId,
   onClose,
   onComplete,
+  regenerate = false,
 }: RecertificationPagePickerModalProps) {
   const { darkMode } = useDarkMode();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -189,13 +202,23 @@ export default function RecertificationPagePickerModal({
       setError('This berm has no plan PDF.');
       return;
     }
-    if (!plan.recertification_decision_at) {
-      setError('Site-visit date is missing — re-record the recertification decision.');
+    // Date source differs by mode:
+    // - default flow: use the in-window site-visit date (decision_at)
+    // - regenerate: use the original recertified_date (already on file)
+    const sourceDate = regenerate
+      ? plan.recertified_date
+      : plan.recertification_decision_at;
+    if (!sourceDate) {
+      setError(
+        regenerate
+          ? 'No recertified date on this berm — nothing to regenerate from.'
+          : 'Site-visit date is missing — re-record the recertification decision.'
+      );
       return;
     }
 
     // Build the three field values
-    const decisionDate = plan.recertification_decision_at;
+    const decisionDate = sourceDate;
     const dateField = formatRecertificationDate(decisionDate);
     const location = buildLocationString({
       latitude: facility.latitude,
@@ -235,33 +258,39 @@ export default function RecertificationPagePickerModal({
         });
       if (uploadErr) throw uploadErr;
 
-      // 4. Mark berm recertified + clear the in-window decision so the next
-      //    5-year cycle surfaces a fresh prompt at the right time.
-      const decisionDateOnly = decisionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      const recertifiedIsoDate = decisionDateOnly
-        ? `${decisionDateOnly[1]}-${decisionDateOnly[2]}-${decisionDateOnly[3]}`
-        : null;
-      const { error: planUpdErr } = await supabase
-        .from('spcc_plans')
-        .update({
-          recertified_date: recertifiedIsoDate,
-          recertification_decision: null,
-          recertification_decision_notes: null,
-          recertification_decision_at: null,
-        })
-        .eq('id', plan.id);
-      if (planUpdErr) throw planUpdErr;
+      // 4. Default flow only: mark berm recertified + clear the in-window
+      //    decision so the next 5-year cycle surfaces a fresh prompt.
+      //    Regenerate mode leaves recertified_date and decision fields alone.
+      if (!regenerate) {
+        const decisionDateOnly = decisionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        const recertifiedIsoDate = decisionDateOnly
+          ? `${decisionDateOnly[1]}-${decisionDateOnly[2]}-${decisionDateOnly[3]}`
+          : null;
+        const { error: planUpdErr } = await supabase
+          .from('spcc_plans')
+          .update({
+            recertified_date: recertifiedIsoDate,
+            recertification_decision: null,
+            recertification_decision_notes: null,
+            recertification_decision_at: null,
+          })
+          .eq('id', plan.id);
+        if (planUpdErr) throw planUpdErr;
+      }
 
       // 5. System comment on the facility comments thread
       const today = new Date().toLocaleDateString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric',
       });
       const bermLabel = getBermShortLabel(plan);
-      const commentBody =
-        `[SYSTEM] SPCC plan recertified for ${bermLabel} on ${today}. ` +
-        `Decision: No Significant Changes. Site-visit date: ${dateField}. ` +
-        `Replaced page ${currentPage + 1} of the plan PDF (Approval by Management) ` +
-        `with a freshly stamped recertification page.`;
+      const commentBody = regenerate
+        ? `[SYSTEM] Regenerated recertification PDF for ${bermLabel} on ${today}. ` +
+          `Re-stamped page ${currentPage + 1} of the plan PDF using the existing ` +
+          `recertified date (${dateField}). No change to recertification cycle.`
+        : `[SYSTEM] SPCC plan recertified for ${bermLabel} on ${today}. ` +
+          `Decision: No Significant Changes. Site-visit date: ${dateField}. ` +
+          `Replaced page ${currentPage + 1} of the plan PDF (Approval by Management) ` +
+          `with a freshly stamped recertification page.`;
       // user_id is the current operator — facility_comments.user_id has
       // an FK to public.users, so we can't use a synthetic NULL system id.
       const { error: commentErr } = await supabase
@@ -312,10 +341,12 @@ export default function RecertificationPagePickerModal({
           <div>
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <FileText className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-              Create Recertification Plan — {getBermShortLabel(plan)}
+              {regenerate ? 'Regenerate' : 'Create'} Recertification Plan — {getBermShortLabel(plan)}
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Pick the "Approval by Management" page to replace, then generate.
+              {regenerate
+                ? 'Re-stamps the recertification page using the existing recertified date. Pick the page to replace.'
+                : 'Pick the "Approval by Management" page to replace, then generate.'}
             </p>
           </div>
           <button
@@ -445,7 +476,11 @@ export default function RecertificationPagePickerModal({
               className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
             >
               {generating && <Loader2 className="w-4 h-4 animate-spin" />}
-              {generating ? 'Generating…' : 'Create Recertification Plan'}
+              {generating
+                ? 'Generating…'
+                : regenerate
+                  ? 'Regenerate Recertification Plan'
+                  : 'Create Recertification Plan'}
             </button>
           </div>
         )}

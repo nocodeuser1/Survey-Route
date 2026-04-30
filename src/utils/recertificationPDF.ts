@@ -79,31 +79,48 @@ export async function findTemplateFieldPositions(
   const page = await pdf.getPage(1);
   const content = await page.getTextContent();
 
-  // Distance from the right edge of the label to the start of the underline.
-  // The template renders labels with a fixed gap before the blank line; this
-  // gap is consistent across the three fields based on visual inspection.
+  // The Facility Name and Location labels behave well: pdfjs reports their
+  // text-item `width` accurately and stamping at right-edge + 6pt lands on
+  // the underline. The Date label does NOT — pdfjs over-reports its width
+  // (likely trailing whitespace baked into the text item) so we ignore the
+  // reported width and use a fixed offset measured from the label's left
+  // edge instead. Empirically, "Date:" rendered at the template's font/size
+  // takes about 28pt; +8pt gap puts the text right where the blank starts.
   const X_GAP_AFTER_LABEL = 6;
-  const Y_BASELINE_NUDGE = 0; // sit on the same baseline as the label
+  const Y_BASELINE_NUDGE = 0;
+  const DATE_FIXED_X_OFFSET_FROM_LABEL_LEFT = 36;
 
   type TextItem = { str: string; transform: number[]; width: number };
   const items = (content.items as unknown as TextItem[]).filter(it => typeof it.str === 'string');
 
-  function findLabelEnd(label: string): FieldPosition {
+  function findLabel(label: string): TextItem {
     const it = items.find(i => i.str.trim().startsWith(label));
     if (!it) {
       throw new Error(
         `Recertification template missing expected label "${label}". The template may have been replaced — re-run findTemplateFieldPositions after re-uploading.`
       );
     }
-    const x = it.transform[4] + (it.width ?? 0) + X_GAP_AFTER_LABEL;
-    const y = it.transform[5] + Y_BASELINE_NUDGE;
-    return { x, y };
+    return it;
   }
 
+  const facilityNameItem = findLabel('Facility Name:');
+  const locationItem = findLabel('Location:');
+  const dateItem = findLabel('Date:');
+
   return {
-    facilityName: findLabelEnd('Facility Name:'),
-    location: findLabelEnd('Location:'),
-    date: findLabelEnd('Date:'),
+    facilityName: {
+      x: facilityNameItem.transform[4] + (facilityNameItem.width ?? 0) + X_GAP_AFTER_LABEL,
+      y: facilityNameItem.transform[5] + Y_BASELINE_NUDGE,
+    },
+    location: {
+      x: locationItem.transform[4] + (locationItem.width ?? 0) + X_GAP_AFTER_LABEL,
+      y: locationItem.transform[5] + Y_BASELINE_NUDGE,
+    },
+    date: {
+      // Ignore reported width — use a fixed offset from the label's left edge.
+      x: dateItem.transform[4] + DATE_FIXED_X_OFFSET_FROM_LABEL_LEFT,
+      y: dateItem.transform[5] + Y_BASELINE_NUDGE,
+    },
   };
 }
 
@@ -121,7 +138,9 @@ export async function stampRecertificationPage(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const page = pdfDoc.getPage(0);
 
-  const FONT_SIZE = 11;
+  // 10pt matches the surrounding template body text. 11pt was visibly
+  // ~1pt too big in the first generated PDF.
+  const FONT_SIZE = 10;
   const COLOR = rgb(0, 0, 0);
 
   page.drawText(values.facilityName, {

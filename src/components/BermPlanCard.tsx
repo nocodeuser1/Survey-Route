@@ -19,7 +19,7 @@ import { isPlanRecertificationActive } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
 import RecertificationPagePickerModal from './RecertificationPagePickerModal';
 import { useAuth } from '../contexts/AuthContext';
-import { FilePlus2 } from 'lucide-react';
+import { FilePlus2, RefreshCw } from 'lucide-react';
 
 interface BermPlanCardProps {
   plan: SPCCPlan;
@@ -64,7 +64,10 @@ export default function BermPlanCard({
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateDraft, setPeDateDraft] = useState(plan.pe_stamp_date || '');
   const [savingPeDate, setSavingPeDate] = useState(false);
-  const [showRecertPicker, setShowRecertPicker] = useState(false);
+  // Picker mode tracks whether we're in fresh "create" flow (gated on
+  // decision='no_changes' + date) or "regenerate" flow (re-stamping a
+  // previously-recertified berm to fix template/positioning issues).
+  const [pickerMode, setPickerMode] = useState<null | 'create' | 'regenerate'>(null);
   const { user } = useAuth();
 
   // Sync drafts if the plan prop changes upstream (e.g. after a refetch)
@@ -337,6 +340,28 @@ export default function BermPlanCard({
                 Replace
               </button>
             </div>
+
+            {/* Regenerate link — appears once a berm has been recertified at
+                least once. Lets the user re-stamp the PDF (e.g. after a
+                template tweak or position fix) without starting a new
+                recertification cycle. Lives outside the in-window
+                Recertification Review card so it stays accessible after
+                the 90-day window has closed. */}
+            {plan.recertified_date && plan.plan_url && (
+              <button
+                type="button"
+                onClick={() => setPickerMode('regenerate')}
+                className={`mt-2 inline-flex items-center gap-1.5 text-xs font-medium transition-colors ${
+                  darkMode
+                    ? 'text-amber-400 hover:text-amber-300'
+                    : 'text-amber-700 hover:text-amber-800'
+                }`}
+                title="Re-stamp the recertification page using the existing recertified date"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Regenerate Recertification PDF
+              </button>
+            )}
           </>
         ) : (
           // Empty or replacing → inline drop zone
@@ -410,7 +435,7 @@ export default function BermPlanCard({
               plan.plan_url && (
                 <button
                   type="button"
-                  onClick={() => setShowRecertPicker(true)}
+                  onClick={() => setPickerMode('create')}
                   className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 transition-colors"
                 >
                   <FilePlus2 className="w-4 h-4" />
@@ -421,12 +446,13 @@ export default function BermPlanCard({
         )}
 
         {/* Recertification page picker / generator */}
-        {showRecertPicker && user && (
+        {pickerMode && user && (
           <RecertificationPagePickerModal
             facility={facility}
             plan={plan}
             userId={user.id}
-            onClose={() => setShowRecertPicker(false)}
+            regenerate={pickerMode === 'regenerate'}
+            onClose={() => setPickerMode(null)}
             onComplete={onPlanChange}
           />
         )}
