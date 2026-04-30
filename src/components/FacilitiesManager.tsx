@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
 import SurveyTypeSelector from './SurveyTypeSelector';
@@ -24,6 +24,7 @@ import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
+import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
@@ -1790,76 +1791,82 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setShowExportColumnSelector(true);
   };
 
+  /**
+   * String-only renderer for a single (facility, column) cell. Used by
+   * `performExport` (CSV) and `handleShareLinksExport` (XLSX) so both
+   * exports stay in lockstep with the column model and neither leaks
+   * React elements into the output (the prior CSV path returned JSX for
+   * `photos_taken`, which serialized as "[object Object]").
+   */
+  const getColumnExportText = (facility: Facility, columnId: ColumnId): string => {
+    if (columnId === 'spcc_status') {
+      if (facility.spcc_inspection_date) return 'Completed';
+      if (facility.spcc_external_completion) return 'External';
+      const effectiveDueDate = facility.spcc_due_date || (facility.first_prod_date ? (() => {
+        const d = parseLocalDate(facility.first_prod_date!);
+        d.setMonth(d.getMonth() + 6);
+        return d.toISOString().split('T')[0];
+      })() : null);
+      if (effectiveDueDate) {
+        const dueDate = parseLocalDate(effectiveDueDate);
+        const today = new Date();
+        const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysDiff < 0) return 'Overdue';
+        if (daysDiff <= 30) return 'Due Soon';
+        return 'Current';
+      }
+      return 'No Date';
+    }
+    if (columnId === 'inspection_status') {
+      const inspection = inspections.get(facility.id);
+      if (!inspection) return 'Pending';
+      return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
+    }
+    if (columnId === 'recertification_status') {
+      if (!isRecertificationActive(facility)) return '';
+      const d = facility.recertification_decision;
+      const at = facility.recertification_decision_at;
+      const datePart = at ? ` on ${formatDate(at)}` : '';
+      if (d === 'no_changes') return `Site visited, confirmed no changes${datePart}`;
+      if (d === 'changes_found') {
+        const notes = facility.recertification_decision_notes?.trim();
+        const base = `Site visited, confirmed changes and new photos taken${datePart}`;
+        return notes ? `${base} — ${notes}` : base;
+      }
+      return 'Pending Decision';
+    }
+    if (
+      columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' ||
+      columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' ||
+      columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' ||
+      columnId === 'company_signature_date' || columnId === 'recertified_date'
+    ) {
+      const value = facility[columnId as keyof Facility];
+      return value ? formatDate(value as string) : '';
+    }
+    if (columnId === 'visit_duration') return `${facility.visit_duration_minutes}`;
+    if (columnId === 'recertification_due_date') return computeRecertificationDueDate(facility) || '';
+    if (columnId === 'spcc_completion_type') return facility.spcc_completion_type || '';
+    if (columnId === 'photos_taken') return facility.photos_taken ? 'Yes' : 'No';
+    if (columnId === 'day_assignment') return facility.day_assignment != null ? String(facility.day_assignment) : '';
+    if (columnId === 'team_assignment') return facility.team_assignment != null ? String(facility.team_assignment) : '';
+    if (columnId === 'status') return facility.status || 'active';
+    if (columnId === 'created_at') return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '';
+    const value = facility[columnId as keyof Facility];
+    return value?.toString() || '';
+  };
+
   const performExport = () => {
     const headers = exportColumnOrder
       .filter(col => exportVisibleColumns.includes(col))
       .map(col => COLUMN_LABELS[col]);
 
-    const csvRows = [headers];
+    const csvRows: string[][] = [headers];
 
     filteredFacilities.forEach(facility => {
       const row = exportColumnOrder
         .filter(col => exportVisibleColumns.includes(col))
-        .map(columnId => {
-          if (columnId === 'spcc_status') {
-            if (facility.spcc_inspection_date) return 'Completed';
-            if (facility.spcc_external_completion) return 'External';
-            const effectiveDueDate = facility.spcc_due_date || (facility.first_prod_date ? (() => {
-              const d = parseLocalDate(facility.first_prod_date!);
-              d.setMonth(d.getMonth() + 6);
-              return d.toISOString().split('T')[0];
-            })() : null);
-            if (effectiveDueDate) {
-              const dueDate = parseLocalDate(effectiveDueDate);
-              const today = new Date();
-              const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-              if (daysDiff < 0) return 'Overdue';
-              if (daysDiff <= 30) return 'Due Soon';
-              return 'Current';
-            }
-            return 'No Date';
-          } else if (columnId === 'inspection_status') {
-            const inspection = inspections.get(facility.id);
-            if (!inspection) return 'Pending';
-            return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
-          } else if (columnId === 'recertification_status') {
-            if (!isRecertificationActive(facility)) return '';
-            const d = facility.recertification_decision;
-            const at = facility.recertification_decision_at;
-            const datePart = at ? ` on ${formatDate(at)}` : '';
-            if (d === 'no_changes') return `Site visited, confirmed no changes${datePart}`;
-            if (d === 'changes_found') {
-              const notes = facility.recertification_decision_notes?.trim();
-              const base = `Site visited, confirmed changes and new photos taken${datePart}`;
-              return notes ? `${base} — ${notes}` : base;
-            }
-            return 'Pending Decision';
-          } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' || columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' || columnId === 'company_signature_date' || columnId === 'recertified_date') {
-            const value = facility[columnId as keyof Facility];
-            return value ? formatDate(value as string) : '';
-          } else if (columnId === 'visit_duration') {
-            return `${facility.visit_duration_minutes}`;
-          } else if (columnId === 'recertification_due_date') {
-            return computeRecertificationDueDate(facility) || '';
-          } else if (columnId === 'spcc_completion_type') {
-            return facility.spcc_completion_type || '';
-          } else if (columnId === 'photos_taken') {
-            return facility.photos_taken
-              ? <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center"><CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
-              : <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center"><AlertCircle className="w-3 h-3 text-red-500 dark:text-red-400" /></div>;
-          } else if (columnId === 'day_assignment') {
-            return facility.day_assignment != null ? String(facility.day_assignment) : '';
-          } else if (columnId === 'team_assignment') {
-            return facility.team_assignment != null ? String(facility.team_assignment) : '';
-          } else if (columnId === 'status') {
-            return facility.status || 'active';
-          } else if (columnId === 'created_at') {
-            return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '';
-          } else {
-            const value = facility[columnId as keyof Facility];
-            return value?.toString() || '';
-          }
-        });
+        .map(columnId => getColumnExportText(facility, columnId));
 
       csvRows.push(row);
     });
@@ -1883,12 +1890,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setShowExportColumnSelector(false);
   };
 
-  // Bulk download all SPCC plan PDFs as a zip
-  // Optional subfolder param nests files inside a folder in the zip (used for "All" mode)
+  /**
+   * Bulk download every SPCC plan PDF for the currently-filtered facilities
+   * as a single ZIP. Iterates the per-berm `spcc_plans` rows (not the
+   * worst-case `facilities.spcc_plan_url` mirror) so multi-berm facilities
+   * contribute one PDF per berm. Each file is named in the canonical
+   * `Name - Camino ID - SPCC Plan|Renewal (MM-DD-YY).pdf` format. Multi-
+   * berm collisions get a " - Berm N" suffix appended before the .pdf so
+   * the zip never overwrites entries silently.
+   *
+   * `subfolder` nests files inside a single folder in the zip (used by
+   * the "All Reports" combo flow).
+   */
   const handleBulkPdfDownload = async (subfolder?: string) => {
-    const facilitiesWithPlans = filteredFacilities.filter(f => f.spcc_plan_url);
-    if (facilitiesWithPlans.length === 0) {
-      setError('No facilities with SPCC plans to download.');
+    const facilityIds = filteredFacilities.map(f => f.id);
+    if (facilityIds.length === 0) {
+      setError('No facilities to download.');
       return;
     }
 
@@ -1896,39 +1913,73 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setError(null);
 
     try {
+      const { data: planRows, error: planErr } = await supabase
+        .from('spcc_plans')
+        .select('id, facility_id, berm_index, plan_url, pe_stamp_date, recertified_date')
+        .in('facility_id', facilityIds);
+      if (planErr) throw planErr;
+
+      const plansWithUrls = (planRows || []).filter(p => p.plan_url);
+      if (plansWithUrls.length === 0) {
+        setError('No plans uploaded for these facilities yet.');
+        return;
+      }
+
+      // Detect multi-berm facilities so we know when to append berm number.
+      const bermCountByFacility = new Map<string, number>();
+      for (const p of plansWithUrls) {
+        bermCountByFacility.set(p.facility_id, (bermCountByFacility.get(p.facility_id) ?? 0) + 1);
+      }
+
+      const facilityById = new Map(filteredFacilities.map(f => [f.id, f]));
+      const folder = subfolder ? `${subfolder}_${new Date().toISOString().split('T')[0]}/` : '';
       const zip = new JSZip();
       let successCount = 0;
       let failCount = 0;
+      const usedNames = new Set<string>();
 
       await Promise.all(
-        facilitiesWithPlans.map(async (facility) => {
+        plansWithUrls.map(async (plan) => {
           try {
-            const response = await fetch(facility.spcc_plan_url!);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const blob = await response.blob();
+            const facility = facilityById.get(plan.facility_id);
+            if (!facility) throw new Error('facility not found in current list');
 
-            // Sanitize facility name for filename
-            const safeName = facility.name
-              .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-              .replace(/\s+/g, '_')
-              .substring(0, 80);
+            const isRenewal = !!plan.recertified_date;
+            const dateForFilename =
+              (isRenewal ? plan.recertified_date : plan.pe_stamp_date) ||
+              new Date().toISOString().slice(0, 10);
 
-            // Detect extension from content type or URL
-            const contentType = response.headers.get('content-type') || '';
-            let ext = 'pdf';
-            if (contentType.includes('pdf')) ext = 'pdf';
-            else {
-              const urlExt = facility.spcc_plan_url!.split('.').pop()?.split('?')[0]?.toLowerCase();
-              if (urlExt && ['pdf', 'png', 'jpg', 'jpeg'].includes(urlExt)) ext = urlExt;
+            let filename = buildPlanFilename({
+              facilityName: pickFacilityFilenameName(facility),
+              caminoFacilityId: facility.camino_facility_id,
+              kind: isRenewal ? 'renewal' : 'plan',
+              date: dateForFilename,
+            });
+
+            // Multi-berm dedup: insert " - Berm N" before .pdf so each
+            // berm gets a distinct entry in the zip.
+            if ((bermCountByFacility.get(plan.facility_id) ?? 1) > 1) {
+              filename = filename.replace(/\.pdf$/i, ` - Berm ${plan.berm_index}.pdf`);
             }
 
-            const filePath = subfolder
-              ? `${subfolder}_${new Date().toISOString().split('T')[0]}/${safeName}.${ext}`
-              : `${safeName}.${ext}`;
-            zip.file(filePath, blob);
+            // Last-resort uniqueness: if two facilities somehow produce the
+            // same name (shouldn't happen with Camino ID in the format) add
+            // a numeric suffix.
+            let entryName = `${folder}${filename}`;
+            let suffix = 1;
+            while (usedNames.has(entryName)) {
+              suffix++;
+              entryName = `${folder}${filename.replace(/\.pdf$/i, ` (${suffix}).pdf`)}`;
+            }
+            usedNames.add(entryName);
+
+            const response = await fetch(plan.plan_url!);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const blob = await response.blob();
+            zip.file(entryName, blob);
             successCount++;
           } catch (err) {
-            console.warn(`Failed to download plan for ${facility.name}:`, err);
+            console.warn(`Failed to download plan ${plan.id} for facility ${plan.facility_id}:`, err);
             failCount++;
           }
         })
@@ -1942,7 +1993,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(zipBlob);
-      link.download = `SPCC_Plans_${new Date().toISOString().split('T')[0]}.zip`;
+      link.download = `SPCC Plans (${new Date().toISOString().split('T')[0]}).zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1954,6 +2005,89 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     } catch (err) {
       console.error('Bulk PDF download error:', err);
       setError('Failed to create zip file. Please try again.');
+    } finally {
+      setIsBulkDownloading(false);
+    }
+  };
+
+  /**
+   * Export an XLSX with one row per filtered facility:
+   *   - Column 1: Facility Name
+   *   - Column 2: Share Links (per-berm landing-page URLs, newline-separated;
+   *     prefixed with "Berm N: " when the facility has more than one berm)
+   *   - Columns 3+: every column the user currently has visible on the
+   *     Facilities tab, in the same order (excluding the Name column to
+   *     avoid duplicating it).
+   *
+   * Pulls plan rows once via `IN (...)` for performance — facilities with
+   * zero plans get an empty Share Links cell rather than being skipped.
+   */
+  const handleShareLinksExport = async () => {
+    const facilityIds = filteredFacilities.map(f => f.id);
+    if (facilityIds.length === 0) {
+      setError('No facilities to export.');
+      return;
+    }
+
+    setIsBulkDownloading(true);
+    setError(null);
+
+    try {
+      const { data: planRows, error: planErr } = await supabase
+        .from('spcc_plans')
+        .select('facility_id, berm_index, plan_url')
+        .in('facility_id', facilityIds);
+      if (planErr) throw planErr;
+
+      const plansByFacility = new Map<string, Array<{ berm_index: number; has_url: boolean }>>();
+      for (const p of planRows || []) {
+        const arr = plansByFacility.get(p.facility_id) ?? [];
+        arr.push({ berm_index: p.berm_index, has_url: !!p.plan_url });
+        plansByFacility.set(p.facility_id, arr);
+      }
+
+      const baseUrl = window.location.origin;
+      const otherColumns = visibleColumns.filter(c => c !== 'name');
+
+      const headers = ['Facility Name', 'Share Links', ...otherColumns.map(c => COLUMN_LABELS[c])];
+
+      const rows: string[][] = filteredFacilities.map(facility => {
+        const plans = (plansByFacility.get(facility.id) ?? []).sort((a, b) => a.berm_index - b.berm_index);
+        const isMultiBerm = plans.length > 1;
+        const shareLinks = plans
+          .filter(p => p.has_url)
+          .map(p => {
+            const url = `${baseUrl}/spcc-plan/${facility.id}/berm/${p.berm_index}/download`;
+            return isMultiBerm ? `Berm ${p.berm_index}: ${url}` : url;
+          })
+          .join('\n');
+
+        const otherCells = otherColumns.map(c => getColumnExportText(facility, c));
+        return [facility.name, shareLinks, ...otherCells];
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      // Wrap-text on the Share Links column so multi-berm cells render readably.
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let r = 1; r <= range.e.r; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
+        if (cell) {
+          cell.s = { alignment: { wrapText: true, vertical: 'top' } };
+        }
+      }
+      // Reasonable column widths.
+      ws['!cols'] = headers.map((h, i) => {
+        if (i === 0) return { wch: 32 };           // Facility Name
+        if (i === 1) return { wch: 90 };           // Share Links (URLs are long)
+        return { wch: Math.max(14, h.length + 2) };
+      });
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'SPCC Plan Share Links');
+      XLSX.writeFile(wb, `SPCC Plan Share Links (${new Date().toISOString().split('T')[0]}).xlsx`);
+    } catch (err: any) {
+      console.error('Share-links export error:', err);
+      setError(err?.message || 'Failed to build the share-links spreadsheet.');
     } finally {
       setIsBulkDownloading(false);
     }
@@ -3412,9 +3546,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       onTooltipShow={setMobileTooltipId}
                       onClick={() => {
                         if (isBulkDownloading) return;
-                        if (spccMode === 'plan') {
-                          handleBulkPdfDownload();
-                        } else if (spccMode === 'inspection') {
+                        // Plans mode used to download directly; now opens the
+                        // picker so the user can choose between zip download
+                        // and share-links spreadsheet.
+                        if (spccMode === 'inspection') {
                           setShowExportPopup(true);
                         } else {
                           setShowReportTypePicker(true);
@@ -4192,8 +4327,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">SPCC Plans</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{filteredFacilities.filter(f => f.spcc_plan_url).length} plan PDFs as ZIP</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">All Plans (ZIP)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{filteredFacilities.filter(f => f.spcc_plan_url).length} plan PDFs, named in canonical format</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowReportTypePicker(false);
+                  handleShareLinksExport();
+                }}
+                disabled={isBulkDownloading || filteredFacilities.length === 0}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:border-amber-300 dark:hover:border-amber-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                  <LinkIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Share Links Spreadsheet</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">XLSX with per-berm download URLs + your visible columns</p>
                 </div>
               </button>
               <button
