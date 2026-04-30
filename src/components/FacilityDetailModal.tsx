@@ -38,7 +38,8 @@ import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
 import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
-import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, type SPCCWorkflowStatus } from '../utils/spccStatus';
+import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, isRecertificationActive, type SPCCWorkflowStatus } from '../utils/spccStatus';
+import RecertificationStatusField from './RecertificationStatusField';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
@@ -1016,6 +1017,19 @@ export default function FacilityDetailModal({
 
   const renderGeneralTab = () => (
     <div className="space-y-6">
+      {isRecertificationActive(facility) && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50/40 dark:bg-amber-900/10 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Recertification Review</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                This facility's SPCC plan is in (or past) the 5-year recertification window. Record your decision.
+              </p>
+            </div>
+          </div>
+          <RecertificationStatusField facility={facility} mode="full" onSaved={bumpFacilityRender} />
+        </div>
+      )}
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-6">
         <div className="space-y-6">
 
@@ -1859,6 +1873,20 @@ export default function FacilityDetailModal({
             </div>
           </div>
         </div>
+
+        {isRecertificationActive(facility) && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50/40 dark:bg-amber-900/10 p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">SPCC Recertification Review</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                  This facility's SPCC plan is in (or past) the 5-year recertification window. Record your decision.
+                </p>
+              </div>
+            </div>
+            <RecertificationStatusField facility={facility} mode="full" onSaved={bumpFacilityRender} />
+          </div>
+        )}
 
         {(facility.initial_inspection_completed || facility.company_signature_date || facility.recertified_date) && (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">

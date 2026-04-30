@@ -12,6 +12,7 @@ import SearchInput from './SearchInput';
 import InspectionReportExport from './InspectionReportExport';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
+import RecertificationStatusField from './RecertificationStatusField';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import SPCCPlanManager from './SPCCPlanManager';
 import BulkSPCCUploadModal from './BulkSPCCUploadModal';
@@ -22,7 +23,7 @@ import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
-import { getSPCCPlanStatus, formatDayCount } from '../utils/spccStatus';
+import { getSPCCPlanStatus, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
@@ -123,7 +124,7 @@ function TouchTooltipButton({
 }
 
 type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'historical_name' |
-  'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'notes' |
+  'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
   'berm_depth_inches' | 'berm_length' | 'berm_width' |
@@ -133,13 +134,13 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet';
 
-const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'notes'];
+const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'recertification_status', 'notes'];
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
   'name', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
   'status', 'day_assignment', 'team_assignment',
-  'spcc_status', 'spcc_plan_uploaded', 'inspection_status', 'notes',
+  'spcc_status', 'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
   'photos_taken', 'field_visit_date', 'estimated_oil_per_day',
   'berm_depth_inches', 'berm_length', 'berm_width',
@@ -166,6 +167,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   spcc_status: 'SPCC Plan Status',
   spcc_plan_uploaded: 'SPCC Plan Uploaded',
   inspection_status: 'SPCC Inspection Status',
+  recertification_status: 'Recertification Status',
   notes: 'Notes',
   first_prod_date: 'Initial Production',
   spcc_due_date: 'SPCC Due',
@@ -1076,6 +1078,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             const order = { pending: 0, expired: 1, expiring: 2, inspected: 3 };
             return order[status];
           }
+          case 'recertification_status': {
+            // Pending decisions float to the top of the asc sort so the user
+            // can knock them out first; inactive rows sink to the bottom.
+            if (!isRecertificationActive(facility)) return 4;
+            const d = facility.recertification_decision;
+            if (d === null || d === undefined) return 0;
+            if (d === 'changes_found') return 1;
+            return 2; // no_changes
+          }
           case 'spcc_plan_uploaded':
             // Asc → "Not uploaded" first, then "Uploaded"; flip via header click.
             return facility.spcc_plan_url ? 1 : 0;
@@ -1811,6 +1822,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             const inspection = inspections.get(facility.id);
             if (!inspection) return 'Pending';
             return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
+          } else if (columnId === 'recertification_status') {
+            if (!isRecertificationActive(facility)) return '';
+            const d = facility.recertification_decision;
+            if (d === 'no_changes') return 'No Significant Changes';
+            if (d === 'changes_found') {
+              const notes = facility.recertification_decision_notes?.trim();
+              return notes ? `Changes Found: ${notes}` : 'Changes Found';
+            }
+            return 'Pending Decision';
           } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' || columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' || columnId === 'company_signature_date' || columnId === 'recertified_date') {
             const value = facility[columnId as keyof Facility];
             return value ? formatDate(value as string) : '';
@@ -2250,6 +2270,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
       case 'inspection_status':
         return getVerificationIcon(facility);
+      case 'recertification_status':
+        return (
+          <RecertificationStatusField
+            facility={facility}
+            mode="compact"
+            onRequestEdit={() => setSelectedFacility(facility)}
+          />
+        );
       case 'matched_facility_name':
         return facility.matched_facility_name || '-';
       case 'well_name_1':

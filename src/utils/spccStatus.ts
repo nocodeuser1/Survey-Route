@@ -43,6 +43,24 @@ export interface SPCCStatusFacility {
   photos_taken?: boolean | null;
 }
 
+export type RecertificationDecision = 'no_changes' | 'changes_found';
+
+/**
+ * True when a facility is in (or past) the SPCC plan recertification window:
+ * has an existing plan AND the 5-year clock is within 90 days of expiry, has
+ * already expired, or has been recertified in the last 5 years.
+ *
+ * Drives visibility of the "Recertification Status" UI everywhere — Facilities
+ * tab column, FacilityDetailModal, SPCCPlanDetailModal, and the map popup.
+ * Facilities still on their initial plan (no PE stamp yet) are deliberately
+ * excluded — recertification only applies once a plan exists.
+ */
+export function isRecertificationActive(facility: SPCCStatusFacility): boolean {
+  const result = getSPCCPlanStatus(facility);
+  if (!result.hasPlan) return false;
+  return result.status === 'expiring' || result.status === 'expired' || result.status === 'recertified';
+}
+
 /**
  * Derives the workflow status that the system would automatically assign
  * based on facility field values. Priority (highest wins):

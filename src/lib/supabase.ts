@@ -69,6 +69,12 @@ export interface Facility {
   initial_inspection_completed?: string | null;
   company_signature_date?: string | null;
   recertified_date?: string | null;
+  // Recertification self-certification (5-year SPCC plan review window).
+  // Informational only — does NOT auto-set recertified_date. See migration
+  // 20260429000000_add_recertification_decision_to_facilities.sql.
+  recertification_decision?: 'no_changes' | 'changes_found' | null;
+  recertification_decision_notes?: string | null;
+  recertification_decision_at?: string | null;
   county?: string | null;
   camino_facility_id?: string | null;
   /**

@@ -7,7 +7,7 @@ import { HomeBase, supabase, UserSettings, Inspection, Facility } from '../lib/s
 import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { isInspectionValid } from '../utils/inspectionUtils';
-import { getSPCCPlanStatus } from '../utils/spccStatus';
+import { getSPCCPlanStatus, isRecertificationActive } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NavigationPopup from './NavigationPopup';
 import SearchInput from './SearchInput';
@@ -1042,6 +1042,40 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               `;
             }
 
+            // Recertification self-cert pill — visible whenever the plan is in
+            // (or past) the 5-year recert window, regardless of survey-type
+            // mode. Read-only display + a button that opens the detail modal
+            // (matches the existing "click facility name → openFacilityModal"
+            // pattern; full edit UI lives there to avoid React-in-Leaflet HTML
+            // duplication).
+            let recertificationHtml = '';
+            if (fullFacility && isRecertificationActive(fullFacility)) {
+              const decision = fullFacility.recertification_decision;
+              const decisionMeta =
+                decision === 'no_changes'
+                  ? { label: 'No Significant Changes', bg: '#D1FAE5', text: '#065F46' }
+                  : decision === 'changes_found'
+                    ? { label: 'Changes Found', bg: '#FEF3C7', text: '#92400E' }
+                    : { label: 'Pending Decision', bg: '#DBEAFE', text: '#1E40AF' };
+              recertificationHtml = `
+                <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #FFFBEB; border-radius: 6px; border: 1px solid #FDE68A;">
+                  <div style="font-weight: 600; margin-bottom: 4px; color: #92400E;">Recertification Status</div>
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                    <span style="display: inline-flex; align-items: center; padding: 2px 6px; background-color: ${decisionMeta.bg}; color: ${decisionMeta.text}; border-radius: 9999px; font-size: 10px; font-weight: 600;">
+                      ${decisionMeta.label}
+                    </span>
+                    <button
+                      id="recert-btn-${facility.index}"
+                      style="padding: 4px 8px; background-color: #FFFFFF; color: #92400E; border: 1px solid #F59E0B; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: 600;"
+                      title="Set Recertification Status"
+                    >
+                      Set
+                    </button>
+                  </div>
+                </div>
+              `;
+            }
+
             // Build field visit quick-actions for Plans mode
             let fieldVisitHtml = '';
             if (surveyType === 'spcc_plan' && fullFacility) {
@@ -1188,6 +1222,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 </div>
                 <div style="font-size: 11px; color: #6b7280;">Visit: ${facility.visitDuration} mins</div>
                 ${planInfoHtml}
+                ${recertificationHtml}
                 ${fieldVisitHtml}
                 <div style="font-size: 11px; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e5e7eb;">
                   <div style="font-weight: 600; margin-bottom: 2px;">Day ${route.day} Schedule:</div>
@@ -1386,6 +1421,22 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     }
                   };
                   btn.addEventListener('click', clickHandler);
+                });
+              }
+
+              // Recertification "Set" button → delegates to the detail modal,
+              // which has the full dropdown + notes UI. Two-click by design —
+              // safer than building React state inside Leaflet HTML.
+              const recertBtn = document.getElementById(`recert-btn-${facility.index}`);
+              if (recertBtn) {
+                recertBtn.addEventListener('click', (e) => {
+                  e.stopPropagation();
+                  if (facilityForThisMarker) {
+                    openFacilityModal(facilityForThisMarker);
+                  } else {
+                    alert('Could not find facility data. Please refresh the page.');
+                  }
+                  marker.closePopup();
                 });
               }
 
