@@ -86,7 +86,10 @@ export async function findTemplateFieldPositions(
   // reported width and use a fixed offset measured from the label's left
   // edge instead. Empirically, "Date:" rendered at the template's font/size
   // takes about 28pt; +8pt gap puts the text right where the blank starts.
-  const X_GAP_AFTER_LABEL = 6;
+  // X_GAP went 6 → 10 after Israel's first iteration ("a hair to the right
+  // so it starts ON the line"). Applied to Facility Name and Location since
+  // both use dynamic right-edge detection. Date keeps its fixed offset.
+  const X_GAP_AFTER_LABEL = 10;
   const Y_BASELINE_NUDGE = 0;
   const DATE_FIXED_X_OFFSET_FROM_LABEL_LEFT = 36;
 
@@ -138,15 +141,16 @@ export async function stampRecertificationPage(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const page = pdfDoc.getPage(0);
 
-  // 10pt matches the surrounding template body text. 11pt was visibly
-  // ~1pt too big in the first generated PDF.
-  const FONT_SIZE = 10;
+  // Per-field font sizes after Israel's calibration pass:
+  //   - Facility Name + Date: 10pt (matches template body text)
+  //   - Location:             9pt (one stop smaller — the lat/long string is
+  //                                long enough that 10pt looks heavy on the line)
   const COLOR = rgb(0, 0, 0);
 
   page.drawText(values.facilityName, {
     x: positions.facilityName.x,
     y: positions.facilityName.y,
-    size: FONT_SIZE,
+    size: 10,
     font,
     color: COLOR,
   });
@@ -154,7 +158,7 @@ export async function stampRecertificationPage(
   page.drawText(values.location, {
     x: positions.location.x,
     y: positions.location.y,
-    size: FONT_SIZE,
+    size: 9,
     font,
     color: COLOR,
   });
@@ -162,7 +166,7 @@ export async function stampRecertificationPage(
   page.drawText(values.date, {
     x: positions.date.x,
     y: positions.date.y,
-    size: FONT_SIZE,
+    size: 10,
     font,
     color: COLOR,
   });
