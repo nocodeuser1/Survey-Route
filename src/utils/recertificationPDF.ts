@@ -243,6 +243,10 @@ export function formatRecertificationDate(isoOrTimestamp: string): string {
   return `${month} ${day}, ${year}`;
 }
 
+// `buildPlanFilename` lives in `../utils/spccPlans.ts` — it's a pure string
+// helper, so it stays out of this PDF module to avoid pulling pdf-lib /
+// pdfjs side effects into every consumer of the filename helper.
+
 /**
  * Build the location string in Israel's exact format:
  *   `35.123456,-97.654321  |  Canadian County, OK`

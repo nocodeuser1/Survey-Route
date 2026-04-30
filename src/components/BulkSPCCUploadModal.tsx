@@ -338,7 +338,6 @@ export default function BulkSPCCUploadModal({
       try {
         const facilityId = result.selectedFacilityId!;
         const peDate = parseDateInput(result.overridePeDate) || result.overridePeDate;
-        const fileExt = result.file.name.split('.').pop() || 'pdf';
 
         // Bulk uploads always target Berm 1 (the default single-berm row that
         // the spcc_plans backfill guarantees exists for every facility). If
@@ -398,7 +397,19 @@ export default function BulkSPCCUploadModal({
           uploadBlob = compressed.blob;
         }
 
-        const fileName = buildPlanStoragePath(facilityId, targetPlan.berm_index, fileExt);
+        const facilityForFilename = facilities.find((f) => f.id === facilityId);
+        if (!facilityForFilename) {
+          throw new Error(`Facility ${facilityId} not found in current list — refresh and retry.`);
+        }
+        const fileName = buildPlanStoragePath({
+          facilityId,
+          bermIndex: targetPlan.berm_index,
+          facility: facilityForFilename,
+          kind: 'plan',
+          // peDate may be 'YYYY-MM-DD' (parsed) or the raw user string;
+          // buildPlanFilename only reads the YYYY-MM-DD prefix.
+          date: peDate || new Date().toISOString().slice(0, 10),
+        });
         const { error: uploadError } = await supabase.storage
           .from('spcc-plans')
           .upload(fileName, uploadBlob, { contentType: 'application/pdf' });

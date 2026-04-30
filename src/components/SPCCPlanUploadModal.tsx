@@ -3,6 +3,7 @@ import { X, Upload, FileText, Calendar, Loader, AlertTriangle } from 'lucide-rea
 import { supabase, Facility } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { compressPDF, formatBytesMB } from '../utils/compressPDF';
+import { buildPlanStoragePath } from '../utils/spccPlans';
 
 const MAX_FILE_SIZE_MB = 2;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -123,9 +124,16 @@ export default function SPCCPlanUploadModal({ isOpen, onClose, facility, onUploa
         setError(null);
 
         try {
-            // 1. Upload to Supabase Storage
-            const fileExt = staged.name.split('.').pop() || 'pdf';
-            const fileName = `${facility.id}/spcc-plan-${Date.now()}.${fileExt}`;
+            // 1. Upload to Supabase Storage. This modal predates the
+            // multi-berm refactor — it writes the legacy facilities.spcc_*
+            // columns directly. Treat it as berm 1 for storage organization.
+            const fileName = buildPlanStoragePath({
+                facilityId: facility.id,
+                bermIndex: 1,
+                facility,
+                kind: 'plan',
+                date: peStampDate,
+            });
             const { error: uploadError } = await supabase.storage
                 .from('spcc-plans')
                 .upload(fileName, staged.blob, { contentType: 'application/pdf' });

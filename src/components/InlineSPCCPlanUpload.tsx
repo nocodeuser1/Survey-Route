@@ -158,8 +158,13 @@ export default function InlineSPCCPlanUpload({
     setIsUploading(true);
     setError(null);
     try {
-      const fileExt = staged.name.split('.').pop() || 'pdf';
-      const fileName = buildPlanStoragePath(facility.id, plan.berm_index, fileExt);
+      const fileName = buildPlanStoragePath({
+        facilityId: facility.id,
+        bermIndex: plan.berm_index,
+        facility,
+        kind: 'plan',
+        date: peStampDate,
+      });
       const { error: uploadError } = await supabase.storage
         .from('spcc-plans')
         .upload(fileName, staged.blob, { contentType: 'application/pdf' });
