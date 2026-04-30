@@ -1051,12 +1051,26 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             let recertificationHtml = '';
             if (fullFacility && isRecertificationActive(fullFacility)) {
               const decision = fullFacility.recertification_decision;
+              const decidedAt = fullFacility.recertification_decision_at;
               const decisionMeta =
                 decision === 'no_changes'
                   ? { label: 'No Significant Changes', bg: '#D1FAE5', text: '#065F46' }
                   : decision === 'changes_found'
                     ? { label: 'Changes Found', bg: '#FEF3C7', text: '#92400E' }
                     : { label: 'Pending Decision', bg: '#DBEAFE', text: '#1E40AF' };
+              // Audit-friendly site-visit sentence (only when a decision is set)
+              let confirmationLineHtml = '';
+              if (decision && decidedAt) {
+                const sentence =
+                  decision === 'no_changes'
+                    ? `Site visited, confirmed no changes on ${formatDate(decidedAt)}`
+                    : `Site visited, confirmed changes and new photos taken on ${formatDate(decidedAt)}`;
+                confirmationLineHtml = `
+                  <div style="margin-top: 6px; font-size: 11px; color: #1F2937; font-weight: 500;">
+                    ${sentence}
+                  </div>
+                `;
+              }
               recertificationHtml = `
                 <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #FFFBEB; border-radius: 6px; border: 1px solid #FDE68A;">
                   <div style="font-weight: 600; margin-bottom: 4px; color: #92400E;">Recertification Status</div>
@@ -1069,9 +1083,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       style="padding: 4px 8px; background-color: #FFFFFF; color: #92400E; border: 1px solid #F59E0B; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: 600;"
                       title="Set Recertification Status"
                     >
-                      Set
+                      ${decision ? 'Edit' : 'Set'}
                     </button>
                   </div>
+                  ${confirmationLineHtml}
                 </div>
               `;
             }

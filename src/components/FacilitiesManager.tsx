@@ -1825,10 +1825,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           } else if (columnId === 'recertification_status') {
             if (!isRecertificationActive(facility)) return '';
             const d = facility.recertification_decision;
-            if (d === 'no_changes') return 'No Significant Changes';
+            const at = facility.recertification_decision_at;
+            const datePart = at ? ` on ${formatDate(at)}` : '';
+            if (d === 'no_changes') return `Site visited, confirmed no changes${datePart}`;
             if (d === 'changes_found') {
               const notes = facility.recertification_decision_notes?.trim();
-              return notes ? `Changes Found: ${notes}` : 'Changes Found';
+              const base = `Site visited, confirmed changes and new photos taken${datePart}`;
+              return notes ? `${base} — ${notes}` : base;
             }
             return 'Pending Decision';
           } else if (columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' || columnId === 'first_prod_date' || columnId === 'spcc_pe_stamp_date' || columnId === 'field_visit_date' || columnId === 'initial_inspection_completed' || columnId === 'company_signature_date' || columnId === 'recertified_date') {
