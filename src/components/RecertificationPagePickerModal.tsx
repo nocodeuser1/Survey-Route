@@ -22,7 +22,7 @@ import {
   formatRecertificationDate,
   buildLocationString,
 } from '../utils/recertificationPDF';
-import { getBermShortLabel, buildPlanStoragePath } from '../utils/spccPlans';
+import { getBermShortLabel } from '../utils/spccPlans';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -246,74 +246,38 @@ export default function RecertificationPagePickerModal({
       // 2. Replace the chosen page in the source PDF
       const merged = await replacePageInPDF(sourceBytesRef.current, currentPage, stamped);
 
-      // 3. Build the new storage path with the canonical "Renewal" filename
-      //    and upload the merged PDF there. The URL changes — Israel's
-      //    earlier "URL must not change" instruction is superseded by the
-      //    explicit filename-format requirement (the URL inherently encodes
-      //    the storage path / filename).
-      const decisionIsoDateMatch = decisionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      const dateForFilename = decisionIsoDateMatch
-        ? `${decisionIsoDateMatch[1]}-${decisionIsoDateMatch[2]}-${decisionIsoDateMatch[3]}`
-        : new Date().toISOString().slice(0, 10);
-
-      const newStoragePath = buildPlanStoragePath({
-        facilityId: facility.id,
-        bermIndex: plan.berm_index,
-        facility,
-        kind: 'renewal',
-        date: dateForFilename,
-      });
-
+      // 3. Overwrite the file at the existing Storage path. URL stays
+      //    identical per Israel's stable-URL rule. The filename baked
+      //    into the URL won't change to reflect "Renewal" — the
+      //    Standardize Plan Filenames tool in account settings handles
+      //    one-time naming; recerts just update file content.
+      const storagePath = plan.plan_url.replace(/^.*\/spcc-plans\//, '');
       const { error: uploadErr } = await supabase.storage
         .from('spcc-plans')
-        .upload(newStoragePath, new Blob([merged], { type: 'application/pdf' }), {
+        .upload(storagePath, new Blob([merged], { type: 'application/pdf' }), {
           contentType: 'application/pdf',
-          // upsert handles the same-day-regenerate case where the formatted
-          // filename collides with an existing file.
           upsert: true,
+          // Short cache TTL so phones drop the stale file quickly.
           cacheControl: '60',
         });
       if (uploadErr) throw uploadErr;
 
-      const { data: { publicUrl: newPublicUrl } } = supabase.storage
-        .from('spcc-plans')
-        .getPublicUrl(newStoragePath);
-
-      // 4. Delete the old file (best-effort — log but don't fail the flow).
-      //    Skip when the path didn't change (same-day regenerate to same name).
-      const oldStoragePath = plan.plan_url.replace(/^.*\/spcc-plans\//, '');
-      if (oldStoragePath && oldStoragePath !== newStoragePath) {
-        const { error: deleteErr } = await supabase.storage
-          .from('spcc-plans')
-          .remove([oldStoragePath]);
-        if (deleteErr) {
-          console.warn('Failed to delete old plan file:', deleteErr);
-        }
-      }
-
-      // 5. Update spcc_plans. Always update plan_url to the new path.
-      //    Default flow additionally marks the berm recertified and clears
-      //    the in-window decision so the next 5-year cycle surfaces a fresh
-      //    prompt. Regenerate mode leaves recertified_date / decision alone.
+      // 4. Default flow: mark berm recertified + clear the in-window decision
+      //    so the next 5-year cycle surfaces a fresh prompt at the right
+      //    time. Regenerate mode leaves both fields alone.
       if (!regenerate) {
-        const recertifiedIsoDate = decisionIsoDateMatch
-          ? `${decisionIsoDateMatch[1]}-${decisionIsoDateMatch[2]}-${decisionIsoDateMatch[3]}`
+        const decisionDateOnly = decisionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        const recertifiedIsoDate = decisionDateOnly
+          ? `${decisionDateOnly[1]}-${decisionDateOnly[2]}-${decisionDateOnly[3]}`
           : null;
         const { error: planUpdErr } = await supabase
           .from('spcc_plans')
           .update({
-            plan_url: newPublicUrl,
             recertified_date: recertifiedIsoDate,
             recertification_decision: null,
             recertification_decision_notes: null,
             recertification_decision_at: null,
           })
-          .eq('id', plan.id);
-        if (planUpdErr) throw planUpdErr;
-      } else {
-        const { error: planUpdErr } = await supabase
-          .from('spcc_plans')
-          .update({ plan_url: newPublicUrl })
           .eq('id', plan.id);
         if (planUpdErr) throw planUpdErr;
       }

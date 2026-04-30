@@ -13,6 +13,7 @@ import AcceptInvitePage from './pages/AcceptInvitePage';
 import SignatureSetupPage from './pages/SignatureSetupPage';
 import UnsubscribePage from './pages/UnsubscribePage';
 import SPCCPlanViewerPage from './pages/SPCCPlanViewerPage';
+import SPCCPlanDownloadPage from './pages/SPCCPlanDownloadPage';
 import MobileSignaturePage from './pages/MobileSignaturePage';
 import App from './App';
 import LoadingScreen from './components/LoadingScreen';
@@ -120,6 +121,10 @@ export default function AppRouter() {
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/unsubscribe" element={<UnsubscribePage />} />
               <Route path="/spcc-plan/:facilityId" element={<SPCCPlanViewerPage />} />
+              <Route
+                path="/spcc-plan/:facilityId/berm/:bermIndex/download"
+                element={<SPCCPlanDownloadPage />}
+              />
               <Route path="/mobile-signature/:token" element={<MobileSignaturePage />} />
               <Route
                 path="/setup-signature"

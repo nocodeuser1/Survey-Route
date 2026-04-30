@@ -79,9 +79,12 @@ export default function BermPlanCard({
   }, [plan.pe_stamp_date]);
 
   const copyViewerLink = () => {
-    // Public viewer URL for the FACILITY, not a specific plan. Sharing a
-    // single berm's PDF URL works too (the `plan_url` is already public).
-    const url = `${window.location.origin}/spcc-plan/${facility.id}`;
+    // Per-berm download landing page. Stable URL (depends only on
+    // facility_id + berm_index — not on the editable berm label, not on
+    // the storage path), and the page resolves the canonical filename
+    // ("Renewal" vs "SPCC Plan") at click time so the recipient always
+    // gets a file named for the current state of the plan.
+    const url = `${window.location.origin}/spcc-plan/${facility.id}/berm/${plan.berm_index}/download`;
     navigator.clipboard.writeText(url).then(() => {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);

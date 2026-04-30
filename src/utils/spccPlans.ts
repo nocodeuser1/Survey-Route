@@ -4,6 +4,7 @@
  * See: supabase/migrations/20260423000000_create_spcc_plans_table.sql
  */
 
+import { supabase } from '../lib/supabase';
 import type { Facility, SPCCPlan } from '../lib/supabase';
 
 export interface FacilityWell {
@@ -150,6 +151,139 @@ export function buildPlanStoragePath(opts: {
     date: opts.date,
   });
   return `${opts.facilityId}/berm-${opts.bermIndex}/${filename}`;
+}
+
+export interface StandardizeFilenamesProgress {
+  total: number;
+  processed: number;
+  migrated: number;
+  skipped: number;
+  failed: number;
+  /** Human-readable line for the most recent operation (success or failure). */
+  lastMessage: string | null;
+}
+
+export interface StandardizeFilenamesResult {
+  migrated: number;
+  skipped: number;
+  failed: number;
+  messages: string[];
+}
+
+/**
+ * One-time migration helper: walks every spcc_plans row that has a plan_url
+ * and renames the underlying Storage object to the canonical filename
+ * Israel specified ("Name - Camino ID - SPCC Plan (MM-DD-YY).pdf").
+ *
+ * Behavior:
+ * - Files already at the canonical path are skipped.
+ * - For others: the object is moved (new path) and `spcc_plans.plan_url`
+ *   is updated to the new public URL.
+ * - "kind" is always 'plan' here — recerts are caught by the recert
+ *   workflow itself, which now overwrites in place. Use the Regenerate
+ *   button on a per-berm card to apply the canonical "Renewal" filename
+ *   to a recertified PDF after this one-time pass.
+ * - Date source: pe_stamp_date when present, falling back to
+ *   recertified_date, finally today's date so the filename always parses.
+ *
+ * Idempotent — re-running after a successful pass should report all
+ * skipped (already at canonical path).
+ */
+export async function standardizeAllPlanFilenames(
+  onProgress?: (p: StandardizeFilenamesProgress) => void
+): Promise<StandardizeFilenamesResult> {
+  const messages: string[] = [];
+
+  const { data: plans, error: plansErr } = await supabase
+    .from('spcc_plans')
+    .select('id, facility_id, berm_index, plan_url, pe_stamp_date, recertified_date');
+  if (plansErr) throw plansErr;
+
+  const withUrls = (plans || []).filter((p) => p.plan_url);
+  const total = withUrls.length;
+  let processed = 0;
+  let migrated = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  const emit = (lastMessage: string | null) => {
+    onProgress?.({ total, processed, migrated, skipped, failed, lastMessage });
+  };
+  emit(null);
+
+  for (const plan of withUrls) {
+    let lastMessage: string | null = null;
+    try {
+      const { data: facility, error: facErr } = await supabase
+        .from('facilities')
+        .select('id, name, matched_facility_name, camino_facility_id')
+        .eq('id', plan.facility_id)
+        .single();
+      if (facErr || !facility) {
+        failed++;
+        lastMessage = `Plan ${plan.id}: facility not found — skipping.`;
+        messages.push(lastMessage);
+        continue;
+      }
+
+      const oldPath = (plan.plan_url as string).replace(/^.*\/spcc-plans\//, '');
+      const newPath = buildPlanStoragePath({
+        facilityId: plan.facility_id,
+        bermIndex: plan.berm_index,
+        facility,
+        kind: 'plan',
+        date:
+          plan.pe_stamp_date ||
+          plan.recertified_date ||
+          new Date().toISOString().slice(0, 10),
+      });
+
+      if (oldPath === newPath) {
+        skipped++;
+        lastMessage = `${facility.name}: already canonical, skipped.`;
+        messages.push(lastMessage);
+        continue;
+      }
+
+      const { error: moveErr } = await supabase.storage
+        .from('spcc-plans')
+        .move(oldPath, newPath);
+      if (moveErr) {
+        failed++;
+        lastMessage = `${facility.name}: move failed — ${moveErr.message}`;
+        messages.push(lastMessage);
+        continue;
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('spcc-plans').getPublicUrl(newPath);
+
+      const { error: updErr } = await supabase
+        .from('spcc_plans')
+        .update({ plan_url: publicUrl })
+        .eq('id', plan.id);
+      if (updErr) {
+        failed++;
+        lastMessage = `${facility.name}: DB update failed — ${updErr.message}`;
+        messages.push(lastMessage);
+        continue;
+      }
+
+      migrated++;
+      lastMessage = `${facility.name}: → ${newPath.split('/').pop()}`;
+      messages.push(lastMessage);
+    } catch (err: any) {
+      failed++;
+      lastMessage = `Plan ${plan.id}: ${err?.message || 'unknown error'}`;
+      messages.push(lastMessage);
+    } finally {
+      processed++;
+      emit(lastMessage);
+    }
+  }
+
+  return { migrated, skipped, failed, messages };
 }
 
 /**
