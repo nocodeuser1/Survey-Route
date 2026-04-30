@@ -32,6 +32,7 @@
     "lucide-react": "^0.344.0",
     "mupdf": "^1.27.0",
     "papaparse": "^5.5.3",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.624",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",

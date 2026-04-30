@@ -17,6 +17,9 @@ import { formatDate } from '../utils/dateUtils';
 import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
 import { isPlanRecertificationActive } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
+import RecertificationPagePickerModal from './RecertificationPagePickerModal';
+import { useAuth } from '../contexts/AuthContext';
+import { FilePlus2 } from 'lucide-react';
 
 interface BermPlanCardProps {
   plan: SPCCPlan;
@@ -61,6 +64,8 @@ export default function BermPlanCard({
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateDraft, setPeDateDraft] = useState(plan.pe_stamp_date || '');
   const [savingPeDate, setSavingPeDate] = useState(false);
+  const [showRecertPicker, setShowRecertPicker] = useState(false);
+  const { user } = useAuth();
 
   // Sync drafts if the plan prop changes upstream (e.g. after a refetch)
   useEffect(() => {
@@ -394,7 +399,36 @@ export default function BermPlanCard({
               mode="full"
               onSaved={onPlanChange}
             />
+
+            {/* Generate-recertification-plan trigger.
+                Visible only after the operator has confirmed "No Significant
+                Changes" with a site-visit date AND there's an existing plan
+                PDF to swap into. The "Changes Found" branch is a separate
+                workflow Israel will spec out later. */}
+            {plan.recertification_decision === 'no_changes' &&
+              plan.recertification_decision_at &&
+              plan.plan_url && (
+                <button
+                  type="button"
+                  onClick={() => setShowRecertPicker(true)}
+                  className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 transition-colors"
+                >
+                  <FilePlus2 className="w-4 h-4" />
+                  Create Recertification Plan
+                </button>
+              )}
           </div>
+        )}
+
+        {/* Recertification page picker / generator */}
+        {showRecertPicker && user && (
+          <RecertificationPagePickerModal
+            facility={facility}
+            plan={plan}
+            userId={user.id}
+            onClose={() => setShowRecertPicker(false)}
+            onComplete={onPlanChange}
+          />
         )}
 
         {/* Wells coverage */}
