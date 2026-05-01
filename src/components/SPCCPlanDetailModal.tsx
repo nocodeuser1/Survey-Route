@@ -4,7 +4,7 @@ import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
-import { formatDate, parseLocalDate } from '../utils/dateUtils';
+import { formatDate } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
@@ -957,8 +957,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 )}
               </div>
 
-              {/* Recertification Date (computed) */}
-              {status.recertificationDate && (
+              {/* Recertification Date (computed). Hidden when no PE stamp
+                  date — without an initial stamp there's no 5-year clock to
+                  count down from, so showing this row would be misleading. */}
+              {status.recertificationDate && (savedPeDate || facility.spcc_pe_stamp_date) && (
                 <div className="px-4 py-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
@@ -1090,32 +1092,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                     </div>
                   )}
                 </div>
-                {(() => {
-                  const peDate = savedPeDate || facility.spcc_pe_stamp_date;
-                  if (!peDate) return null;
-                  const d = parseLocalDate(peDate);
-                  if (isNaN(d.getTime())) return null;
-                  const due = new Date(d);
-                  due.setFullYear(due.getFullYear() + 5);
-                  const daysUntil = Math.floor((due.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  return (
-                    <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertification Due</span>
-                      </div>
-                      <span className={`text-sm font-medium ${
-                        daysUntil < 0
-                          ? (darkMode ? 'text-red-400' : 'text-red-600')
-                          : daysUntil <= 90
-                            ? (darkMode ? 'text-amber-400' : 'text-amber-600')
-                            : (darkMode ? 'text-white' : 'text-gray-900')
-                      }`}>
-                        {due.toLocaleDateString('en-US')}
-                      </span>
-                    </div>
-                  );
-                })()}
+                {/* "Recertification Due" used to render here as PE+5 — removed
+                    because it duplicated the smarter "5-Year Recertification"
+                    row in Key Dates above (which prefers recertified_date
+                    when present, falling back to PE+5 otherwise). */}
               </div>
             </div>
           )}
