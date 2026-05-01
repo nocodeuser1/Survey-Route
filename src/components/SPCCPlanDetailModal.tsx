@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2 } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
@@ -313,8 +313,6 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [saving, setSaving] = useState(false);
   const [savedIpDate, setSavedIpDate] = useState<string | null>(null);
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
-  const ipDatePickerRef = useRef<HTMLInputElement>(null);
-  const peDatePickerRef = useRef<HTMLInputElement>(null);
 
   // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
   // fetch every plan for this facility and subscribe to realtime changes so
@@ -406,11 +404,15 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const effectiveRecertDate =
     savedRecertDate !== undefined ? savedRecertDate : facility.recertified_date ?? null;
 
-  // Use optimistic values so status/badge update immediately after save
+  // Use optimistic values so status/badge update immediately after save.
+  // savedIpDate / savedPeDate take priority over the facility prop — the prop
+  // can lag behind by 100s of ms while the parent refetch round-trips, and a
+  // freshly-saved value should win until the next [facility.X] useEffect resets
+  // it back to undefined/null (which lets the prop take over again).
   const effectiveFacility = {
     ...facility,
-    first_prod_date: facility.first_prod_date || savedIpDate || undefined,
-    spcc_pe_stamp_date: facility.spcc_pe_stamp_date || savedPeDate || undefined,
+    first_prod_date: savedIpDate || facility.first_prod_date || undefined,
+    spcc_pe_stamp_date: savedPeDate || facility.spcc_pe_stamp_date || undefined,
     recertified_date: effectiveRecertDate,
   };
   const status = getSPCCPlanStatus(effectiveFacility);
@@ -815,28 +817,27 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingIpDate ? (
                   <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="mm/dd/yy"
-                        value={ipDateValue}
-                        onChange={(e) => setIpDateValue(e.target.value)}
-                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
-                          ? 'bg-gray-700 border-gray-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-900'
-                          } ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
-                        autoFocus
-                      />
-                      <input
-                        ref={ipDatePickerRef}
-                        type="date"
-                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
-                        tabIndex={-1}
-                        onChange={(e) => {
-                          if (e.target.value) setIpDateValue(formatDateDisplay(e.target.value));
-                        }}
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      placeholder="mm/dd/yy"
+                      value={ipDateValue}
+                      onChange={(e) => setIpDateValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveIpDate();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingIpDate(false);
+                          setIpDateValue(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
+                        }
+                      }}
+                      className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                        ? 'bg-gray-700 border-gray-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-900'
+                        } ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
+                      autoFocus
+                    />
                     <button
                       onClick={handleSaveIpDate}
                       disabled={saving || (!!ipDateValue && !parseDateInput(ipDateValue))}
@@ -854,7 +855,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 ) : (
                   <div className="flex items-center gap-2">
                     {(() => {
-                      const effectiveDate = facility.first_prod_date || savedIpDate;
+                      const effectiveDate = savedIpDate || facility.first_prod_date;
                       return (
                         <span className={`text-sm font-medium ${effectiveDate
                           ? (darkMode ? 'text-white' : 'text-gray-900')
@@ -886,28 +887,27 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingPeDate ? (
                   <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="mm/dd/yy"
-                        value={peDateValue}
-                        onChange={(e) => setPeDateValue(e.target.value)}
-                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
-                          ? 'bg-gray-700 border-gray-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-900'
-                          } ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
-                        autoFocus
-                      />
-                      <input
-                        ref={peDatePickerRef}
-                        type="date"
-                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
-                        tabIndex={-1}
-                        onChange={(e) => {
-                          if (e.target.value) setPeDateValue(formatDateDisplay(e.target.value));
-                        }}
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      placeholder="mm/dd/yy"
+                      value={peDateValue}
+                      onChange={(e) => setPeDateValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSavePeDate();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingPeDate(false);
+                          setPeDateValue(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
+                        }
+                      }}
+                      className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                        ? 'bg-gray-700 border-gray-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-900'
+                        } ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
+                      autoFocus
+                    />
                     <button
                       onClick={handleSavePeDate}
                       disabled={saving || (!!peDateValue && !parseDateInput(peDateValue))}
@@ -925,7 +925,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 ) : (
                   <div className="flex items-center gap-2">
                     {(() => {
-                      const effectiveDate = facility.spcc_pe_stamp_date || savedPeDate;
+                      const effectiveDate = savedPeDate || facility.spcc_pe_stamp_date;
                       return (
                         <span className={`text-sm font-medium ${effectiveDate
                           ? (darkMode ? 'text-white' : 'text-gray-900')
@@ -989,7 +989,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               tab and FacilityDetailModal still show the rollup summary. */}
 
           {/* Compliance Tracking */}
-          {(facility.initial_inspection_completed || facility.company_signature_date || effectiveRecertDate || (facility.spcc_pe_stamp_date || savedPeDate)) && (
+          {(facility.initial_inspection_completed || facility.company_signature_date || effectiveRecertDate || (savedPeDate || facility.spcc_pe_stamp_date)) && (
             <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
               <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                 <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -1091,7 +1091,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   )}
                 </div>
                 {(() => {
-                  const peDate = facility.spcc_pe_stamp_date || savedPeDate;
+                  const peDate = savedPeDate || facility.spcc_pe_stamp_date;
                   if (!peDate) return null;
                   const d = parseLocalDate(peDate);
                   if (isNaN(d.getTime())) return null;
