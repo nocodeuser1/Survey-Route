@@ -959,10 +959,11 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                         multi-berm, the top-level date is a read-only
                         aggregate (earliest PE date across berms); users edit
                         per berm below. */}
-                    {singlePlan && (
+                    {(plansLoading || singlePlan) && (
                       <button
                         onClick={() => setEditingPeDate(true)}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                        disabled={plansLoading}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'} disabled:opacity-0`}
                         title="Edit PE stamp date"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
