@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2 } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
@@ -315,7 +315,6 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
   const ipDatePickerRef = useRef<HTMLInputElement>(null);
   const peDatePickerRef = useRef<HTMLInputElement>(null);
-  const recertDatePickerRef = useRef<HTMLInputElement>(null);
 
   // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
   // fetch every plan for this facility and subscribe to realtime changes so
@@ -1023,33 +1022,42 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   </div>
                   {editingRecertDate ? (
                     <div className="flex items-center gap-2">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="mm/dd/yy"
-                          value={recertDateValue}
-                          onChange={(e) => setRecertDateValue(e.target.value)}
-                          className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
-                            ? 'bg-gray-700 border-gray-600 text-white'
-                            : 'bg-white border-gray-300 text-gray-900'
-                            } ${recertDateValue && !parseDateInput(recertDateValue) ? 'border-red-400' : ''}`}
-                          autoFocus
-                        />
-                        <input
-                          ref={recertDatePickerRef}
-                          type="date"
-                          className="absolute inset-0 opacity-0 w-full cursor-pointer"
-                          tabIndex={-1}
-                          onChange={(e) => {
-                            if (e.target.value) setRecertDateValue(formatDateDisplay(e.target.value));
-                          }}
-                        />
-                      </div>
+                      <input
+                        type="text"
+                        placeholder="mm/dd/yy"
+                        value={recertDateValue}
+                        onChange={(e) => setRecertDateValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveRecertDate();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingRecertDate(false);
+                            setRecertDateValue(effectiveRecertDate ? formatDateDisplay(effectiveRecertDate) : '');
+                          }
+                        }}
+                        className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                          ? 'bg-gray-700 border-gray-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-900'
+                          } ${recertDateValue && !parseDateInput(recertDateValue) ? 'border-red-400' : ''}`}
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => {
+                          setRecertDateValue('');
+                          handleSaveRecertDate();
+                        }}
+                        disabled={saving}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 ${darkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'}`}
+                        title="Clear recertified date"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={handleSaveRecertDate}
                         disabled={saving || (!!recertDateValue && !parseDateInput(recertDateValue))}
                         className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                        title="Save (leave empty to clear)"
                       >
                         Save
                       </button>
