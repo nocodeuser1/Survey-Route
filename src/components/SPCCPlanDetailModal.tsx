@@ -483,9 +483,12 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   // makes sense when there's a real recertification on file. Israel needs
   // this to fix backfill noise where recertified_date got copied from the
   // initial PE stamp on facilities that were never actually recertified.
-  const handleSaveRecertDate = async () => {
-    const isoDate = recertDateValue ? parseDateInput(recertDateValue) : null;
-    if (recertDateValue && !isoDate) return; // invalid format, leave editor open
+  //
+  // `rawValue` is parameterized so the trash-icon clear path can pass `''`
+  // directly without racing the React state update for `recertDateValue`.
+  const handleSaveRecertDate = async (rawValue: string = recertDateValue) => {
+    const isoDate = rawValue ? parseDateInput(rawValue) : null;
+    if (rawValue && !isoDate) return; // invalid format, leave editor open
     setSaving(true);
     try {
       const update: Record<string, unknown> = { recertified_date: isoDate };
@@ -496,6 +499,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
         .eq('facility_id', facility.id);
       if (error) throw error;
       setSavedRecertDate(isoDate);
+      setRecertDateValue(rawValue);
       setEditingRecertDate(false);
       await refetchPlans();
       onFacilitiesChange();
@@ -1044,10 +1048,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                         autoFocus
                       />
                       <button
-                        onClick={() => {
-                          setRecertDateValue('');
-                          handleSaveRecertDate();
-                        }}
+                        onClick={() => handleSaveRecertDate('')}
                         disabled={saving}
                         className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 ${darkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'}`}
                         title="Clear recertified date"
