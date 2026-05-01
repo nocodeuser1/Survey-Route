@@ -399,6 +399,21 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
     setWorkflowStatus(facility.spcc_workflow_status || '');
   }, [facility.spcc_workflow_status]);
 
+  // Escape closes the modal — but only when focus is NOT inside an inline
+  // editor. The IP/PE/Recert date editors handle their own Escape (cancel
+  // the edit), so deferring to them when focused gives the expected
+  // "Escape cancels edit, second Escape closes modal" behavior.
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+      onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
   // Resolved recertified date for display: respects an in-flight clear (null)
   // or a newly saved value (string) before the parent refetch lands.
   const effectiveRecertDate =
