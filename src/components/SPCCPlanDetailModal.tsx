@@ -1073,7 +1073,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                         <Trash2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={handleSaveRecertDate}
+                        onClick={() => handleSaveRecertDate()}
                         disabled={saving || (!!recertDateValue && !parseDateInput(recertDateValue))}
                         className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                       >
