@@ -1,20 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Route, Star, CheckCircle, ArrowRight, Shield, Zap, BarChart3, Smartphone, Globe, Menu, X, ChevronRight, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, Wifi, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint, Clock, Calendar } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useStripeCheckout } from '../hooks/useStripeCheckout';
-
-interface StripeProduct {
-  id: number;
-  tier_name: string;
-  monthly_price_id: string | null;
-  annual_price_id: string | null;
-  monthly_price_amount: number;
-  annual_price_amount: number;
-  features: string[];
-  is_active: boolean;
-}
+import { useEffect, useState, useRef } from 'react';
+import { Route, Star, CheckCircle, ArrowRight, Shield, BarChart3, Globe, X, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint, Clock, Calendar, Smartphone, Handshake, Users, Sparkles } from 'lucide-react';
 
 // ─── useScrollAnimation ───────────────────────────────────────────────
 function useScrollAnimation(threshold = 0.15) {
@@ -376,11 +363,7 @@ html { scroll-behavior: smooth; }
 export default function LandingPage() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
-  const [isAnnual, setIsAnnual] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const [products, setProducts] = useState<StripeProduct[]>([]);
-  const [productsLoading, setProductsLoading] = useState(true);
-  const { createCheckoutSession, loading: checkoutLoading } = useStripeCheckout();
   const [showMobileCta, setShowMobileCta] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
 
@@ -394,7 +377,6 @@ export default function LandingPage() {
   const howItWorks = useScrollAnimation();
   const stats = useScrollAnimation();
   const pricing = useScrollAnimation();
-  const useCases = useScrollAnimation();
   const techFeatures = useScrollAnimation();
   const faq = useScrollAnimation();
   const finalCta = useScrollAnimation();
@@ -428,77 +410,6 @@ export default function LandingPage() {
       }
     }
   }, [user, loading, navigate]);
-
-  useEffect(() => {
-    loadProducts();
-  }, []);
-
-  const loadProducts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('stripe_products')
-        .select('*')
-        .eq('is_active', true)
-        .order('tier_name');
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error loading products:', error);
-    } finally {
-      setProductsLoading(false);
-    }
-  };
-
-  const handleGetStarted = async (product: StripeProduct) => {
-    if (!user) {
-      navigate('/request-access');
-      return;
-    }
-
-    const priceId = isAnnual ? product.annual_price_id : product.monthly_price_id;
-
-    if (!priceId) {
-      alert('This pricing option is not available yet. Please contact support.');
-      return;
-    }
-
-    try {
-      await createCheckoutSession({
-        priceId,
-        mode: 'subscription',
-      });
-    } catch (error) {
-      console.error('Checkout error:', error);
-      alert('Failed to start checkout. Please try again.');
-    }
-  };
-
-  const formatPrice = (cents: number) => {
-    return (cents / 100).toFixed(0);
-  };
-
-  const getTierConfig = (tierName: string) => {
-    const configs: Record<string, { color: string; borderColor: string; buttonClass: string; popular?: boolean }> = {
-      starter: {
-        color: 'text-gray-900',
-        borderColor: 'border-gray-200/50',
-        buttonClass: 'bg-gray-100 text-gray-900 hover:bg-gray-200',
-      },
-      professional: {
-        color: 'text-blue-600',
-        borderColor: 'border-blue-400/50 ring-2 ring-blue-400/20',
-        buttonClass: 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl',
-        popular: true,
-      },
-      enterprise: {
-        color: 'text-gray-900',
-        borderColor: 'border-gray-200/50',
-        buttonClass: 'bg-gray-100 text-gray-900 hover:bg-gray-200',
-      },
-    };
-    return configs[tierName] || configs.starter;
-  };
 
   if (loading) {
     return (
@@ -620,45 +531,37 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ══════════ SOCIAL PROOF ══════════ */}
+        {/* ══════════ VALUE STRIP ══════════
+            Replaces the previous "Trusted by ACME OIL / PLAINS ENERGY..."
+            fake-logo row and the fabricated Jake-Thompson testimonial. Both
+            were placeholder copy that risked credibility if a real customer
+            spotted them. This is an honest, capability-focused row that says
+            what the platform does without inventing endorsements. */}
         <section className="py-10 sm:py-16 bg-gray-50 border-y border-gray-200">
           <div ref={socialProof.ref} className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${sectionClass(socialProof.isVisible)}`}>
-            <p className="text-center text-sm text-gray-400 font-medium uppercase tracking-wider mb-8">Trusted by inspection teams at</p>
-            <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12 mb-12">
+            <p className="text-center text-sm text-gray-500 font-medium uppercase tracking-wider mb-8">
+              Built for the realities of field compliance
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
               {[
-                { name: 'ACME OIL', icon: '▲' },
-                { name: 'PLAINS ENERGY', icon: '◆' },
-                { name: 'MIDWEST PIPELINE', icon: '━' },
-                { name: 'EAGLE ENVIRONMENTAL', icon: '▶' },
-                { name: 'SUMMIT RESOURCES', icon: '▲' },
-              ].map((co) => (
-                <div key={co.name} className="flex items-center gap-2 text-gray-300 hover:text-gray-400 transition-colors">
-                  <span className="text-xl">{co.icon}</span>
-                  <span className="text-sm sm:text-base font-bold tracking-wider whitespace-nowrap">{co.name}</span>
-                </div>
-              ))}
-            </div>
-            {/* Testimonial */}
-            <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-md border border-gray-100 p-6 sm:p-8">
-              <div className="flex gap-1 mb-4">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} className="w-5 h-5 text-yellow-400 fill-yellow-400" />
-                ))}
-              </div>
-              <blockquote className="text-gray-700 text-lg leading-relaxed mb-6">
-                "Survey-Route cut our average inspection time by 35% and eliminated the paper shuffle completely.
-                The route optimization alone saves each inspector 2+ hours of driving per day.
-                We went from dreading SPCC audits to being fully prepared in minutes."
-              </blockquote>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                  JT
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900">Jake Thompson</p>
-                  <p className="text-sm text-gray-500">Field Operations Manager, Plains Energy</p>
-                </div>
-              </div>
+                { icon: Shield, value: 'SPCC', label: 'Annual & 5-year recertification workflows built in' },
+                { icon: WifiOff, value: 'Offline', label: 'Inspections, photos, and routes work with no signal' },
+                { icon: Smartphone, value: 'Native', label: 'iOS and Android apps, plus the full web experience' },
+                { icon: FileText, value: 'Your Data', label: 'Full CSV/PDF exports — your records stay yours' },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.value} className="bg-white rounded-xl p-5 border border-gray-200 shadow-sm card-hover">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <Icon className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <p className="font-bold text-gray-900 text-lg">{item.value}</p>
+                    </div>
+                    <p className="text-sm text-gray-600 leading-snug">{item.label}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -941,139 +844,82 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ══════════ PRICING ══════════ */}
-        <section className="py-10 sm:py-20 bg-white">
-          <div ref={pricing.ref} className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${sectionClass(pricing.isVisible)}`}>
+        {/* ══════════ PRICING — Co-Authored SaaS Agreement ══════════
+            One bespoke pricing model rather than tiered self-serve. Replaces
+            the previous Stripe-driven cards (which never had products active
+            in production) with a high-value-feeling contact-first flow. */}
+        <section className="relative py-16 sm:py-28 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 overflow-hidden">
+          <div className="absolute inset-0 opacity-10" style={{ backgroundImage: topoPatternSvg, backgroundSize: '500px 500px' }} />
+          {/* Decorative gradient orbs */}
+          <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-500 rounded-full opacity-20 blur-3xl" />
+          <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-cyan-500 rounded-full opacity-20 blur-3xl" />
+
+          <div ref={pricing.ref} className={`max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative ${sectionClass(pricing.isVisible)}`}>
             <div className="text-center mb-12">
-              <h2 className="text-2xl sm:text-4xl font-bold text-gray-900 mb-2 sm:mb-4">Simple, Transparent Pricing</h2>
-              <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-8">
-                Choose the plan that fits your team size. All plans include 14-day free trial.
-              </p>
-
-              <div className="inline-flex items-center gap-4 bg-white rounded-lg p-1 shadow-md border border-gray-200">
-                <button
-                  onClick={() => setIsAnnual(false)}
-                  className={`px-6 py-2 rounded-md font-medium transition-all ${!isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'}`}
-                >
-                  Monthly
-                </button>
-                <button
-                  onClick={() => setIsAnnual(true)}
-                  className={`px-6 py-2 rounded-md font-medium transition-all ${isAnnual ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900'}`}
-                >
-                  Annual
-                  <span className="ml-2 text-sm bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                    Save 17%
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {productsLoading ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-4 text-gray-600">Loading pricing...</p>
-              </div>
-            ) : products.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-600">Pricing information coming soon. Please contact us for details.</p>
-                <button
-                  onClick={() => navigate('/request-access')}
-                  className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-                >
-                  Request Access
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-8 max-w-6xl mx-auto">
-                {products.map((product) => {
-                  const config = getTierConfig(product.tier_name);
-                  const monthlyPrice = formatPrice(product.monthly_price_amount);
-                  const annualPrice = formatPrice(product.annual_price_amount);
-                  const annualMonthlyPrice = formatPrice(Math.round(product.annual_price_amount / 12));
-
-                  return (
-                    <div
-                      key={product.id}
-                      className={`glass-card card-hover rounded-2xl shadow-lg ${config.borderColor} p-8 ${config.popular ? 'relative transform scale-105 shadow-2xl' : ''}`}
-                    >
-                      {config.popular && (
-                        <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                          <span className="bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-bold shadow-lg">
-                            MOST POPULAR
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="text-center mb-6">
-                        <h3 className="text-2xl font-bold text-gray-900 mb-2 capitalize">
-                          {product.tier_name}
-                        </h3>
-                        <div className="mb-4">
-                          <span className={`text-5xl font-bold ${config.color}`}>
-                            ${isAnnual ? annualMonthlyPrice : monthlyPrice}
-                          </span>
-                          <span className="text-gray-600">/month</span>
-                        </div>
-                        {isAnnual && (
-                          <p className="text-sm text-green-600 font-medium">
-                            Billed annually at ${annualPrice}
-                          </p>
-                        )}
-                      </div>
-
-                      <ul className="space-y-4 mb-8">
-                        {product.features.map((feature, idx) => (
-                          <li key={idx} className="flex items-start gap-3">
-                            <CheckCircle className={`w-5 h-5 ${config.popular ? 'text-blue-600' : 'text-green-600'} flex-shrink-0 mt-0.5`} />
-                            <span className="text-gray-700">{feature}</span>
-                          </li>
-                        ))}
-                      </ul>
-
-                      <button
-                        onClick={() => handleGetStarted(product)}
-                        disabled={checkoutLoading}
-                        className={`w-full py-3 rounded-lg transition-colors font-semibold ${config.buttonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
-                        {checkoutLoading ? 'Loading...' : 'Get Started'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ══════════ USE CASES ══════════ */}
-        <section className="py-10 sm:py-20 bg-gradient-to-br from-gray-50 to-white">
-          <div ref={useCases.ref} className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${sectionClass(useCases.isVisible)}`}>
-            <div className="text-center mb-8 sm:mb-16">
-              <h2 className="text-2xl sm:text-4xl font-bold text-gray-900 mb-2 sm:mb-4">Purpose-Built for Oil & Gas</h2>
-              <p className="text-sm sm:text-xl text-gray-600 max-w-3xl mx-auto">
-                Complete solutions for every type of facility inspection and compliance need
+              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-200 text-xs font-semibold tracking-wider uppercase mb-5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Pricing
+              </span>
+              <h2 className="text-3xl sm:text-5xl font-bold text-white mb-5 leading-tight">
+                Built Around How You Operate
+              </h2>
+              <p className="text-base sm:text-xl text-blue-100/90 max-w-2xl mx-auto leading-relaxed">
+                Every operation runs differently — fleet size, facility count, compliance requirements, integrations.
+                So we don't sell a stock plan.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
-              {[
-                { icon: Shield, color: 'blue', title: 'SPCC Inspections', desc: 'Spill Prevention Control and Countermeasure inspections with customizable checklists and photo documentation' },
-                { icon: CheckCircle, color: 'green', title: 'Well Site Inspections', desc: 'Production facility monitoring, wellhead inspections, and equipment condition assessments' },
-                { icon: Zap, color: 'orange', title: 'Tank Farm Audits', desc: 'Storage tank inspections, secondary containment checks, and capacity monitoring' },
-                { icon: MapPin, color: 'teal', title: 'Pipeline Integrity', desc: 'Right-of-way monitoring, leak detection surveys, and pipeline integrity assessments' },
-                { icon: FileText, color: 'red', title: 'Environmental Monitoring', desc: 'Stormwater compliance, air quality checks, and environmental impact assessments' },
-                { icon: TrendingUp, color: 'yellow', title: 'Safety & OSHA Compliance', desc: 'Workplace safety audits, equipment safety checks, and regulatory compliance verification' },
-              ].map((uc) => {
-                const Icon = uc.icon;
-                return (
-                  <div key={uc.title} className={`card-hover bg-gradient-to-br from-${uc.color}-50 to-white p-3 sm:p-6 rounded-xl border border-${uc.color}-100 shadow-sm`}>
-                    <Icon className={`w-7 h-7 sm:w-10 sm:h-10 text-${uc.color}-600 mb-3`} />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{uc.title}</h3>
-                    <p className="text-gray-600">{uc.desc}</p>
+            <div className="bg-white/[0.04] backdrop-blur-sm border border-white/10 rounded-3xl p-6 sm:p-12 shadow-2xl">
+              <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-8 lg:gap-12 items-center">
+                <div>
+                  <div className="inline-flex items-center gap-2 bg-blue-500/15 border border-blue-400/20 px-3 py-1.5 rounded-full mb-5">
+                    <Handshake className="w-4 h-4 text-blue-300" />
+                    <span className="text-xs font-semibold text-blue-200 uppercase tracking-wider">Co-Authored SaaS Agreement</span>
                   </div>
-                );
-              })}
+                  <h3 className="text-xl sm:text-3xl font-bold text-white mb-5 leading-snug">
+                    Your team and ours collaborate on a SaaS agreement engineered around the way your operation runs.
+                  </h3>
+                  <p className="text-blue-100/80 mb-8 leading-relaxed text-base sm:text-lg">
+                    A short discovery call covers your inspection workflow, current pain points, and the integrations you need.
+                    Within a few days you have transparent pricing for your exact scope — no per-seat surprises, no
+                    contracts you have to interpret.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      onClick={() => navigate('/request-access')}
+                      className="inline-flex items-center justify-center gap-2 px-7 py-4 bg-white text-blue-700 rounded-xl font-semibold text-base hover:bg-blue-50 transition-all shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      Request Pricing
+                      <ArrowRight className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => navigate('/login')}
+                      className="inline-flex items-center justify-center gap-2 px-7 py-4 bg-white/10 text-white rounded-xl font-semibold text-base hover:bg-white/15 transition-all border border-white/20"
+                    >
+                      Sign In
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-white/[0.06] to-white/[0.02] rounded-2xl p-6 sm:p-7 border border-white/10">
+                  <p className="text-[11px] uppercase tracking-widest text-blue-200/80 font-semibold mb-5">Every agreement includes</p>
+                  <ul className="space-y-3.5">
+                    {[
+                      'Full feature access — no tier-locked tools',
+                      '14-day free trial, no credit card required',
+                      'Direct onboarding with the team that built the app',
+                      'Custom survey configuration assistance',
+                      'Camino facility import (we handle the file)',
+                      'Cancel anytime — your data exports stay yours',
+                    ].map((line, i) => (
+                      <li key={i} className="flex items-start gap-3 text-blue-50/95 text-sm sm:text-[15px] leading-relaxed">
+                        <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1124,7 +970,7 @@ export default function LandingPage() {
             <div className="text-center mb-8 sm:mb-16">
               <h2 className="text-2xl sm:text-4xl font-bold text-gray-900 mb-2 sm:mb-4">Frequently Asked Questions</h2>
               <p className="text-xl text-gray-600">
-                Everything you need to know about Survey Hub
+                Everything you need to know about Survey-Route
               </p>
             </div>
 
@@ -1132,11 +978,11 @@ export default function LandingPage() {
               {[
                 {
                   q: "How does route optimization work?",
-                  a: "Survey Hub uses k-means clustering to intelligently group nearby facilities, then applies the OSRM routing engine to calculate accurate driving times and distances. You can set constraints like max facilities per day or daily hour limits, and the system automatically generates optimized multi-day routes that minimize travel time."
+                  a: "Survey-Route uses k-means clustering to intelligently group nearby facilities, then applies the OSRM routing engine to calculate accurate driving times and distances. You can set constraints like max facilities per day or daily hour limits, and the system automatically generates optimized multi-day routes that minimize travel time."
                 },
                 {
                   q: "Can I use this on mobile devices?",
-                  a: "Absolutely! Survey Hub is fully responsive and optimized for mobile use. The survey mode is specifically designed for field inspectors using smartphones, with large touch targets, GPS tracking, and one-tap navigation to Google Maps or Apple Maps."
+                  a: "Absolutely! Survey-Route is fully responsive and optimized for mobile use. The survey mode is specifically designed for field inspectors using smartphones, with large touch targets, GPS tracking, and one-tap navigation to Google Maps or Apple Maps."
                 },
                 {
                   q: "Is my data secure?",
@@ -1147,16 +993,16 @@ export default function LandingPage() {
                   a: "Absolutely. You can create unlimited custom survey types with 12+ field types — text, numbers, dates, dropdowns, multi-select, checkboxes, photos, signatures, locations, and ratings. Each survey type gets its own fields, and the entire app filters to show only relevant data when you switch between survey types. It works like custom fields in a CRM, but built for field inspections."
                 },
                 {
-                  q: "What happens if I exceed my facility limit?",
-                  a: "You'll receive a notification when approaching your plan's facility limit. You can either upgrade to a higher tier or contact us to discuss custom pricing for your specific needs. We never automatically charge you without permission."
+                  q: "How is Survey-Route priced?",
+                  a: "We don't sell off-the-shelf tiers. After a short discovery call about your facility count, team size, compliance regime, and integrations, we put together a SaaS agreement built around your operation — transparent, no per-seat surprises. Every customer gets full feature access, a 14-day free trial, and direct onboarding from the team that built the app."
                 },
                 {
                   q: "Do you offer training and onboarding?",
-                  a: "Yes! All plans include email support with comprehensive documentation. Professional plans get priority support, and Enterprise customers receive dedicated onboarding sessions with an account manager plus ongoing training for your team."
+                  a: "Yes — onboarding is included in every agreement. We'll walk your team through facility setup, custom survey configuration, route planning, and any field-team training you need. We can also handle bulk imports for you (Camino exports, CSV facility lists, existing SPCC plan PDFs) so you're not the one staging data."
                 },
                 {
                   q: "Can I import existing facility data?",
-                  a: "Yes! You can upload facility lists via CSV with addresses, visit durations, and other metadata. The system automatically geocodes addresses and makes facilities ready for route optimization."
+                  a: "Yes. CSV uploads with addresses and visit durations geocode automatically. We also support Camino facility export files directly — match by Camino ID, then bulk-upload the corresponding SPCC plan PDFs and the system files them by berm and well assignment."
                 },
                 {
                   q: "Does it work offline?",
@@ -1204,7 +1050,7 @@ export default function LandingPage() {
               Start Optimizing Your Field Inspections Today
             </h2>
             <p className="text-xl text-blue-100 mb-10 leading-relaxed">
-              Join teams across the country using Survey Hub to reduce travel time,
+              Join teams across the country using Survey-Route to reduce travel time,
               complete more inspections, and deliver better results.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -1250,7 +1096,7 @@ export default function LandingPage() {
                   <Route className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <p className="font-semibold text-white">Survey Hub</p>
+                  <p className="font-semibold text-white">Survey-Route</p>
                   <p className="text-xs text-gray-400">by BEAR DATA</p>
                 </div>
               </div>
