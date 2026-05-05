@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList, User } from 'lucide-react';
 import OfflineIndicator from './components/OfflineIndicator';
+import AIAssistantBubble from './components/AIAssistantBubble';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
 import FacilitiesManager from './components/FacilitiesManager';
 import RoutePlanningControls from './components/RoutePlanningControls';
@@ -3990,6 +3991,13 @@ function App() {
       />
 
       <OfflineIndicator />
+
+      {/* Floating AI assistant — bottom-right bubble. Lets the user query
+          their account-wide facility data in natural language ("how many
+          SPCCs are due this year"). Backed by the `ai-assistant` Edge
+          Function which loads a snapshot + calls Claude with an
+          SPCC-aware system prompt. */}
+      <AIAssistantBubble />
     </div>
   );
 }
