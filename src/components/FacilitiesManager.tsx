@@ -545,14 +545,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   };
 
-  // Compute recertification due date (PE stamp date + 5 years)
+  // Compute recertification due date.
+  // Delegates to getSPCCPlanStatus so this stays in lockstep with the
+  // SPCC Plan modal's "5-Year Recertification" row: prefers
+  // recertified_date + 5 when a real recert is on file, otherwise falls
+  // back to PE stamp + 5. Returns '' when neither date exists.
   const computeRecertificationDueDate = (facility: Facility | null): string => {
-    if (!facility?.spcc_pe_stamp_date) return '';
-    const peDate = parseLocalDate(facility.spcc_pe_stamp_date);
-    if (isNaN(peDate.getTime())) return '';
-    const dueDate = new Date(peDate);
-    dueDate.setFullYear(dueDate.getFullYear() + 5);
-    return dueDate.toISOString().split('T')[0];
+    if (!facility) return '';
+    const { recertificationDate } = getSPCCPlanStatus(facility);
+    if (!recertificationDate) return '';
+    return recertificationDate.toISOString().split('T')[0];
   };
 
   // Check if a form field has data (for hide-empty toggle)
@@ -962,9 +964,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return R * c;
   };
 
-  // Helper function to calculate SPCC plan due date for sorting
+  // Helper function to calculate SPCC plan due date for sorting.
+  // For plans with a PE stamp, defers to getSPCCPlanStatus so the recert
+  // window matches the modal (recertified_date + 5 when present, else PE + 5).
+  // For plans not yet stamped, falls back to first_prod_date + 6 months
+  // (the initial-plan deadline).
   const getSPCCPlanDueDate = (facility: Facility): Date | null => {
-    // If no plan exists, check first prod date for initial plan due date
     if (!facility.spcc_plan_url || !facility.spcc_pe_stamp_date) {
       if (facility.first_prod_date) {
         const firstProd = parseLocalDate(facility.first_prod_date);
@@ -972,14 +977,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
         return sixMonthsLater;
       }
-      return null; // No due date if no plan and no first prod date
+      return null;
     }
-
-    // Calculate recertification date (5 years from PE stamp date)
-    const peStampDate = parseLocalDate(facility.spcc_pe_stamp_date);
-    const recertificationDate = new Date(peStampDate);
-    recertificationDate.setFullYear(recertificationDate.getFullYear() + 5);
-    return recertificationDate;
+    return getSPCCPlanStatus(facility).recertificationDate;
   };
 
   const getFacilityPlanStatus = (facility: Facility): 'overdue' | 'current' => {

@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2 } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, isRecertificationActive, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
-import RecertificationStatusField from './RecertificationStatusField';
-import { formatDate, parseLocalDate } from '../utils/dateUtils';
+import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
+import { formatDate } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
@@ -304,13 +303,16 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateValue, setPeDateValue] = useState(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
+  const [editingRecertDate, setEditingRecertDate] = useState(false);
+  const [recertDateValue, setRecertDateValue] = useState(facility.recertified_date ? formatDateDisplay(facility.recertified_date) : '');
+  // tri-state override so an explicit clear-to-null displays immediately
+  // (undefined = no override; null = cleared; string = newly saved date).
+  const [savedRecertDate, setSavedRecertDate] = useState<string | null | undefined>(undefined);
   const [workflowStatus, setWorkflowStatus] = useState<SPCCWorkflowStatus | ''>(facility.spcc_workflow_status || '');
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedIpDate, setSavedIpDate] = useState<string | null>(null);
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
-  const ipDatePickerRef = useRef<HTMLInputElement>(null);
-  const peDatePickerRef = useRef<HTMLInputElement>(null);
 
   // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
   // fetch every plan for this facility and subscribe to realtime changes so
@@ -389,14 +391,44 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   }, [facility.spcc_pe_stamp_date]);
 
   useEffect(() => {
+    setRecertDateValue(facility.recertified_date ? formatDateDisplay(facility.recertified_date) : '');
+    setSavedRecertDate(undefined);
+  }, [facility.recertified_date]);
+
+  useEffect(() => {
     setWorkflowStatus(facility.spcc_workflow_status || '');
   }, [facility.spcc_workflow_status]);
 
-  // Use optimistic values so status/badge update immediately after save
+  // Escape closes the modal — but only when focus is NOT inside an inline
+  // editor. The IP/PE/Recert date editors handle their own Escape (cancel
+  // the edit), so deferring to them when focused gives the expected
+  // "Escape cancels edit, second Escape closes modal" behavior.
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+      onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  // Resolved recertified date for display: respects an in-flight clear (null)
+  // or a newly saved value (string) before the parent refetch lands.
+  const effectiveRecertDate =
+    savedRecertDate !== undefined ? savedRecertDate : facility.recertified_date ?? null;
+
+  // Use optimistic values so status/badge update immediately after save.
+  // savedIpDate / savedPeDate take priority over the facility prop — the prop
+  // can lag behind by 100s of ms while the parent refetch round-trips, and a
+  // freshly-saved value should win until the next [facility.X] useEffect resets
+  // it back to undefined/null (which lets the prop take over again).
   const effectiveFacility = {
     ...facility,
-    first_prod_date: facility.first_prod_date || savedIpDate || undefined,
-    spcc_pe_stamp_date: facility.spcc_pe_stamp_date || savedPeDate || undefined,
+    first_prod_date: savedIpDate || facility.first_prod_date || undefined,
+    spcc_pe_stamp_date: savedPeDate || facility.spcc_pe_stamp_date || undefined,
+    recertified_date: effectiveRecertDate,
   };
   const status = getSPCCPlanStatus(effectiveFacility);
   const badgeConfig = getStatusBadgeConfig(status.status);
@@ -456,6 +488,40 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
       onFacilitiesChange();
     } catch (err) {
       console.error('Error saving PE stamp date:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Recertified date editor. Writes to every spcc_plans row for the facility
+  // (single- and multi-berm both supported — the mirror trigger keeps
+  // facilities.recertified_date in sync). Saving an empty value clears the
+  // date AND clears recertification_pdf_generated_at, since that signal only
+  // makes sense when there's a real recertification on file. Israel needs
+  // this to fix backfill noise where recertified_date got copied from the
+  // initial PE stamp on facilities that were never actually recertified.
+  //
+  // `rawValue` is parameterized so the trash-icon clear path can pass `''`
+  // directly without racing the React state update for `recertDateValue`.
+  const handleSaveRecertDate = async (rawValue: string = recertDateValue) => {
+    const isoDate = rawValue ? parseDateInput(rawValue) : null;
+    if (rawValue && !isoDate) return; // invalid format, leave editor open
+    setSaving(true);
+    try {
+      const update: Record<string, unknown> = { recertified_date: isoDate };
+      if (isoDate === null) update.recertification_pdf_generated_at = null;
+      const { error } = await supabase
+        .from('spcc_plans')
+        .update(update)
+        .eq('facility_id', facility.id);
+      if (error) throw error;
+      setSavedRecertDate(isoDate);
+      setRecertDateValue(rawValue);
+      setEditingRecertDate(false);
+      await refetchPlans();
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error saving recertified date:', err);
     } finally {
       setSaving(false);
     }
@@ -766,28 +832,27 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingIpDate ? (
                   <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="mm/dd/yy"
-                        value={ipDateValue}
-                        onChange={(e) => setIpDateValue(e.target.value)}
-                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
-                          ? 'bg-gray-700 border-gray-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-900'
-                          } ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
-                        autoFocus
-                      />
-                      <input
-                        ref={ipDatePickerRef}
-                        type="date"
-                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
-                        tabIndex={-1}
-                        onChange={(e) => {
-                          if (e.target.value) setIpDateValue(formatDateDisplay(e.target.value));
-                        }}
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      placeholder="mm/dd/yy"
+                      value={ipDateValue}
+                      onChange={(e) => setIpDateValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveIpDate();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingIpDate(false);
+                          setIpDateValue(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
+                        }
+                      }}
+                      className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                        ? 'bg-gray-700 border-gray-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-900'
+                        } ${ipDateValue && !parseDateInput(ipDateValue) ? 'border-red-400' : ''}`}
+                      autoFocus
+                    />
                     <button
                       onClick={handleSaveIpDate}
                       disabled={saving || (!!ipDateValue && !parseDateInput(ipDateValue))}
@@ -805,7 +870,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 ) : (
                   <div className="flex items-center gap-2">
                     {(() => {
-                      const effectiveDate = facility.first_prod_date || savedIpDate;
+                      const effectiveDate = savedIpDate || facility.first_prod_date;
                       return (
                         <span className={`text-sm font-medium ${effectiveDate
                           ? (darkMode ? 'text-white' : 'text-gray-900')
@@ -837,28 +902,27 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 </div>
                 {editingPeDate ? (
                   <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="mm/dd/yy"
-                        value={peDateValue}
-                        onChange={(e) => setPeDateValue(e.target.value)}
-                        className={`text-sm px-2 py-1 pr-7 rounded border w-28 ${darkMode
-                          ? 'bg-gray-700 border-gray-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-900'
-                          } ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
-                        autoFocus
-                      />
-                      <input
-                        ref={peDatePickerRef}
-                        type="date"
-                        className="absolute inset-0 opacity-0 w-full cursor-pointer"
-                        tabIndex={-1}
-                        onChange={(e) => {
-                          if (e.target.value) setPeDateValue(formatDateDisplay(e.target.value));
-                        }}
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      placeholder="mm/dd/yy"
+                      value={peDateValue}
+                      onChange={(e) => setPeDateValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSavePeDate();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingPeDate(false);
+                          setPeDateValue(facility.spcc_pe_stamp_date ? formatDateDisplay(facility.spcc_pe_stamp_date) : '');
+                        }
+                      }}
+                      className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                        ? 'bg-gray-700 border-gray-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-900'
+                        } ${peDateValue && !parseDateInput(peDateValue) ? 'border-red-400' : ''}`}
+                      autoFocus
+                    />
                     <button
                       onClick={handleSavePeDate}
                       disabled={saving || (!!peDateValue && !parseDateInput(peDateValue))}
@@ -876,7 +940,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 ) : (
                   <div className="flex items-center gap-2">
                     {(() => {
-                      const effectiveDate = facility.spcc_pe_stamp_date || savedPeDate;
+                      const effectiveDate = savedPeDate || facility.spcc_pe_stamp_date;
                       return (
                         <span className={`text-sm font-medium ${effectiveDate
                           ? (darkMode ? 'text-white' : 'text-gray-900')
@@ -895,10 +959,11 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                         multi-berm, the top-level date is a read-only
                         aggregate (earliest PE date across berms); users edit
                         per berm below. */}
-                    {singlePlan && (
+                    {(plansLoading || singlePlan) && (
                       <button
                         onClick={() => setEditingPeDate(true)}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                        disabled={plansLoading}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'} disabled:opacity-0`}
                         title="Edit PE stamp date"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
@@ -908,8 +973,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 )}
               </div>
 
-              {/* Recertification Date (computed) */}
-              {status.recertificationDate && (
+              {/* Recertification Date (computed). Hidden when no PE stamp
+                  date — without an initial stamp there's no 5-year clock to
+                  count down from, so showing this row would be misleading. */}
+              {status.recertificationDate && (savedPeDate || facility.spcc_pe_stamp_date) && (
                 <div className="px-4 py-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
@@ -940,7 +1007,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               tab and FacilityDetailModal still show the rollup summary. */}
 
           {/* Compliance Tracking */}
-          {(facility.initial_inspection_completed || facility.company_signature_date || facility.recertified_date || (facility.spcc_pe_stamp_date || savedPeDate)) && (
+          {(facility.initial_inspection_completed || facility.company_signature_date || effectiveRecertDate || (savedPeDate || facility.spcc_pe_stamp_date)) && (
             <div className={`rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
               <div className={`px-4 py-3 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                 <h3 className={`text-sm font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -970,43 +1037,81 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                     </span>
                   </div>
                 )}
-                {facility.recertified_date && (
-                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <ShieldCheck className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                      <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertified</span>
-                    </div>
-                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {formatDate(facility.recertified_date)}
-                    </span>
+                <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <ShieldCheck className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+                    <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertified</span>
                   </div>
-                )}
-                {(() => {
-                  const peDate = facility.spcc_pe_stamp_date || savedPeDate;
-                  if (!peDate) return null;
-                  const d = parseLocalDate(peDate);
-                  if (isNaN(d.getTime())) return null;
-                  const due = new Date(d);
-                  due.setFullYear(due.getFullYear() + 5);
-                  const daysUntil = Math.floor((due.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  return (
-                    <div className="px-4 py-2.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
-                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Recertification Due</span>
-                      </div>
-                      <span className={`text-sm font-medium ${
-                        daysUntil < 0
-                          ? (darkMode ? 'text-red-400' : 'text-red-600')
-                          : daysUntil <= 90
-                            ? (darkMode ? 'text-amber-400' : 'text-amber-600')
-                            : (darkMode ? 'text-white' : 'text-gray-900')
-                      }`}>
-                        {due.toLocaleDateString('en-US')}
-                      </span>
+                  {editingRecertDate ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="mm/dd/yy"
+                        value={recertDateValue}
+                        onChange={(e) => setRecertDateValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveRecertDate();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingRecertDate(false);
+                            setRecertDateValue(effectiveRecertDate ? formatDateDisplay(effectiveRecertDate) : '');
+                          }
+                        }}
+                        className={`text-sm px-2 py-1 rounded border w-28 ${darkMode
+                          ? 'bg-gray-700 border-gray-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-900'
+                          } ${recertDateValue && !parseDateInput(recertDateValue) ? 'border-red-400' : ''}`}
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleSaveRecertDate('')}
+                        disabled={saving}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 ${darkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-600 hover:bg-red-50'}`}
+                        title="Clear recertified date"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleSaveRecertDate()}
+                        disabled={saving || (!!recertDateValue && !parseDateInput(recertDateValue))}
+                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingRecertDate(false);
+                          setRecertDateValue(effectiveRecertDate ? formatDateDisplay(effectiveRecertDate) : '');
+                        }}
+                        className={`px-2 py-1 text-xs rounded ${darkMode ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                      >
+                        Cancel
+                      </button>
                     </div>
-                  );
-                })()}
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${effectiveRecertDate
+                        ? (darkMode ? 'text-white' : 'text-gray-900')
+                        : (darkMode ? 'text-gray-500 italic' : 'text-gray-400 italic')
+                        }`}>
+                        {effectiveRecertDate ? formatDate(effectiveRecertDate) : 'Not set'}
+                      </span>
+                      <button
+                        onClick={() => setEditingRecertDate(true)}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`}
+                        title="Edit or clear recertified date (applies to all berms)"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {/* "Recertification Due" used to render here as PE+5 — removed
+                    because it duplicated the smarter "5-Year Recertification"
+                    row in Key Dates above (which prefers recertified_date
+                    when present, falling back to PE+5 otherwise). */}
               </div>
             </div>
           )}

@@ -101,13 +101,24 @@ UPDATE spcc_plans SET pe_stamp_date = '2018-12-04'::date
 UPDATE spcc_plans SET pe_stamp_date = '2018-06-26'::date
   WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20170045');
 
--- Garth Brooks 1MXH; Johnston 1H (filename date 01-14-25) (OC20170075) | PE: Randall D. Holleyman | raw: 11/12/19 | cert page references Johnston 31-12-7 1H specifically
-UPDATE spcc_plans SET pe_stamp_date = '2019-11-12'::date
-  WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20170075');
+-- OC20170075 = TWO SEPARATE facility rows sharing the same Camino ID (Johnston + Garth Brooks).
+-- Must target each by well_name_1 to avoid the second UPDATE overwriting the first.
 
--- Garth Brooks 1MXH; Johnston 1H (filename date 01-22-25) (OC20170075) | PE: Randall D. Holleyman | raw: 9/12/19 | cert page references Garth Brooks 1107 6-7-1MXH (different facility than 018 despite same Camino ID)
+-- Johnston PDF (cert explicitly references Johnston 31-12-7 1H) | PE: Randall D. Holleyman | raw: 11/12/19
+UPDATE spcc_plans SET pe_stamp_date = '2019-11-12'::date
+  WHERE facility_id IN (
+    SELECT id FROM facilities
+    WHERE camino_facility_id = 'OC20170075'
+      AND well_name_1 ILIKE '%JOHNSTON%'
+  );
+
+-- Garth Brooks PDF (cert references Garth Brooks 1107 6-7-1MXH) | PE: Randall D. Holleyman | raw: 9/12/19
 UPDATE spcc_plans SET pe_stamp_date = '2019-09-12'::date
-  WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20170075');
+  WHERE facility_id IN (
+    SELECT id FROM facilities
+    WHERE camino_facility_id = 'OC20170075'
+      AND well_name_1 ILIKE '%GARTH%'
+  );
 
 -- Geronimo 2MH (OC20170049) | PE: Randall D. Holleyman | raw: 6/26/18
 UPDATE spcc_plans SET pe_stamp_date = '2018-06-26'::date
@@ -133,9 +144,15 @@ UPDATE spcc_plans SET pe_stamp_date = '2019-09-12'::date
 UPDATE spcc_plans SET pe_stamp_date = '2020-06-25'::date
   WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20190072');
 
--- Jaxon 1XH; Jack David 1XH (OC20180067) | PE: Randall D. Holleyman | raw: 12/4/18 | cert references Jack David 0-4-1XH & Jaxon 8-5-1XH; SAME camino_id as Kimber (030)
+-- OC20180067 = TWO SEPARATE facility rows sharing the same Camino ID (Jaxon/JD + Kimber/Holden).
+-- Jaxon/Jack David facility has well_name_1='35051242620000' (an API#, not a name) — targeted by exclusion.
+-- PE: Randall D. Holleyman | raw: 12/4/18 | cert references Jack David 0-4-1XH & Jaxon 8-5-1XH
 UPDATE spcc_plans SET pe_stamp_date = '2018-12-04'::date
-  WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20180067');
+  WHERE facility_id IN (
+    SELECT id FROM facilities
+    WHERE camino_facility_id = 'OC20180067'
+      AND well_name_1 NOT ILIKE '%HOLDEN%'
+  );
 
 -- John Phillips 1MXH; Robbers Cave 1WXH (OC20190074) | PE: Randall D. Holleyman | raw: 2/7/20 | B Bastin format, cert on page 2
 UPDATE spcc_plans SET pe_stamp_date = '2020-02-07'::date
@@ -149,9 +166,13 @@ UPDATE spcc_plans SET pe_stamp_date = '2020-06-25'::date
 UPDATE spcc_plans SET pe_stamp_date = '2019-08-28'::date
   WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20190079');
 
--- Kimber 1MHR; Holden 1WH (OC20180067) | PE: Billy Wayne Niblar | raw: May 28 2020 | handwritten; SAME camino_id as Jaxon (026) — DUPLICATE Camino ID across two facilities
+-- Kimber/Holden facility (well_name_1='HOLDEN 0707 16-21-1WH') | PE: Billy Wayne Niblar | raw: May 28 2020 | handwritten
 UPDATE spcc_plans SET pe_stamp_date = '2020-05-28'::date
-  WHERE facility_id IN (SELECT id FROM facilities WHERE camino_facility_id = 'OC20180067');
+  WHERE facility_id IN (
+    SELECT id FROM facilities
+    WHERE camino_facility_id = 'OC20180067'
+      AND well_name_1 ILIKE '%HOLDEN%'
+  );
 
 -- Mount Scott 1WXH; Cowabunga 1MXH (OC20200037) | PE: Billy Wayne Niblar | raw: 10-26-20 | handwritten
 UPDATE spcc_plans SET pe_stamp_date = '2020-10-26'::date
