@@ -995,7 +995,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     let filtered = facilities.filter(facility => {
       const matchesSearch = !searchQuery ||
         facility.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        facility.address?.toLowerCase().includes(searchQuery.toLowerCase());
+        facility.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        facility.camino_facility_id?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesReportType = matchesReportTypeFilter(facility);
 
@@ -3333,7 +3334,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder="Search facilities..."
+                placeholder="Search name, address, or Camino ID..."
                 size="sm"
                 containerClassName="relative flex-1 min-w-[180px]"
               />

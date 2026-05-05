@@ -27,6 +27,7 @@ import {
   Camera,
   RotateCw,
   MessageSquare,
+  GripVertical,
 } from 'lucide-react';
 import { supabase, Facility, FacilityComment, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
@@ -133,6 +134,13 @@ export default function FacilityDetailModal({
   // they fill it (the slot now has data) the value is reset to null so the
   // slot once again has to be explicitly revealed via the button.
   const [revealedExtraWell, setRevealedExtraWell] = useState<number | null>(null);
+  // Drag-to-reorder state for the General-tab Well Numbers card. `draggedWellSlot`
+  // is the slot the user grabbed; `dragOverWellSlot` is the row currently under
+  // the cursor (used for the drop-target ring). `reorderingWells` blocks the UI
+  // while we persist the swap to facilities + spcc_plans.
+  const [draggedWellSlot, setDraggedWellSlot] = useState<number | null>(null);
+  const [dragOverWellSlot, setDragOverWellSlot] = useState<number | null>(null);
+  const [reorderingWells, setReorderingWells] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState('');
   const [showInspectionForm, setShowInspectionForm] = useState(false);
@@ -507,6 +515,123 @@ export default function FacilityDetailModal({
     if (error) throw error;
     (facility as any)[field] = value;
     bumpFacilityRender();
+  };
+
+  /**
+   * Drag-to-reorder for the Well Numbers card.
+   *
+   * Wells are stored as wide columns (well_name_1..6 / well_api_1..6). The user
+   * sees the *filled* slots in numeric order; dragging a row repositions that
+   * well's data within the filled range. Empty slots are untouched.
+   *
+   * Two writes happen:
+   *  1) `facilities`: every filled slot gets its new (name, api) pair.
+   *  2) `spcc_plans.assigned_well_indices`: each plan's well list is remapped
+   *     so the SAME WELL stays on the SAME BERM. Without this, dragging well
+   *     1 below well 2 would silently move whatever well is now at slot 1 onto
+   *     whatever berm slot-1 was assigned to.
+   */
+  const reorderWells = async (sourceSlot: number, targetSlot: number) => {
+    if (sourceSlot === targetSlot) return;
+
+    // 1) Filled slots in display order.
+    const filledNums: number[] = [];
+    for (const n of WELL_NUMBERS) {
+      const name = facility[`well_name_${n}` as keyof Facility];
+      const api = facility[`well_api_${n}` as keyof Facility];
+      if (name || api) filledNums.push(n);
+    }
+    if (!filledNums.includes(sourceSlot) || !filledNums.includes(targetSlot)) return;
+
+    // 2) Snapshot the (name, api) pair for each filled slot so we can rewrite
+    //    the slots in any order without losing values.
+    const snapshot = new Map<number, { name: string | null; api: string | null }>();
+    for (const n of filledNums) {
+      snapshot.set(n, {
+        name: (facility[`well_name_${n}` as keyof Facility] as string | null | undefined) ?? null,
+        api: (facility[`well_api_${n}` as keyof Facility] as string | null | undefined) ?? null,
+      });
+    }
+
+    // 3) Compute the new ordering: take source out, splice into target's index.
+    //    This is a list reorder (shift), not a pairwise swap — matches what
+    //    users expect from drag-and-drop.
+    const reordered = [...filledNums];
+    const sourceIdx = reordered.indexOf(sourceSlot);
+    const targetIdx = reordered.indexOf(targetSlot);
+    reordered.splice(sourceIdx, 1);
+    reordered.splice(targetIdx, 0, sourceSlot);
+
+    // 4) Build remap: oldSlot → newSlot. The Nth item in `reordered` lands in
+    //    the Nth filled slot (we keep the slot-number set stable so empty
+    //    slots above N stay empty).
+    const remap = new Map<number, number>();
+    reordered.forEach((oldSlot, i) => {
+      remap.set(oldSlot, filledNums[i]);
+    });
+    // No-op if the reorder didn't actually change anything.
+    let changed = false;
+    for (const [oldSlot, newSlot] of remap) {
+      if (oldSlot !== newSlot) { changed = true; break; }
+    }
+    if (!changed) return;
+
+    // 5) Build the facilities update payload. Touch only the filled slots.
+    const update: Record<string, string | null> = {};
+    for (const [oldSlot, newSlot] of remap.entries()) {
+      const data = snapshot.get(oldSlot)!;
+      update[`well_name_${newSlot}`] = data.name;
+      update[`well_api_${newSlot}`] = data.api;
+    }
+
+    setReorderingWells(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update(update)
+        .eq('id', facility.id);
+      if (error) throw error;
+
+      // Mirror to local facility prop so the UI re-renders without a refetch.
+      for (const [k, v] of Object.entries(update)) {
+        (facility as any)[k] = v;
+      }
+
+      // 6) Remap spcc_plans.assigned_well_indices so berm coverage follows
+      //    the well, not the slot. Skip plans whose indices are unchanged.
+      const { data: plans, error: plansErr } = await supabase
+        .from('spcc_plans')
+        .select('id, assigned_well_indices')
+        .eq('facility_id', facility.id);
+      if (plansErr) throw plansErr;
+
+      if (plans) {
+        for (const p of plans) {
+          const oldIndices: number[] = p.assigned_well_indices ?? [];
+          const newIndices = oldIndices
+            .map((i) => remap.get(i) ?? i)
+            .sort((a, b) => a - b);
+          const same =
+            oldIndices.length === newIndices.length &&
+            oldIndices.every((v, idx) => v === newIndices[idx]);
+          if (same) continue;
+          const { error: planUpdateErr } = await supabase
+            .from('spcc_plans')
+            .update({ assigned_well_indices: newIndices })
+            .eq('id', p.id);
+          if (planUpdateErr) throw planUpdateErr;
+        }
+      }
+
+      bumpFacilityRender();
+    } catch (err) {
+      console.error('Error reordering wells:', err);
+      alert('Failed to reorder wells. Please refresh and try again.');
+    } finally {
+      setReorderingWells(false);
+      setDraggedWellSlot(null);
+      setDragOverWellSlot(null);
+    }
   };
 
   const handleSaveIpDate = async () => {
@@ -1136,7 +1261,7 @@ export default function FacilityDetailModal({
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Well Numbers</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Wells and API identifiers associated with this facility.
+                  Wells and API identifiers associated with this facility. Drag a row by its handle to renumber.
                 </p>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300">
@@ -1169,16 +1294,62 @@ export default function FacilityDetailModal({
                 const wellName = facility[`well_name_${num}` as keyof Facility] as string | null | undefined;
                 const wellApi = facility[`well_api_${num}` as keyof Facility] as string | null | undefined;
                 const hasAny = !!wellName || !!wellApi;
+                const isDragging = draggedWellSlot === num;
+                const isDropTarget = dragOverWellSlot === num && draggedWellSlot !== null && draggedWellSlot !== num;
                 return (
                   <div
                     key={num}
-                    className={`rounded-lg border p-4 ${
+                    draggable={hasAny && !reorderingWells}
+                    onDragStart={(e) => {
+                      if (!hasAny) return;
+                      setDraggedWellSlot(num);
+                      // dataTransfer is required for Firefox to start a drag.
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', String(num));
+                    }}
+                    onDragOver={(e) => {
+                      if (draggedWellSlot === null || !hasAny) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverWellSlot !== num) setDragOverWellSlot(num);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverWellSlot === num) setDragOverWellSlot(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedWellSlot !== null && draggedWellSlot !== num) {
+                        void reorderWells(draggedWellSlot, num);
+                      } else {
+                        setDraggedWellSlot(null);
+                        setDragOverWellSlot(null);
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDraggedWellSlot(null);
+                      setDragOverWellSlot(null);
+                    }}
+                    className={`rounded-lg border p-4 transition-all ${
                       hasAny
                         ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40'
                         : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-700/20'
+                    } ${isDragging ? 'opacity-40' : ''} ${
+                      isDropTarget ? 'ring-2 ring-blue-400 dark:ring-blue-500 border-blue-400 dark:border-blue-500' : ''
                     }`}
                   >
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Well {num}</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Well {num}</p>
+                      {hasAny && (
+                        <span
+                          title="Drag to reorder wells"
+                          className={`flex items-center text-gray-400 dark:text-gray-500 ${
+                            reorderingWells ? 'cursor-wait opacity-50' : 'cursor-grab active:cursor-grabbing'
+                          }`}
+                        >
+                          <GripVertical className="w-4 h-4" />
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">Name</p>
