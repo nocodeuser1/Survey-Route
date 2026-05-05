@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2 } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2, Copy, Check } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
@@ -313,6 +313,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   const [saving, setSaving] = useState(false);
   const [savedIpDate, setSavedIpDate] = useState<string | null>(null);
   const [savedPeDate, setSavedPeDate] = useState<string | null>(null);
+  // Click-to-copy state for the facility name in the header. Pulses a brief
+  // "Copied!" badge so the user gets visible feedback that the click did
+  // something (vs. silently writing to the OS clipboard).
+  const [nameCopied, setNameCopied] = useState(false);
 
   // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
   // fetch every plan for this facility and subscribe to realtime changes so
@@ -663,10 +667,18 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 <ShieldCheck className="w-5 h-5 flex-shrink-0 opacity-80" />
                 <span className="text-xs font-medium uppercase tracking-wider opacity-80">SPCC Plan</span>
               </div>
+              {/* Facility name. Click does TWO things at once:
+                    1. Copy the full name to the OS clipboard.
+                    2. Toggle truncated <-> wrapped display so the user can
+                       see the full string when it would otherwise be cut off.
+                  Visual feedback: a brief inline "Copied!" pill that fades
+                  back to a subtle copy hint. */}
               <h2
-                className="text-xl font-bold truncate cursor-default select-text"
-                title={facility.name}
-                onClick={(e) => {
+                className="text-xl font-bold truncate cursor-pointer select-text inline-flex items-center gap-2 group max-w-full hover:text-white/90 transition-colors"
+                title={`${facility.name}\n(click to copy)`}
+                onClick={async (e) => {
+                  // Toggle the truncate behavior on the heading element so the
+                  // full name shows even when it would otherwise be cut off.
                   const el = e.currentTarget;
                   if (el.classList.contains('truncate')) {
                     el.classList.remove('truncate');
@@ -675,9 +687,28 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                     el.classList.add('truncate');
                     el.classList.remove('whitespace-normal', 'break-words');
                   }
+                  // Copy the full facility name to the OS clipboard. We
+                  // intentionally don't await before toggling truncate above
+                  // so the visual response is immediate even if the clipboard
+                  // permission prompt blocks the write.
+                  try {
+                    await navigator.clipboard.writeText(facility.name);
+                    setNameCopied(true);
+                    setTimeout(() => setNameCopied(false), 1500);
+                  } catch (err) {
+                    console.error('Failed to copy facility name:', err);
+                  }
                 }}
               >
-                {facility.name}
+                <span className="min-w-0">{facility.name}</span>
+                {nameCopied ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/30 text-xs font-semibold whitespace-nowrap flex-shrink-0">
+                    <Check className="w-3 h-3" />
+                    Copied
+                  </span>
+                ) : (
+                  <Copy className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                )}
               </h2>
               <p className="text-sm opacity-80 mt-0.5">
                 {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
