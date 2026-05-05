@@ -358,7 +358,7 @@ export default function SPCCPlansOverviewModal({
                         PE Stamp Date
                       </th>
                       <th className={`px-4 py-3 text-left text-sm font-semibold hidden lg:table-cell ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        Recertification Date
+                        Recertification Due
                       </th>
                       <th className={`px-4 py-3 text-center text-sm font-semibold hidden sm:table-cell ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                         Days Until Due
@@ -566,13 +566,13 @@ function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: bo
             darkMode={darkMode}
           />
           <DetailRow
-            label="Recertification Date"
+            label="Recertification Due"
             value={item.recertificationDate ? item.recertificationDate.toLocaleDateString() : 'N/A'}
             darkMode={darkMode}
           />
           {facility.recertified_date && (
             <DetailRow
-              label="Recertified Date"
+              label="Recertified On"
               value={formatDate(facility.recertified_date)}
               darkMode={darkMode}
             />

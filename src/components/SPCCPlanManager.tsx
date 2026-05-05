@@ -58,13 +58,25 @@ export default function SPCCPlanManager({ facility, onPlanUpdate }: SPCCPlanMana
                                         <Calendar className="w-3 h-3" />
                                         Stamped: {formatDate(facility.spcc_pe_stamp_date!)}
                                     </span>
-                                    {status.recertificationDate && (
+                                    {/* Recertification line: distinguish "already done" from "still pending".
+                                        Before this fix the label always read "Recertification: <date>" where
+                                        the date was the calculated 5-year due window (PE stamp + 5y), which
+                                        misled users into thinking the plan had already been recertified. Now
+                                        we explicitly switch on facility.recertified_date and show the actual
+                                        completion date when it exists, or the next due date when it doesn't. */}
+                                    {facility.recertified_date ? (
                                         <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'
                                             }`}>
                                             <Calendar className="w-3 h-3" />
-                                            Recertification: {status.recertificationDate.toLocaleDateString()}
+                                            Recertified: {formatDate(facility.recertified_date)}
                                         </span>
-                                    )}
+                                    ) : status.recertificationDate ? (
+                                        <span className={`text-sm flex items-center gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'
+                                            }`}>
+                                            <Calendar className="w-3 h-3" />
+                                            Recertification Due: {status.recertificationDate.toLocaleDateString()}
+                                        </span>
+                                    ) : null}
                                 </div>
                             </div>
                         </div>
