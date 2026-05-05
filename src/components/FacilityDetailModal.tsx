@@ -665,6 +665,11 @@ export default function FacilityDetailModal({
       if (spccDueDate !== undefined) {
         facility.spcc_due_date = spccDueDate;
       }
+      // Trigger a re-render so the auto-calculated SPCC due date appears
+      // immediately in the modal — without this the user has to close and
+      // reopen the modal to see the new due date even though the DB write
+      // succeeded.
+      bumpFacilityRender();
       setEditingIpDate(false);
     } catch (err) {
       console.error('Error saving IP date:', err);
