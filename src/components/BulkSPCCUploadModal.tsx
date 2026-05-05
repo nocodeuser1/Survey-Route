@@ -641,7 +641,7 @@ export default function BulkSPCCUploadModal({
                         key={chip.key}
                         type="button"
                         onClick={() => setReviewFilter(active ? null : chip.key)}
-                        className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                        className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition-colors whitespace-nowrap ${
                           active ? chip.activeClass : chip.inactiveClass
                         }`}
                         title={

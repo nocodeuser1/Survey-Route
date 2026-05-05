@@ -38,7 +38,7 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
   return (
     <div className={`inline-flex flex-col items-start gap-1 ${className}`}>
       <span
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colors}`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${colors}`}
         title={result.message}
       >
         <Icon className="w-3 h-3" />

@@ -2748,12 +2748,12 @@ function App() {
                   <div className="flex items-center gap-2">
                     <p className="text-sm text-gray-600 dark:text-gray-300">{currentAccount.accountName}</p>
                     {teamCount > 1 && effectiveUserTeam && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">
                         Team {effectiveUserTeam}
                       </span>
                     )}
                     {teamCount > 1 && !effectiveUserTeam && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200 whitespace-nowrap">
                         All Teams
                       </span>
                     )}
@@ -3328,12 +3328,12 @@ function App() {
                                 <FileText className="w-4 h-4" />
                                 SPCC Inspections
                                 {inspectionInRouteCount > 0 && (
-                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                                     {inspectionInRouteCount}
                                   </span>
                                 )}
                                 {inspectionPastDueCount > 0 && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
                                     {inspectionPastDueCount} overdue
                                   </span>
                                 )}
@@ -3373,12 +3373,12 @@ function App() {
                                 <FileCheck className="w-4 h-4" />
                                 SPCC Plans
                                 {planInRouteCount > 0 && (
-                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                                     {planInRouteCount}
                                   </span>
                                 )}
                                 {planPastDueCount > 0 && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
                                     {planPastDueCount} overdue
                                   </span>
                                 )}

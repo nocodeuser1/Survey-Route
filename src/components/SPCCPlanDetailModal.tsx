@@ -786,7 +786,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                 <div className="text-xs font-semibold uppercase tracking-wider opacity-80">Workflow Status</div>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   {workflowConfig ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white whitespace-nowrap">
                       {workflowConfig.label}
                     </span>
                   ) : (

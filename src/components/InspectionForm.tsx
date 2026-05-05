@@ -991,7 +991,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                 }`}
             >
               <div className="flex items-start gap-2 sm:gap-3">
-                <span className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-semibold text-xs sm:text-sm">
+                <span className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-semibold text-xs sm:text-sm whitespace-nowrap">
                   {index + 1}
                 </span>
                 <div className="flex-1 min-w-0">
@@ -1068,7 +1068,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                       <Camera className="w-4 h-4" />
                       {uploadingPhotos[question.id] ? 'Uploading...' : 'Add Photo'}
                       {response.photos && response.photos.length > 0 && (
-                        <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white rounded-full text-xs">
+                        <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white rounded-full text-xs whitespace-nowrap">
                           {response.photos.length}/10
                         </span>
                       )}

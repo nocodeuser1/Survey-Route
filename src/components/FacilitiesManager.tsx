@@ -2359,7 +2359,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
             <span className="break-words">{facility.name}</span>
             {surveyCompletion && surveyCompletion.total > 0 && (
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
                 surveyCompletion.percent === 100
                   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
                   : surveyCompletion.percent > 0
@@ -3273,7 +3273,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <div className="hidden sm:flex items-center gap-1.5 ml-1">
                     <button
                       onClick={() => setSpccPlanFilter(spccPlanFilter === 'overdue' ? 'all' : 'overdue')}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${spccPlanFilter === 'overdue'
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${spccPlanFilter === 'overdue'
                         ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-2 ring-red-400 dark:ring-red-500'
                         : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:ring-1 hover:ring-red-300 dark:hover:ring-red-600'
                         }`}
@@ -3283,7 +3283,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     </button>
                     <button
                       onClick={() => setSpccPlanFilter(spccPlanFilter === 'current' ? 'all' : 'current')}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all ${spccPlanFilter === 'current'
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${spccPlanFilter === 'current'
                         ? 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 ring-2 ring-emerald-400 dark:ring-emerald-500'
                         : 'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400 hover:ring-1 hover:ring-emerald-300 dark:hover:ring-emerald-600'
                         }`}

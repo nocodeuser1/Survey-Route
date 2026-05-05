@@ -360,7 +360,7 @@ export default function InspectionsOverviewModal({
                                                     {item.inspection.inspector_name}
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${item.hasFlagged
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${item.hasFlagged
                                                             ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200'
                                                             : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200'
                                                         }`}>

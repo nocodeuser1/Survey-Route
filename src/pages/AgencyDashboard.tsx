@@ -344,7 +344,7 @@ export default function AgencyDashboard() {
                   <UserPlus className="w-4 h-4" />
                   <span className="hidden sm:inline">Pending Requests</span>
                   <span className="sm:hidden">Requests</span>
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center whitespace-nowrap">
                     {pendingRequests.length}
                   </span>
                 </button>
@@ -470,7 +470,7 @@ export default function AgencyDashboard() {
                           <span>{account._routeCount || 0} routes</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${account.status === 'active'
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${account.status === 'active'
                             ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
                             : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
                             }`}>

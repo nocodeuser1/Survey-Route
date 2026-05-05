@@ -149,7 +149,7 @@ export default function SPCCPlansOverviewModal({
       case 'valid':
       case 'recertified':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200 whitespace-nowrap">
             <CheckCircle className="w-3 h-3" />
             Current
           </span>
@@ -157,7 +157,7 @@ export default function SPCCPlansOverviewModal({
       case 'expiring':
       case 'renewal_due':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 whitespace-nowrap">
             <Clock className="w-3 h-3" />
             Expiring
           </span>
@@ -165,14 +165,14 @@ export default function SPCCPlansOverviewModal({
       case 'expired':
       case 'initial_overdue':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200 whitespace-nowrap">
             <AlertTriangle className="w-3 h-3" />
             Overdue
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 whitespace-nowrap">
             <FileText className="w-3 h-3" />
             No Plan
           </span>

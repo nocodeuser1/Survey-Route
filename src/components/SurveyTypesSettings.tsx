@@ -844,13 +844,13 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                       {field.name}
                     </span>
                     {field.is_system && (
-                      <span className="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 whitespace-nowrap">
                         <Lock className="w-3 h-3" />
                         System
                       </span>
                     )}
                     {field.required && (
-                      <span className="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                      <span className="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 whitespace-nowrap">
                         Required
                       </span>
                     )}
@@ -1000,7 +1000,7 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                   {keywordsInput && (
                     <div className="flex gap-1 flex-wrap mt-2">
                       {keywordsInput.split(',').map(k => k.trim()).filter(k => k).map((k, idx) => (
-                        <span key={idx} className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                        <span key={idx} className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 whitespace-nowrap">
                           {k}
                         </span>
                       ))}
@@ -1252,7 +1252,7 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
                     {type.name}
                   </h4>
                   {type.is_system && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 whitespace-nowrap">
                       System
                     </span>
                   )}

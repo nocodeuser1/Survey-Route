@@ -1784,12 +1784,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <FileText className="w-4 h-4" />
                         SPCC Inspections
                         {counts.inspectionInRouteCount > 0 && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                             {counts.inspectionInRouteCount}
                           </span>
                         )}
                         {counts.inspectionPastDueCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
                             {counts.inspectionPastDueCount} overdue
                           </span>
                         )}
@@ -1824,12 +1824,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <FileCheck className="w-4 h-4" />
                         SPCC Plans
                         {counts.planInRouteCount > 0 && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                             {counts.planInRouteCount}
                           </span>
                         )}
                         {counts.planPastDueCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
                             {counts.planPastDueCount} overdue
                           </span>
                         )}

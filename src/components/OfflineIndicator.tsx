@@ -24,7 +24,7 @@ export default function OfflineIndicator() {
     <div className="fixed bottom-4 left-4 z-[1500] flex items-center gap-2">
       {/* Connection status badge */}
       <div
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg transition-colors ${
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg transition-colors whitespace-nowrap ${
           isOnline
             ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
             : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
@@ -40,7 +40,7 @@ export default function OfflineIndicator() {
 
       {/* Pending sync badge */}
       {pendingSyncCount > 0 && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 whitespace-nowrap">
           <CloudOff className="w-3.5 h-3.5" />
           {pendingSyncCount} pending
           {isOnline && (

@@ -18,7 +18,7 @@ export default function SPCCExternalCompletionBadge({ completedDate, className =
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium ${className}`}
+      className={`inline-flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium whitespace-nowrap ${className}`}
       title={`SPCC Completed Externally: ${formattedDate}`}
     >
       <CheckCircle className="w-3 h-3" />

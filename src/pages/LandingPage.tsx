@@ -166,7 +166,7 @@ function SurveySettingsMockup() {
           <h3 className="font-semibold text-gray-900 text-sm">Survey Configuration</h3>
           <p className="text-xs text-gray-500">Tank Farm Audit — 22 fields</p>
         </div>
-        <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium">Custom</span>
+        <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium whitespace-nowrap">Custom</span>
       </div>
       <div className="divide-y divide-gray-100">
         {[
@@ -856,7 +856,7 @@ export default function LandingPage() {
 
           <div ref={pricing.ref} className={`max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative ${sectionClass(pricing.isVisible)}`}>
             <div className="text-center mb-12">
-              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-200 text-xs font-semibold tracking-wider uppercase mb-5">
+              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-200 text-xs font-semibold tracking-wider uppercase mb-5 whitespace-nowrap">
                 <Sparkles className="w-3.5 h-3.5" />
                 Pricing
               </span>

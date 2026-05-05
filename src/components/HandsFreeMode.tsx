@@ -731,7 +731,7 @@ export default function HandsFreeMode({
           </div>
           <div className="flex items-center gap-2">
             {photos.length > 0 && (
-              <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white/50 text-xs">
+              <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-white/50 text-xs whitespace-nowrap">
                 <Image className="w-3 h-3" />
                 {photos.length}
               </span>
@@ -765,7 +765,7 @@ export default function HandsFreeMode({
               {currentField?.voice_keywords && currentField.voice_keywords.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
                   {currentField.voice_keywords.map((kw, i) => (
-                    <span key={i} className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-medium">
+                    <span key={i} className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-medium whitespace-nowrap">
                       {kw}
                     </span>
                   ))}
@@ -1117,7 +1117,7 @@ export default function HandsFreeMode({
                   ) : Array.isArray(value) ? (
                     <div className="flex flex-wrap gap-1">
                       {(value as string[]).map((v, i) => (
-                        <span key={i} className="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs">{v}</span>
+                        <span key={i} className="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs whitespace-nowrap">{v}</span>
                       ))}
                     </div>
                   ) : (

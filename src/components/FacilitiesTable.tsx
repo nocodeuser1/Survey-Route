@@ -234,7 +234,7 @@ export default function FacilitiesTable({ facilities, userId, teamNumber = 1, on
                     {facility.day ? `Day ${facility.day}` : '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${status === 'inspected' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-200' :
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${status === 'inspected' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-200' :
                       status === 'expired' ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200' :
                         'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200'
                       }`}>

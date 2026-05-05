@@ -1275,7 +1275,7 @@ export default function FacilityDetailModal({
                   Wells and API identifiers associated with this facility. Drag a row by its handle to renumber.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300">
+              <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap flex-shrink-0">
                 {wells.length} listed
               </span>
             </div>
@@ -1565,7 +1565,7 @@ export default function FacilityDetailModal({
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white">Facility Comments</h3>
                   {commentCount > 0 && (
-                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs font-medium text-blue-700 dark:text-blue-300">
+                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">
                       {commentCount}
                     </span>
                   )}
@@ -1835,7 +1835,7 @@ export default function FacilityDetailModal({
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Workflow Status</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {workflowConfig ? (
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${workflowConfig.colorClass} dark:bg-transparent ${workflowConfig.darkColorClass}`}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${workflowConfig.colorClass} dark:bg-transparent ${workflowConfig.darkColorClass}`}>
                       {workflowConfig.label}
                     </span>
                   ) : (
@@ -2239,7 +2239,7 @@ export default function FacilityDetailModal({
 
     if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium" title={`Expires in ${expiry.daysUntilExpiry}d - Reinspection due soon`}>
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium whitespace-nowrap" title={`Expires in ${expiry.daysUntilExpiry}d - Reinspection due soon`}>
           <Clock className="w-3.5 h-3.5" />
           <span>Inspection Expiring ({formatDayCount(expiry.daysUntilExpiry)})</span>
         </span>
@@ -2249,7 +2249,7 @@ export default function FacilityDetailModal({
     if (expiry.status === 'expired') {
       const label = facility.spcc_completion_type === 'external' ? 'External' : facility.spcc_completion_type === 'internal' ? 'Internal' : 'Inspection';
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium" title={`${label} completion expired - Reinspection needed`}>
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs font-medium whitespace-nowrap" title={`${label} completion expired - Reinspection needed`}>
           <AlertTriangle className="w-3 h-3" />
           <span>Inspection Expired</span>
         </span>
@@ -2257,7 +2257,7 @@ export default function FacilityDetailModal({
     }
 
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium" title="No SPCC Inspection on record">
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium whitespace-nowrap" title="No SPCC Inspection on record">
         <Clock className="w-3 h-3" />
         <span>No Inspection</span>
       </span>
@@ -2347,7 +2347,7 @@ export default function FacilityDetailModal({
                   </button>
 
                   {facility.status === 'sold' && (
-                    <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300">
+                    <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-semibold border border-gray-300 whitespace-nowrap">
                       <DollarSign className="w-3 h-3" />
                       Sold {facility.sold_at ? `on ${formatDate(facility.sold_at)}` : ''}
                     </span>

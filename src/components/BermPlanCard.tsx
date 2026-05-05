@@ -494,7 +494,7 @@ export default function BermPlanCard({
             wellsOnThisBerm.map((w) => (
               <span
                 key={w.index}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${
                   darkMode
                     ? 'bg-blue-900/40 text-blue-300'
                     : 'bg-blue-50 text-blue-700'

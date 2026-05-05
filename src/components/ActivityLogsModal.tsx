@@ -266,7 +266,7 @@ export default function ActivityLogsModal({ accountId, accountName, onClose }: A
               <Filter className="w-4 h-4" />
               Filters
               {activeFilterCount > 0 && (
-                <span className="bg-white text-blue-600 px-2 py-0.5 rounded-full text-xs font-bold">
+                <span className="bg-white text-blue-600 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap">
                   {activeFilterCount}
                 </span>
               )}

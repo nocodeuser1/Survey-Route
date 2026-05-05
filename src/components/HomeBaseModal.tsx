@@ -322,7 +322,7 @@ export default function HomeBaseModal({
                     {localTeamCount > 1 && (
                       <div className="flex items-center gap-2 mb-3">
                         <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold whitespace-nowrap ${
                             form.latitude && form.longitude
                               ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
