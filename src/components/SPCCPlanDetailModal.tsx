@@ -317,6 +317,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
   // "Copied!" badge so the user gets visible feedback that the click did
   // something (vs. silently writing to the OS clipboard).
   const [nameCopied, setNameCopied] = useState(false);
+  // Click-to-copy state for the lat/long line under the facility name in the
+  // SPCC modal header. Same UX as the name copy: brief "Copied" pill replaces
+  // the inline copy hint icon for 1.5s.
+  const [coordsCopied, setCoordsCopied] = useState(false);
 
   // Multi-berm plan state — backed by the `spcc_plans` table. On mount we
   // fetch every plan for this facility and subscribe to realtime changes so
@@ -710,9 +714,38 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   <Copy className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                 )}
               </h2>
-              <p className="text-sm opacity-80 mt-0.5">
-                {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
-              </p>
+              {/* Lat/long under the facility name. Click copies the
+                  "lat, long" string (six decimals each, comma-space) to the
+                  OS clipboard — convenient for pasting into Google Maps,
+                  Apple Maps, or any "Go to coordinates" field. Same Copy
+                  → "Copied" pill affordance as the facility name above. */}
+              <button
+                type="button"
+                onClick={async () => {
+                  const coords = `${Number(facility.latitude).toFixed(6)}, ${Number(facility.longitude).toFixed(6)}`;
+                  try {
+                    await navigator.clipboard.writeText(coords);
+                    setCoordsCopied(true);
+                    setTimeout(() => setCoordsCopied(false), 1500);
+                  } catch (err) {
+                    console.error('Failed to copy coordinates:', err);
+                  }
+                }}
+                title={`${Number(facility.latitude).toFixed(6)}, ${Number(facility.longitude).toFixed(6)}\n(click to copy)`}
+                className="text-sm opacity-80 hover:opacity-100 mt-0.5 inline-flex items-center gap-1.5 cursor-pointer transition-opacity group select-text"
+              >
+                <span>
+                  {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
+                </span>
+                {coordsCopied ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-[11px] font-semibold whitespace-nowrap">
+                    <Check className="w-2.5 h-2.5" />
+                    Copied
+                  </span>
+                ) : (
+                  <Copy className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity" />
+                )}
+              </button>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {onViewFacilityDetails && (

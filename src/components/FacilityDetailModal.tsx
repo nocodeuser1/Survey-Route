@@ -28,6 +28,7 @@ import {
   RotateCw,
   MessageSquare,
   GripVertical,
+  Copy,
 } from 'lucide-react';
 import { supabase, Facility, FacilityComment, Inspection, UserSettings } from '../lib/supabase';
 import InspectionForm from './InspectionForm';
@@ -141,6 +142,11 @@ export default function FacilityDetailModal({
   const [draggedWellSlot, setDraggedWellSlot] = useState<number | null>(null);
   const [dragOverWellSlot, setDragOverWellSlot] = useState<number | null>(null);
   const [reorderingWells, setReorderingWells] = useState(false);
+  // Click-to-copy state for the facility name in the modal header. Pulses a
+  // brief "Copied" pill so the user gets visible feedback that the click did
+  // something (vs. silently writing to the OS clipboard). Mirrors the same
+  // pattern in SPCCPlanDetailModal.
+  const [nameCopied, setNameCopied] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState('');
   const [showInspectionForm, setShowInspectionForm] = useState(false);
@@ -2273,11 +2279,21 @@ export default function FacilityDetailModal({
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Facility name. Click does TWO things at once:
+                        1. Copy the full name to the OS clipboard.
+                        2. Toggle truncated <-> wrapped display so the user
+                           can see the full string when it would otherwise be
+                           cut off (the original behavior).
+                      Visual feedback: a Copy icon hints at the action on
+                      hover; on click it flips to a green "Copied" pill for
+                      1.5s. Mirrors the same affordance in SPCCPlanDetailModal. */}
                   <h2
-                    className="text-2xl font-bold truncate max-w-[16rem] sm:max-w-xs md:max-w-sm lg:max-w-md cursor-default select-text"
-                    title={facility.name}
-                    onClick={(e) => {
-                      // Mobile: tap once to expand/collapse full name
+                    className="text-2xl font-bold truncate max-w-[16rem] sm:max-w-xs md:max-w-sm lg:max-w-md cursor-pointer select-text inline-flex items-center gap-2 group hover:text-white/90 transition-colors"
+                    title={`${facility.name}\n(click to copy)`}
+                    onClick={async (e) => {
+                      // Toggle the truncate class on the heading element so
+                      // the full name shows even when it would otherwise be
+                      // cut off.
                       const el = e.currentTarget;
                       if (el.classList.contains('truncate')) {
                         el.classList.remove('truncate');
@@ -2286,9 +2302,28 @@ export default function FacilityDetailModal({
                         el.classList.add('truncate');
                         el.classList.remove('whitespace-normal', 'break-words');
                       }
+                      // Write the full name to the OS clipboard. Don't await
+                      // before the truncate toggle above so the visual response
+                      // is immediate even if the clipboard permission prompt
+                      // blocks the write.
+                      try {
+                        await navigator.clipboard.writeText(facility.name);
+                        setNameCopied(true);
+                        setTimeout(() => setNameCopied(false), 1500);
+                      } catch (err) {
+                        console.error('Failed to copy facility name:', err);
+                      }
                     }}
                   >
-                    {facility.name}
+                    <span className="min-w-0">{facility.name}</span>
+                    {nameCopied ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/30 text-xs font-semibold whitespace-nowrap flex-shrink-0">
+                        <Check className="w-3 h-3" />
+                        Copied
+                      </span>
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                    )}
                   </h2>
                   
                   {onViewSPCCPlan ? (
