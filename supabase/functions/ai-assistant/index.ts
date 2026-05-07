@@ -1,5 +1,5 @@
 /**
- * Survey-Route AI Assistant — Supabase Edge Function
+ * Survey-Route AI Assistant — Supabase Edge Function (Gemini-backed)
  *
  * Backs the floating chat bubble in the app. The frontend POSTs the user's
  * conversation + the active accountId; this function:
@@ -8,29 +8,40 @@
  *      (covers the agency-owner pattern via the user_has_account_access SQL helper).
  *   2. Pulls a compact snapshot of every facility, inspection, and SPCC plan
  *      for the account — keys are abbreviated to keep the prompt cheap.
- *   3. Calls Claude (Opus 4.7, adaptive thinking) with a system prompt that
+ *   3. Calls Google Gemini (gemini-2.5-flash) with a system prompt that
  *      teaches the model the SPCC compliance domain + the JSON shape.
  *   4. Streams the response back to the client as Server-Sent Events.
  *
+ * Why raw fetch instead of the @google/genai SDK: the SDK has Node/Deno
+ * compatibility quirks under the Supabase edge runtime (some imports rely
+ * on Node fs/streams shims). The REST API is small enough that calling it
+ * directly is cleaner and avoids version drift.
+ *
  * Setup notes (one-time, per CLAUDE.md migration policy):
- *   1. In the Supabase dashboard → Edge Functions → Manage secrets, add
- *      ANTHROPIC_API_KEY with your real key.
- *   2. Deploy: `npx supabase functions deploy ai-assistant`
+ *   1. Get a key from https://aistudio.google.com/apikey
+ *   2. In the Supabase dashboard → Edge Functions → Manage secrets, add
+ *      GEMINI_API_KEY with that key.
+ *   3. Deploy: `npx supabase functions deploy ai-assistant`
  *      (or via the dashboard's bulk deploy).
- *   3. The function requires NO migration — it only reads existing tables.
+ *   4. The function requires NO migration — it only reads existing tables.
  */
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2.49.1';
-import Anthropic from 'npm:@anthropic-ai/sdk@0.40.0';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
 );
 
-const anthropic = new Anthropic({
-  apiKey: Deno.env.get('ANTHROPIC_API_KEY') ?? '',
-});
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
+// Gemini 3.1 Flash Lite — newest stable Gemini at ship time. Google bills
+// it as "frontier-class performance rivaling larger models at a fraction
+// of the cost." For SPCC chat (counting, filtering, reading dates from a
+// JSON snapshot) it's plenty smart and very fast/cheap. Bump to
+// `gemini-2.5-pro` or `gemini-3.1-pro-preview` if answers look shallow on
+// hard analytical queries.
+const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -57,7 +68,7 @@ interface RequestBody {
 
 /**
  * Compact field abbreviations keep tokens down. The system prompt below
- * documents what each key means so Claude can read the snapshot.
+ * documents what each key means so the model can read the snapshot.
  */
 type FacilitySnap = {
   name: string;
@@ -167,38 +178,43 @@ ${JSON.stringify(snapshot.facilities)}`;
  * the agency-owner + member pattern already enforced everywhere else.
  */
 async function verifyAccountAccess(authUserId: string, accountId: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('user_has_account_access', {
-    p_account_id: accountId,
-  }).eq('user_auth_id', authUserId);
-  if (error) {
-    // Fallback: hand-rolled join (covers older deployments without the helper).
-    const { data: fallback } = await supabase
-      .from('users')
-      .select('id, is_agency_owner, account_users(account_id)')
-      .eq('auth_user_id', authUserId)
+  // Hand-rolled join. We can't use the user_has_account_access RPC here
+  // because that helper reads auth.uid() from the JWT context — and we're
+  // calling it with the SERVICE ROLE client, where auth.uid() is null.
+  const { data: profile } = await supabase
+    .from('users')
+    .select('id, is_agency_owner, email, account_users(account_id)')
+    .eq('auth_user_id', authUserId)
+    .maybeSingle();
+  if (!profile) return false;
+  if (profile.is_agency_owner) {
+    // Agency owner: verify they own the agency that owns this account.
+    const { data: acct } = await supabase
+      .from('accounts')
+      .select('agency_id, agencies!inner(owner_email)')
+      .eq('id', accountId)
       .maybeSingle();
-    if (!fallback) return false;
-    if (fallback.is_agency_owner) {
-      // Agency owners: verify they own the agency that owns this account.
-      const { data: acct } = await supabase
-        .from('accounts')
-        .select('agency_id, agencies!inner(owner_email)')
-        .eq('id', accountId)
-        .maybeSingle();
-      if (!acct) return false;
-      const { data: ownerUser } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', fallback.id)
-        .maybeSingle();
-      // @ts-expect-error nested join
-      return ownerUser?.email === acct.agencies?.owner_email;
-    }
-    // Regular user: must have an account_users membership row.
-    const memberships = (fallback.account_users ?? []) as Array<{ account_id: string }>;
-    return memberships.some((m) => m.account_id === accountId);
+    if (!acct) return false;
+    // @ts-expect-error nested join shape
+    return profile.email === acct.agencies?.owner_email;
   }
-  return Boolean(data);
+  // Regular user: must have an account_users membership row for this account.
+  const memberships = (profile.account_users ?? []) as Array<{ account_id: string }>;
+  return memberships.some((m) => m.account_id === accountId);
+}
+
+/**
+ * Convert our chat-style message array into Gemini's `contents` shape.
+ * Gemini uses 'user' and 'model' (not 'assistant'). Empty/whitespace-only
+ * messages would 400, so they're filtered out.
+ */
+function toGeminiContents(messages: ChatMessage[]): Array<{ role: string; parts: Array<{ text: string }> }> {
+  return messages
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
 }
 
 Deno.serve(async (req) => {
@@ -210,6 +226,10 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (!GEMINI_API_KEY) {
+      return jsonResponse({ error: 'GEMINI_API_KEY not configured. Set it in Supabase Edge Function secrets.' }, 500);
+    }
+
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return jsonResponse({ error: 'Missing Authorization header' }, 401);
     const token = authHeader.replace('Bearer ', '');
@@ -232,41 +252,84 @@ Deno.serve(async (req) => {
     const snapshot = await loadSnapshot(body.accountId);
     const systemPrompt = buildSystemPrompt(snapshot);
 
-    // Cap conversation history at the last 12 turns. SPCC chats don't
-    // benefit from more context and the snapshot already dwarfs the chat.
-    const recentMessages = body.messages.slice(-12).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Cap history at the last 12 turns. SPCC chats don't benefit from more
+    // context, and the snapshot already dwarfs the conversation.
+    const recentMessages = body.messages.slice(-12);
+    const contents = toGeminiContents(recentMessages);
 
-    // Stream the response. We forward Anthropic's text deltas as a
-    // line-delimited stream so the client can render incrementally.
-    const stream = anthropic.messages.stream({
-      model: 'claude-opus-4-7',
-      max_tokens: 4096,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'low' },
-      // Cache the big system prompt so subsequent turns within a 5-min
-      // window only pay ~10% of input cost on the prefix.
-      system: [
-        {
-          type: 'text',
-          text: systemPrompt,
-          cache_control: { type: 'ephemeral' },
+    // Call Gemini's streaming endpoint. SSE format: each event is a JSON
+    // object with `candidates[0].content.parts[0].text` carrying the delta.
+    const geminiResp = await fetch(GEMINI_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 2048,
+          // Let 2.5 Flash decide how much to think (-1 = dynamic; 0 = off).
+          // Disabled here to keep latency low for short factual queries —
+          // bump to -1 if answers seem under-thought on harder questions.
+          thinkingConfig: { thinkingBudget: 0 },
         },
-      ],
-      messages: recentMessages,
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+        ],
+      }),
     });
 
+    if (!geminiResp.ok || !geminiResp.body) {
+      const errText = await geminiResp.text().catch(() => '');
+      console.error('[ai-assistant] Gemini error:', geminiResp.status, errText);
+      return jsonResponse({ error: `Gemini API ${geminiResp.status}: ${errText.slice(0, 500)}` }, 502);
+    }
+
+    // Re-emit the upstream SSE stream as our own SSE shape so the frontend
+    // doesn't need to know which provider is behind the function.
     const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
     const responseStream = new ReadableStream({
       async start(controller) {
+        const reader = geminiResp.body!.getReader();
+        let buffer = '';
         try {
-          stream.on('text', (delta: string) => {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text: delta })}\n\n`));
-          });
-          const final = await stream.finalMessage();
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage: final.usage })}\n\n`));
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            // Gemini's SSE uses `data: {json}\n\n` delimiters.
+            const events = buffer.split('\n\n');
+            buffer = events.pop() ?? '';
+
+            for (const event of events) {
+              const line = event.split('\n').find((l) => l.startsWith('data: '));
+              if (!line) continue;
+              try {
+                const json = JSON.parse(line.slice(6));
+                const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
+                }
+                // Surface a finish reason once, when the stream ends. Gemini
+                // sets `finishReason` on the last chunk's candidate.
+                const finish: string | undefined = json?.candidates?.[0]?.finishReason;
+                if (finish && finish !== 'STOP') {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: `Stopped: ${finish}` })}\n\n`));
+                }
+              } catch (parseErr) {
+                console.error('[ai-assistant] SSE parse error:', parseErr, line);
+              }
+            }
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`));
@@ -282,10 +345,9 @@ Deno.serve(async (req) => {
         ...CORS_HEADERS,
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        // NB: do NOT set `Connection: keep-alive` here. It's a forbidden
+        // NB: do NOT set `Connection: keep-alive` — it's a forbidden
         // hop-by-hop response header in the Fetch spec and some browsers
-        // reject the entire response, surfacing as "Failed to fetch" on
-        // the client. Streaming SSE works without it.
+        // reject the entire response, surfacing as "Failed to fetch".
       },
     });
   } catch (err) {
