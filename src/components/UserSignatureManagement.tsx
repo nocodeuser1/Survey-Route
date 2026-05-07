@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { autocropSignature } from '../utils/signatureAutocrop';
+import ConfirmDialog from './ConfirmDialog';
 
 /**
  * Build a human-readable label for a user record where `full_name` and/or
@@ -48,6 +49,10 @@ export default function UserSignatureManagement() {
   const [reassignModal, setReassignModal] = useState<{signatureId: string; currentUserId: string; currentUserName: string} | null>(null);
   const [reassigning, setReassigning] = useState(false);
   const [deletingSignatureId, setDeletingSignatureId] = useState<string | null>(null);
+  // Themed confirmation dialog state for the delete flow. We hold onto the
+  // whole signature row so the helper that runs the actual delete has the
+  // user info needed to render a friendly label in the dialog body.
+  const [pendingDeleteSig, setPendingDeleteSig] = useState<any | null>(null);
 
   // Anyone who can administer the team can see the team-signatures panel.
   // (Reassign button itself stays gated on isAgencyOwner inside the row.)
@@ -183,27 +188,39 @@ export default function UserSignatureManagement() {
   }
 
   /**
-   * Delete a signature record. Available to agency owners + account admins.
-   * Confirms via window.confirm so a stray click can't nuke a signature.
-   * After successful delete we reload the team-signatures list so the row
-   * vanishes immediately.
+   * Run the actual delete for the signature currently held in
+   * `pendingDeleteSig`. Triggered when the user confirms the themed
+   * dialog. Crucially we use `.delete().select()` so we can detect the
+   * silent-RLS failure case: PostgREST returns the deleted rows in the
+   * payload, so an empty array means "row exists but RLS denied delete".
+   * Without this check the UI would fake success while the row stayed.
    */
-  async function handleDeleteSignature(sig: { id: string; users?: { full_name?: string | null; email?: string | null } | null }) {
-    if (!canManageTeamSignatures) return;
-    const label = userDisplayLabel(sig.users ?? undefined);
-    if (!window.confirm(`Delete the signature for ${label}? This cannot be undone.`)) return;
+  async function performDeleteSignature() {
+    const sig = pendingDeleteSig;
+    if (!sig || !canManageTeamSignatures) return;
 
     setDeletingSignatureId(sig.id);
     setError('');
     setSuccess('');
     try {
-      const { error: delErr } = await supabase
+      const { data: deleted, error: delErr } = await supabase
         .from('user_signatures')
         .delete()
-        .eq('id', sig.id);
+        .eq('id', sig.id)
+        .select();
       if (delErr) throw delErr;
 
+      // Empty result with no error = RLS silently rejected. Without this
+      // check the UI optimistically claims "Signature deleted" while the
+      // row is still in the database.
+      if (!deleted || deleted.length === 0) {
+        throw new Error(
+          "You don't have permission to delete this signature — please apply the latest RLS migration in Supabase (20260429120000_user_signatures_admin_delete.sql).",
+        );
+      }
+
       setSuccess('Signature deleted');
+      setPendingDeleteSig(null);
       await loadAllSignatures();
       // If the deleted signature belonged to the current user, refresh
       // their own signature card too so the canvas state matches.
@@ -212,6 +229,7 @@ export default function UserSignatureManagement() {
     } catch (err: any) {
       console.error('Error deleting signature:', err);
       setError(err.message || 'Failed to delete signature');
+      setPendingDeleteSig(null);
     } finally {
       setDeletingSignatureId(null);
     }
@@ -605,7 +623,7 @@ export default function UserSignatureManagement() {
                         </button>
                       )}
                       <button
-                        onClick={() => handleDeleteSignature(sig)}
+                        onClick={() => setPendingDeleteSig(sig)}
                         disabled={isDeleting}
                         title="Delete this signature"
                         className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 whitespace-nowrap"
@@ -762,6 +780,24 @@ export default function UserSignatureManagement() {
           </div>
         </div>
       )}
+
+      {/* Themed delete confirmation. Replaces window.confirm so the prompt
+          matches the rest of the app's modal design (dark mode aware,
+          Esc/Enter shortcuts, keyboard-focus management). */}
+      <ConfirmDialog
+        open={!!pendingDeleteSig}
+        title="Delete this signature?"
+        message={
+          pendingDeleteSig
+            ? `${userDisplayLabel(pendingDeleteSig.users ?? undefined)}'s signature will be permanently removed. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete signature"
+        danger
+        busy={!!deletingSignatureId}
+        onConfirm={performDeleteSignature}
+        onCancel={() => { if (!deletingSignatureId) setPendingDeleteSig(null); }}
+      />
     </div>
   );
 }

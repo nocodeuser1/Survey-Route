@@ -32,7 +32,7 @@ import { optimizeRoutes, OptimizationResult, FacilityWithIndex, optimizeRouteOrd
 import { useAuth } from './contexts/AuthContext';
 import { useAccount } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { isInspectionValid, getFacilityInspectionExpiry } from './utils/inspectionUtils';
 import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
@@ -177,7 +177,23 @@ function App() {
   const [triggerMapLocation, setTriggerMapLocation] = useState(0);
   const [showVisibilityModal, setShowVisibilityModal] = useState(false);
   const [showHomeBaseModal, setShowHomeBaseModal] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState('route-planning');
+  // Settings tab is persisted in the URL query string so a refresh on
+  // (e.g.) the Team tab lands you back on Team rather than the default
+  // Route Planning tab. The param is read once on mount and updated
+  // whenever the active tab changes via setActiveSettingsTab below.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeSettingsTab, _setActiveSettingsTabRaw] = useState(
+    () => searchParams.get('settingsTab') || 'route-planning',
+  );
+  const setActiveSettingsTab = (next: string) => {
+    _setActiveSettingsTabRaw(next);
+    // Mutate the URL in place. We only set the param when in settings
+    // view (handled by the useEffect below) — here we just keep it in
+    // sync if it's already there.
+    const params = new URLSearchParams(searchParams);
+    params.set('settingsTab', next);
+    setSearchParams(params, { replace: true });
+  };
   const [isInspectionFormActive, setIsInspectionFormActive] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -428,6 +444,9 @@ function App() {
 
   useEffect(() => {
     const handleNavigateToSettings = () => {
+      // Reset to the default tab when programmatically navigating into
+      // settings. setActiveSettingsTab also rewrites the URL param so
+      // subsequent refreshes land back on this tab.
       setActiveSettingsTab('route-planning');
       setCurrentView('settings');
     };
@@ -436,6 +455,7 @@ function App() {
     return () => {
       window.removeEventListener('navigate-to-settings', handleNavigateToSettings);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Log user login when component mounts and user is authenticated
