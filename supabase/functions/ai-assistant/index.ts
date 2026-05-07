@@ -282,7 +282,10 @@ Deno.serve(async (req) => {
         ...CORS_HEADERS,
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
+        // NB: do NOT set `Connection: keep-alive` here. It's a forbidden
+        // hop-by-hop response header in the Fetch spec and some browsers
+        // reject the entire response, surfacing as "Failed to fetch" on
+        // the client. Streaming SSE works without it.
       },
     });
   } catch (err) {

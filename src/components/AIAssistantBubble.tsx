@@ -77,7 +77,13 @@ export default function AIAssistantBubble() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not signed in');
 
-      const supabaseUrl = (supabase as unknown as { supabaseUrl: string }).supabaseUrl;
+      // Read the URL from the build-time env var rather than digging into
+      // the supabase client's private `supabaseUrl` field — that field is
+      // safe in dev but can get renamed by minification in production
+      // builds, leaving the fetch URL as `undefined/functions/v1/...` and
+      // surfacing as a "Failed to fetch" TypeError.
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+      if (!supabaseUrl) throw new Error('Supabase URL not configured');
       const url = `${supabaseUrl}/functions/v1/ai-assistant`;
 
       const controller = new AbortController();
@@ -139,7 +145,15 @@ export default function AIAssistantBubble() {
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
-      const msg = err instanceof Error ? err.message : 'Something went wrong';
+      let msg = err instanceof Error ? err.message : 'Something went wrong';
+      // The browser surfaces network-level fetch failures as "Failed to fetch".
+      // That happens before any HTTP response — usually because the function
+      // isn't deployed, ANTHROPIC_API_KEY isn't set, or CORS preflight failed.
+      // Replace the unhelpful default with a setup-aware message.
+      if (msg === 'Failed to fetch') {
+        msg = "Couldn't reach the assistant service. Make sure the ai-assistant Edge Function is deployed and ANTHROPIC_API_KEY is set in Supabase secrets.";
+      }
+      console.error('[AIAssistant] Request failed:', err);
       setError(msg);
       // Drop the empty assistant placeholder we optimistically added.
       setMessages((prev) => prev.filter((m, i) => !(i === prev.length - 1 && m.role === 'assistant' && !m.content)));
