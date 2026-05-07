@@ -7,9 +7,27 @@ import { useAccount } from '../contexts/AccountContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { autocropSignature } from '../utils/signatureAutocrop';
 
+/**
+ * Build a human-readable label for a user record where `full_name` and/or
+ * `email` may be missing from the embedded join. Without this fallback the
+ * Reassign modal renders bare bullet rows like "• Admin" because both
+ * `users.full_name` and `users.email` are undefined for some account_users
+ * (typically because the public.users mirror row hasn't been created yet,
+ * or RLS blocks the join). Fallback chain: full_name → email → short ID.
+ */
+function userDisplayLabel(u?: { full_name?: string | null; email?: string | null; id?: string }): string {
+  if (!u) return 'Unknown user';
+  const name = u.full_name?.trim();
+  if (name) return name;
+  const email = u.email?.trim();
+  if (email) return email;
+  if (u.id) return `Unknown user (#${u.id.slice(0, 8)})`;
+  return 'Unknown user';
+}
+
 export default function UserSignatureManagement() {
   const { user, reloadUserProfile } = useAuth();
-  const { currentAccount } = useAccount();
+  const { currentAccount, accountRole } = useAccount();
   const { darkMode } = useDarkMode();
   const sigCanvas = useRef<SignatureCanvas>(null);
 
@@ -23,21 +41,29 @@ export default function UserSignatureManagement() {
   const [isLandscape, setIsLandscape] = useState(false);
   const [showFullscreenSignature, setShowFullscreenSignature] = useState(false);
 
-  // Agency owner features
+  // Team-signature features (agency owners + account admins).
+  // Reassign is still agency-owner-only; Delete is open to admins.
   const [allSignatures, setAllSignatures] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [reassignModal, setReassignModal] = useState<{signatureId: string; currentUserId: string; currentUserName: string} | null>(null);
   const [reassigning, setReassigning] = useState(false);
+  const [deletingSignatureId, setDeletingSignatureId] = useState<string | null>(null);
+
+  // Anyone who can administer the team can see the team-signatures panel.
+  // (Reassign button itself stays gated on isAgencyOwner inside the row.)
+  const canManageTeamSignatures = !!user?.isAgencyOwner || accountRole === 'account_admin';
 
   useEffect(() => {
     if (user && currentAccount) {
       loadSignature();
-      if (user.isAgencyOwner) {
+      if (canManageTeamSignatures) {
         loadAllSignatures();
-        loadAllUsers();
+        // Only load the team roster when we'll actually render the
+        // Reassign picker — that's still agency-owner-only.
+        if (user.isAgencyOwner) loadAllUsers();
       }
     }
-  }, [user, currentAccount]);
+  }, [user, currentAccount, canManageTeamSignatures]);
 
   // Device and orientation detection
   useEffect(() => {
@@ -108,7 +134,8 @@ export default function UserSignatureManagement() {
   }
 
   async function loadAllSignatures() {
-    if (!user?.isAgencyOwner || !currentAccount) return;
+    // Open to anyone who can manage team signatures (agency owners + admins).
+    if (!canManageTeamSignatures || !currentAccount) return;
 
     try {
       const { data, error } = await supabase
@@ -152,6 +179,41 @@ export default function UserSignatureManagement() {
       setAllUsers(data || []);
     } catch (err: any) {
       console.error('Error loading all users:', err);
+    }
+  }
+
+  /**
+   * Delete a signature record. Available to agency owners + account admins.
+   * Confirms via window.confirm so a stray click can't nuke a signature.
+   * After successful delete we reload the team-signatures list so the row
+   * vanishes immediately.
+   */
+  async function handleDeleteSignature(sig: { id: string; users?: { full_name?: string | null; email?: string | null } | null }) {
+    if (!canManageTeamSignatures) return;
+    const label = userDisplayLabel(sig.users ?? undefined);
+    if (!window.confirm(`Delete the signature for ${label}? This cannot be undone.`)) return;
+
+    setDeletingSignatureId(sig.id);
+    setError('');
+    setSuccess('');
+    try {
+      const { error: delErr } = await supabase
+        .from('user_signatures')
+        .delete()
+        .eq('id', sig.id);
+      if (delErr) throw delErr;
+
+      setSuccess('Signature deleted');
+      await loadAllSignatures();
+      // If the deleted signature belonged to the current user, refresh
+      // their own signature card too so the canvas state matches.
+      await loadSignature();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      console.error('Error deleting signature:', err);
+      setError(err.message || 'Failed to delete signature');
+    } finally {
+      setDeletingSignatureId(null);
     }
   }
 
@@ -473,7 +535,7 @@ export default function UserSignatureManagement() {
         </p>
       </div>
 
-      {user?.isAgencyOwner && allSignatures.length > 0 && (
+      {canManageTeamSignatures && allSignatures.length > 0 && (
         <div className="border-t pt-8 mt-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -482,55 +544,80 @@ export default function UserSignatureManagement() {
                 Manage Team Signatures
               </h3>
               <p className="text-sm text-gray-600 mt-1">
-                As agency owner, you can reassign signatures to different team members
+                {user?.isAgencyOwner
+                  ? 'Reassign signatures to different team members or delete unwanted ones.'
+                  : 'Delete unassigned or stale team signatures.'}
               </p>
             </div>
           </div>
 
           <div className="space-y-4">
-            {allSignatures.map((sig) => (
-              <div key={sig.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="font-semibold text-gray-900 dark:text-white">
-                        {sig.users?.full_name || 'Unknown User'}
-                      </h4>
-                      <span className="text-sm text-gray-500">
-                        ({sig.users?.email})
-                      </span>
+            {allSignatures.map((sig) => {
+              // Fallback chain handles incomplete user joins so the row never
+              // renders as a bare bullet — always something the admin can ID.
+              const displayName = userDisplayLabel(sig.users ?? undefined);
+              const showEmail = sig.users?.email && sig.users.email !== displayName;
+              const isDeleting = deletingSignatureId === sig.id;
+              return (
+                <div key={sig.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <h4 className="font-semibold text-gray-900 dark:text-white truncate">
+                          {displayName}
+                        </h4>
+                        {showEmail && (
+                          <span className="text-sm text-gray-500 truncate">
+                            ({sig.users.email})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div>
+                          <img
+                            src={sig.signature_data}
+                            alt={`Signature of ${sig.signature_name}`}
+                            className="max-w-[200px] h-auto border border-gray-200 rounded"
+                            style={{
+                              maxHeight: '80px',
+                              filter: darkMode ? 'invert(1) hue-rotate(180deg)' : 'none'
+                            }}
+                          />
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Created: {new Date(sig.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <img
-                          src={sig.signature_data}
-                          alt={`Signature of ${sig.signature_name}`}
-                          className="max-w-[200px] h-auto border border-gray-200 rounded"
-                          style={{
-                            maxHeight: '80px',
-                            filter: darkMode ? 'invert(1) hue-rotate(180deg)' : 'none'
-                          }}
-                        />
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Created: {new Date(sig.created_at).toLocaleDateString()}
-                      </div>
+                    <div className="flex flex-col gap-2 flex-shrink-0">
+                      {user?.isAgencyOwner && (
+                        <button
+                          onClick={() => setReassignModal({
+                            signatureId: sig.id,
+                            currentUserId: sig.user_id,
+                            currentUserName: displayName
+                          })}
+                          disabled={isDeleting}
+                          className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 whitespace-nowrap"
+                        >
+                          <UserCog className="w-4 h-4" />
+                          Reassign
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteSignature(sig)}
+                        disabled={isDeleting}
+                        title="Delete this signature"
+                        className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {isDeleting ? 'Deleting…' : 'Delete'}
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setReassignModal({
-                      signatureId: sig.id,
-                      currentUserId: sig.user_id,
-                      currentUserName: sig.users?.full_name || 'Unknown User'
-                    })}
-                    className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                  >
-                    <UserCog className="w-4 h-4" />
-                    Reassign
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -631,21 +718,36 @@ export default function UserSignatureManagement() {
             <div className="space-y-3 max-h-60 overflow-y-auto mb-6">
               {allUsers
                 .filter(u => u.user_id !== reassignModal.currentUserId)
-                .map((u) => (
-                  <button
-                    key={u.user_id}
-                    onClick={() => handleReassignSignature(u.user_id)}
-                    disabled={reassigning}
-                    className="w-full text-left px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <div className="font-medium text-gray-900 dark:text-white">
-                      {u.users?.full_name}
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {u.users?.email} • {u.role === 'account_admin' ? 'Admin' : 'User'}
-                    </div>
-                  </button>
-                ))}
+                .map((u) => {
+                  // Defensive labelling: when the embedded `users` row is
+                  // missing fields (or missing entirely), the previous code
+                  // rendered a bare "• Admin" line. Now we degrade
+                  // gracefully through full_name → email → short ID.
+                  const primary = userDisplayLabel(u.users ?? { id: u.user_id });
+                  const role = u.role === 'account_admin' ? 'Admin' : 'User';
+                  // Only show email on the secondary line if it's not
+                  // already the primary label (avoids "alice@x.com /
+                  // alice@x.com • Admin" duplication).
+                  const email = u.users?.email?.trim();
+                  const secondary = email && email !== primary
+                    ? `${email} • ${role}`
+                    : role;
+                  return (
+                    <button
+                      key={u.user_id}
+                      onClick={() => handleReassignSignature(u.user_id)}
+                      disabled={reassigning}
+                      className="w-full text-left px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div className="font-medium text-gray-900 dark:text-white">
+                        {primary}
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {secondary}
+                      </div>
+                    </button>
+                  );
+                })}
             </div>
 
             <div className="flex gap-3">
