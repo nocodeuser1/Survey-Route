@@ -278,6 +278,16 @@ export function calculateDayRoute(
   const driveTimeHome = distanceMatrix.durations[sequence[sequence.length - 1]][homeIndex] || 0;
   totalMiles += driveHome;
   totalDriveTime += driveTimeHome;
+
+  // Capture last-facility departure BEFORE we add the drive-home time. The
+  // previous code set both `endTime` and `lastFacilityDepartureTime` to the
+  // post-drive `currentTime`, which made `lastFacilityDepartureTime` actually
+  // mean "arrival at home" — and the UI's day summary, which reads that
+  // field, displayed the wrong time. Now: lastFacilityDepartureTime = when
+  // you leave the final facility; endTime = when you're back at home base
+  // (after the return drive). The return-by-time constraint still uses
+  // endTime so "home by 4pm" actually means home, with drive included.
+  const lastFacilityDepartureTime = currentTime;
   currentTime = addMinutesToTime(currentTime, driveTimeHome);
 
   segments.push({
@@ -299,7 +309,7 @@ export function calculateDayRoute(
     totalTime: totalDriveTime + totalVisitTime + (lunchAdded ? lunchBreakMinutes : 0),
     startTime,
     endTime: currentTime,
-    lastFacilityDepartureTime: currentTime,
+    lastFacilityDepartureTime,
     segments,
   };
 }

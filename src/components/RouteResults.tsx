@@ -1405,7 +1405,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <Home className="inline w-4 h-4 mr-1" />
                         Return to Home Base By
                       </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
                       <div className="relative mt-2">
                         <input
                           type="time"
@@ -1991,13 +1991,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <div className="mt-2 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {(() => {
-                      // Get departure time from last facility (for both display and sunset calculation)
+                      // Get departure time from last facility (for sunset calculation)
+                      // and the home-base arrival time (for the displayed end of day —
+                      // includes the return drive). Two distinct values now: sunset
+                      // is keyed off "leaving last facility" because that's when the
+                      // crew is still in the field. The day-summary line shows the
+                      // home-arrival time so "Return by 4 PM" actually matches what
+                      // the user reads on the bar.
                       const lastDepartureTime = route.lastFacilityDepartureTime || route.endTime || '';
+                      const homeArrivalTime = route.endTime || lastDepartureTime;
 
                       return (
                         <>
-                          <div className="text-sm text-blue-100">
-                            {formatTimeTo12Hour(route.startTime)} - {formatTimeTo12Hour(lastDepartureTime)}
+                          <div className="text-sm text-blue-100" title={`Leave home ${formatTimeTo12Hour(route.startTime)} → leave last facility ${formatTimeTo12Hour(lastDepartureTime)} → home by ${formatTimeTo12Hour(homeArrivalTime)}`}>
+                            {formatTimeTo12Hour(route.startTime)} – home by {formatTimeTo12Hour(homeArrivalTime)}
                           </div>
                           {(() => {
 
@@ -2562,7 +2569,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <Home className="inline w-4 h-4 mr-1" />
                       Return to Home Base By
                     </label>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ensures each day's route ends before this time. Leave empty for no limit.</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
                     <div className="relative mt-2">
                       <input
                         type="time"

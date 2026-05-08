@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Zap } from 'lucide-react';
+import { Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Zap, Home, Coffee, Navigation, X as XIcon } from 'lucide-react';
 import { supabase, UserSettings } from '../lib/supabase';
 import { convertTo12Hour } from '../utils/timeFormat';
 
@@ -82,6 +82,12 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
         team_count: settings.team_count,
         inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
         plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
+        // Time-budget fields — parity with the Update Route Settings modal so
+        // editing in either surface persists to the same row and both UIs
+        // reflect the same value on next mount.
+        lunch_break_minutes: settings.lunch_break_minutes ?? 0,
+        max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
+        return_by_time: settings.return_by_time || null,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'account_id',
@@ -416,6 +422,106 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
                 disabled={!settings.use_hours_constraint}
                 className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 transition-colors duration-200"
               />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Time-budget fields — kept in sync with the Update Route Settings
+          modal (RouteResults.tsx). Editing either surface writes the same
+          user_settings row, so the values are identical on next mount. */}
+      <div className="border-t dark:border-gray-700 pt-6">
+        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-4">Day Time Budget</h4>
+
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                <Coffee className="inline w-4 h-4 mr-1" />
+                Lunch Break (minutes)
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Inserted near the midpoint of each day. 0 = no lunch break.</p>
+              <input
+                type="number"
+                min="0"
+                max="180"
+                step="5"
+                value={settings.lunch_break_minutes ?? 0}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    lunch_break_minutes: parseInt(e.target.value) || 0,
+                  })
+                }
+                className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                <Navigation className="inline w-4 h-4 mr-1" />
+                Max Drive Time per Day (minutes)
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Caps total driving time per day, including the return drive home. 0 = no cap.</p>
+              <div className="relative mt-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="720"
+                  step="15"
+                  value={settings.max_drive_time_minutes ?? 0}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      max_drive_time_minutes: parseInt(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full px-4 py-2 pr-8 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                />
+                {(settings.max_drive_time_minutes ?? 0) > 0 && (
+                  <button
+                    onClick={() => setSettings({ ...settings, max_drive_time_minutes: 0 })}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    title="Clear"
+                  >
+                    <XIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                <Home className="inline w-4 h-4 mr-1" />
+                Return to Home Base By
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
+              <div className="relative mt-2">
+                <input
+                  type="time"
+                  value={settings.return_by_time ?? ''}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      return_by_time: e.target.value || '',
+                    })
+                  }
+                  className="w-full px-4 py-2 pr-8 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                />
+                {(settings.return_by_time ?? '') !== '' && (
+                  <button
+                    onClick={() => setSettings({ ...settings, return_by_time: '' })}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    title="Clear"
+                  >
+                    <XIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
