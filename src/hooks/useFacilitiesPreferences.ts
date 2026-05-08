@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import type { CustomRule } from '../utils/customFilters';
 
 export interface FacilitiesPreferences {
   sort_column: string | null;
@@ -10,6 +11,10 @@ export interface FacilitiesPreferences {
   status_filter: string;
   spcc_plan_filter: string;
   show_sold_facilities: boolean;
+  /** User-built rule list applied as AND on top of the dropdown's preset
+   *  filters. Stored as JSON inside facilities_ui_preferences (no schema
+   *  change needed). See src/utils/customFilters.ts for the rule shape. */
+  custom_filter_rules: CustomRule[];
 }
 
 const DEFAULT_PREFS: FacilitiesPreferences = {
@@ -21,6 +26,7 @@ const DEFAULT_PREFS: FacilitiesPreferences = {
   status_filter: 'all',
   spcc_plan_filter: 'all',
   show_sold_facilities: false,
+  custom_filter_rules: [],
 };
 
 const CACHE_KEY = (accountId: string) => `facilities_prefs_${accountId}`;

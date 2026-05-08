@@ -12,6 +12,12 @@ import SearchInput from './SearchInput';
 import InspectionReportExport from './InspectionReportExport';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
+import CustomFilterBuilder from './CustomFilterBuilder';
+import {
+  evaluateAllRules,
+  describeRule,
+  type CustomRule,
+} from '../utils/customFilters';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import RecertificationStatusField from './RecertificationStatusField';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
@@ -429,6 +435,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
+  // Custom rule-based filters from the Filters dropdown. Hydrated from
+  // user preferences (JSON-serializable). See src/utils/customFilters.ts.
+  const [customFilterRules, setCustomFilterRules] = useState<CustomRule[]>(
+    Array.isArray(facPrefs.custom_filter_rules) ? facPrefs.custom_filter_rules : []
+  );
   const [isImporting, setIsImporting] = useState(false);
   const [importResults, setImportResults] = useState<{
     updatedCount: number;
@@ -696,7 +707,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [initialFacilityToEdit]);
 
   // Determine if any filter is active (for indicator badge)
-  const hasActiveFilter = statusFilters.length > 0 || selectedReportType !== 'all' || showSoldFacilities || spccPlanFilter !== 'all';
+  const hasActiveFilter =
+    statusFilters.length > 0 ||
+    selectedReportType !== 'all' ||
+    showSoldFacilities ||
+    spccPlanFilter !== 'all' ||
+    customFilterRules.length > 0;
 
   const toggleStatusFilter = (value: string) => {
     setStatusFilters(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
@@ -782,8 +798,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       status_filter: statusFilters.length > 0 ? JSON.stringify(statusFilters) : 'all',
       spcc_plan_filter: spccPlanFilter,
       show_sold_facilities: showSoldFacilities,
+      custom_filter_rules: customFilterRules,
     });
-  }, [searchQuery, statusFilters, spccPlanFilter, showSoldFacilities]);
+  }, [searchQuery, statusFilters, spccPlanFilter, showSoldFacilities, customFilterRules]);
 
   // Close edit modal on Escape key
   useEffect(() => {
@@ -1036,6 +1053,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (spccPlanFilter !== 'all' && spccMode === 'plan') {
         const planStatus = getFacilityPlanStatus(facility);
         if (planStatus !== spccPlanFilter) return false;
+      }
+
+      // Custom rules (AND-combined). Empty list short-circuits inside the
+      // evaluator. Any rule with an incomplete value is treated as
+      // pass-through there, so partially-built rules don't accidentally
+      // hide every row while the user is editing.
+      if (customFilterRules.length > 0) {
+        if (!evaluateAllRules(facility, customFilterRules)) return false;
       }
 
       return matchesSearch && matchesStatus && matchesReportType;
@@ -3272,6 +3297,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <span className="text-sm text-gray-400 dark:text-gray-500 font-normal">{filteredFacilities.length}/{facilities.length}</span>
                 )}
               </div>
+              {/* Active custom-filter chips — visible even when the Filters
+                  dropdown is closed so the user can see what's active and
+                  remove rules one-click. Each chip is the rule's
+                  human-readable summary; the X removes that rule. */}
+              {customFilterRules.length > 0 && (
+                <div className="hidden sm:flex items-center gap-1.5 flex-wrap ml-1">
+                  {customFilterRules.map((r) => {
+                    const desc = describeRule(r);
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() =>
+                          setCustomFilterRules((prev) =>
+                            prev.filter((x) => x.id !== r.id)
+                          )
+                        }
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors whitespace-nowrap"
+                        title="Remove this filter"
+                      >
+                        {desc ?? '(incomplete filter)'}
+                        <X className="w-3 h-3" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {/* Inline stat badges - plan mode only */}
               {spccMode === 'plan' && !isLoading && (() => {
                 let oc = 0;
@@ -3378,7 +3430,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         className="fixed inset-0 bg-black/50 sm:bg-transparent z-40"
                         onClick={() => setShowFilters(false)}
                       />
-                      <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-0 sm:top-auto w-auto sm:w-64 mt-0 sm:mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3">
+                      <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3">
+                        {/* Custom-rule builder. Stays at the top of the
+                            dropdown — it's the most expressive control and
+                            the one the user will reach for when the canned
+                            options below don't combine. */}
+                        <CustomFilterBuilder
+                          rules={customFilterRules}
+                          onChange={setCustomFilterRules}
+                        />
+                        <div className="h-px bg-gray-200 dark:bg-gray-600" />
                         {/* Status — multi-select checkboxes */}
                         <div className="flex flex-col gap-1.5">
                           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</p>
