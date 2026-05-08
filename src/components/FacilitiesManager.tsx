@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
 import SurveyTypeSelector from './SurveyTypeSelector';
@@ -1729,6 +1729,47 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       setError(`Failed to save facilities: ${err.message || JSON.stringify(err)}`);
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  // Click-to-copy state for the bulk Copy Names button. Pulses a brief
+  // "Copied!" checkmark replacing the icon for 1.5s so the user gets
+  // visible feedback that the names landed on the clipboard.
+  const [namesCopied, setNamesCopied] = useState(false);
+
+  const handleCopySelectedNames = async () => {
+    if (selectedFacilityIds.size === 0) return;
+    // Preserve the user's current sort order in the table — copying in the
+    // same order they see makes paste-into-spreadsheet workflows obvious.
+    // filteredFacilities is already sorted; just keep selected rows.
+    const names = filteredFacilities
+      .filter((f) => selectedFacilityIds.has(f.id))
+      .map((f) => f.name)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(names);
+      setNamesCopied(true);
+      setTimeout(() => setNamesCopied(false), 1500);
+    } catch (err) {
+      console.error('Failed to copy facility names:', err);
+      // Fallback: legacy execCommand path for browsers blocking the async
+      // Clipboard API in non-secure contexts (rare on the deployed site,
+      // common on http://localhost without HTTPS).
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = names;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setNamesCopied(true);
+        setTimeout(() => setNamesCopied(false), 1500);
+      } catch (fallbackErr) {
+        console.error('Fallback copy failed:', fallbackErr);
+        alert('Could not copy facility names — clipboard access blocked.');
+      }
     }
   };
 
@@ -3742,6 +3783,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         <span className="hidden md:inline">Route</span>
                       </button>
                     )}
+
+                    {/* Copy Names — newline-separated. Pulses a check on
+                        success so the user knows the clipboard updated. */}
+                    <button
+                      onClick={handleCopySelectedNames}
+                      className={`flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg active:scale-95 transition-all text-xs font-medium ${
+                        namesCopied
+                          ? 'bg-emerald-500/15 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-violet-500/10 dark:bg-violet-400/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 dark:hover:bg-violet-400/20'
+                      }`}
+                      title="Copy selected facility names (one per line)"
+                    >
+                      {namesCopied ? (
+                        <Check className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                      ) : (
+                        <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                      )}
+                      <span className="hidden md:inline">
+                        {namesCopied ? 'Copied' : 'Copy Names'}
+                      </span>
+                    </button>
 
                     {/* Delete */}
                     <button
