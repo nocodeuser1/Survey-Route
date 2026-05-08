@@ -22,6 +22,7 @@ import {
   Link as LinkIcon,
   LocateFixed,
   ShieldCheck,
+  ExternalLink,
   Calendar,
   Droplets,
   Camera,
@@ -1815,6 +1816,38 @@ export default function FacilityDetailModal({
 
     return (
       <div className="space-y-6">
+        {/* Prominent shortcut to the full SPCC Plan Detail Modal. The header
+            badge already opens it, but it's small and easy to miss when the
+            user is focused on the tab content. This button is the one
+            obvious affordance for "go deeper" once you've landed on this
+            tab. Only rendered when the parent wired up onViewSPCCPlan. */}
+        {onViewSPCCPlan && (
+          <button
+            type="button"
+            onClick={onViewSPCCPlan}
+            className="w-full flex items-center justify-between gap-3 px-5 py-4 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 transition-colors group"
+            title="Open the full SPCC Plan Details modal (per-berm plans, well coverage, recertification)"
+          >
+            <span className="flex items-center gap-3 min-w-0">
+              <span className="w-10 h-10 rounded-lg flex items-center justify-center bg-blue-600 text-white flex-shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </span>
+              <span className="text-left min-w-0">
+                <span className="block text-sm font-semibold text-blue-900 dark:text-blue-100">
+                  Open SPCC Plan Details
+                </span>
+                <span className="block text-xs text-blue-700/80 dark:text-blue-300/80 truncate">
+                  Per-berm plans, well coverage, photos, recertification
+                </span>
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-blue-700 dark:text-blue-300 flex-shrink-0 whitespace-nowrap">
+              Show Details
+              <ExternalLink className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+            </span>
+          </button>
+        )}
+
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
           <div className="flex items-center gap-3 mb-4">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`}>

@@ -124,6 +124,13 @@ export interface SPCCPlan {
   workflow_status_overridden: boolean;
   /** Array of well ordinals (1..6) on the parent facility this plan covers. */
   assigned_well_indices: number[];
+  /** Per-berm "photos taken" flag. Mirrored up to facilities.photos_taken
+   *  (TRUE only when every berm has it set). See migration
+   *  20260508000000_per_berm_photos.sql. */
+  photos_taken: boolean;
+  /** Per-berm field visit date — the day the photos for this berm were
+   *  taken. Mirrored to facilities.field_visit_date as MIN across berms. */
+  field_visit_date: string | null;
   // Per-berm recertification (5-year cycle from pe_stamp_date). See migration
   // 20260430010000_per_berm_recertification.sql. The mirror trigger rolls
   // these up onto facilities.* as a worst-case summary; edits happen here.

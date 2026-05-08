@@ -10,6 +10,8 @@ import {
   Droplet,
   AlertTriangle,
   Edit2,
+  Camera,
+  CheckCircle,
 } from 'lucide-react';
 import { supabase, type Facility, type SPCCPlan } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
@@ -21,12 +23,42 @@ import RecertificationPagePickerModal from './RecertificationPagePickerModal';
 import { useAuth } from '../contexts/AuthContext';
 import { FilePlus2, RefreshCw } from 'lucide-react';
 
+/** Parse mm/dd/yy or mm/dd/yyyy → ISO YYYY-MM-DD. Mirrors the helper used in
+ *  SPCCPlanDetailModal so the per-berm and facility-level visit-date editors
+ *  accept the exact same formats. */
+function parseDateInput(input: string): string | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+  if (!match) return null;
+  const month = parseInt(match[1], 10);
+  const day = parseInt(match[2], 10);
+  let year = parseInt(match[3], 10);
+  if (year < 100) year += 2000;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** ISO YYYY-MM-DD → mm/dd/yy for editing display. */
+function formatDateMmddyy(iso: string): string {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return iso;
+  const year = parseInt(match[1], 10) % 100;
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
+}
+
 interface BermPlanCardProps {
   plan: SPCCPlan;
   facility: Facility;
   darkMode: boolean;
   /** True when this is the only berm — removes the "Remove" affordance. */
   isOnlyBerm: boolean;
+  /** When true, render the per-berm Photos Taken toggle. We only show it on
+   *  multi-berm facilities; single-berm facilities still have the
+   *  facility-level toggle in FieldOperationsSection (which edits berm 1's
+   *  row under the hood via the mirror trigger logic + an explicit write). */
+  showPhotosToggle?: boolean;
   /** Refetch plans from DB after any mutation. */
   onPlanChange: () => void;
   /** Open the well-assignment modal for editing this berm's coverage. */
@@ -52,6 +84,7 @@ export default function BermPlanCard({
   facility,
   darkMode,
   isOnlyBerm,
+  showPhotosToggle = false,
   onPlanChange,
   onOpenWellAssignment,
   onRemove,
@@ -64,6 +97,16 @@ export default function BermPlanCard({
   const [editingPeDate, setEditingPeDate] = useState(false);
   const [peDateDraft, setPeDateDraft] = useState(plan.pe_stamp_date || '');
   const [savingPeDate, setSavingPeDate] = useState(false);
+  // Per-berm photos toggle — optimistic local state, same pattern as the
+  // facility-level toggle in SPCCPlanDetailModal/FieldOperationsSection.
+  const [photosTaken, setPhotosTaken] = useState(plan.photos_taken);
+  const [visitDateInput, setVisitDateInput] = useState(
+    plan.field_visit_date ? formatDateMmddyy(plan.field_visit_date) : ''
+  );
+  useEffect(() => {
+    setPhotosTaken(plan.photos_taken);
+    setVisitDateInput(plan.field_visit_date ? formatDateMmddyy(plan.field_visit_date) : '');
+  }, [plan.photos_taken, plan.field_visit_date]);
   // Picker mode tracks whether we're in fresh "create" flow (gated on
   // decision='no_changes' + date) or "regenerate" flow (re-stamping a
   // previously-recertified berm to fix template/positioning issues).
@@ -131,6 +174,88 @@ export default function BermPlanCard({
       console.error('Error saving PE stamp date:', err);
     } finally {
       setSavingPeDate(false);
+    }
+  };
+
+  // --- Per-berm Photos Taken handlers --------------------------------------
+  // Same UX as the facility-level toggle: tapping "Mark Photos Taken" seeds
+  // today's date if the visit date is empty; toggling off leaves the date in
+  // place (it's still useful info) but flips the boolean. The visit date
+  // input commits on blur/Enter and auto-flips photosTaken to true.
+  const handleTogglePhotos = async () => {
+    const newVal = !photosTaken;
+    const today = new Date().toISOString().split('T')[0];
+    const existingIso =
+      plan.field_visit_date || (visitDateInput ? parseDateInput(visitDateInput) : null);
+    const seedDate = newVal && !existingIso ? today : null;
+
+    setPhotosTaken(newVal);
+    if (seedDate) setVisitDateInput(formatDateMmddyy(seedDate));
+
+    try {
+      const updateData: Record<string, any> = { photos_taken: newVal };
+      if (seedDate) updateData.field_visit_date = seedDate;
+      const { error } = await supabase
+        .from('spcc_plans')
+        .update(updateData)
+        .eq('id', plan.id);
+      if (error) throw error;
+      onPlanChange();
+    } catch (err) {
+      console.error('Error toggling per-berm photos_taken:', err);
+      // Revert on failure.
+      setPhotosTaken(!newVal);
+      if (seedDate) {
+        setVisitDateInput(plan.field_visit_date ? formatDateMmddyy(plan.field_visit_date) : '');
+      }
+    }
+  };
+
+  const commitVisitDate = async () => {
+    const trimmed = visitDateInput.trim();
+    const parsedIso = trimmed ? parseDateInput(trimmed) : null;
+
+    if (trimmed === '') {
+      if (!plan.field_visit_date) return;
+      try {
+        const { error } = await supabase
+          .from('spcc_plans')
+          .update({ field_visit_date: null })
+          .eq('id', plan.id);
+        if (error) throw error;
+        onPlanChange();
+      } catch (err) {
+        console.error('Error clearing per-berm visit date:', err);
+        setVisitDateInput(plan.field_visit_date ? formatDateMmddyy(plan.field_visit_date) : '');
+      }
+      return;
+    }
+
+    if (!parsedIso) return; // invalid input — leave the value, the red border signals it
+
+    if (parsedIso === plan.field_visit_date && photosTaken) {
+      setVisitDateInput(formatDateMmddyy(parsedIso));
+      return;
+    }
+
+    setVisitDateInput(formatDateMmddyy(parsedIso));
+    const wasPhotosOn = photosTaken;
+    if (!wasPhotosOn) setPhotosTaken(true);
+
+    const updateData: Record<string, any> = { field_visit_date: parsedIso };
+    if (!wasPhotosOn) updateData.photos_taken = true;
+
+    try {
+      const { error } = await supabase
+        .from('spcc_plans')
+        .update(updateData)
+        .eq('id', plan.id);
+      if (error) throw error;
+      onPlanChange();
+    } catch (err) {
+      console.error('Error saving per-berm visit date:', err);
+      setVisitDateInput(plan.field_visit_date ? formatDateMmddyy(plan.field_visit_date) : '');
+      setPhotosTaken(plan.photos_taken);
     }
   };
 
@@ -461,6 +586,90 @@ export default function BermPlanCard({
             onClose={() => setPickerMode(null)}
             onComplete={onPlanChange}
           />
+        )}
+
+        {/* Per-berm Photos Taken — only on multi-berm facilities. Single-berm
+            facilities keep the facility-level toggle in FieldOperationsSection,
+            which writes to the (only) plan row implicitly. */}
+        {showPhotosToggle && (
+          <div className="space-y-2">
+            <button
+              onClick={handleTogglePhotos}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
+                photosTaken
+                  ? darkMode
+                    ? 'border-green-600 bg-green-900/30'
+                    : 'border-green-500 bg-green-50'
+                  : darkMode
+                    ? 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+              }`}
+            >
+              {photosTaken ? (
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              ) : (
+                <Camera className="w-5 h-5 text-gray-400 flex-shrink-0" />
+              )}
+              <div className="flex-1 text-left">
+                <div
+                  className={`text-sm font-semibold ${
+                    photosTaken
+                      ? darkMode
+                        ? 'text-green-400'
+                        : 'text-green-700'
+                      : darkMode
+                        ? 'text-gray-300'
+                        : 'text-gray-700'
+                  }`}
+                >
+                  {photosTaken
+                    ? `Photos Taken — ${getBermShortLabel(plan)}`
+                    : `Mark Photos Taken — ${getBermShortLabel(plan)}`}
+                </div>
+                {photosTaken && (() => {
+                  const iso = parseDateInput(visitDateInput) || plan.field_visit_date;
+                  if (!iso) return null;
+                  return (
+                    <div
+                      className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}
+                    >
+                      Visited: {formatDate(iso)}
+                    </div>
+                  );
+                })()}
+              </div>
+            </button>
+
+            <div className="flex items-center justify-between gap-3 px-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <Calendar
+                  className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}
+                />
+                <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Visit Date
+                </span>
+              </div>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="mm/dd/yy"
+                value={visitDateInput}
+                onChange={(e) => setVisitDateInput(e.target.value)}
+                onBlur={commitVisitDate}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                className={`text-sm font-medium px-2 py-1 rounded border w-28 ${
+                  darkMode
+                    ? 'bg-gray-700 border-gray-600 text-white'
+                    : 'bg-white border-gray-300 text-gray-900'
+                } ${visitDateInput && !parseDateInput(visitDateInput) ? 'border-red-400' : ''}`}
+              />
+            </div>
+          </div>
         )}
 
         {/* Wells coverage */}

@@ -24,7 +24,22 @@ const statusIconMap = {
   file: FileText,
 };
 
-function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { facility: Facility; darkMode: boolean; onFacilitiesChange: () => void }) {
+function FieldOperationsSection({
+  facility,
+  singlePlan,
+  darkMode,
+  onFacilitiesChange,
+}: {
+  facility: Facility;
+  /** When the facility has exactly one berm, photos_taken / field_visit_date
+   *  are written to THIS plan row instead of the facility row. The mirror
+   *  trigger then reflects the value back onto facilities.* — keeping the
+   *  source of truth on the per-berm row that the per-berm UI also edits.
+   *  Null only on the brief race where plans haven't loaded yet. */
+  singlePlan: SPCCPlan | null;
+  darkMode: boolean;
+  onFacilitiesChange: () => void;
+}) {
   // Optimistic local state - updates instantly on tap
   const [photosTaken, setPhotosTaken] = useState(facility.photos_taken || false);
   // Visit date is edited as free-form text in mm/dd/yy or mm/dd/yyyy format,
@@ -58,14 +73,16 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
     setPhotosTaken(newVal);
     if (seedDate) setVisitDateInput(formatDateDisplay(seedDate));
 
-    // Save to DB in background
+    // Save to DB in background. When a single plan row exists, write to it
+    // (the trigger mirrors back to facility.*); otherwise fall back to
+    // updating the facility directly to avoid losing the toggle on a
+    // not-yet-backfilled facility.
     try {
       const updateData: any = { photos_taken: newVal };
       if (seedDate) updateData.field_visit_date = seedDate;
-      const { error } = await supabase
-        .from('facilities')
-        .update(updateData)
-        .eq('id', facility.id);
+      const { error } = singlePlan
+        ? await supabase.from('spcc_plans').update(updateData).eq('id', singlePlan.id)
+        : await supabase.from('facilities').update(updateData).eq('id', facility.id);
       if (error) throw error;
       onFacilitiesChange();
     } catch (err) {
@@ -91,10 +108,15 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
     if (trimmed === '') {
       if (!facility.field_visit_date) return; // nothing to save
       try {
-        const { error } = await supabase
-          .from('facilities')
-          .update({ field_visit_date: null })
-          .eq('id', facility.id);
+        const { error } = singlePlan
+          ? await supabase
+              .from('spcc_plans')
+              .update({ field_visit_date: null })
+              .eq('id', singlePlan.id)
+          : await supabase
+              .from('facilities')
+              .update({ field_visit_date: null })
+              .eq('id', facility.id);
         if (error) throw error;
         onFacilitiesChange();
       } catch (err) {
@@ -124,10 +146,9 @@ function FieldOperationsSection({ facility, darkMode, onFacilitiesChange }: { fa
     if (!wasPhotosOn) updateData.photos_taken = true;
 
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update(updateData)
-        .eq('id', facility.id);
+      const { error } = singlePlan
+        ? await supabase.from('spcc_plans').update(updateData).eq('id', singlePlan.id)
+        : await supabase.from('facilities').update(updateData).eq('id', facility.id);
       if (error) throw error;
       onFacilitiesChange();
     } catch (err) {
@@ -1180,12 +1201,24 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
             </div>
           )}
 
-          {/* Field Operations */}
-          <FieldOperationsSection
-            facility={facility}
-            darkMode={darkMode}
-            onFacilitiesChange={onFacilitiesChange}
-          />
+          {/* Field Operations — facility-level Photos Taken / Visit Date.
+              Only rendered when there's a single berm. Multi-berm facilities
+              hide this section entirely; each BermPlanCard below renders its
+              own per-berm toggle so you can mark photos taken for one berm
+              without falsely implying both are done. The other rows
+              (estimated oil) live on the facility regardless of berm count
+              so we still surface them via a slim variant. */}
+          {sortedPlans.length <= 1 && (
+            <FieldOperationsSection
+              facility={facility}
+              singlePlan={singlePlan}
+              darkMode={darkMode}
+              onFacilitiesChange={() => {
+                refetchPlans();
+                onFacilitiesChange();
+              }}
+            />
+          )}
 
           {/* Berm Measurements */}
           {(facility.berm_depth_inches != null || facility.berm_length != null || facility.berm_width != null) && (
@@ -1365,6 +1398,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                       facility={facility}
                       darkMode={darkMode}
                       isOnlyBerm={sortedPlans.length === 1}
+                      // Multi-berm facilities: each card shows its own Photos
+                      // Taken toggle. Single-berm facilities keep the
+                      // facility-level toggle in FieldOperationsSection.
+                      showPhotosToggle={sortedPlans.length >= 2}
                       onPlanChange={() => {
                         refetchPlans();
                         onFacilitiesChange();
