@@ -4020,8 +4020,9 @@ function App() {
           their account-wide facility data in natural language ("how many
           SPCCs are due this year"). Backed by the `ai-assistant` Edge
           Function which loads a snapshot + calls Claude with an
-          SPCC-aware system prompt. */}
-      <AIAssistantBubble />
+          SPCC-aware system prompt. Hidden on fullscreen map to keep the
+          map view uncluttered. */}
+      {!isFullScreenMap && <AIAssistantBubble />}
     </div>
   );
 }

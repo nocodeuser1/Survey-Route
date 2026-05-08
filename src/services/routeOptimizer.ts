@@ -1,5 +1,5 @@
 import { DistanceMatrix } from './osrm';
-import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, GeoPoint, Cluster } from '../utils/geoClustering';
+import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, validateGeographicCohesion, MAX_MERGE_CENTROID_DISTANCE_MILES, GeoPoint, Cluster } from '../utils/geoClustering';
 
 export interface FacilityWithIndex {
   index: number;
@@ -406,8 +406,17 @@ function mergeAdjacentClusters(
       const avgDist2 = getAvgIntraDistance(candidateCluster);
       const avgIntraDistance = (avgDist1 + avgDist2) / 2;
 
-      // Clusters are adjacent if centroid distance is within 2x average intra-cluster distance
-      if (centroidDistance > avgIntraDistance * 2 && avgIntraDistance > 0) continue;
+      // Hard ceiling first — never merge two clusters whose centroids are
+      // far apart, even if both are size-1 (the previous logic skipped the
+      // distance check entirely when avgIntraDistance was 0, so two
+      // single-point clusters could fuse regardless of distance —
+      // this was the root cause of the "Day 2 split across the map" bug).
+      if (centroidDistance > MAX_MERGE_CENTROID_DISTANCE_MILES) continue;
+      // Relative check: clusters are adjacent only if centroid distance is
+      // within 2x average intra-cluster distance. Skipped when both
+      // clusters are size-1 because the relative measure is undefined; the
+      // hard ceiling above already gates that case.
+      if (avgIntraDistance > 0 && centroidDistance > avgIntraDistance * 2) continue;
 
       // Estimate if combined route would fit time constraint
       if (constraints.useHoursConstraint && constraints.maxHoursPerDay) {
@@ -520,6 +529,31 @@ export function optimizeRoutes(
 
   // Merge small adjacent clusters before day building
   clusters = mergeAdjacentClusters(clusters, maxFacilitiesPerDay, constraints, homeBase);
+
+  // Belt-and-suspenders: re-run cohesion validation AFTER merging. Even
+  // with the merge gates above, edge cases can still produce a bimodal
+  // cluster (e.g. when two ~adjacent clusters both happen to have
+  // legitimate avgIntraDistance values, then merging them produces a
+  // cluster whose own pairwise span exceeds the cohesion ceiling).
+  // Re-running the validator catches those before they become a day.
+  clusters = validateGeographicCohesion(clusters, homeBase);
+
+  // Re-sort by distance from home so day numbering stays "closer first".
+  clusters.sort((a, b) => {
+    const distA = haversineDistance(
+      homeBase.latitude,
+      homeBase.longitude,
+      a.centroid.latitude,
+      a.centroid.longitude
+    );
+    const distB = haversineDistance(
+      homeBase.latitude,
+      homeBase.longitude,
+      b.centroid.latitude,
+      b.centroid.longitude
+    );
+    return distA - distB;
+  });
 
   let dayNumber = 1;
 

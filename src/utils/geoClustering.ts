@@ -246,7 +246,46 @@ export function balanceClusters(
   return validateGeographicCohesion(newClusters, homeBase);
 }
 
-function validateGeographicCohesion(
+/**
+ * Hard ceiling on the distance between any two points in the same day's
+ * cluster. ~40 miles is roughly an hour of driving on rural roads — past
+ * that, the day is almost certainly bimodal and the user is paying drive
+ * time to bounce between two areas that should be different days.
+ *
+ * Why an ABSOLUTE cap and not just relative checks: bimodal clusters with
+ * the centroid sitting between the two subgroups defeat both the
+ * max-from-centroid (all points equally far) and bearing-span checks
+ * (subgroups can be in similar directions from home base). An absolute
+ * pairwise ceiling catches that case directly.
+ */
+const MAX_INTRA_CLUSTER_PAIRWISE_MILES = 40;
+
+/**
+ * Hard ceiling on how far apart two cluster centroids can be for the
+ * mergeAdjacentClusters step to fuse them. Same intuition as above —
+ * we don't want a single-point cluster in Watonga merging with a
+ * single-point cluster in Chickasha just because the relative
+ * intra-cluster distance check is undefined for size-1 clusters.
+ */
+export const MAX_MERGE_CENTROID_DISTANCE_MILES = 30;
+
+function maxPairwiseDistance(points: GeoPoint[]): number {
+  let max = 0;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const d = haversineDistance(
+        points[i].latitude,
+        points[i].longitude,
+        points[j].latitude,
+        points[j].longitude
+      );
+      if (d > max) max = d;
+    }
+  }
+  return max;
+}
+
+export function validateGeographicCohesion(
   clusters: Cluster[],
   homeBase: GeoPoint
 ): Cluster[] {
@@ -256,6 +295,26 @@ function validateGeographicCohesion(
   for (const cluster of clusters) {
     if (cluster.points.length <= 1) {
       validatedClusters.push(cluster);
+      continue;
+    }
+
+    // Bimodal-distribution guard: max pairwise distance between any two
+    // points in the cluster. The centroid-distance and bearing checks
+    // below both miss the "two tight subgroups equidistant from the
+    // centroid" failure mode (every point looks ~equally far from the
+    // centroid, every bearing looks similar). This catches it directly.
+    const maxPairwise = maxPairwiseDistance(cluster.points);
+    if (maxPairwise > MAX_INTRA_CLUSTER_PAIRWISE_MILES) {
+      // Re-cluster into 2 sub-groups via k-means. High tightness keeps
+      // each sub-group tight. Recursing into validateGeographicCohesion
+      // handles the rare case where the cluster was actually trimodal —
+      // each new sub-cluster gets re-checked.
+      const split = kMeansClustering(cluster.points, 2, 30, 0.85);
+      const reValidated = validateGeographicCohesion(
+        split.map((sc, idx) => ({ ...sc, id: cluster.id + idx * 0.1 })),
+        homeBase
+      );
+      validatedClusters.push(...reValidated);
       continue;
     }
 
