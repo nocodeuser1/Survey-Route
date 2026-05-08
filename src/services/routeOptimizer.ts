@@ -315,6 +315,17 @@ export function calculateDayRoute(
 }
 
 export function recalculateRouteTimes(route: DailyRoute): DailyRoute {
+  // Empty-day placeholders (from a reassign that left a day with no
+  // facilities) have `segments: []`. Bailing here prevents the crash at
+  // `segments[segments.length - 1].arrivalTime` further down — that
+  // unguarded access was killing route loads for users whose saved
+  // routes contained an empty placeholder day. Empty placeholders
+  // already carry sane default times (startTime === endTime ===
+  // settings.start_time) so there's nothing to recalculate.
+  if (!route.segments || route.segments.length === 0) {
+    return route;
+  }
+
   // Recalculate times based on current visit durations without changing facility assignments
   const segments: RouteSegment[] = [];
   let totalVisitTime = 0;
