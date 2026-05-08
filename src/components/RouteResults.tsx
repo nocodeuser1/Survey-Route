@@ -117,15 +117,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     const updatedRoutes = result.routes.map(route => {
       const newStartTime = startTimes[route.day] || settings?.start_time || '08:00';
-      if (newStartTime === route.startTime) return route;
 
-      // Recalculate all segment times from the new start time
+      // Empty placeholder day (from Add Day with nothing assigned yet) —
+      // just stamp the new start time and bail; segments are empty.
+      if (!route.segments || route.segments.length === 0) {
+        return { ...route, startTime: newStartTime, endTime: newStartTime, lastFacilityDepartureTime: newStartTime };
+      }
+
+      // ALWAYS recompute, even when newStartTime matches route.startTime.
+      // The old early-return left routes whose endTime / segment times had
+      // stale values (e.g. routes saved before the calculateDayRoute fix
+      // for lastFacilityDepartureTime) untouched on Apply — the user's
+      // "times don't refresh after Apply" report. Re-walking the segment
+      // chain is cheap (≤ 15 facilities/day in practice) and guarantees
+      // every value the day card renders is freshly derived.
       const updatedSegments = [];
       let currentTime = newStartTime;
+      let totalVisitMinutes = 0;
+      let totalDriveMinutes = 0;
 
       for (const segment of route.segments) {
         // Drive to this location
         currentTime = addMinutesToTimeLocal(currentTime, segment.duration);
+        totalDriveMinutes += segment.duration || 0;
         const arrivalTime = currentTime;
 
         let departureTime = arrivalTime;
@@ -135,8 +149,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           const oldDepart = segment.departureTime;
           const [aH, aM] = oldArrival.split(':').map(Number);
           const [dH, dM] = oldDepart.split(':').map(Number);
-          const visitMinutes = (dH * 60 + dM) - (aH * 60 + aM);
-          departureTime = addMinutesToTimeLocal(arrivalTime, Math.max(visitMinutes, 0));
+          const visitMinutes = Math.max((dH * 60 + dM) - (aH * 60 + aM), 0);
+          totalVisitMinutes += visitMinutes;
+          departureTime = addMinutesToTimeLocal(arrivalTime, visitMinutes);
           currentTime = departureTime;
         }
 
@@ -157,11 +172,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         startTime: newStartTime,
         endTime: updatedSegments[updatedSegments.length - 1]?.arrivalTime || newStartTime,
         lastFacilityDepartureTime: lastFacilityDept,
+        totalDriveTime: totalDriveMinutes,
+        totalVisitTime: totalVisitMinutes,
+        totalTime: totalDriveMinutes + totalVisitMinutes,
         segments: updatedSegments,
       };
     });
 
-    onUpdateResult({ ...result, routes: updatedRoutes });
+    // Re-aggregate result-level totals so the summary cards above the day
+    // list ("19h 23m total", drive time, etc.) also refresh.
+    const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + (r.totalDriveTime || 0), 0);
+    const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + (r.totalVisitTime || 0), 0);
+    const totalTime = totalDriveTime + totalVisitTime;
+
+    onUpdateResult({ ...result, routes: updatedRoutes, totalDriveTime, totalVisitTime, totalTime });
     setDayStartTimes(startTimes);
   };
 
