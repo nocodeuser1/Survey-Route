@@ -901,38 +901,55 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     try {
       console.log('[RouteResults] Starting re-optimization', { settings, homeBase });
 
-      // Get completed facility IDs
-      const { data: completedInspections } = await supabase
-        .from('inspections')
-        .select('facility_id')
-        .eq('account_id', accountId || '')
-        .eq('status', 'completed');
-
-      const completedFacilityIds = new Set(
-        (completedInspections || []).map(i => i.facility_id)
-      );
-
-      // Group facilities by their current day assignment, excluding completed facilities
+      // Source the facility list from the CURRENT route (result.routes), not
+      // from facility.day_assignment in the database. Two reasons:
+      //   1. The DB-driven path was filtering out anything with a completed
+      //      inspection — silently evicting facilities the user explicitly
+      //      put in this route. Re-optimize should be pure re-ordering, not
+      //      membership editing.
+      //   2. Drift between the displayed route and the persisted
+      //      day_assignment (history loads, manual reassignments, etc.)
+      //      could change which facilities even appeared in the regroup.
+      // Walk result.routes directly: every facility currently shown stays.
       const facilitiesByDay = new Map<number, typeof facilities>();
-      facilities.forEach(f => {
-        if (f.day_assignment && isActiveFacility(f) && !completedFacilityIds.has(f.id)) {
-          if (!facilitiesByDay.has(f.day_assignment)) {
-            facilitiesByDay.set(f.day_assignment, []);
-          }
-          facilitiesByDay.get(f.day_assignment)?.push(f);
+      const dayOrderedRouteFacilities: typeof facilities = [];
+      const seenFacilityIds = new Set<string>();
+      for (const route of result.routes) {
+        const dayList: typeof facilities = [];
+        for (const rf of route.facilities) {
+          // Look up the live facility row by name to pick up the latest
+          // lat/lng/visit-duration. If the facility was deleted between the
+          // route's creation and now, fall back to the route copy so we
+          // don't drop it (better to re-optimize a stale entry than to
+          // change the route's facility count under the user's feet).
+          const live = facilities.find(f => f.name === rf.name);
+          const item = live ?? ({
+            id: `route-only-${rf.name}`,
+            name: rf.name,
+            latitude: rf.latitude,
+            longitude: rf.longitude,
+            visit_duration_minutes: rf.visitDuration,
+          } as unknown as Facility);
+          if (seenFacilityIds.has(item.id)) continue;
+          seenFacilityIds.add(item.id);
+          dayList.push(item);
+          dayOrderedRouteFacilities.push(item);
         }
-      });
+        if (dayList.length > 0) {
+          facilitiesByDay.set(route.day, dayList);
+        }
+      }
 
-      console.log('[RouteResults] Facilities grouped by day (excluding completed)', {
+      console.log('[RouteResults] Facilities grouped from current route', {
         dayCount: facilitiesByDay.size,
         days: Array.from(facilitiesByDay.keys()),
-        completedCount: completedFacilityIds.size
+        totalFacilities: dayOrderedRouteFacilities.length,
       });
 
-      // Build distance matrix for non-completed facilities (with home base as index 0)
-      const allFacilitiesForMatrix = facilities.filter(
-        f => isActiveFacility(f) && !completedFacilityIds.has(f.id)
-      );
+      // Build distance matrix scoped to JUST the facilities in this route
+      // (with home base as index 0). Faster than matrixing the whole account
+      // and avoids drift between the matrix index and the in-route lookup.
+      const allFacilitiesForMatrix = dayOrderedRouteFacilities;
       const locations = [
         {
           latitude: Number(homeBase.latitude),
