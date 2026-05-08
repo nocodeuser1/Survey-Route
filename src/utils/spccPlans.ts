@@ -78,6 +78,34 @@ export function getBermShortLabel(plan: Pick<SPCCPlan, 'berm_index'>): string {
   return `Berm ${plan.berm_index}`;
 }
 
+/** Three-state photos-taken status used by the facility-level UI when there
+ *  can be more than one berm. Driven by the mirrored counters
+ *  `berms_total_count` / `berms_with_photos_count` populated by the
+ *  spcc_plans → facilities trigger.
+ *
+ *  - 'all'      every berm has photos taken (or facility has 0 berms and the
+ *               legacy boolean is true — covers single-row pre-multi-berm
+ *               state where the trigger hasn't repopulated counts yet)
+ *  - 'partial'  some — but not all — berms have photos
+ *  - 'none'     no berm has photos
+ */
+export type FacilityPhotosState = 'all' | 'partial' | 'none';
+
+export function getFacilityPhotosState(
+  facility: Pick<Facility, 'photos_taken' | 'berms_total_count' | 'berms_with_photos_count'>
+): FacilityPhotosState {
+  const total = facility.berms_total_count ?? 0;
+  const withPhotos = facility.berms_with_photos_count ?? 0;
+
+  // Pre-mirror or no-plans facility — fall back to the legacy boolean.
+  if (total === 0) {
+    return facility.photos_taken ? 'all' : 'none';
+  }
+  if (withPhotos === 0) return 'none';
+  if (withPhotos >= total) return 'all';
+  return 'partial';
+}
+
 /**
  * The canonical SPCC plan filename format Israel requires:
  *

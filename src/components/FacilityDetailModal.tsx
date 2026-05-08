@@ -36,6 +36,7 @@ import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import SPCCStatusBadge from './SPCCStatusBadge';
+import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
@@ -2088,17 +2089,22 @@ export default function FacilityDetailModal({
                 <Camera className="w-3.5 h-3.5" />
                 Photos Taken
               </p>
-              <div className="flex items-center gap-2">
-                <p className="text-base font-medium text-gray-900 dark:text-white">
-                  {facility.photos_taken ? 'Yes' : 'No'}
-                </p>
-                <button
-                  onClick={togglePhotosTaken}
-                  className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
-                  title={facility.photos_taken ? 'Change to No' : 'Change to Yes'}
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <PhotosTakenStatusBadge facility={facility} variant="full" />
+                {/* The flat-toggle is only meaningful when the facility has
+                    a single berm. With 2+ berms there's no single boolean to
+                    flip — the user has to set per-berm photos in the SPCC
+                    Plan modal. We hide the toggle then and let the badge
+                    above carry the message. */}
+                {(facility.berms_total_count ?? 0) <= 1 && (
+                  <button
+                    onClick={togglePhotosTaken}
+                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                    title={facility.photos_taken ? 'Change to No' : 'Change to Yes'}
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>

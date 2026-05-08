@@ -11,6 +11,7 @@ import CSVUpload from './CSVUpload';
 import SearchInput from './SearchInput';
 import InspectionReportExport from './InspectionReportExport';
 import SPCCStatusBadge from './SPCCStatusBadge';
+import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import RecertificationStatusField from './RecertificationStatusField';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
@@ -1848,7 +1849,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (columnId === 'visit_duration') return `${facility.visit_duration_minutes}`;
     if (columnId === 'recertification_due_date') return computeRecertificationDueDate(facility) || '';
     if (columnId === 'spcc_completion_type') return facility.spcc_completion_type || '';
-    if (columnId === 'photos_taken') return facility.photos_taken ? 'Yes' : 'No';
+    if (columnId === 'photos_taken') {
+      // CSV / sort accessor: surface the partial state as "1/2 berms" so a
+      // mixed multi-berm facility doesn't get reduced to plain "No".
+      const total = facility.berms_total_count ?? 0;
+      const withPhotos = facility.berms_with_photos_count ?? 0;
+      if (total <= 1) return facility.photos_taken ? 'Yes' : 'No';
+      if (withPhotos === 0) return `No (0/${total} berms)`;
+      if (withPhotos >= total) return `Yes (${total}/${total} berms)`;
+      return `Partial (${withPhotos}/${total} berms)`;
+    }
     if (columnId === 'day_assignment') return facility.day_assignment != null ? String(facility.day_assignment) : '';
     if (columnId === 'team_assignment') return facility.team_assignment != null ? String(facility.team_assignment) : '';
     if (columnId === 'status') return facility.status || 'active';
@@ -2508,9 +2518,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       case 'visit_duration':
         return `${facility.visit_duration_minutes} min`;
       case 'photos_taken':
-        return facility.photos_taken
-          ? <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center"><CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
-          : <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center"><AlertCircle className="w-3 h-3 text-red-500 dark:text-red-400" /></div>;
+        // 3-state badge: all / partial / none. Multi-berm facilities can sit
+        // partway done — green check for done berms next to a red X for the
+        // ones still pending, with a "1/2" count.
+        return <PhotosTakenStatusBadge facility={facility} variant="icon" />;
       case 'field_visit_date':
         return facility.field_visit_date || '-';
       case 'estimated_oil_per_day':
