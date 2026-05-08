@@ -1739,12 +1739,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const handleCopySelectedNames = async () => {
     if (selectedFacilityIds.size === 0) return;
-    // Preserve the user's current sort order in the table — copying in the
-    // same order they see makes paste-into-spreadsheet workflows obvious.
-    // filteredFacilities is already sorted; just keep selected rows.
+    // Always copy alphabetically regardless of how the table is sorted —
+    // the user uses the clipboard contents in external tools (sheets,
+    // emails) where alphabetical is the expected default. localeCompare
+    // with sensitivity:'base' sorts case-insensitively and handles
+    // unicode/digit ordering correctly (so "10" follows "9", not "1").
     const names = filteredFacilities
       .filter((f) => selectedFacilityIds.has(f.id))
       .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
       .join('\n');
     try {
       await navigator.clipboard.writeText(names);
