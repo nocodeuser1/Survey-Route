@@ -3727,13 +3727,17 @@ function App() {
               key={`survey-${currentAccount.id}`}
               result={filteredOptimizationResult}
               facilities={(() => {
-                let surveyFacilities = filteredFacilities.filter(f => f.status !== 'sold');
-                // When a custom route is loaded, only show route facilities in Survey mode
-                if (showOnlyRouteFacilities && routeFacilityIds && routeFacilityIds.length > 0) {
-                  surveyFacilities = surveyFacilities.filter(f => routeFacilityIds.includes(f.id));
-                }
-                return surveyFacilities;
+                // We pass the FULL eligible facility list (account-wide, minus
+                // sold) so SurveyMode can render off-route facilities when the
+                // user toggles "Show off-route". The component itself decides
+                // whether to filter to routeFacilityIds based on its toggle.
+                return filteredFacilities.filter(f => f.status !== 'sold');
               })()}
+              routeFacilityIds={
+                showOnlyRouteFacilities && routeFacilityIds && routeFacilityIds.length > 0
+                  ? routeFacilityIds
+                  : null
+              }
               userId={currentAccount.id}
               teamNumber={1}
               accountId={currentAccount.id}

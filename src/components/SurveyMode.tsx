@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
-import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { Facility, Inspection, supabase, UserSettings } from '../lib/supabase';
+import { Facility, Inspection, supabase, UserSettings, SPCCPlan } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
@@ -13,6 +13,7 @@ import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
+import { getBermDisplayLabel } from '../utils/spccPlans';
 
 const COLORS = [
   '#3B82F6', // Blue
@@ -33,7 +34,15 @@ const COLORS = [
 
 interface SurveyModeProps {
   result: OptimizationResult;
+  /** All eligible facilities (account-wide, minus sold). The component filters
+   *  this further based on `routeFacilityIds` and the in-component
+   *  "Show off-route" toggle. */
   facilities: Facility[];
+  /** Facility IDs that belong to the currently active custom route, or null
+   *  when no custom route is active. When non-null, the off-route toggle
+   *  becomes available; when null, every facility is treated as "on route"
+   *  (no concept of off-route exists, toggle is hidden). */
+  routeFacilityIds?: string[] | null;
   userId: string;
   teamNumber: number;
   accountId: string;
@@ -55,7 +64,7 @@ type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
 type ViewModeType = 'all' | 'inspections' | 'plans';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange }: SurveyModeProps) {
+export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange }: SurveyModeProps) {
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [facilitiesWithDistance, setFacilitiesWithDistance] = useState<FacilityWithDistance[]>([]);
   const [inspectingFacility, setInspectingFacility] = useState<Facility | null>(null);
@@ -99,6 +108,27 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     if (externalSurveyType === 'all') return 'all';
     return statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
   });
+
+  // "Show off-route facilities" toggle. Only meaningful when a custom route
+  // is active (routeFacilityIds non-null). When ON, the list expands to every
+  // eligible facility and off-route ones are visually dimmed + tagged so the
+  // tech doesn't accidentally start a survey at the wrong place. Persisted
+  // to localStorage so the choice sticks across visits.
+  const [showOffRoute, setShowOffRoute] = useState<boolean>(() => {
+    return statePersistence.get<boolean>('surveyMode_showOffRoute', false) ?? false;
+  });
+
+  // Set of route facility IDs for O(1) on-route lookup.
+  const routeFacilityIdSet = useMemo(
+    () => new Set(routeFacilityIds || []),
+    [routeFacilityIds]
+  );
+  const isCustomRouteActive = !!routeFacilityIds && routeFacilityIds.length > 0;
+
+  // Per-facility SPCC plan rows (multi-berm). Loaded once; the per-row
+  // history dropdown reads from this map when surveyType === 'spcc_plan' or
+  // 'all'. Keyed by facility_id.
+  const [plansByFacility, setPlansByFacility] = useState<Record<string, SPCCPlan[]>>({});
 
   // Sync from external surveyType
   useEffect(() => {
@@ -150,10 +180,15 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   }, [viewMode]);
 
   useEffect(() => {
+    statePersistence.set('surveyMode_showOffRoute', showOffRoute);
+  }, [showOffRoute]);
+
+  useEffect(() => {
     console.log('[SurveyMode] Component mounted/updated', { userId, accountId, timestamp: new Date().toISOString() });
     lastInspectionLoadRef.current = Date.now();
     loadUserSettings();
     loadInspections();
+    loadPlans();
     startLocationTracking();
     checkForInProgressInspection();
 
@@ -185,11 +220,11 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
         if (timeSinceLastLoad > 1800000) {
           console.log('[SurveyMode] Tab visible after 30+ min absence, reloading data');
           lastInspectionLoadRef.current = now;
-          loadInspections().then(() => {
-            setTimeout(() => {
-              restoreScrollPosition('facility-list-container');
-            }, 100);
-          });
+          loadInspections();
+          loadPlans();
+          setTimeout(() => {
+            restoreScrollPosition('facility-list-container');
+          }, 100);
         } else {
           console.log('[SurveyMode] Tab visible, state preserved (no reload)');
           // Just restore scroll position without reloading
@@ -258,7 +293,16 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     if (currentPosition) {
       updateFacilitiesWithDistance();
     }
-  }, [currentPosition, facilities, result, inspections]);
+  }, [currentPosition, facilities, result, inspections, routeFacilityIds, showOffRoute]);
+
+  // Refresh plan rows whenever the parent's facility list changes (e.g.
+  // switching accounts or saving a new route). Skipped on initial mount —
+  // that's covered by the main mount effect above.
+  const facilitiesIdKey = facilities.map(f => f.id).sort().join(',');
+  useEffect(() => {
+    if (facilities.length > 0) loadPlans();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facilitiesIdKey, accountId]);
 
   function checkForInProgressInspection() {
     try {
@@ -346,6 +390,37 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
     }
   }
 
+  // Load per-berm SPCC plan rows for every facility in this account so the
+  // per-row "History" dropdown can show plan history (PE stamp / recert)
+  // when surveyType === 'spcc_plan' or 'all'. Keep it cheap by only
+  // selecting the columns we actually render in the dropdown.
+  async function loadPlans() {
+    try {
+      const facilityIds = facilities.map(f => f.id);
+      if (facilityIds.length === 0) {
+        setPlansByFacility({});
+        return;
+      }
+      const { data, error } = await supabase
+        .from('spcc_plans')
+        .select('id, facility_id, berm_index, berm_label, plan_url, pe_stamp_date, recertified_date, workflow_status, photos_taken, field_visit_date, recertification_decision, recertification_decision_at, recertification_pdf_generated_at, assigned_well_indices, workflow_status_overridden, recertification_decision_notes, created_at, updated_at')
+        .in('facility_id', facilityIds);
+      if (error) throw error;
+      const grouped: Record<string, SPCCPlan[]> = {};
+      (data || []).forEach(p => {
+        if (!grouped[p.facility_id]) grouped[p.facility_id] = [];
+        grouped[p.facility_id].push(p as SPCCPlan);
+      });
+      // Sort each facility's plans by berm_index ascending for stable display.
+      Object.keys(grouped).forEach(fid => {
+        grouped[fid].sort((a, b) => a.berm_index - b.berm_index);
+      });
+      setPlansByFacility(grouped);
+    } catch (err) {
+      console.error('Error loading SPCC plans:', err);
+    }
+  }
+
   function startLocationTracking() {
     if (!navigator.geolocation) {
       setLocationError('Geolocation not supported');
@@ -404,7 +479,16 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
   function updateFacilitiesWithDistance() {
     if (!currentPosition) return;
 
-    const withDistance = facilities.map(facility => {
+    // Source for the visible list:
+    //   - No custom route active → every passed-in facility (existing behavior).
+    //   - Custom route active + "Show off-route" OFF → only route members.
+    //   - Custom route active + "Show off-route" ON → every facility, with
+    //     off-route ones visually de-emphasized in the row renderer.
+    const sourceFacilities = isCustomRouteActive && !showOffRoute
+      ? facilities.filter(f => routeFacilityIdSet.has(f.id))
+      : facilities;
+
+    const withDistance = sourceFacilities.map(facility => {
       const distance = calculateDistance(
         currentPosition.lat,
         currentPosition.lng,
@@ -792,7 +876,7 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                 onClick={async () => {
                   setIsRefreshing(true);
                   console.log('[SurveyMode] Manual refresh triggered');
-                  await loadInspections();
+                  await Promise.all([loadInspections(), loadPlans()]);
                   setIsRefreshing(false);
                 }}
                 disabled={isRefreshing}
@@ -963,32 +1047,57 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
           </div>
         )}
 
-        {filteredFacilities.length > 0 && (
-          <div className="mb-2 flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (selectedFacilityIds.size === filteredFacilities.length) {
-                  setSelectedFacilityIds(new Set());
-                } else {
-                  setSelectedFacilityIds(new Set(filteredFacilities.map(f => f.id)));
-                }
-              }}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-white dark:text-white"
-            >
-              <input
-                type="checkbox"
-                checked={filteredFacilities.length > 0 && selectedFacilityIds.size === filteredFacilities.length}
-                readOnly
-                className="w-4 h-4 text-blue-600 rounded"
-              />
-              Select All ({filteredFacilities.length})
-            </button>
-            {selectedFacilityIds.size > 0 && selectedFacilityIds.size !== filteredFacilities.length && (
+        {(filteredFacilities.length > 0 || isCustomRouteActive) && (
+          <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              {filteredFacilities.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (selectedFacilityIds.size === filteredFacilities.length) {
+                      setSelectedFacilityIds(new Set());
+                    } else {
+                      setSelectedFacilityIds(new Set(filteredFacilities.map(f => f.id)));
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-white dark:text-white"
+                >
+                  <input
+                    type="checkbox"
+                    checked={filteredFacilities.length > 0 && selectedFacilityIds.size === filteredFacilities.length}
+                    readOnly
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  Select All ({filteredFacilities.length})
+                </button>
+              )}
+              {selectedFacilityIds.size > 0 && selectedFacilityIds.size !== filteredFacilities.length && (
+                <button
+                  onClick={() => setSelectedFacilityIds(new Set())}
+                  className="text-xs text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:text-white dark:hover:text-white"
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+
+            {/* "Show off-route facilities" toggle — only meaningful when a
+                custom route is active. Lets a tech see nearby facilities
+                that aren't in their current route (use case: drive to a
+                neighboring site that needs a survey). Off-route rows are
+                visually dimmed and tagged so they aren't confused with
+                in-route ones. */}
+            {isCustomRouteActive && (
               <button
-                onClick={() => setSelectedFacilityIds(new Set())}
-                className="text-xs text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:text-white dark:hover:text-white"
+                onClick={() => setShowOffRoute(!showOffRoute)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                  showOffRoute
+                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                title={showOffRoute ? 'Hide off-route facilities' : 'Show off-route facilities'}
               >
-                Clear Selection
+                <MapPin className="w-3.5 h-3.5" />
+                {showOffRoute ? 'Showing All' : 'Show Off-Route'}
               </button>
             )}
           </div>
@@ -1007,12 +1116,46 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
               const isExpanded = expandedFacility === facility.id;
               const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
               const latestInspection = facilityInspections[0];
+              const facilityPlans = plansByFacility[facility.id] || [];
+              // "On route" only matters when a custom route is active. Without
+              // one, treat every visible facility as on-route (no badge). With
+              // one, anything not in routeFacilityIdSet is off-route.
+              const isOffRoute = isCustomRouteActive && !routeFacilityIdSet.has(facility.id);
+              const isOnRouteHighlighted = isCustomRouteActive && !isOffRoute && showOffRoute;
+              const isSelected = selectedFacilityId === facility.id;
+              const showInspectionHistory = (viewMode === 'inspections' || viewMode === 'all') && facilityInspections.length > 0;
+              const showPlanHistory = (viewMode === 'plans' || viewMode === 'all') && facilityPlans.some(p => p.pe_stamp_date || p.recertified_date || p.plan_url);
+              const hasAnyHistory = showInspectionHistory || showPlanHistory;
+
+              // Border/ring rules:
+              //   - Off-route: faint dashed gray ring + dimmed bg, takes
+              //     precedence over completion-color border so the tech
+              //     immediately recognises "this isn't on my route".
+              //   - On-route + showOffRoute ON: solid emerald ring so the
+              //     route members stand out among the off-route ones.
+              //   - Otherwise: existing completion-state border.
+              let cardBorderClass: string;
+              let cardBgClass = 'bg-white dark:bg-gray-800';
+              if (isOffRoute) {
+                cardBorderClass = 'border border-dashed border-gray-300 dark:border-gray-600';
+                cardBgClass = 'bg-gray-50 dark:bg-gray-800/60';
+              } else if (isOnRouteHighlighted) {
+                cardBorderClass = 'border-2 border-emerald-500';
+              } else {
+                cardBorderClass = getBorderColorClass(facility, status);
+              }
 
               return (
                 <div
                   key={facility.id}
-                  onClick={() => setSelectedFacilityId(selectedFacilityId === facility.id ? null : facility.id)}
-                  className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${getBorderColorClass(facility, status)}`}
+                  // Row click expands the row's actions but never collapses
+                  // them — collapsing is reserved for the explicit chevron in
+                  // the actions area. This stops accidental taps on the row
+                  // body from hiding Manage / History.
+                  onClick={() => {
+                    if (!isSelected) setSelectedFacilityId(facility.id);
+                  }}
+                  className={`${cardBgClass} rounded-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${cardBorderClass} ${isOffRoute ? 'opacity-90' : ''}`}
                 >
                   <div className="p-3">
                     <div className="flex items-start gap-3">
@@ -1068,18 +1211,42 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                          {status === 'completed' && <SPCCInspectionBadge className="text-[10px]" />}
-                          {status === 'expired' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200">
-                              <AlertCircle className="w-2.5 h-2.5" />
-                              Expired
+                          {/* Route-membership pill — only rendered when a
+                              custom route is active. Off-route is the loud
+                              one (gray "Off Route" with a MapPin) so a tech
+                              never confuses it with a route member. */}
+                          {isCustomRouteActive && isOffRoute && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
+                              <MapPin className="w-2.5 h-2.5" />
+                              Off Route
                             </span>
                           )}
-                          {status === 'incomplete' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200">
-                              <Clock className="w-2.5 h-2.5" />
-                              Pending
+                          {isCustomRouteActive && !isOffRoute && showOffRoute && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                              <Route className="w-2.5 h-2.5" />
+                              On Route
                             </span>
+                          )}
+
+                          {/* Mode-aware status: SPCC plan badge in plans
+                              mode, inspection badge in inspections mode,
+                              both in 'all' mode. */}
+                          {(viewMode === 'inspections' || viewMode === 'all') && (
+                            <>
+                              {status === 'completed' && <SPCCInspectionBadge className="text-[10px]" />}
+                              {status === 'expired' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200">
+                                  <AlertCircle className="w-2.5 h-2.5" />
+                                  Expired
+                                </span>
+                              )}
+                              {status === 'incomplete' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  Pending
+                                </span>
+                              )}
+                            </>
                           )}
 
                           {facility.day && (
@@ -1089,55 +1256,148 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                             </span>
                           )}
 
-                          <SPCCStatusBadge facility={facility} className="text-[10px]" />
+                          {(viewMode === 'plans' || viewMode === 'all') && (
+                            <SPCCStatusBadge facility={facility} className="text-[10px]" />
+                          )}
 
-                          {latestInspection && (
+                          {/* "Last:" mini-label adapts to mode — in plans
+                              mode it shows the latest PE stamp / recert
+                              date; in inspection mode the latest inspection
+                              date; in 'all' mode whichever is more recent
+                              is shown alongside its label. */}
+                          {(viewMode === 'inspections' || viewMode === 'all') && latestInspection && (
                             <span className="text-[10px] text-gray-500">
-                              Last: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              Insp: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </span>
                           )}
+                          {(viewMode === 'plans' || viewMode === 'all') && (() => {
+                            // Pick the most informative plan date: recertified
+                            // wins over PE stamp because it's strictly more
+                            // recent. Falls back to facility-level mirror so
+                            // legacy single-berm rows still surface a date.
+                            const allDates: string[] = [];
+                            facilityPlans.forEach(p => {
+                              if (p.recertified_date) allDates.push(p.recertified_date);
+                              else if (p.pe_stamp_date) allDates.push(p.pe_stamp_date);
+                            });
+                            if (allDates.length === 0) {
+                              if (facility.recertified_date) allDates.push(facility.recertified_date);
+                              else if (facility.spcc_pe_stamp_date) allDates.push(facility.spcc_pe_stamp_date);
+                            }
+                            if (allDates.length === 0) return null;
+                            const latest = allDates.sort().reverse()[0];
+                            return (
+                              <span className="text-[10px] text-gray-500">
+                                Plan: {parseLocalDate(latest).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                              </span>
+                            );
+                          })()}
                         </div>
 
-                        {selectedFacilityId === facility.id && (
+                        {isSelected && (
                           <>
-                            <div className="grid grid-cols-2 gap-2">
+                            {/* Explicit close chevron — replaces the old
+                                "click row to collapse" behavior. Without it
+                                there'd be no way to fold the action panel
+                                back up once expanded. */}
+                            <div className="flex items-center justify-end mb-1.5">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setNavigationTarget(facility);
+                                  setSelectedFacilityId(null);
+                                  setExpandedFacility(null);
                                 }}
-                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                                title="Collapse"
                               >
-                                <Navigation className="w-3.5 h-3.5" />
-                                Navigate
-                              </button>
-
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (viewMode === 'plans') {
-                                    setSpccPlanDetailFacility(facility);
-                                  } else {
-                                    console.log('[SurveyMode] Starting inspection', {
-                                      facilityId: facility.id,
-                                      facilityName: facility.name,
-                                      userId,
-                                      accountId,
-                                      teamNumber,
-                                      currentStatus: status,
-                                      timestamp: new Date().toISOString()
-                                    });
-                                    setInspectingFacility(facility);
-                                  }
-                                }}
-                                className={`flex items-center justify-center gap-1.5 px-3 py-2 text-white rounded-lg transition-colors text-xs font-medium ${viewMode === 'plans' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
-                              >
-                                <FileText className="w-3.5 h-3.5" />
-                                {viewMode === 'plans' ? 'SPCC Plan' : status === 'completed' ? 'Re-inspect' : 'Inspect'}
+                                <ChevronUp className="w-3 h-3" />
+                                Close
                               </button>
                             </div>
 
-                            {facilityInspections.length > 0 && (
+                            {/* Primary actions. In 'all' mode we show both
+                                Inspect AND SPCC Plan side-by-side so the
+                                tech can pick whichever is needed; in single-
+                                mode views we show one primary action and a
+                                Navigate button. */}
+                            {viewMode === 'all' ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setNavigationTarget(facility);
+                                  }}
+                                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                                >
+                                  <Navigation className="w-3.5 h-3.5" />
+                                  Navigate
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setInspectingFacility(facility);
+                                  }}
+                                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  {status === 'completed' ? 'Re-inspect' : 'Inspect'}
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSpccPlanDetailFacility(facility);
+                                  }}
+                                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-xs font-medium"
+                                >
+                                  <Stamp className="w-3.5 h-3.5" />
+                                  SPCC Plan
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setNavigationTarget(facility);
+                                  }}
+                                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                                >
+                                  <Navigation className="w-3.5 h-3.5" />
+                                  Navigate
+                                </button>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (viewMode === 'plans') {
+                                      setSpccPlanDetailFacility(facility);
+                                    } else {
+                                      console.log('[SurveyMode] Starting inspection', {
+                                        facilityId: facility.id,
+                                        facilityName: facility.name,
+                                        userId,
+                                        accountId,
+                                        teamNumber,
+                                        currentStatus: status,
+                                        timestamp: new Date().toISOString()
+                                      });
+                                      setInspectingFacility(facility);
+                                    }
+                                  }}
+                                  className={`flex items-center justify-center gap-1.5 px-3 py-2 text-white rounded-lg transition-colors text-xs font-medium ${viewMode === 'plans' ? 'bg-violet-600 hover:bg-violet-700' : 'bg-green-600 hover:bg-green-700'}`}
+                                >
+                                  {viewMode === 'plans' ? <Stamp className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+                                  {viewMode === 'plans' ? 'SPCC Plan' : status === 'completed' ? 'Re-inspect' : 'Inspect'}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* History toggle — label and count adapt to the
+                                current view mode so the dropdown matches
+                                what the tech is looking for. In 'all' mode
+                                we show a generic "History" with the union
+                                count when both data types exist. */}
+                            {hasAnyHistory && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1146,7 +1406,11 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                                 className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-xs font-medium border border-gray-200 dark:border-gray-600"
                               >
                                 <History className="w-3 h-3" />
-                                History ({facilityInspections.length})
+                                {viewMode === 'plans'
+                                  ? `Plan History (${facilityPlans.filter(p => p.pe_stamp_date || p.recertified_date || p.plan_url).length})`
+                                  : viewMode === 'inspections'
+                                    ? `Inspection History (${facilityInspections.length})`
+                                    : `History (${facilityInspections.length + facilityPlans.filter(p => p.pe_stamp_date || p.recertified_date || p.plan_url).length})`}
                                 {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                               </button>
                             )}
@@ -1168,45 +1432,163 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
                       </div>
                     </div>
 
-                    {isExpanded && facilityInspections.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 space-y-1.5">
-                        {facilityInspections.slice(0, 3).map(inspection => (
-                          <div
-                            key={inspection.id}
-                            className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                          >
-                            <div className="flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-semibold text-gray-900 dark:text-white">
-                                  {new Date(inspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
-                                </span>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isInspectionValid(inspection)
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
-                                  }`}>
-                                  {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
-                                </span>
+                    {isExpanded && hasAnyHistory && (
+                      <div
+                        className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 space-y-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Inspection history block — visible in 'inspections'
+                            and 'all' modes when there are inspections. */}
+                        {showInspectionHistory && (
+                          <>
+                            {viewMode === 'all' && (
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 px-1">
+                                Inspections
+                              </p>
+                            )}
+                            {facilityInspections.slice(0, 3).map(inspection => (
+                              <div
+                                key={inspection.id}
+                                className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                      {new Date(inspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                                    </span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isInspectionValid(inspection)
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-red-100 text-red-700'
+                                      }`}>
+                                      {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
+                                    </span>
+                                  </div>
+                                  {inspection.inspector_name && (
+                                    <p className="text-[10px] text-gray-500 mt-0.5">By {inspection.inspector_name}</p>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingInspection(inspection);
+                                  }}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                  title="View"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
                               </div>
-                              {inspection.inspector_name && (
-                                <p className="text-[10px] text-gray-500 mt-0.5">By {inspection.inspector_name}</p>
-                              )}
-                            </div>
+                            ))}
+                            {facilityInspections.length > 3 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setManagingInspectionsFacility(facility);
+                                }}
+                                className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium py-1.5 hover:bg-blue-50 rounded transition-colors"
+                              >
+                                View all {facilityInspections.length}
+                              </button>
+                            )}
+                          </>
+                        )}
+
+                        {/* Plan history block — visible in 'plans' and 'all'
+                            modes. One entry per berm with content; shows
+                            recertified_date OR pe_stamp_date (recert wins),
+                            plus a link to the PDF when present. Falls back
+                            to legacy facility-level fields when no
+                            multi-berm rows exist. */}
+                        {showPlanHistory && (
+                          <>
+                            {viewMode === 'all' && (
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 px-1 pt-1">
+                                SPCC Plan
+                              </p>
+                            )}
+                            {(() => {
+                              // Build per-berm rows. If facilityPlans is empty
+                              // but the facility has legacy fields, synthesise
+                              // a single fake row so legacy single-berm
+                              // facilities still show plan history.
+                              const rows: Array<{
+                                key: string;
+                                bermLabel: string;
+                                date: string | null;
+                                isRecert: boolean;
+                                planUrl: string | null;
+                              }> = [];
+                              if (facilityPlans.length > 0) {
+                                facilityPlans.forEach(p => {
+                                  const date = p.recertified_date || p.pe_stamp_date;
+                                  if (date || p.plan_url) {
+                                    rows.push({
+                                      key: p.id,
+                                      bermLabel: getBermDisplayLabel(p),
+                                      date,
+                                      isRecert: !!p.recertified_date,
+                                      planUrl: p.plan_url,
+                                    });
+                                  }
+                                });
+                              } else if (facility.spcc_pe_stamp_date || facility.recertified_date || facility.spcc_plan_url) {
+                                rows.push({
+                                  key: 'legacy',
+                                  bermLabel: 'SPCC Plan',
+                                  date: facility.recertified_date || facility.spcc_pe_stamp_date || null,
+                                  isRecert: !!facility.recertified_date,
+                                  planUrl: facility.spcc_plan_url || null,
+                                });
+                              }
+                              return rows.map(r => (
+                                <div
+                                  key={r.key}
+                                  className="flex items-center justify-between p-2 bg-violet-50 dark:bg-violet-900/30 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
+                                >
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                        {r.bermLabel}
+                                      </span>
+                                      {r.date && (
+                                        <span className="text-[10px] text-gray-700 dark:text-gray-300">
+                                          {parseLocalDate(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                                        </span>
+                                      )}
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                        r.isRecert
+                                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
+                                          : 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300'
+                                      }`}>
+                                        {r.isRecert ? 'Recertified' : 'PE Stamped'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {r.planUrl && (
+                                    <a
+                                      href={r.planUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="p-1.5 text-violet-600 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-900/50 rounded transition-colors"
+                                      title="Open plan PDF"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                    </a>
+                                  )}
+                                </div>
+                              ));
+                            })()}
                             <button
-                              onClick={() => setViewingInspection(inspection)}
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                              title="View"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSpccPlanDetailFacility(facility);
+                              }}
+                              className="w-full text-xs text-violet-600 hover:text-violet-700 dark:text-violet-300 font-medium py-1.5 hover:bg-violet-50 dark:hover:bg-violet-900/30 rounded transition-colors"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              Open SPCC Plan Details
                             </button>
-                          </div>
-                        ))}
-                        {facilityInspections.length > 3 && (
-                          <button
-                            onClick={() => setManagingInspectionsFacility(facility)}
-                            className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium py-1.5 hover:bg-blue-50 rounded transition-colors"
-                          >
-                            View all {facilityInspections.length}
-                          </button>
+                          </>
                         )}
                       </div>
                     )}
