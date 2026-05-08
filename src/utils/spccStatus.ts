@@ -9,6 +9,10 @@ export type SPCCPlanStatus =
   | 'no_plan'          // Has IP date, plan not yet due (>30 days out)
   | 'initial_due'      // Within 30 days of 6-month deadline, no plan
   | 'initial_overdue'  // Past 6-month deadline, no plan
+  | 'awaiting_pe_stamp'// Workflow set to "Awaiting PE Stamp" — overrides
+                       // whatever the date math would say, because the user
+                       // has explicitly told us "field work is done, waiting
+                       // on the PE". Always manually set (never auto).
   | 'valid'            // Plan on file, >90 days until recertification
   | 'recertified'      // Recertified within last 5 years
   | 'expiring'         // Plan valid but <90 days until 5-year recertification
@@ -158,6 +162,27 @@ export function getSPCCPlanStatus(facility: SPCCStatusFacility): SPCCStatusResul
   // (spcc_inspection_date is separate and used for SPCC inspection tracking)
   const hasPlan = !!(facility.spcc_plan_url && facility.spcc_pe_stamp_date);
   const peStampDate = facility.spcc_pe_stamp_date ? parseLocalDate(facility.spcc_pe_stamp_date) : null;
+
+  // Manual workflow override: if the user has explicitly set workflow status
+  // to "Awaiting PE Stamp", surface that as the plan status — they're saying
+  // "field work is done, the PE has the plan, we're waiting on the stamp."
+  // This sits between "Overdue" and "Expiring" in sort order so it's the
+  // next thing the user sees after the most-urgent rows. We don't override
+  // when a current valid plan + PE date already exist — there'd be nothing
+  // to wait on, and the underlying valid/expiring/expired math is more
+  // informative than a stale workflow flag in that case.
+  if (facility.spcc_workflow_status === 'awaiting_pe_stamp' && !hasPlan) {
+    return {
+      status: 'awaiting_pe_stamp',
+      message: 'Awaiting PE Stamp',
+      isCompliant: false,
+      isUrgent: true,
+      daysUntilDue: null,
+      peStampDate,
+      recertificationDate: null,
+      hasPlan,
+    };
+  }
 
   // Case 0: Has a recertified_date -> use recert date + 5 years as the recertification window
   if (facility.recertified_date) {
@@ -367,6 +392,16 @@ export function getStatusBadgeConfig(status: SPCCPlanStatus): StatusBadgeConfig 
         icon: 'alert',
         label: 'Overdue',
       };
+    case 'awaiting_pe_stamp':
+      return {
+        // Same blue palette as the workflow chip so the two render with the
+        // same visual identity — when the user sees blue "Awaiting PE Stamp"
+        // here vs. on the workflow tag, they're looking at the same state.
+        colorClass: 'bg-blue-100 text-blue-700',
+        darkColorClass: 'bg-blue-900/30 text-blue-300',
+        icon: 'clock',
+        label: 'Awaiting PE Stamp',
+      };
     case 'no_plan':
       return {
         colorClass: 'bg-blue-50 text-blue-600',
@@ -389,7 +424,15 @@ export function getStatusBadgeConfig(status: SPCCPlanStatus): StatusBadgeConfig 
  *  appear in SPCC Plans mode counts, day lists, and map when selected for a route. */
 export function facilityNeedsSPCCPlan(facility: SPCCStatusFacility): boolean {
   const { status } = getSPCCPlanStatus(facility);
-  return ['no_plan', 'initial_overdue', 'initial_due', 'expired', 'expiring', 'renewal_due'].includes(status);
+  return [
+    'no_plan',
+    'initial_overdue',
+    'initial_due',
+    'awaiting_pe_stamp',
+    'expired',
+    'expiring',
+    'renewal_due',
+  ].includes(status);
 }
 
 /** Returns a CSV-friendly status string */
@@ -402,6 +445,7 @@ export function getSPCCPlanStatusText(facility: SPCCStatusFacility): string {
     case 'expired': return 'Expired';
     case 'initial_due': return 'Due Soon';
     case 'initial_overdue': return 'Overdue';
+    case 'awaiting_pe_stamp': return 'Awaiting PE Stamp';
     case 'no_plan': return 'Upcoming';
     case 'no_ip_date': return 'No Date';
     case 'renewal_due': return 'Recertification Due';

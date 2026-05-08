@@ -124,6 +124,7 @@ export const FILTER_FIELDS: CustomFilterField[] = [
         valueInputType: 'select',
         valueChoices: [
           { value: 'initial_overdue', label: 'Initial Plan Overdue' },
+          { value: 'awaiting_pe_stamp', label: 'Awaiting PE Stamp' },
           { value: 'expired', label: 'Expired' },
           { value: 'expiring', label: 'Expiring Soon' },
           { value: 'renewal_due', label: 'Renewal Due' },

@@ -1034,6 +1034,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           matchesStatus = statusFilters.some(sf => {
             switch (sf) {
               case 'plan_overdue': return planResult.status === 'initial_overdue';
+              case 'plan_awaiting_pe_stamp': return planResult.status === 'awaiting_pe_stamp';
               case 'plan_expired': return planResult.status === 'expired';
               case 'plan_expiring': return planResult.status === 'expiring' || planResult.status === 'renewal_due';
               case 'plan_upcoming': return planResult.status === 'no_plan' || planResult.status === 'initial_due';
@@ -1081,20 +1082,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           case 'longitude':
             return Number(facility.longitude) || 0;
           case 'spcc_status': {
-            // Group by status severity, then by days within each group
+            // Group by status severity, then by days within each group.
+            // awaiting_pe_stamp slots right after initial_overdue so a user
+            // sorting ascending sees Overdue → Awaiting PE Stamp → Expired
+            // → Due Soon → Expiring → Upcoming → Valid → Recertified.
             const result = getSPCCPlanStatus(facility);
             const statusOrder: Record<string, number> = {
               initial_overdue: 0,
-              expired: 1,
-              initial_due: 2,
-              expiring: 3,
-              renewal_due: 3,
-              no_plan: 4,
-              valid: 5,
-              recertified: 6,
-              no_ip_date: 7,
+              awaiting_pe_stamp: 1,
+              expired: 2,
+              initial_due: 3,
+              expiring: 4,
+              renewal_due: 4,
+              no_plan: 5,
+              valid: 6,
+              recertified: 7,
+              no_ip_date: 8,
             };
-            const group = statusOrder[result.status] ?? 8;
+            const group = statusOrder[result.status] ?? 9;
             // Encode group in the high bits, days in the low bits
             // For overdue/expired (groups 0-1), sort by most overdue first (most negative daysUntilDue)
             // For others, sort by soonest due first
@@ -3446,6 +3451,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           <div className="flex flex-col gap-1">
                             {(spccMode === 'plan' ? [
                               { value: 'plan_overdue', label: 'Overdue' },
+                              { value: 'plan_awaiting_pe_stamp', label: 'Awaiting PE Stamp' },
                               { value: 'plan_expired', label: 'Expired' },
                               { value: 'plan_expiring', label: 'Expiring' },
                               { value: 'plan_upcoming', label: 'Upcoming / Due Soon' },

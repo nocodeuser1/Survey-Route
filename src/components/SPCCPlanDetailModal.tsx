@@ -264,6 +264,7 @@ function getStatusGradient(status: SPCCPlanStatus, darkMode: boolean): string {
       return darkMode
         ? 'from-red-800 to-red-900'
         : 'from-red-600 to-red-700';
+    case 'awaiting_pe_stamp':
     case 'no_plan':
       return darkMode
         ? 'from-blue-800 to-blue-900'
@@ -287,6 +288,7 @@ function getStatusRingColor(status: SPCCPlanStatus, darkMode: boolean): string {
     case 'expired':
     case 'initial_overdue':
       return darkMode ? 'ring-red-500/30' : 'ring-red-400/30';
+    case 'awaiting_pe_stamp':
     case 'no_plan':
       return darkMode ? 'ring-blue-500/30' : 'ring-blue-400/30';
     case 'no_ip_date':

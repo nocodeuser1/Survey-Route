@@ -744,6 +744,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 spccPlanStatus = 'overdue';
                 spccPlanStatusColor = '#EF4444';
                 break;
+              case 'awaiting_pe_stamp':
+                // Same blue as the workflow chip — "in progress, waiting on PE".
+                spccPlanStatus = 'awaiting_pe_stamp';
+                spccPlanStatusColor = '#3B82F6';
+                break;
               case 'no_plan':
                 spccPlanStatus = 'pending';
                 spccPlanStatusColor = '#6B7280';

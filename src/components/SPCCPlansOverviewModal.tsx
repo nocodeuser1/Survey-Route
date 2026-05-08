@@ -112,14 +112,15 @@ export default function SPCCPlansOverviewModal({
   const sortedData = useMemo(() => {
     const priorityOrder: Record<string, number> = {
       'initial_overdue': 0,
-      'expired': 1,
-      'expiring': 2,
-      'renewal_due': 3,
-      'initial_due': 4,
-      'no_plan': 5,
-      'no_ip_date': 6,
-      'valid': 7,
-      'recertified': 8,
+      'awaiting_pe_stamp': 1,
+      'expired': 2,
+      'expiring': 3,
+      'renewal_due': 4,
+      'initial_due': 5,
+      'no_plan': 6,
+      'no_ip_date': 7,
+      'valid': 8,
+      'recertified': 9,
     };
     return [...filteredData].sort((a, b) => {
       const pa = priorityOrder[a.status] ?? 99;
@@ -168,6 +169,13 @@ export default function SPCCPlansOverviewModal({
           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200 whitespace-nowrap">
             <AlertTriangle className="w-3 h-3" />
             Overdue
+          </span>
+        );
+      case 'awaiting_pe_stamp':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200 whitespace-nowrap">
+            <Clock className="w-3 h-3" />
+            Awaiting PE Stamp
           </span>
         );
       default:
