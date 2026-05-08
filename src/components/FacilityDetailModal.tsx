@@ -179,6 +179,19 @@ export default function FacilityDetailModal({
     setActiveTab(initialTab);
   }, [initialTab, facility.id]);
 
+  // Escape closes the modal — but only when no nested overlay is on top.
+  // Sub-flows (inspection form/viewer, nav popup, nearby alert) own Escape
+  // while they're showing so a single key press doesn't blow past them.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showInspectionForm || viewingInspection || showNavigationPopup || showNearbyAlert) return;
+      onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, showInspectionForm, viewingInspection, showNavigationPopup, showNearbyAlert]);
+
   useEffect(() => {
     if (onInspectionFormActiveChange) {
       onInspectionFormActiveChange(showInspectionForm);

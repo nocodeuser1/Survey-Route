@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, FolderOpen, Edit2, Trash2, X, Check, Clock } from 'lucide-react';
 import { supabase, RoutePlan } from '../lib/supabase';
+import LoadingSpinner from './LoadingSpinner';
 
 interface SavedRoutesManagerProps {
   accountId: string;
@@ -20,6 +21,7 @@ export default function SavedRoutesManager({
   hideButtons = false,
 }: SavedRoutesManagerProps) {
   const [savedRoutes, setSavedRoutes] = useState<RoutePlan[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -53,6 +55,11 @@ export default function SavedRoutesManager({
       totalHours: hours,
       totalMinutes: minutes,
       avgMinutesOnsite,
+      // Live count derived from plan_data.routes — bypasses any stale
+      // total_facilities column (e.g. routes saved before commit 89df0e8
+      // got the wrong account-wide count baked in). Fall back to the
+      // stored column only if plan_data is missing somehow.
+      facilityCount,
     };
   };
 
@@ -63,6 +70,9 @@ export default function SavedRoutesManager({
   }, [isOpen, accountId]);
 
   const loadSavedRoutes = async () => {
+    // Track loading so the modal can show a spinner instead of a brief
+    // "No saved routes yet" flash while the query is in flight.
+    setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('route_plans')
@@ -74,6 +84,8 @@ export default function SavedRoutesManager({
       setSavedRoutes(data || []);
     } catch (err) {
       console.error('Error loading saved routes:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -214,7 +226,11 @@ export default function SavedRoutesManager({
             </div>
 
             <div className="overflow-y-auto flex-1">
-              {savedRoutes.length === 0 ? (
+              {isLoading ? (
+                <div className="py-12">
+                  <LoadingSpinner size="md" text="Loading saved routes..." />
+                </div>
+              ) : savedRoutes.length === 0 ? (
                 <p className="text-gray-500 dark:text-gray-400 text-center py-8">No saved routes yet</p>
               ) : (
                 <div className="space-y-2">
@@ -269,16 +285,23 @@ export default function SavedRoutesManager({
                                 )}
                               </div>
                               <div className="space-y-1 mt-2">
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
-                                  {route.total_days} days • {route.total_facilities} facilities • {route.total_miles.toFixed(1)} mi
-                                </p>
                                 {(() => {
                                   const metrics = calculateRouteMetrics(route);
+                                  // Prefer the live count from plan_data; fall back to
+                                  // the stored column only when plan_data is missing.
+                                  const facilityCount = metrics.facilityCount > 0
+                                    ? metrics.facilityCount
+                                    : route.total_facilities;
                                   return (
-                                    <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1">
-                                      <Clock className="w-3.5 h-3.5" />
-                                      {metrics.totalHours}h {metrics.totalMinutes}m total • {metrics.avgMinutesOnsite} min avg onsite
-                                    </p>
+                                    <>
+                                      <p className="text-sm text-gray-600 dark:text-gray-300">
+                                        {route.total_days} days • {facilityCount} facilities • {route.total_miles.toFixed(1)} mi
+                                      </p>
+                                      <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                                        <Clock className="w-3.5 h-3.5" />
+                                        {metrics.totalHours}h {metrics.totalMinutes}m total • {metrics.avgMinutesOnsite} min avg onsite
+                                      </p>
+                                    </>
                                   );
                                 })()}
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -324,7 +347,14 @@ export default function SavedRoutesManager({
       {/* When hideButtons is true, render the list directly without popup wrapper */}
       {hideButtons && isOpen && (
         <div className="overflow-y-auto max-h-[60vh]">
-          {savedRoutes.length === 0 ? (
+          {isLoading ? (
+            // Same spinner the rest of the app uses, so loading states feel
+            // consistent. Only shown while the supabase query is in flight —
+            // prevents the "No saved routes yet" flash users were seeing.
+            <div className="py-12">
+              <LoadingSpinner size="md" text="Loading saved routes..." />
+            </div>
+          ) : savedRoutes.length === 0 ? (
             <p className="text-gray-500 text-center py-8">No saved routes yet</p>
           ) : (
             <div className="space-y-2">
@@ -378,7 +408,15 @@ export default function SavedRoutesManager({
                             <div className="flex items-center gap-3 mt-1 text-xs text-gray-600">
                               <span>{route.total_days} days</span>
                               <span>•</span>
-                              <span>{route.total_facilities} facilities</span>
+                              {/* Live count from plan_data — falls back to stored column
+                                  only if plan_data is missing. Bypasses stale 148-style
+                                  values from pre-89df0e8 saves. */}
+                              <span>
+                                {metrics.facilityCount > 0
+                                  ? metrics.facilityCount
+                                  : route.total_facilities}{' '}
+                                facilities
+                              </span>
                               <span>•</span>
                               <span>{route.total_miles.toFixed(1)} miles</span>
                               <span>•</span>
