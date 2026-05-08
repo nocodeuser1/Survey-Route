@@ -203,17 +203,23 @@ export default function UserSignatureManagement() {
     setError('');
     setSuccess('');
     try {
-      const { data: deleted, error: delErr } = await supabase
+      // Use count-based delete instead of .delete().select(): the latter
+      // requires SELECT permission on the row's OLD values for PostgREST
+      // to return them, and account-admin SELECT often doesn't include
+      // other users' signature rows — that produced a confusing 403 even
+      // when the DELETE itself succeeded. With { count: 'exact' } we get
+      // the deleted-row count back in response headers without needing
+      // SELECT permission.
+      const { error: delErr, count } = await supabase
         .from('user_signatures')
-        .delete()
-        .eq('id', sig.id)
-        .select();
+        .delete({ count: 'exact' })
+        .eq('id', sig.id);
       if (delErr) throw delErr;
 
-      // Empty result with no error = RLS silently rejected. Without this
-      // check the UI optimistically claims "Signature deleted" while the
-      // row is still in the database.
-      if (!deleted || deleted.length === 0) {
+      // count===0 (with no error) means the DELETE policy silently
+      // rejected the row. Surface a clear pointer at the migration so
+      // the failure mode can't go unnoticed.
+      if (!count || count === 0) {
         throw new Error(
           "You don't have permission to delete this signature — please apply the latest RLS migration in Supabase (20260429120000_user_signatures_admin_delete.sql).",
         );
