@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2 } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -808,6 +808,30 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       const newSet = new Set(prev);
       newSet.delete(newDayNumber);
       return newSet;
+    });
+  };
+
+  // Delete an empty day from the route. Refused if the day has any
+  // facilities — Delete is only offered for empty days, but the guard
+  // here protects against a stale UI state. Subsequent day numbers slide
+  // down by 1 so there are no gaps (e.g. delete Day 2 from [1,2,3] → [1,2]).
+  // The map view reads the same `result.routes` so its "Move to Day N"
+  // options update automatically.
+  const handleDeleteDay = (dayToDelete: number) => {
+    if (!result || !onUpdateResult) return;
+    const target = result.routes.find(r => r.day === dayToDelete);
+    if (!target || target.facilities.length > 0) return;
+
+    const remaining = result.routes
+      .filter(r => r.day !== dayToDelete)
+      // Renumber so days are contiguous after the gap.
+      .sort((a, b) => a.day - b.day)
+      .map((r, idx) => ({ ...r, day: idx + 1 }));
+
+    onUpdateResult({
+      ...result,
+      routes: remaining,
+      totalDays: remaining.length,
     });
   };
 
@@ -1927,7 +1951,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       <div className="space-y-4">
         {result.routes
-          .filter(route => surveyType === 'all' || route.facilities.some(f => isFacilityVisible(f.name)))
+          // Empty days (`facilities.length === 0`) are kept in the list so
+          // the user can see + delete them. The previous filter dropped any
+          // day with no visible facilities in non-"all" survey modes, which
+          // hid days the user just created via Add Day. The non-"all" mode
+          // filter is now scoped to days that actually have facilities.
+          .filter(route =>
+            route.facilities.length === 0 ||
+            surveyType === 'all' ||
+            route.facilities.some(f => isFacilityVisible(f.name))
+          )
           .map((route) => (
             <div
               key={route.day}
@@ -1958,6 +1991,23 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <Clock className="w-3 h-3" />
                       <span>{formatTimeTo12Hour(getDayStartTime(route.day))}</span>
                     </button>
+                    {/* Delete button for empty days only — Add Day creates
+                        the day so the user has somewhere to drop facilities;
+                        Delete reverses that when the day is no longer needed.
+                        Hidden the moment any facility lands on the day. */}
+                    {route.facilities.length === 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDay(route.day);
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 bg-red-500/20 hover:bg-red-500/40 text-white rounded-md text-xs font-medium transition-colors whitespace-nowrap"
+                        title={`Delete Day ${route.day}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete Day</span>
+                      </button>
+                    )}
                     {collapsedDays.has(route.day) ? (
                       <ChevronDown className="w-5 h-5" />
                     ) : (
