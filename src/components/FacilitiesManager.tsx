@@ -3788,10 +3788,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     )}
 
                     {/* Copy Names — newline-separated. Pulses a check on
-                        success so the user knows the clipboard updated. */}
+                        success so the user knows the clipboard updated.
+                        whitespace-nowrap so "Copy Names" stays on one line
+                        even when the action bar gets crowded. */}
                     <button
                       onClick={handleCopySelectedNames}
-                      className={`flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg active:scale-95 transition-all text-xs font-medium ${
+                      className={`flex items-center justify-center gap-1.5 whitespace-nowrap w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg active:scale-95 transition-all text-xs font-medium ${
                         namesCopied
                           ? 'bg-emerald-500/15 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400'
                           : 'bg-violet-500/10 dark:bg-violet-400/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 dark:hover:bg-violet-400/20'
@@ -3799,11 +3801,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       title="Copy selected facility names (one per line)"
                     >
                       {namesCopied ? (
-                        <Check className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <Check className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
                       ) : (
-                        <Copy className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <Copy className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
                       )}
-                      <span className="hidden md:inline">
+                      <span className="hidden md:inline whitespace-nowrap">
                         {namesCopied ? 'Copied' : 'Copy Names'}
                       </span>
                     </button>
