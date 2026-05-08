@@ -121,8 +121,13 @@ export default function BermWellAssignmentModal({
   };
 
   const content = (
+    // z-index must beat the parent SPCCPlanDetailModal (zIndex: 999999) — this
+    // modal opens ON TOP of it, not next to it. Tailwind's z-50 was getting
+    // buried, so the backdrop showed through but the content card sat behind
+    // the SPCC modal, invisible.
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4"
+      style={{ zIndex: 1000000 }}
       onClick={onClose}
     >
       <div
