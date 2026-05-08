@@ -269,6 +269,16 @@ const MAX_INTRA_CLUSTER_PAIRWISE_MILES = 40;
  */
 export const MAX_MERGE_CENTROID_DISTANCE_MILES = 30;
 
+/**
+ * Minimum number of facilities the optimizer will try to leave on a single
+ * day. The bimodal-split and merge-distance rules both back off when
+ * enforcing them would create a sub-cluster smaller than this — driving
+ * extra miles to keep four facilities together beats spending a whole day
+ * on two stops. Field intuition the user surfaced; future work could make
+ * this user-configurable.
+ */
+export const MIN_VIABLE_DAY_FACILITIES = 3;
+
 function maxPairwiseDistance(points: GeoPoint[]): number {
   let max = 0;
   for (let i = 0; i < points.length; i++) {
@@ -303,19 +313,30 @@ export function validateGeographicCohesion(
     // below both miss the "two tight subgroups equidistant from the
     // centroid" failure mode (every point looks ~equally far from the
     // centroid, every bearing looks similar). This catches it directly.
+    //
+    // BUT: only split if the resulting sub-clusters would each be a
+    // viable day on their own. For a 2+2 facility split across 70 miles,
+    // the user would rather drive the gap than spend a whole day on
+    // 2 stops. Drop back to one bimodal day in that case.
     const maxPairwise = maxPairwiseDistance(cluster.points);
     if (maxPairwise > MAX_INTRA_CLUSTER_PAIRWISE_MILES) {
       // Re-cluster into 2 sub-groups via k-means. High tightness keeps
-      // each sub-group tight. Recursing into validateGeographicCohesion
-      // handles the rare case where the cluster was actually trimodal —
-      // each new sub-cluster gets re-checked.
+      // each sub-group tight.
       const split = kMeansClustering(cluster.points, 2, 30, 0.85);
-      const reValidated = validateGeographicCohesion(
-        split.map((sc, idx) => ({ ...sc, id: cluster.id + idx * 0.1 })),
-        homeBase
-      );
-      validatedClusters.push(...reValidated);
-      continue;
+      const smallestSplitSize = Math.min(...split.map((c) => c.points.length));
+      if (smallestSplitSize >= MIN_VIABLE_DAY_FACILITIES) {
+        // Both halves are viable days on their own — accept the split.
+        // Recurse so a trimodal original splits all the way down.
+        const reValidated = validateGeographicCohesion(
+          split.map((sc, idx) => ({ ...sc, id: cluster.id + idx * 0.1 })),
+          homeBase
+        );
+        validatedClusters.push(...reValidated);
+        continue;
+      }
+      // One side would be too small. Keep the bimodal cluster as a
+      // single day — better to drive 40+ miles than do 2 facilities and
+      // call it a day. Fall through to remaining cohesion checks below.
     }
 
     // Also check if cluster has points too far from its centroid

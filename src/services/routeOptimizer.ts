@@ -1,5 +1,5 @@
 import { DistanceMatrix } from './osrm';
-import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, validateGeographicCohesion, MAX_MERGE_CENTROID_DISTANCE_MILES, GeoPoint, Cluster } from '../utils/geoClustering';
+import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, validateGeographicCohesion, MAX_MERGE_CENTROID_DISTANCE_MILES, MIN_VIABLE_DAY_FACILITIES, GeoPoint, Cluster } from '../utils/geoClustering';
 
 export interface FacilityWithIndex {
   index: number;
@@ -406,12 +406,17 @@ function mergeAdjacentClusters(
       const avgDist2 = getAvgIntraDistance(candidateCluster);
       const avgIntraDistance = (avgDist1 + avgDist2) / 2;
 
-      // Hard ceiling first — never merge two clusters whose centroids are
-      // far apart, even if both are size-1 (the previous logic skipped the
-      // distance check entirely when avgIntraDistance was 0, so two
-      // single-point clusters could fuse regardless of distance —
-      // this was the root cause of the "Day 2 split across the map" bug).
-      if (centroidDistance > MAX_MERGE_CENTROID_DISTANCE_MILES) continue;
+      // Distance ceiling. Default cap is 30 miles — keeps two genuinely-
+      // viable clusters from fusing into one bimodal day. BUT relax that
+      // when at least one of the two clusters is sub-viable on its own
+      // (< MIN_VIABLE_DAY_FACILITIES): a 1-facility cluster 50 miles from
+      // a 2-facility cluster shouldn't become two solo/two-stop days when
+      // they could be one productive day. Time/facility constraints below
+      // still bound the result.
+      const eitherSubViable =
+        currentCluster.points.length < MIN_VIABLE_DAY_FACILITIES ||
+        candidateCluster.points.length < MIN_VIABLE_DAY_FACILITIES;
+      if (!eitherSubViable && centroidDistance > MAX_MERGE_CENTROID_DISTANCE_MILES) continue;
       // Relative check: clusters are adjacent only if centroid distance is
       // within 2x average intra-cluster distance. Skipped when both
       // clusters are size-1 because the relative measure is undefined; the
