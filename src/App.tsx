@@ -3182,7 +3182,7 @@ function App() {
                         setRouteVersion(prev => prev + 1);
                       }}
                       onRefresh={async () => {
-                        console.log('RouteResults onRefresh called');
+                        console.log('RouteResults onRefresh called (settings panel)');
                         setTriggerFitBounds(prev => prev + 1);
                         // Reload latest settings from database
                         const { data: latestSettings, error } = await supabase
@@ -3197,17 +3197,21 @@ function App() {
                           return;
                         }
 
-                        if (latestSettings) {
-                          console.log('Loaded latest settings, calling handleGenerateRoutes', latestSettings);
-                          handleGenerateRoutes(latestSettings);
+                        // CRITICAL: when the user originally created a route from a
+                        // hand-picked selection (routeFacilityIds set), Apply & Re-optimize
+                        // from the settings drawer must stay scoped to that selection.
+                        // Falling through to handleGenerateRoutes here was the bug behind
+                        // "I had 17 selected, re-optimized, suddenly 27 on the map" — that
+                        // path generates over EVERY facility for the current survey type.
+                        const settingsToUse = latestSettings ?? lastUsedSettings;
+                        if (!settingsToUse) {
+                          alert('Settings not found. Please configure settings first.');
+                          return;
+                        }
+                        if (routeFacilityIds && routeFacilityIds.length > 0) {
+                          await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
                         } else {
-                          // Settings don't exist yet, use lastUsedSettings or create defaults
-                          console.warn('No settings found in database, using current settings');
-                          if (lastUsedSettings) {
-                            handleGenerateRoutes(lastUsedSettings);
-                          } else {
-                            alert('Settings not found. Please configure settings first.');
-                          }
+                          handleGenerateRoutes(settingsToUse);
                         }
                       }}
                       onFacilitiesUpdated={loadData}

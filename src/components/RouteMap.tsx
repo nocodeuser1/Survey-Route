@@ -877,13 +877,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerSize = hasAnyValidCompletion ? 30 : 36;
           const markerAnchor = hasAnyValidCompletion ? 15 : 18;
 
-          // Use gray background for manually removed facilities
-          // Use status-based color when SPCC Plans filter is active
-          const markerBgColor = isManuallyRemoved
-            ? '#9CA3AF'
-            : surveyType === 'spcc_plan'
-              ? spccPlanStatusColor
-              : color;
+          // Use gray background for manually removed facilities; otherwise
+          // ALWAYS use the per-day route color so days are visually
+          // distinguishable on the map (day 1 blue, day 2 red, day 3 green,
+          // etc., per the COLORS array). Previously when surveyType was
+          // 'spcc_plan' we overrode the background with the SPCC status
+          // color, which collapsed all days into the same red/orange — the
+          // user's "every day looks the same color" report. Plan urgency is
+          // surfaced via the small status pip at bottom-right (added below)
+          // so the information isn't lost.
+          const markerBgColor = isManuallyRemoved ? '#9CA3AF' : color;
           const markerFinalOpacity = isManuallyRemoved ? '0.6' : markerOpacity;
 
           // Add camera badge when photos are taken in SPCC plan mode
@@ -894,8 +897,22 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               </div>`
             : '';
 
+          // Small SPCC status pip at bottom-right — preserves the urgency
+          // signal that used to come from the marker background (now the
+          // day color). Only shown in spcc_plan mode and only for statuses
+          // that actually need attention (skip valid/recertified — the
+          // checkmark variant of the marker already covers those).
+          const showStatusPip =
+            surveyType === 'spcc_plan' &&
+            !hasAnyValidCompletion &&
+            !isManuallyRemoved &&
+            spccPlanStatus !== 'missing'; // missing = no IP date; not actionable here
+          const statusPipHtml = showStatusPip
+            ? `<div style="position: absolute; bottom: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: ${spccPlanStatusColor}; border: 2px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.3);" title="SPCC: ${spccPlanStatus}"></div>`
+            : '';
+
           const markerIcon = L.divIcon({
-            html: `<div style="position: relative; background-color: ${markerBgColor}; color: white; width: ${markerSize}px; height: ${markerSize}px; border-radius: 50%; border: ${borderWidth} solid ${borderColor}; box-shadow: ${boxShadow}; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; opacity: ${markerFinalOpacity}; transition: opacity 0.3s ease;">${markerContent}${photoBadgeHtml}</div>`,
+            html: `<div style="position: relative; background-color: ${markerBgColor}; color: white; width: ${markerSize}px; height: ${markerSize}px; border-radius: 50%; border: ${borderWidth} solid ${borderColor}; box-shadow: ${boxShadow}; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; opacity: ${markerFinalOpacity}; transition: opacity 0.3s ease;">${markerContent}${photoBadgeHtml}${statusPipHtml}</div>`,
             className: '',
             iconSize: [markerSize, markerSize],
             iconAnchor: [markerAnchor, markerAnchor],
