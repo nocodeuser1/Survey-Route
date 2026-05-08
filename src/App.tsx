@@ -2079,7 +2079,14 @@ function App() {
           optimizedFromSequence,
           distanceMatrix,
           homeIndex,
-          lastUsedSettings.start_time || '08:00'
+          // Preserve any per-day start time the user had set on this day.
+          // Hard-coding lastUsedSettings.start_time here was clobbering
+          // per-day overrides on every reassign — and was the cause of
+          // the "wrong home arrival time after reassign, fixed by opening
+          // and re-applying the start-time modal" phenomenon. The modal's
+          // tempDayStartTimes still held the override; clicking Apply
+          // detected the mismatch and recalculated correctly.
+          fromRoute.startTime || lastUsedSettings.start_time || '08:00'
         );
         newFromRoute.day = fromDay;
 
@@ -2129,7 +2136,9 @@ function App() {
         optimizedToSequence,
         distanceMatrix,
         homeIndex,
-        lastUsedSettings.start_time || '08:00'
+        // Preserve the destination day's existing start time (per-day override
+        // stays intact across reassigns). See comment on the fromRoute branch.
+        toRoute.startTime || lastUsedSettings.start_time || '08:00'
       );
       newToRoute.day = toDay;
 
@@ -2312,7 +2321,10 @@ function App() {
             optimizedSequence,
             distanceMatrix,
             homeIndex,
-            lastUsedSettings.start_time || '08:00'
+            // Preserve the day's existing start time across bulk reassigns.
+            // Same root cause as handleReassignFacility — see the longer
+            // comment there.
+            route.startTime || lastUsedSettings.start_time || '08:00'
           );
           newRoute.day = route.day;
           routesToKeep.push(newRoute);
@@ -2491,13 +2503,15 @@ function App() {
         homeIndex
       );
 
-      // Calculate the new route with updated times
+      // Calculate the new route with updated times. Preserve the day's
+      // existing start time so per-day overrides survive a remove. Same
+      // pattern as the reassign handlers.
       const newRoute = calculateDayRoute(
         facilitiesWithIndex,
         optimizedSequence,
         distanceMatrix,
         homeIndex,
-        lastUsedSettings.start_time || '08:00',
+        routeToUpdate.startTime || lastUsedSettings.start_time || '08:00',
         lastUsedSettings.sunset_offset_minutes || 0
       );
 
