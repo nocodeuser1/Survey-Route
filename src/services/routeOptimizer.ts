@@ -1,5 +1,18 @@
 import { DistanceMatrix } from './osrm';
-import { haversineDistance, kMeansClustering, balanceClusters, findOptimalClusters, validateGeographicCohesion, MAX_MERGE_CENTROID_DISTANCE_MILES, MIN_VIABLE_DAY_FACILITIES, GeoPoint, Cluster } from '../utils/geoClustering';
+import {
+  haversineDistance,
+  kMeansClustering,
+  balanceClusters,
+  findOptimalClusters,
+  validateGeographicCohesion,
+  maxPairwiseDistance,
+  calculateCentroid,
+  MAX_MERGE_CENTROID_DISTANCE_MILES,
+  MIN_VIABLE_DAY_FACILITIES,
+  MAX_INTRA_CLUSTER_PAIRWISE_MILES,
+  GeoPoint,
+  Cluster,
+} from '../utils/geoClustering';
 
 export interface FacilityWithIndex {
   index: number;
@@ -475,6 +488,95 @@ function mergeAdjacentClusters(
   return merged;
 }
 
+/**
+ * After clustering + merging, some clusters may still be bimodal — points
+ * legitimately split across two distant areas — but too small to split
+ * cleanly into viable days on their own. The right answer in that case
+ * is usually to PUSH each subgroup into a different day-cluster that's
+ * already in its area (e.g. the Watonga half of a Day 2 stub joins
+ * Day 1 which is already around El Reno; the Chickasha half joins Day 3
+ * which is already in Chickasha).
+ *
+ * This pass walks the cluster list, detects any cluster whose max
+ * pairwise distance exceeds the cohesion ceiling, k-means-splits it into
+ * 2 subgroups, and tries to absorb each subgroup into the nearest
+ * EXISTING cluster — but only if doing so:
+ *   1. fits within maxFacilitiesPerDay,
+ *   2. doesn't push the target cluster's max-pairwise above the ceiling
+ *      (i.e. the target stays cohesive after absorption).
+ *
+ * If both subgroups can be absorbed, the original bimodal cluster is
+ * removed. If even one subgroup has nowhere to go, we leave the original
+ * intact — better one bimodal day than orphaned mini-days. Same
+ * minimum-viable-day intuition the user surfaced.
+ */
+function absorbBimodalIntoNeighbors(
+  clusters: Cluster[],
+  maxFacilitiesPerDay: number
+): Cluster[] {
+  const out: Cluster[] = [...clusters];
+
+  // Walk in reverse so splice() doesn't shift indices we're about to look at.
+  for (let i = out.length - 1; i >= 0; i--) {
+    const cluster = out[i];
+    if (cluster.points.length < 2) continue;
+
+    const maxPair = maxPairwiseDistance(cluster.points);
+    if (maxPair <= MAX_INTRA_CLUSTER_PAIRWISE_MILES) continue;
+
+    // Bimodal — try to dissolve it into neighbors. K-means split first.
+    const split = kMeansClustering(cluster.points, 2, 30, 0.85);
+    if (split.length < 2) continue;
+
+    type Plan = { targetIdx: number; subgroup: Cluster };
+    const plans: Plan[] = [];
+    const claimedTargetIdx = new Set<number>();
+
+    for (const sub of split) {
+      let bestTarget = -1;
+      let bestDist = Infinity;
+      for (let j = 0; j < out.length; j++) {
+        if (j === i) continue;
+        if (claimedTargetIdx.has(j)) continue;
+        const tgt = out[j];
+        if (tgt.points.length + sub.points.length > maxFacilitiesPerDay) continue;
+        // Absorption mustn't introduce new bimodality in the target.
+        const combinedPoints = [...tgt.points, ...sub.points];
+        if (maxPairwiseDistance(combinedPoints) > MAX_INTRA_CLUSTER_PAIRWISE_MILES) continue;
+        const d = haversineDistance(
+          tgt.centroid.latitude,
+          tgt.centroid.longitude,
+          sub.centroid.latitude,
+          sub.centroid.longitude
+        );
+        if (d < bestDist) {
+          bestDist = d;
+          bestTarget = j;
+        }
+      }
+      if (bestTarget < 0) {
+        // No home for this subgroup — abandon redistribution for this cluster.
+        plans.length = 0;
+        break;
+      }
+      plans.push({ targetIdx: bestTarget, subgroup: sub });
+      claimedTargetIdx.add(bestTarget);
+    }
+
+    if (plans.length === split.length) {
+      // Every subgroup found a home. Commit absorptions and drop original.
+      for (const { targetIdx, subgroup } of plans) {
+        const tgt = out[targetIdx];
+        tgt.points = [...tgt.points, ...subgroup.points];
+        tgt.centroid = calculateCentroid(tgt.points);
+      }
+      out.splice(i, 1);
+    }
+  }
+
+  return out;
+}
+
 export function optimizeRoutes(
   facilities: FacilityWithIndex[],
   distanceMatrix: DistanceMatrix,
@@ -535,10 +637,18 @@ export function optimizeRoutes(
   // Merge small adjacent clusters before day building
   clusters = mergeAdjacentClusters(clusters, maxFacilitiesPerDay, constraints, homeBase);
 
-  // Belt-and-suspenders: re-run cohesion validation AFTER merging. Even
-  // with the merge gates above, edge cases can still produce a bimodal
-  // cluster (e.g. when two ~adjacent clusters both happen to have
-  // legitimate avgIntraDistance values, then merging them produces a
+  // For any bimodal cluster that survived merging (typically because both
+  // halves are individually sub-viable, like a 2+2 stub), try to dissolve
+  // it into neighboring clusters that are already in those areas. This is
+  // the "the Watonga pair should join Day 1, the Chickasha pair should
+  // join Day 3" case — better than either keeping a bimodal day or
+  // splitting into two undersized days.
+  clusters = absorbBimodalIntoNeighbors(clusters, maxFacilitiesPerDay);
+
+  // Belt-and-suspenders: re-run cohesion validation AFTER merge +
+  // absorption. Even with the gates above, edge cases can still produce
+  // a bimodal cluster (e.g. when two ~adjacent clusters both happen to
+  // have legitimate avgIntraDistance values, then merging them produces a
   // cluster whose own pairwise span exceeds the cohesion ceiling).
   // Re-running the validator catches those before they become a day.
   clusters = validateGeographicCohesion(clusters, homeBase);

@@ -29,7 +29,7 @@ export function haversineDistance(
   return R * c;
 }
 
-function calculateCentroid(points: GeoPoint[]): GeoPoint {
+export function calculateCentroid(points: GeoPoint[]): GeoPoint {
   if (points.length === 0) {
     return { latitude: 0, longitude: 0 };
   }
@@ -258,7 +258,7 @@ export function balanceClusters(
  * (subgroups can be in similar directions from home base). An absolute
  * pairwise ceiling catches that case directly.
  */
-const MAX_INTRA_CLUSTER_PAIRWISE_MILES = 40;
+export const MAX_INTRA_CLUSTER_PAIRWISE_MILES = 40;
 
 /**
  * Hard ceiling on how far apart two cluster centroids can be for the
@@ -279,7 +279,7 @@ export const MAX_MERGE_CENTROID_DISTANCE_MILES = 30;
  */
 export const MIN_VIABLE_DAY_FACILITIES = 3;
 
-function maxPairwiseDistance(points: GeoPoint[]): number {
+export function maxPairwiseDistance(points: GeoPoint[]): number {
   let max = 0;
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 1; j < points.length; j++) {
