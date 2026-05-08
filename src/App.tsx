@@ -2144,12 +2144,18 @@ function App() {
       const totalDriveTime = updatedRoutes.reduce((sum, route) => sum + route.totalDriveTime, 0);
       const totalVisitTime = updatedRoutes.reduce((sum, route) => sum + route.totalVisitTime, 0);
       const totalTime = updatedRoutes.reduce((sum, route) => sum + route.totalTime, 0);
+      // Count facilities from the route's actual days, NOT from the
+      // account-wide active list. The previous `facilities.filter(...)`
+      // form pulled in the entire account (e.g. 148) and stomped over the
+      // custom-route count (e.g. 15) on every reassign — which then
+      // persisted to the saved route on Save.
+      const totalFacilities = updatedRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
 
       const newResult: OptimizationResult = {
         routes: updatedRoutes,
         totalDays: updatedRoutes.length,
         totalMiles,
-        totalFacilities: facilities.filter(isActiveFacility).length,
+        totalFacilities,
         totalDriveTime,
         totalVisitTime,
         totalTime,
@@ -2326,12 +2332,15 @@ function App() {
       const totalDriveTime = routesToKeep.reduce((sum, route) => sum + route.totalDriveTime, 0);
       const totalVisitTime = routesToKeep.reduce((sum, route) => sum + route.totalVisitTime, 0);
       const totalTime = routesToKeep.reduce((sum, route) => sum + route.totalTime, 0);
+      // Count facilities from the route's actual days, not from the
+      // account-wide list (see same fix applied in handleReassignFacility).
+      const totalFacilities = routesToKeep.reduce((sum, r) => sum + r.facilities.length, 0);
 
       const newResult: OptimizationResult = {
         routes: routesToKeep,
         totalDays: routesToKeep.length,
         totalMiles,
-        totalFacilities: facilities.filter(isActiveFacility).length,
+        totalFacilities,
         totalDriveTime,
         totalVisitTime,
         totalTime,
@@ -2436,12 +2445,15 @@ function App() {
         const totalDriveTime = routesWithoutDay.reduce((sum, r) => sum + r.totalDriveTime, 0);
         const totalVisitTime = routesWithoutDay.reduce((sum, r) => sum + r.totalVisitTime, 0);
         const totalTime = routesWithoutDay.reduce((sum, r) => sum + r.totalTime, 0);
+        // Count from the route's actual remaining facilities, not from the
+        // account-wide list — same fix pattern as handleReassignFacility.
+        const totalFacilities = routesWithoutDay.reduce((sum, r) => sum + r.facilities.length, 0);
 
         const newResult: OptimizationResult = {
           routes: routesWithoutDay,
           totalDays: routesWithoutDay.length,
           totalMiles,
-          totalFacilities: facilities.filter(isActiveFacility).length - 1,
+          totalFacilities,
           totalDriveTime,
           totalVisitTime,
           totalTime,
@@ -2499,12 +2511,14 @@ function App() {
       const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
       const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
       const totalTime = updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0);
+      // Count from the route's actual days — see fix in handleReassignFacility.
+      const totalFacilities = updatedRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
 
       const newResult: OptimizationResult = {
         routes: updatedRoutes,
         totalDays: updatedRoutes.length,
         totalMiles,
-        totalFacilities: facilities.filter(isActiveFacility).length - 1,
+        totalFacilities,
         totalDriveTime,
         totalVisitTime,
         totalTime,
