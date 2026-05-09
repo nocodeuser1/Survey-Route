@@ -38,6 +38,10 @@ export interface Facility {
   well_name_4?: string | null;
   well_name_5?: string | null;
   well_name_6?: string | null;
+  well_name_7?: string | null;
+  well_name_8?: string | null;
+  well_name_9?: string | null;
+  well_name_10?: string | null;
   // API numbers
   well_api_1?: string | null;
   well_api_2?: string | null;
@@ -45,6 +49,10 @@ export interface Facility {
   well_api_4?: string | null;
   well_api_5?: string | null;
   well_api_6?: string | null;
+  well_api_7?: string | null;
+  well_api_8?: string | null;
+  well_api_9?: string | null;
+  well_api_10?: string | null;
   api_numbers_combined?: string | null;
   // Alternative coordinates
   lat_well_sheet?: number | null;

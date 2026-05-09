@@ -13,6 +13,10 @@ export interface ParsedFacility {
   well_name_4?: string;
   well_name_5?: string;
   well_name_6?: string;
+  well_name_7?: string;
+  well_name_8?: string;
+  well_name_9?: string;
+  well_name_10?: string;
   // API numbers
   well_api_1?: string;
   well_api_2?: string;
@@ -20,6 +24,10 @@ export interface ParsedFacility {
   well_api_4?: string;
   well_api_5?: string;
   well_api_6?: string;
+  well_api_7?: string;
+  well_api_8?: string;
+  well_api_9?: string;
+  well_api_10?: string;
   api_numbers_combined?: string;
   // Alternative coordinates
   lat_well_sheet?: number;
@@ -54,12 +62,20 @@ export interface ColumnMapping {
   well_name_4?: string | null;
   well_name_5?: string | null;
   well_name_6?: string | null;
+  well_name_7?: string | null;
+  well_name_8?: string | null;
+  well_name_9?: string | null;
+  well_name_10?: string | null;
   well_api_1?: string | null;
   well_api_2?: string | null;
   well_api_3?: string | null;
   well_api_4?: string | null;
   well_api_5?: string | null;
   well_api_6?: string | null;
+  well_api_7?: string | null;
+  well_api_8?: string | null;
+  well_api_9?: string | null;
+  well_api_10?: string | null;
   api_numbers_combined?: string | null;
   lat_well_sheet?: string | null;
   long_well_sheet?: string | null;
@@ -242,12 +258,20 @@ export function detectColumns(headers: string[]): ColumnMapping {
     well_name_4: findColumn(headers, wellNameVariations(4)),
     well_name_5: findColumn(headers, wellNameVariations(5)),
     well_name_6: findColumn(headers, wellNameVariations(6)),
+    well_name_7: findColumn(headers, wellNameVariations(7)),
+    well_name_8: findColumn(headers, wellNameVariations(8)),
+    well_name_9: findColumn(headers, wellNameVariations(9)),
+    well_name_10: findColumn(headers, wellNameVariations(10)),
     well_api_1: findColumn(headers, wellApiVariations(1)),
     well_api_2: findColumn(headers, wellApiVariations(2)),
     well_api_3: findColumn(headers, wellApiVariations(3)),
     well_api_4: findColumn(headers, wellApiVariations(4)),
     well_api_5: findColumn(headers, wellApiVariations(5)),
     well_api_6: findColumn(headers, wellApiVariations(6)),
+    well_api_7: findColumn(headers, wellApiVariations(7)),
+    well_api_8: findColumn(headers, wellApiVariations(8)),
+    well_api_9: findColumn(headers, wellApiVariations(9)),
+    well_api_10: findColumn(headers, wellApiVariations(10)),
     api_numbers_combined: findColumn(headers, apiCombinedVariations),
     lat_well_sheet: findColumn(headers, latWellSheetVariations),
     long_well_sheet: findColumn(headers, longWellSheetVariations),
@@ -392,13 +416,13 @@ function processRow(
   if (columnMapping.matched_facility_name && row[columnMapping.matched_facility_name]) {
     facility.matched_facility_name = row[columnMapping.matched_facility_name]?.toString().trim();
   }
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 10; i++) {
     const wellNameKey = `well_name_${i}` as keyof ColumnMapping;
     if (columnMapping[wellNameKey] && row[columnMapping[wellNameKey]!]) {
       (facility as any)[wellNameKey] = row[columnMapping[wellNameKey]!]?.toString().trim();
     }
   }
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 10; i++) {
     const wellApiKey = `well_api_${i}` as keyof ColumnMapping;
     if (columnMapping[wellApiKey] && row[columnMapping[wellApiKey]!]) {
       (facility as any)[wellApiKey] = row[columnMapping[wellApiKey]!]?.toString().trim();

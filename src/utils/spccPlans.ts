@@ -22,7 +22,7 @@ export interface FacilityWell {
  */
 export function getFacilityWells(facility: Facility): FacilityWell[] {
   const wells: FacilityWell[] = [];
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 10; i++) {
     const name = (facility as any)[`well_name_${i}`] as string | null | undefined;
     const api = (facility as any)[`well_api_${i}`] as string | null | undefined;
     if (name != null && String(name).trim() !== '') {

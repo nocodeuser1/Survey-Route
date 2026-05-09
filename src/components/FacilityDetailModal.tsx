@@ -84,7 +84,7 @@ type DerivedDocument = {
   uploadedAt?: string | null;
 };
 
-const WELL_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
+const WELL_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 function createFallbackSettings(userId: string, accountId?: string): UserSettings {
   return {

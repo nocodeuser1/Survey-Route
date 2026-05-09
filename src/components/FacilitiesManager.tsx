@@ -138,8 +138,8 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'berm_depth_inches' | 'berm_length' | 'berm_width' |
   'initial_inspection_completed' | 'company_signature_date' | 'recertified_date' | 'recertification_due_date' |
   'day_assignment' | 'team_assignment' | 'status' | 'created_at' |
-  'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' |
-  'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'api_numbers_combined' |
+  'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' | 'well_name_7' | 'well_name_8' | 'well_name_9' | 'well_name_10' |
+  'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet';
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'recertification_status', 'notes'];
@@ -156,6 +156,8 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'matched_facility_name', 'api_numbers_combined',
   'well_name_1', 'well_api_1', 'well_name_2', 'well_api_2', 'well_name_3', 'well_api_3',
   'well_name_4', 'well_api_4', 'well_name_5', 'well_api_5', 'well_name_6', 'well_api_6',
+  'well_name_7', 'well_api_7', 'well_name_8', 'well_api_8', 'well_name_9', 'well_api_9',
+  'well_name_10', 'well_api_10',
   'lat_well_sheet', 'long_well_sheet',
   'created_at',
 ];
@@ -199,12 +201,20 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   well_name_4: 'Well 4',
   well_name_5: 'Well 5',
   well_name_6: 'Well 6',
+  well_name_7: 'Well 7',
+  well_name_8: 'Well 8',
+  well_name_9: 'Well 9',
+  well_name_10: 'Well 10',
   well_api_1: 'API 1',
   well_api_2: 'API 2',
   well_api_3: 'API 3',
   well_api_4: 'API 4',
   well_api_5: 'API 5',
   well_api_6: 'API 6',
+  well_api_7: 'API 7',
+  well_api_8: 'API 8',
+  well_api_9: 'API 9',
+  well_api_10: 'API 10',
   api_numbers_combined: 'Combined API',
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
@@ -1137,6 +1147,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.well_name_5 || '';
           case 'well_name_6':
             return facility.well_name_6 || '';
+          case 'well_name_7':
+            return facility.well_name_7 || '';
+          case 'well_name_8':
+            return facility.well_name_8 || '';
+          case 'well_name_9':
+            return facility.well_name_9 || '';
+          case 'well_name_10':
+            return facility.well_name_10 || '';
           case 'well_api_1':
             return facility.well_api_1 || '';
           case 'well_api_2':
@@ -1149,6 +1167,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.well_api_5 || '';
           case 'well_api_6':
             return facility.well_api_6 || '';
+          case 'well_api_7':
+            return facility.well_api_7 || '';
+          case 'well_api_8':
+            return facility.well_api_8 || '';
+          case 'well_api_9':
+            return facility.well_api_9 || '';
+          case 'well_api_10':
+            return facility.well_api_10 || '';
           case 'api_numbers_combined':
             return facility.api_numbers_combined || '';
           case 'lat_well_sheet':
@@ -1255,12 +1281,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     formData.well_name_4 = facility.well_name_4 || '';
     formData.well_name_5 = facility.well_name_5 || '';
     formData.well_name_6 = facility.well_name_6 || '';
+    formData.well_name_7 = facility.well_name_7 || '';
+    formData.well_name_8 = facility.well_name_8 || '';
+    formData.well_name_9 = facility.well_name_9 || '';
+    formData.well_name_10 = facility.well_name_10 || '';
     formData.well_api_1 = facility.well_api_1 || '';
     formData.well_api_2 = facility.well_api_2 || '';
     formData.well_api_3 = facility.well_api_3 || '';
     formData.well_api_4 = facility.well_api_4 || '';
     formData.well_api_5 = facility.well_api_5 || '';
     formData.well_api_6 = facility.well_api_6 || '';
+    formData.well_api_7 = facility.well_api_7 || '';
+    formData.well_api_8 = facility.well_api_8 || '';
+    formData.well_api_9 = facility.well_api_9 || '';
+    formData.well_api_10 = facility.well_api_10 || '';
     formData.api_numbers_combined = facility.api_numbers_combined || '';
     formData.lat_well_sheet = facility.lat_well_sheet ? String(facility.lat_well_sheet) : '';
     formData.long_well_sheet = facility.long_well_sheet ? String(facility.long_well_sheet) : '';
@@ -1284,15 +1318,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setMobileEditFormData(formData);
 
     // Auto-expand well section if any well data exists
-    const hasWellData = [formData.well_name_1, formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
-    formData.well_api_1, formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6,
+    const hasWellData = [formData.well_name_1, formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6, formData.well_name_7, formData.well_name_8, formData.well_name_9, formData.well_name_10,
+    formData.well_api_1, formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6, formData.well_api_7, formData.well_api_8, formData.well_api_9, formData.well_api_10,
     formData.matched_facility_name, formData.api_numbers_combined].some(v => v && v.trim());
     setShowWellSection(hasWellData);
 
-    // Auto-expand wells 2-6 if any have data
-    const hasWells2to6 = [formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6,
-    formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6].some(v => v && v.trim());
-    setShowWells2to6(hasWells2to6);
+    // Auto-expand wells 2-10 if any have data
+    const hasWells2to10 = [formData.well_name_2, formData.well_name_3, formData.well_name_4, formData.well_name_5, formData.well_name_6, formData.well_name_7, formData.well_name_8, formData.well_name_9, formData.well_name_10,
+    formData.well_api_2, formData.well_api_3, formData.well_api_4, formData.well_api_5, formData.well_api_6, formData.well_api_7, formData.well_api_8, formData.well_api_9, formData.well_api_10].some(v => v && v.trim());
+    setShowWells2to6(hasWells2to10);
   };
 
   const handleSaveMobileEdit = async () => {
@@ -1553,7 +1587,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const buildDetailFields = (parsedFacility: ParsedFacility) => {
     const d: any = {};
     if (parsedFacility.matched_facility_name !== undefined) d.matched_facility_name = parsedFacility.matched_facility_name || null;
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= 10; i++) {
       const wn = `well_name_${i}` as keyof ParsedFacility;
       const wa = `well_api_${i}` as keyof ParsedFacility;
       if (parsedFacility[wn] !== undefined) d[wn] = parsedFacility[wn] || null;
@@ -3233,7 +3267,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors py-1"
                       >
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showWells2to6 ? 'rotate-180' : ''}`} />
-                        <span>{showWells2to6 ? 'Hide Wells 2-6' : 'Show Wells 2-6'}</span>
+                        <span>{showWells2to6 ? 'Hide Wells 2-10' : 'Show Wells 2-10'}</span>
                       </button>
                       <div
                         className="grid transition-all duration-300 ease-out"
@@ -3244,7 +3278,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       >
                         <div className="overflow-hidden min-h-0">
                           <div className="space-y-3">
-                            {([2, 3, 4, 5, 6] as const).map(n => (
+                            {([2, 3, 4, 5, 6, 7, 8, 9, 10] as const).map(n => (
                               <div key={n} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Well {n}</label>
