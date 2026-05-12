@@ -496,6 +496,48 @@ function App() {
     }
   }, [optimizationResult]);
 
+  // Auto-save optimizationResult to route_plans.plan_data whenever it changes,
+  // so per-day start times (and any other in-memory route edits) persist
+  // across reloads / forced refreshes. Debounced 800ms to batch rapid edits.
+  // Skips the very first run after a route is loaded so we don't re-save
+  // the exact data we just read.
+  const lastSavedRouteIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentRouteId || !optimizationResult || !currentAccount) return;
+
+    // When the route id flips (load/new route), reset the baseline and skip
+    // the immediate auto-save triggered by setOptimizationResult during load.
+    if (lastSavedRouteIdRef.current !== currentRouteId) {
+      lastSavedRouteIdRef.current = currentRouteId;
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      try {
+        const planDataToSave = routeFacilityIds
+          ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
+          : optimizationResult;
+        const { error: saveErr } = await supabase
+          .from('route_plans')
+          .update({
+            plan_data: planDataToSave,
+            total_days: optimizationResult.totalDays,
+            total_miles: optimizationResult.totalMiles,
+            total_facilities: optimizationResult.totalFacilities,
+          })
+          .eq('id', currentRouteId)
+          .eq('account_id', currentAccount.id);
+        if (saveErr) {
+          console.warn('[autosave] route_plans update failed:', saveErr.message);
+        }
+      } catch (e: any) {
+        console.warn('[autosave] route_plans update threw:', e?.message || e);
+      }
+    }, 800);
+
+    return () => clearTimeout(handle);
+  }, [optimizationResult, currentRouteId, currentAccount, routeFacilityIds]);
+
 
   useEffect(() => {
     if (currentAccount && currentAccount.id !== loadedAccountRef.current) {
