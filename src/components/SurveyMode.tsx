@@ -854,8 +854,10 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         <div className="max-w-[700px] mx-auto px-4 py-3">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white dark:text-white">Survey Mode</h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {/* "Survey Mode" label removed here — the global top nav already
+                  renders it on both mobile and desktop. Keep just the subtitle
+                  so we don't show the title twice. */}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 Team {teamNumber} Route
                 {selectedFacilityIds.size > 0 && (
                   <span className="ml-2 text-blue-600 dark:text-blue-400">({selectedFacilityIds.size} selected)</span>
@@ -1600,18 +1602,42 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         </div>
       </div>
 
-      {navigationTarget && userSettings && (
-        <NavigationPopup
-          latitude={navigationTarget.latitude}
-          longitude={navigationTarget.longitude}
-          facilityName={navigationTarget.name}
-          mapPreference={userSettings.map_preference}
-          includeGoogleEarth={userSettings.include_google_earth}
-          onClose={() => setNavigationTarget(null)}
-          onShowOnMap={onShowOnMap ? () => {
-            onShowOnMap(navigationTarget.latitude, navigationTarget.longitude);
-          } : undefined}
-        />
+      {navigationTarget && (
+        (() => {
+          const lat = Number(navigationTarget.latitude);
+          const lng = Number(navigationTarget.longitude);
+          // Guard against missing coordinates — popup would silently 404 in
+          // Google/Apple Maps otherwise. Surface a clear message instead.
+          if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+            return (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setNavigationTarget(null)}>
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No coordinates</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                    “{navigationTarget.name}” doesn't have a latitude / longitude on file, so we can't open Maps. Add coordinates to the facility to enable navigation.
+                  </p>
+                  <button onClick={() => setNavigationTarget(null)} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Close</button>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <NavigationPopup
+              latitude={lat}
+              longitude={lng}
+              facilityName={navigationTarget.name}
+              // Fall back to Google Maps + Earth when user_settings hasn't
+              // been loaded yet (or doesn't exist for this account). The old
+              // gate `userSettings &&` made Navigate silently no-op.
+              mapPreference={userSettings?.map_preference || 'google'}
+              includeGoogleEarth={userSettings?.include_google_earth ?? true}
+              onClose={() => setNavigationTarget(null)}
+              onShowOnMap={onShowOnMap ? () => {
+                onShowOnMap(lat, lng);
+              } : undefined}
+            />
+          );
+        })()
       )}
 
       {managingInspectionsFacility && (
