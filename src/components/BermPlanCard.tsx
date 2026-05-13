@@ -17,7 +17,7 @@ import { supabase, type Facility, type SPCCPlan } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
 import { formatDate } from '../utils/dateUtils';
 import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
-import { isPlanRecertificationActive } from '../utils/spccStatus';
+import { isPlanRecertificationActive, isRecertificationActive } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
 import RecertificationPagePickerModal from './RecertificationPagePickerModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -525,9 +525,19 @@ export default function BermPlanCard({
           </div>
         )}
 
-        {/* Per-berm recertification self-cert (only when this berm's 5-year
-            clock is within 90 days, past, or recently rolled). */}
-        {isPlanRecertificationActive(plan) && (
+        {/* Per-berm recertification self-cert. Visible whenever:
+            1. The berm's 5-year clock is within 90 days, past, or recently rolled,
+            2. The plan already has any recertification data recorded (so the
+               user can review/edit a previously recorded decision), or
+            3. The facility-level rollup considers this facility in a recert
+               state (e.g., facility.recertified_date is set, which is why the
+               rollup tells the user to "Edit per-berm in the SPCC Plan tab"). */}
+        {(isPlanRecertificationActive(plan)
+          || !!plan.recertification_decision
+          || !!plan.recertification_decision_at
+          || !!plan.recertification_decision_notes
+          || !!plan.recertified_date
+          || isRecertificationActive(facility)) && (
           <div
             className={`rounded-lg border p-3 ${
               darkMode
@@ -545,7 +555,9 @@ export default function BermPlanCard({
                   Recertification Review — {getBermShortLabel(plan)}
                 </h4>
                 <p className={`text-[11px] mt-0.5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  This berm's 5-year recertification window is open. Record your decision.
+                  {isPlanRecertificationActive(plan)
+                    ? "This berm's 5-year recertification window is open. Record your decision."
+                    : "Record or update this berm's recertification decision."}
                 </p>
               </div>
             </div>

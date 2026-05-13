@@ -359,7 +359,7 @@ export default function RecertificationStatusField(
           )}
           {!subjectView.writable && (
             <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
-              Edit per-berm in the SPCC Plan tab
+              Open SPCC Plan Details to edit per-berm
             </span>
           )}
         </div>
