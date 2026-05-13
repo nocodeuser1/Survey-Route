@@ -2427,7 +2427,14 @@ export default function FacilityDetailModal({
               <div className="flex items-center gap-1 sm:gap-2">
                 {onEdit && (
                   <button
-                    onClick={onEdit}
+                    onClick={() => {
+                      // Close the detail modal first so the edit view/form is
+                      // visible and not hidden behind the still-open modal.
+                      onClose();
+                      // Defer to next tick so React unmounts the portal before
+                      // the parent opens its edit UI.
+                      setTimeout(() => onEdit(), 0);
+                    }}
                     className="w-10 h-10 flex items-center justify-center hover:bg-blue-800 rounded-full transition-colors"
                     title="Edit facility details"
                   >
@@ -2486,13 +2493,13 @@ export default function FacilityDetailModal({
       </div>
 
 
-      {showNavigationPopup && settings && (
+      {showNavigationPopup && (
         <NavigationPopup
           latitude={facility.latitude}
           longitude={facility.longitude}
           facilityName={facility.name}
-          mapPreference={settings.map_preference}
-          includeGoogleEarth={settings.include_google_earth}
+          mapPreference={settings?.map_preference ?? (createFallbackSettings(userId, accountId).map_preference)}
+          includeGoogleEarth={settings?.include_google_earth ?? (createFallbackSettings(userId, accountId).include_google_earth)}
           onClose={() => setShowNavigationPopup(false)}
           onShowOnMap={
             onShowOnMap
