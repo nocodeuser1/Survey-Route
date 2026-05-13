@@ -2027,6 +2027,13 @@ function App() {
     setCurrentView('facilities');
   };
 
+  // Silent, optimistic facility patch — updates a single facility in local state
+  // without triggering a full loadData() / routeVersion bump. Used by RouteMap's
+  // photo-toggle so the user's map view, zoom, and open popup stay intact.
+  const handleFacilityPatch = (id: string, patch: Record<string, any>) => {
+    setFacilities(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
+  };
+
   const handleReassignFacility = async (facilityIndex: number, fromDay: number, toDay: number) => {
     if (!optimizationResult || !homeBase || !lastUsedSettings) return;
 
@@ -3533,6 +3540,7 @@ function App() {
                         userId={DEMO_USER_ID}
                         teamNumber={1}
                         onFacilitiesChange={loadData}
+                        onFacilityPatch={handleFacilityPatch}
                         onInspectionFormActiveChange={setIsInspectionFormActive}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
@@ -3682,6 +3690,7 @@ function App() {
                             userId={DEMO_USER_ID}
                             teamNumber={1}
                             onFacilitiesChange={loadData}
+                            onFacilityPatch={handleFacilityPatch}
                             targetCoords={mapTargetCoords}
                             onNavigateToView={(view) => {
                               setCurrentView(view);

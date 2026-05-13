@@ -44,6 +44,7 @@ interface RouteMapProps {
   onToggleHideCompleted?: () => void;
   showSearchFromParent?: boolean;
   triggerLocationCenter?: number;
+  onFacilityPatch?: (id: string, patch: Record<string, any>) => void;
   navigationMode?: boolean;
   onNavigationModeChange?: (enabled: boolean) => void;
   onInspectionFormActiveChange?: (active: boolean) => void;
@@ -82,7 +83,7 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapWrapperRef = useRef<HTMLDivElement>(null);
@@ -582,9 +583,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     if (!mapRef.current || !homeBase) return;
 
     // Save current map view before updating markers (skip on initial load)
-    // Always save when in full screen to preserve user's view during facility visibility toggles
-    // SKIP saving if targetCoords is set (we're navigating to a specific location)
-    if (!initialLoadRef.current && isFullScreen && !targetCoords) {
+    // Save in both full-screen and embedded modes so the user's view is preserved
+    // through facility visibility toggles, silent patches, etc.
+    // SKIP saving if targetCoords is set (we're navigating to a specific location).
+    if (!initialLoadRef.current && !targetCoords) {
       savedMapViewRef.current = {
         center: mapRef.current.getCenter(),
         zoom: mapRef.current.getZoom()
@@ -1511,7 +1513,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                         ${visitLabel}
                       </div>
                     `;
-                    if (onFacilitiesChange) onFacilitiesChange();
+                    // Silent state patch — keeps user's map view, zoom, and open popup intact.
+                    // Falls back to full refresh if the silent patch handler isn't wired in.
+                    if (onFacilityPatch && facId) {
+                      onFacilityPatch(facId, updateData);
+                    } else if (onFacilitiesChange) {
+                      onFacilitiesChange();
+                    }
                   } catch (err) {
                     console.error('Error toggling photos_taken:', err);
                   }
@@ -1979,7 +1987,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       ${visitLabel}
                     </div>
                   `;
-                  if (onFacilitiesChange) onFacilitiesChange();
+                  // Silent state patch — keeps user's map view and open popup intact.
+                  if (onFacilityPatch && facId) {
+                    onFacilityPatch(facId, updateData);
+                  } else if (onFacilitiesChange) {
+                    onFacilitiesChange();
+                  }
                 } catch (err) {
                   console.error('Error toggling photos_taken:', err);
                 }
@@ -2166,7 +2179,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         initialLoadRef.current = false;
         savedMapViewRef.current = null; // Clear saved view when fitting bounds
         console.log('[RouteMap] Fit bounds triggered');
-      } else if (savedMapViewRef.current && isFullScreen && !targetCoords && !justNavigatedRef.current) {
+      } else if (savedMapViewRef.current && !targetCoords && !justNavigatedRef.current) {
         // Restore saved map view after updating markers in full-screen mode
         // SKIP restoration if we have targetCoords OR just navigated (prevents glitch after "Show on Map")
         console.log('[RouteMap] Restoring map view:', savedMapViewRef.current);
@@ -3169,6 +3182,22 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
     setIsLocating(true);
     console.log('Requesting geolocation...');
+
+    // INSTANT FEEDBACK: if we already have a known user location, center on it
+    // RIGHT NOW so the map zooms in immediately. Then we still refine in the
+    // background with a fresh geolocation reading.
+    if (userLocation &&
+        userLocation.lat >= -90 && userLocation.lat <= 90 &&
+        userLocation.lng >= -180 && userLocation.lng <= 180) {
+      const trackingZoom = 18;
+      setLocationTrackingZoom(trackingZoom);
+      setAutoCentering(true);
+      justNavigatedRef.current = false;
+      userInteractedWithMapRef.current = false;
+      isDraggingRef.current = false;
+      console.log('[goToCurrentLocation] Instant center on cached userLocation');
+      centerMapOnLocation(userLocation.lat, userLocation.lng, trackingZoom, true);
+    }
 
     const handleSuccess = (position: GeolocationPosition) => {
       console.log('[goToCurrentLocation] Geolocation success:', position.coords);
