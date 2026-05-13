@@ -3183,20 +3183,34 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     setIsLocating(true);
     console.log('Requesting geolocation...');
 
-    // INSTANT FEEDBACK: if we already have a known user location, center on it
-    // RIGHT NOW so the map zooms in immediately. Then we still refine in the
-    // background with a fresh geolocation reading.
+    // INSTANT FEEDBACK: reset interaction flags and bump zoom RIGHT NOW so the
+    // user sees the map respond immediately. Geolocation can take a beat
+    // (especially on first tap with no cached position).
+    const trackingZoom = 18;
+    setLocationTrackingZoom(trackingZoom);
+    setAutoCentering(true);
+    justNavigatedRef.current = false;
+    userInteractedWithMapRef.current = false;
+    isDraggingRef.current = false;
+
     if (userLocation &&
         userLocation.lat >= -90 && userLocation.lat <= 90 &&
         userLocation.lng >= -180 && userLocation.lng <= 180) {
-      const trackingZoom = 18;
-      setLocationTrackingZoom(trackingZoom);
-      setAutoCentering(true);
-      justNavigatedRef.current = false;
-      userInteractedWithMapRef.current = false;
-      isDraggingRef.current = false;
+      // Best case: we have a cached user location — center on it instantly
+      // at zoom 18, then refine via geolocation in the background.
       console.log('[goToCurrentLocation] Instant center on cached userLocation');
       centerMapOnLocation(userLocation.lat, userLocation.lng, trackingZoom, true);
+    } else if (mapRef.current) {
+      // No cached location yet: at minimum zoom the map in at zoom 18 on its
+      // current center so the tap visibly registers. Real centering happens
+      // when geolocation resolves below.
+      console.log('[goToCurrentLocation] No cached userLocation — zooming in on current center as visual feedback');
+      try {
+        const currentCenter = mapRef.current.getCenter();
+        mapRef.current.setView(currentCenter, trackingZoom, { animate: true, duration: 0.3 });
+      } catch (err) {
+        console.warn('[goToCurrentLocation] Could not pre-zoom map:', err);
+      }
     }
 
     const handleSuccess = (position: GeolocationPosition) => {
@@ -3247,32 +3261,55 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       alert(errorMessage);
     };
 
-    // Two-stage approach: use cached position FIRST for instant centering,
-    // then refine with high accuracy in the background
+    // Three-stage approach for fastest possible visual response:
+    //   1. Accept ANY cached browser position (maximumAge: Infinity) — returns
+    //      synchronously if the browser has ever resolved location before.
+    //   2. If no cache, try a low-accuracy fast read (3s timeout).
+    //   3. Finally refine with high-accuracy GPS in the background.
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        console.log('[goToCurrentLocation] Got cached/fast position, centering immediately');
+        console.log('[goToCurrentLocation] Got browser-cached position, centering immediately');
         handleSuccess(position);
-        // Then request high accuracy to refine
+        // Refine with high accuracy in the background.
         navigator.geolocation.getCurrentPosition(
           (refinedPosition) => {
             console.log('[goToCurrentLocation] Got refined high-accuracy position');
             updateUserLocation(refinedPosition);
-            centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, locationTrackingZoom, true);
+            centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, trackingZoom, true);
           },
-          () => {}, // Ignore errors on refinement - we already have a position
+          () => {}, // Ignore refinement errors — we already have a position
           { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
       },
-      (error) => {
-        console.warn('[goToCurrentLocation] Fast position failed, trying high accuracy:', error.message);
+      () => {
+        // No browser cache — try a fast low-accuracy read next.
+        console.log('[goToCurrentLocation] No cache, trying fast low-accuracy read');
         navigator.geolocation.getCurrentPosition(
-          handleSuccess,
-          handleError,
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+          (position) => {
+            handleSuccess(position);
+            // Then refine with high accuracy.
+            navigator.geolocation.getCurrentPosition(
+              (refinedPosition) => {
+                console.log('[goToCurrentLocation] Got refined high-accuracy position');
+                updateUserLocation(refinedPosition);
+                centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, trackingZoom, true);
+              },
+              () => {},
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+          },
+          (error) => {
+            console.warn('[goToCurrentLocation] Fast read failed, falling back to high-accuracy:', error.message);
+            navigator.geolocation.getCurrentPosition(
+              handleSuccess,
+              handleError,
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+          },
+          { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
         );
       },
-      { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
+      { enableHighAccuracy: false, timeout: 0, maximumAge: Infinity }
     );
   };
 
