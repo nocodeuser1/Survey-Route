@@ -3730,7 +3730,7 @@ function App() {
 
                         <div className="h-full w-full">
                           <RouteMap
-                            key={`route-map-fullscreen-${routeVersion}-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
+                            key={`route-map-fullscreen-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
                             result={filteredOptimizationResult}
                             homeBase={homeBase}
                             isFullScreen={true}

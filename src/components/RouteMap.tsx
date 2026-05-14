@@ -294,6 +294,76 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onFacilitiesChange]);
 
+  // Stable refs so the delegated day-assign handler always sees fresh props.
+  const onFacilityPatchRef = useRef(onFacilityPatch);
+  const onFacilitiesChangeRef = useRef(onFacilitiesChange);
+  useEffect(() => { onFacilityPatchRef.current = onFacilityPatch; }, [onFacilityPatch]);
+  useEffect(() => { onFacilitiesChangeRef.current = onFacilitiesChange; }, [onFacilitiesChange]);
+
+  // Global delegated click/touch listener for ".assign-day-btn" inside popups.
+  // Attached once at the document level so it survives popup recreation when
+  // markers re-render (e.g. on every keystroke in the search field).
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const btn = target.closest('.assign-day-btn') as HTMLButtonElement | null;
+      if (!btn) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const day = parseInt(btn.dataset.day || '0', 10);
+      const facilityId = btn.dataset.facilityId || '';
+      const facilityName = btn.dataset.facilityName || 'facility';
+      if (!facilityId || !day) return;
+
+      // Guard against double-fire (e.g. touchend + click).
+      if (btn.dataset.assigning === '1') return;
+      btn.dataset.assigning = '1';
+
+      try {
+        const { error } = await supabase
+          .from('facilities')
+          .update({ day_assignment: day })
+          .eq('id', facilityId);
+
+        if (error) throw error;
+
+        // Close any open popup
+        mapRef.current?.closePopup();
+
+        // Instant local update so the marker stays visible on the map.
+        if (onFacilityPatchRef.current) {
+          onFacilityPatchRef.current(facilityId, { day_assignment: day });
+        }
+
+        // Keep facility visible after search is cleared.
+        setRecentlyAssignedIds(prev => new Set(prev).add(facilityId));
+
+        setAssignSuccessMsg(`Added ${facilityName} to Day ${day}`);
+        setTimeout(() => setAssignSuccessMsg(null), 3000);
+
+        // Background refresh so route optimization sees the new assignment.
+        if (onFacilitiesChangeRef.current) {
+          onFacilitiesChangeRef.current();
+        }
+      } catch (err) {
+        console.error('[RouteMap] Failed to assign facility to day:', err);
+        setAssignSuccessMsg('Failed to add facility to route');
+        setTimeout(() => setAssignSuccessMsg(null), 3000);
+      } finally {
+        // Reset guard after a moment in case the button persists.
+        setTimeout(() => { if (btn) btn.dataset.assigning = '0'; }, 500);
+      }
+    };
+
+    document.addEventListener('click', handler, true);
+    return () => {
+      document.removeEventListener('click', handler, true);
+    };
+  }, []);
+
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -1859,9 +1929,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const color = COLORS[(day - 1) % COLORS.length];
             return `<button
                         data-day="${day}"
+                        data-facility-id="${facility.id}"
+                        data-facility-name="${facility.name.replace(/"/g, '&quot;')}"
                         data-facility-index="${facilityIndex}"
                         class="assign-day-btn"
-                        style="padding: 4px 10px; background-color: ${color}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; flex: 0 0 auto;"
+                        style="padding: 6px 12px; background-color: ${color}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; flex: 0 0 auto; touch-action: manipulation; -webkit-tap-highlight-color: transparent;"
                       >
                         Day ${day}
                       </button>`;
@@ -1908,54 +1980,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             const surveyBtn = document.getElementById(`survey-btn-${facilityIndex}`);
             const navigateBtn = document.getElementById(`navigate-btn-${facilityIndex}`);
             const restoreBtn = document.getElementById(`restore-btn-${facilityIndex}`);
-            const dayButtons = document.querySelectorAll('.assign-day-btn');
-
-            // Handle day assignment buttons
-            dayButtons.forEach(btn => {
-              const btnElement = btn as HTMLButtonElement;
-              const day = parseInt(btnElement.dataset.day || '0');
-              const btnFacilityIndex = parseInt(btnElement.dataset.facilityIndex || '0');
-
-              if (btnFacilityIndex === facilityIndex && day > 0) {
-                btnElement.addEventListener('click', async () => {
-                  try {
-                    // Assign facility to day
-                    const { error } = await supabase
-                      .from('facilities')
-                      .update({ day_assignment: day })
-                      .eq('id', facility.id);
-
-                    if (error) throw error;
-
-                    marker.closePopup();
-
-                    // Immediately update local state so the marker stays visible
-                    // after clearing the search — no full page reload needed.
-                    if (onFacilityPatch) {
-                      onFacilityPatch(facility.id, { day_assignment: day });
-                    }
-
-                    // Track this facility so it stays on the map even when
-                    // the search query is cleared.
-                    setRecentlyAssignedIds(prev => new Set(prev).add(facility.id));
-
-                    // Show brief in-map success toast instead of blocking alert
-                    setAssignSuccessMsg(`Added ${facility.name} to Day ${day}`);
-                    setTimeout(() => setAssignSuccessMsg(null), 3000);
-
-                    // Also trigger a full data refresh in the background so
-                    // the route optimization picks up the new assignment.
-                    if (onFacilitiesChange) {
-                      onFacilitiesChange();
-                    }
-                  } catch (err) {
-                    console.error('Error assigning facility to day:', err);
-                    setAssignSuccessMsg('Failed to add facility to route');
-                    setTimeout(() => setAssignSuccessMsg(null), 3000);
-                  }
-                });
-              }
-            });
+            // Day-assignment buttons are handled by a global delegated
+            // click listener attached once to the map container (see useEffect
+            // below). This survives popup recreation and works reliably on
+            // mobile where per-popup listeners can be lost during re-renders.
 
             if (surveyBtn) {
               surveyBtn.addEventListener('click', () => {
