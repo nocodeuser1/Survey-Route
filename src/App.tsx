@@ -682,10 +682,14 @@ function App() {
       });
 
       if (!document.hidden && currentAccount) {
-        // CRITICAL: Only reload if it's been more than 30 minutes (1800000ms)
-        // This prevents data loss when switching apps during inspections
-        if (timeSinceLastLoad > 1800000) {
-          console.log('[App] Tab visible after 30+ min absence, reloading data');
+        // Only do a background refresh if it's been more than 4 hours.
+        // In practice, iOS evicts the page from memory when it runs low
+        // (cold relaunch) rather than triggering visibilitychange — that
+        // case is now handled by the stale-while-revalidate cache restore
+        // at the top of loadData(). Here we just keep data fresh over
+        // long sessions without interrupting active field work.
+        if (timeSinceLastLoad > 4 * 60 * 60 * 1000) {
+          console.log('[App] Tab visible after 4h+ absence, background refresh');
           lastLoadTimeRef.current = now;
           loadData();
         } else {
@@ -858,17 +862,73 @@ function App() {
     }
 
     isLoadingDataRef.current = true;
-    // Note: isLoadingFacilities is already true by default, but we ensure it here
-    // only if we have 0 facilities to allow for the "loading" state to persist
-    if (facilities.length === 0) {
-      setIsLoadingFacilities(true);
-    } else {
-      // If we already have facilities, don't show the full white loading screen
-      // but still update things in the background
-      console.log('[loadData] Background refresh (facilities already exist)');
-    }
     const loadStartTime = Date.now();
     console.log('[loadData] Starting data load for account:', currentAccount.id);
+
+    // ── Stale-while-revalidate: restore from IndexedDB cache immediately ──────
+    // This is the key fix for mobile: when iOS evicts the page from memory and
+    // reloads it, we show cached data instantly instead of a blank loading screen.
+    // The Supabase fetch below then refreshes everything silently in the background.
+    if (facilities.length === 0) {
+      try {
+        const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
+          getOfflineFacilities(currentAccount.id).catch(() => []),
+          getOfflineHomeBases(user?.id ?? '').catch(() => []),
+          getOfflineRoutePlans(user?.id ?? '').catch(() => []),
+        ]);
+
+        if (cachedFacilities.length > 0) {
+          console.log('[loadData] Cache hit — showing', cachedFacilities.length, 'facilities instantly');
+          setFacilities(cachedFacilities);
+
+          if (cachedHomeBases.length > 0) {
+            setHomeBases(cachedHomeBases);
+            setHomeBase(cachedHomeBases[0]);
+            setTeamCount(cachedHomeBases.length);
+          }
+
+          const lastViewed = cachedRoutePlans.find((p: any) => p.is_last_viewed);
+          if (lastViewed && !optimizationResult) {
+            setOptimizationResult(lastViewed.plan_data);
+            setCurrentRouteId(lastViewed.id);
+            setRouteVersion(prev => prev + 1);
+
+            const savedIds = lastViewed.plan_data?._routeFacilityIds;
+            if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
+              setRouteFacilityIds(savedIds);
+              setShowOnlyRouteFacilities(true);
+            } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
+              const routeFacIds: string[] = [];
+              lastViewed.plan_data.routes.forEach((route: any) => {
+                route.facilities?.forEach((rf: any) => {
+                  const match = cachedFacilities.find((f: any) => f.name === rf.name);
+                  if (match) routeFacIds.push(match.id);
+                });
+              });
+              if (routeFacIds.length > 0) {
+                setRouteFacilityIds(routeFacIds);
+                setShowOnlyRouteFacilities(true);
+              }
+            }
+          }
+
+          // Cache restored — dismiss loading screen immediately so the user
+          // sees their route while the fresh fetch runs silently.
+          setIsLoadingFacilities(false);
+          setIsLoadingRoutes(false);
+        } else {
+          // No cache yet (first load) — keep loading screen up.
+          setIsLoadingFacilities(true);
+        }
+      } catch (cacheErr) {
+        console.warn('[loadData] Cache restore failed, proceeding with network load:', cacheErr);
+        setIsLoadingFacilities(true);
+      }
+    } else {
+      // If we already have facilities in memory, don't show the loading screen.
+      console.log('[loadData] Background refresh (facilities already in memory)');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Show loading state if we're on route-planning view and don't have results yet
     if (currentView === 'route-planning' && !optimizationResult && homeBase) {
