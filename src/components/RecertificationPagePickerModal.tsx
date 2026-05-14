@@ -283,10 +283,21 @@ export default function RecertificationPagePickerModal({
             recertification_decision_notes: null,
             recertification_decision_at: null,
             recertification_pdf_generated_at: generatedAt,
+            // Advance the workflow now that a stamped recertification page
+            // is baked into an uploaded PDF. Without this the manual
+            // "Awaiting PE Stamp" state stuck around even after the user
+            // finished the whole recert flow (user-reported regression).
+            // Clearing the override lets the auto-derivation take over for
+            // future state transitions.
+            workflow_status: 'completed_uploaded',
+            workflow_status_overridden: false,
           })
           .eq('id', plan.id);
         if (planUpdErr) throw planUpdErr;
       } else {
+        // Regenerate path: just re-stamp; don't touch workflow status —
+        // the user is fixing a template / positioning issue, not advancing
+        // the recertification cycle.
         const { error: planUpdErr } = await supabase
           .from('spcc_plans')
           .update({ recertification_pdf_generated_at: generatedAt })
