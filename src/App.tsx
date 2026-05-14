@@ -2929,7 +2929,7 @@ function App() {
   const showSignatureBanner = user && !user.signatureCompleted && accountRole === 'user' && !signatureBannerDismissed;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-200">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-200">
       {showSignatureBanner && (
         <SignaturePromptBar onDismiss={() => setSignatureBannerDismissed(true)} />
       )}
@@ -3180,7 +3180,7 @@ function App() {
         </nav>
       )}
 
-      <main className={currentView === 'survey' ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
+      <main className={currentView === 'survey' ? 'flex-1' : 'flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
         {error && (
           <div className={`mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 ${currentView === 'survey' ? 'mx-4 mt-4' : ''}`}>
             <p className="whitespace-pre-line">{error}</p>
@@ -4129,7 +4129,7 @@ function App() {
         )}
       </main>
 
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-12 transition-colors duration-200">
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto pb-[env(safe-area-inset-bottom)] transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <p className="text-sm text-gray-600 dark:text-gray-300 text-center">
             Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenStreetMap</a> contributors | Routing by <a href="http://project-osrm.org/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OSRM</a>
