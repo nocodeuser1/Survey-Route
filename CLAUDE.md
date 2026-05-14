@@ -66,6 +66,14 @@ The harness blocks production database writes from the agent (CLI install + serv
 
 When you write a migration, default to also pasting the SQL inline in the chat reply (saves Israel from opening the file). End the reply with the literal action: **"To apply: paste this block into the SQL editor and run."**
 
+**Always include the clickable SQL editor link right above the SQL block — Israel does not want to dig for it.** Use this exact markdown:
+
+```
+[Supabase SQL editor](https://supabase.com/dashboard/project/rbjvcwgmqnubxixneitb/sql/new)
+```
+
+Skipping the link is a recurring papercut; this rule is the fix. Established 2026-05-12.
+
 Don't say "shipped" or "applied" or "the data is fixed" until Israel confirms he ran it. Until then say "pushed the migration file" — that's what actually happened. Lesson learned 2026-04-25 when Israel reported a bad facility name was still showing up after I'd "fixed" it; the migration existed but hadn't been run.
 
 ---
