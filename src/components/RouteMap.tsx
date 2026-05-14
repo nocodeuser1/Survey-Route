@@ -1599,7 +1599,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // When hideCompletedFacilities is TRUE, this block doesn't execute, so unassigned facilities are hidden
       // In SPCC plan mode, always show this section since externally completed facilities
       // (an inspection concept) are skipped from the external section and need plan-aware rendering
-      if ((!hideCompletedFacilities || surveyType === 'spcc_plan') && !showOnlyRouteFacilities) {
+      // Override: when fullscreen search is active OR there are recently-assigned
+      // facilities, we ALWAYS render the non-route loop so users can find/add
+      // facilities that aren't in the current optimized route. Without this,
+      // showOnlyRouteFacilities=true (the default after generating a route) would
+      // skip this entire block and the search would have nothing to filter.
+      const fullscreenSearchActive = isFullScreen && (searchQuery.trim().length > 0 || recentlyAssignedIds.size > 0);
+      if ((!hideCompletedFacilities || surveyType === 'spcc_plan' || fullscreenSearchActive) && (!showOnlyRouteFacilities || fullscreenSearchActive)) {
         // Get facility names already shown in routes
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
@@ -1612,12 +1618,17 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           if (facilitiesInRoutes.has(facility.name)) return;
 
           // Skip if facility should be hidden by Plan Visibility filter
-          if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) return;
+          // Exception: keep recently-assigned facilities visible.
+          if (hideCompletedFacilities && completedFacilityNames.has(facility.name) && !recentlyAssignedIds.has(facility.id)) return;
 
           // In fullscreen mode with an active search query, only show facilities
           // that match the search string (partial, case-insensitive).
           // Exception: facilities the user just assigned are always kept visible.
           const searchActive = isFullScreen && searchQuery.trim().length > 0;
+
+          // When fullscreenSearchActive but no actual search query (only recently
+          // assigned), only show the recently-assigned ones — don't flood the map.
+          if (fullscreenSearchActive && !searchActive && !recentlyAssignedIds.has(facility.id)) return;
           const matchesSearch = facility.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
           if (searchActive && !matchesSearch && !recentlyAssignedIds.has(facility.id)) return;
 
