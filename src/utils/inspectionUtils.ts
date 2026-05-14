@@ -33,7 +33,14 @@ export function getInspectionStatus(inspection: Inspection | undefined): {
   return { isValid, daysUntilExpiry, inspectionDate };
 }
 
-export type InspectionExpiryStatus = 'valid' | 'expiring' | 'expired' | 'pending';
+export type InspectionExpiryStatus =
+  | 'valid'             // Inspected, > INSPECTION_EXPIRING_DAYS until 1-yr expiry
+  | 'expiring'          // Inspected, ≤ INSPECTION_EXPIRING_DAYS until 1-yr expiry
+  | 'expired'           // Inspected, past 1-yr expiry
+  | 'initial_upcoming'  // Never inspected, IP date set, > INSPECTION_EXPIRING_DAYS until 1-yr-from-IP
+  | 'initial_due'       // Never inspected, IP date set, ≤ INSPECTION_EXPIRING_DAYS until 1-yr-from-IP
+  | 'initial_overdue'   // Never inspected, IP date set, past 1-yr-from-IP
+  | 'no_ip_date';       // Never inspected, no IP date — can't compute a deadline
 
 /**
  * Days-out at which an inspection switches from "valid" → "expiring" in the
@@ -52,12 +59,25 @@ export const INSPECTION_COUNTDOWN_DAYS = 90;
 
 /**
  * Comprehensive inspection expiry check for a facility.
- * Considers both the facility's completion date (spcc_inspection_date)
- * and the latest inspection record from the inspections table.
- * Returns 'expiring' when within INSPECTION_EXPIRING_DAYS of 1-year expiry.
+ * Considers (in order):
+ *   1. Completion-type date (internal/external) → annual cycle from there.
+ *   2. Latest inspection record → annual cycle from conducted_at.
+ *   3. First production date with no inspection yet → "initial inspection"
+ *      lifecycle (upcoming/due/overdue) using the same 1-year clock.
+ *   4. Nothing → no_ip_date.
+ *
+ * The "initial" branch mirrors plan mode's no_plan/initial_due/initial_overdue
+ * lifecycle so brand-new facilities aren't lumped in with truly-unknown ones.
+ * 40 CFR is performance-based (no federal calendar interval — the PE plan
+ * defines cadence), but production-facility plans almost universally use
+ * annual visual integrity inspections, so we hardcode 365d for v1.
  */
 export function getFacilityInspectionExpiry(
-  facility: { spcc_completion_type?: string | null; spcc_inspection_date?: string | null },
+  facility: {
+    spcc_completion_type?: string | null;
+    spcc_inspection_date?: string | null;
+    first_prod_date?: string | null;
+  },
   latestInspection?: Inspection
 ): {
   status: InspectionExpiryStatus;
@@ -91,5 +111,19 @@ export function getFacilityInspectionExpiry(
     return { status: 'valid', daysUntilExpiry, expiryDate };
   }
 
-  return { status: 'pending', daysUntilExpiry: null, expiryDate: null };
+  // No inspection on record. If we know first production, run the "initial
+  // inspection" lifecycle off that date; otherwise we genuinely don't have
+  // enough info to say anything.
+  if (facility.first_prod_date) {
+    const ipDate = parseLocalDate(facility.first_prod_date);
+    const expiryDate = new Date(ipDate);
+    expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilExpiry <= 0) return { status: 'initial_overdue', daysUntilExpiry, expiryDate };
+    if (daysUntilExpiry <= INSPECTION_EXPIRING_DAYS) return { status: 'initial_due', daysUntilExpiry, expiryDate };
+    return { status: 'initial_upcoming', daysUntilExpiry, expiryDate };
+  }
+
+  return { status: 'no_ip_date', daysUntilExpiry: null, expiryDate: null };
 }

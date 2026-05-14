@@ -914,25 +914,77 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       );
     }
 
-    // pending — no completion date or inspection record on file.
+    // Never-inspected lifecycle, mirrors SPCC plan mode (Upcoming → Due Soon →
+    // Overdue). Branches off first_prod_date — a brand-new facility isn't the
+    // same kind of "Not inspected" as a 5-year-old facility nobody's ever
+    // surveyed, and the user wanted that distinction visible at a glance.
+    if (expiry.status === 'initial_overdue' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 text-xs font-medium whitespace-nowrap"
+          title={`Initial inspection overdue ${formatDayCount(Math.abs(expiry.daysUntilExpiry))} — never inspected since first production`}
+        >
+          <AlertCircle className="w-3 h-3" />
+          {formatDayCount(Math.abs(expiry.daysUntilExpiry))} overdue
+        </span>
+      );
+    }
+
+    if (expiry.status === 'initial_due' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 text-xs font-medium whitespace-nowrap"
+          title={`Initial inspection due in ${formatDayCount(expiry.daysUntilExpiry)} — first inspection coming up`}
+        >
+          <Clock className="w-3 h-3" />
+          Due in {formatDayCount(expiry.daysUntilExpiry)}
+        </span>
+      );
+    }
+
+    if (expiry.status === 'initial_upcoming' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 text-xs font-medium whitespace-nowrap"
+          title={`Initial inspection due in ${formatDayCount(expiry.daysUntilExpiry)} (1 year after first production)`}
+        >
+          <Clock className="w-3 h-3" />
+          Upcoming
+        </span>
+      );
+    }
+
+    // no_ip_date — no inspection AND no first-production date.
     return (
       <span
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 text-xs font-medium whitespace-nowrap"
-        title="No inspection on file"
+        title="No first production date on file — can't compute inspection deadline"
       >
-        Not inspected
+        No IP Date
       </span>
     );
   };
 
-  const getInspectionStatus = (facility: Facility): 'inspected' | 'pending' | 'expired' | 'expiring' => {
+  type InspectionFilterValue =
+    | 'inspected'
+    | 'expiring'
+    | 'expired'
+    | 'overdue'
+    | 'due_soon'
+    | 'upcoming'
+    | 'no_ip';
+
+  const getInspectionStatus = (facility: Facility): InspectionFilterValue => {
     const inspection = inspections.get(facility.id);
     const expiry = getFacilityInspectionExpiry(facility, inspection);
     switch (expiry.status) {
       case 'valid': return 'inspected';
       case 'expiring': return 'expiring';
       case 'expired': return 'expired';
-      case 'pending': return 'pending';
+      case 'initial_overdue': return 'overdue';
+      case 'initial_due': return 'due_soon';
+      case 'initial_upcoming': return 'upcoming';
+      case 'no_ip_date': return 'no_ip';
     }
   };
 
@@ -1117,8 +1169,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return group * 1e10 + days;
           }
           case 'inspection_status': {
+            // Sort severity-first so the user sees what needs attention at the
+            // top of an ascending sort. Mirrors the spcc_status ordering:
+            // overdue → expired → due_soon → expiring → upcoming → inspected
+            // → no_ip (unknowns sink to the bottom).
             const status = getInspectionStatus(facility);
-            const order = { pending: 0, expired: 1, expiring: 2, inspected: 3 };
+            const order: Record<InspectionFilterValue, number> = {
+              overdue: 0,
+              expired: 1,
+              due_soon: 2,
+              expiring: 3,
+              upcoming: 4,
+              inspected: 5,
+              no_ip: 6,
+            };
             return order[status];
           }
           case 'recertification_status': {
@@ -3553,9 +3617,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               { value: 'plan_recertified', label: 'SPCC Recertified' },
                               { value: 'plan_no_ip', label: 'No IP Date' },
                             ] : [
-                              { value: 'inspected', label: 'Inspected' },
-                              { value: 'pending', label: 'Pending' },
+                              { value: 'overdue', label: 'Overdue' },
                               { value: 'expired', label: 'Expired' },
+                              { value: 'due_soon', label: 'Due Soon' },
+                              { value: 'expiring', label: 'Expiring' },
+                              { value: 'upcoming', label: 'Upcoming' },
+                              { value: 'inspected', label: 'Inspected' },
+                              { value: 'no_ip', label: 'No IP Date' },
                             ]).map(opt => (
                               <label key={opt.value} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200 cursor-pointer select-none rounded px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700">
                                 <input

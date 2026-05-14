@@ -2308,10 +2308,38 @@ export default function FacilityDetailModal({
       );
     }
 
+    if (expiry.status === 'initial_overdue' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection overdue — never inspected since first production">
+          <AlertTriangle className="w-3 h-3" />
+          <span>Initial Inspection Overdue ({formatDayCount(Math.abs(expiry.daysUntilExpiry))})</span>
+        </span>
+      );
+    }
+
+    if (expiry.status === 'initial_due' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection due soon — first inspection coming up">
+          <Clock className="w-3.5 h-3.5" />
+          <span>Initial Inspection Due ({formatDayCount(expiry.daysUntilExpiry)})</span>
+        </span>
+      );
+    }
+
+    if (expiry.status === 'initial_upcoming' && expiry.daysUntilExpiry !== null) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection comes due 1 year after first production">
+          <Clock className="w-3.5 h-3.5" />
+          <span>Inspection Upcoming ({formatDayCount(expiry.daysUntilExpiry)})</span>
+        </span>
+      );
+    }
+
+    // no_ip_date — no inspection AND no first-production date on file
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium whitespace-nowrap" title="No SPCC Inspection on record">
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium whitespace-nowrap" title="No first production date on file — can't compute inspection deadline">
         <Clock className="w-3 h-3" />
-        <span>No Inspection</span>
+        <span>No IP Date</span>
       </span>
     );
   };
