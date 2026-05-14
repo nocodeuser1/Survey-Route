@@ -1727,15 +1727,21 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             : hasAnyValidInspectionCompletion;
           const isManuallyRemoved = facility.day_assignment === -2;
 
-          // Determine marker appearance
+          // Determine marker appearance.
+          // Non-route facilities that aren't manually removed or already
+          // completed get a well/droplet icon — the old "D2" / "?" badges
+          // were confusing because the facility is not actually in the
+          // current optimized route. The droplet reads as "well" and is
+          // the standard oil-and-gas industry symbol.
           const hasPositiveDayAssignment = facility.day_assignment !== null && facility.day_assignment > 0;
+          const wellIconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>`;
           const markerContent = isManuallyRemoved
             ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
             : hasAnyValidCompletion
               ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
               : hasPositiveDayAssignment
-                ? `D${facility.day_assignment}`
-                : '?';
+                ? wellIconSvg
+                : wellIconSvg;
 
           // Determine border colors
           let completionBorderColor = '#3B82F6';
