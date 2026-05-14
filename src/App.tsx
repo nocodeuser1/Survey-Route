@@ -217,6 +217,10 @@ function App() {
     return savedView === 'route-planning';
   });
   const [isLoadingFacilities, setIsLoadingFacilities] = useState(true); // Always start true to prevent empty flash
+  // True once the FIRST Supabase fetch (or its definitive failure) completes.
+  // Used to suppress the "Set Your Home Base" prompt during the brief window
+  // where cached facilities are restored but homeBase hasn't been fetched yet.
+  const [hasLoadedFromNetwork, setHasLoadedFromNetwork] = useState(false);
   const [facilityToEdit, setFacilityToEdit] = useState<Facility | null>(null);
   const [signatureBannerDismissed, setSignatureBannerDismissed] = useState(() => {
     return localStorage.getItem('signatureDeferred') === 'true';
@@ -1225,6 +1229,10 @@ function App() {
     } finally {
       // Always clear the loading flag
       isLoadingDataRef.current = false;
+      // Mark that the first Supabase fetch has completed (success or failure).
+      // The "Set Your Home Base" prompt is gated on this so it doesn't flash
+      // during the cache-restore window.
+      setHasLoadedFromNetwork(true);
     }
   };
 
@@ -2085,6 +2093,38 @@ function App() {
   const handleEditFacility = (facility: Facility) => {
     setFacilityToEdit(facility);
     setCurrentView('facilities');
+  };
+
+  // Called by RouteMap after a user taps "Add to Route — Day N" in the
+  // fullscreen-search popup. The facility's day_assignment is already updated
+  // in Supabase by the map's click handler. We now need to:
+  //   1. Include the facility in routeFacilityIds (so "show only route
+  //      facilities" mode keeps it visible and re-optimization includes it).
+  //   2. Re-run route generation so the route plan actually contains the
+  //      new facility and gets auto-saved — otherwise reloading the app
+  //      would pull the original route without the newly-added facility.
+  const handleAddFacilityToRoute = async (facilityId: string, _day: number) => {
+    try {
+      const settings = lastUsedSettings;
+      if (!settings) {
+        console.warn('[handleAddFacilityToRoute] No lastUsedSettings; cannot regenerate route');
+        return;
+      }
+
+      if (routeFacilityIds && routeFacilityIds.length > 0) {
+        // "Show only route facilities" mode — extend the selection and rebuild.
+        if (!routeFacilityIds.includes(facilityId)) {
+          const newIds = [...routeFacilityIds, facilityId];
+          setRouteFacilityIds(newIds);
+          await handleCreateRouteFromSelection(newIds, surveyType);
+        }
+      } else {
+        // Full route mode — full regeneration will include all assigned facilities.
+        await handleGenerateRoutes(settings);
+      }
+    } catch (err) {
+      console.error('[handleAddFacilityToRoute] Failed:', err);
+    }
   };
 
   // Silent, optimistic facility patch — updates a single facility in local state
@@ -3255,7 +3295,7 @@ function App() {
                 </div>
               )}
 
-              {!homeBase && !isLoadingRoutes && !optimizationResult && (
+              {!homeBase && !isLoadingRoutes && !optimizationResult && hasLoadedFromNetwork && (
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 text-center transition-colors">
                   <div className="w-14 h-14 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center mx-auto mb-4">
                     <Home className="w-7 h-7 text-blue-600 dark:text-blue-400" />
@@ -3601,6 +3641,7 @@ function App() {
                         teamNumber={1}
                         onFacilitiesChange={loadData}
                         onFacilityPatch={handleFacilityPatch}
+                        onAddFacilityToRoute={handleAddFacilityToRoute}
                         onInspectionFormActiveChange={setIsInspectionFormActive}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
@@ -3751,6 +3792,7 @@ function App() {
                             teamNumber={1}
                             onFacilitiesChange={loadData}
                             onFacilityPatch={handleFacilityPatch}
+                            onAddFacilityToRoute={handleAddFacilityToRoute}
                             targetCoords={mapTargetCoords}
                             onNavigateToView={(view) => {
                               setCurrentView(view);

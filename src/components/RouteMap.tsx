@@ -45,6 +45,7 @@ interface RouteMapProps {
   showSearchFromParent?: boolean;
   triggerLocationCenter?: number;
   onFacilityPatch?: (id: string, patch: Record<string, any>) => void;
+  onAddFacilityToRoute?: (facilityId: string, day: number) => void | Promise<void>;
   navigationMode?: boolean;
   onNavigationModeChange?: (enabled: boolean) => void;
   onInspectionFormActiveChange?: (active: boolean) => void;
@@ -83,7 +84,7 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapWrapperRef = useRef<HTMLDivElement>(null);
@@ -297,8 +298,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   // Stable refs so the delegated day-assign handler always sees fresh props.
   const onFacilityPatchRef = useRef(onFacilityPatch);
   const onFacilitiesChangeRef = useRef(onFacilitiesChange);
+  const onAddFacilityToRouteRef = useRef(onAddFacilityToRoute);
   useEffect(() => { onFacilityPatchRef.current = onFacilityPatch; }, [onFacilityPatch]);
   useEffect(() => { onFacilitiesChangeRef.current = onFacilitiesChange; }, [onFacilitiesChange]);
+  useEffect(() => { onAddFacilityToRouteRef.current = onAddFacilityToRoute; }, [onAddFacilityToRoute]);
 
   // Global delegated click/touch listener for ".assign-day-btn" inside popups.
   // Attached once at the document level so it survives popup recreation when
@@ -344,8 +347,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         setAssignSuccessMsg(`Added ${facilityName} to Day ${day}`);
         setTimeout(() => setAssignSuccessMsg(null), 3000);
 
-        // Background refresh so route optimization sees the new assignment.
-        if (onFacilitiesChangeRef.current) {
+        // Rebuild the route plan so the new facility is actually IN the route
+        // (gets its day color/D-badge marker and persists to Supabase via the
+        // auto-save). If the parent didn't wire onAddFacilityToRoute, fall
+        // back to a plain data refresh.
+        if (onAddFacilityToRouteRef.current) {
+          await onAddFacilityToRouteRef.current(facilityId, day);
+        } else if (onFacilitiesChangeRef.current) {
           onFacilitiesChangeRef.current();
         }
       } catch (err) {
