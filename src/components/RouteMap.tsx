@@ -182,6 +182,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [recentlyAssignedIds, setRecentlyAssignedIds] = useState<Set<string>>(new Set());
+  const [assignSuccessMsg, setAssignSuccessMsg] = useState<string | null>(null);
   const [spiderfiedMarkers, setSpiderfiedMarkers] = useState<Map<number, L.Marker>>(new Map());
   const spiderfyLinesRef = useRef<L.Polyline[]>([]);
   const spiderfyBackdropRef = useRef<L.Layer | null>(null);
@@ -1612,6 +1614,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // Skip if facility should be hidden by Plan Visibility filter
           if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) return;
 
+          // In fullscreen mode with an active search query, only show facilities
+          // that match the search string (partial, case-insensitive).
+          // Exception: facilities the user just assigned are always kept visible.
+          const searchActive = isFullScreen && searchQuery.trim().length > 0;
+          const matchesSearch = facility.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+          if (searchActive && !matchesSearch && !recentlyAssignedIds.has(facility.id)) return;
+
           // Use a unique negative index for non-route facilities to avoid conflicts
           const facilityIndex = -(idx + 1);
           currentFacilityIndexes.add(facilityIndex);
@@ -1695,7 +1704,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Get available days from result for assignment
           const availableDays = result?.routes.map(r => r.day) || [];
+          // Show "Add to Route" buttons for unassigned facilities OR any non-route facility
+          // when found via search (so the user can add it even if it has a day_assignment
+          // that isn't reflected in the current optimized route).
           const isUnassigned = !isManuallyRemoved && !hasAnyValidCompletion;
+          const showAddToRoute = (isUnassigned || (isFullScreen && searchQuery.trim().length > 0 && !facilitiesInRoutes.has(facility.name)));
 
           // Build survey-type-aware status and buttons for non-route popup
           let nonRouteStatusHtml = '';
@@ -1827,9 +1840,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               </div>
               ${nonRoutePlanInfoHtml}
               ${nonRouteFieldVisitHtml}
-              ${isUnassigned && availableDays.length > 0 ? `
+              ${showAddToRoute && availableDays.length > 0 ? `
                 <div style="margin-bottom: 8px;">
-                  <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Assign to Day:</div>
+                  <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Add to Route — choose day:</div>
                   <div id="day-buttons-${facilityIndex}" style="display: flex; flex-wrap: wrap; gap: 4px;">
                     ${availableDays.map(day => {
             const color = COLORS[(day - 1) % COLORS.length];
@@ -1905,16 +1918,29 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
                     marker.closePopup();
 
-                    // Trigger route refresh
+                    // Immediately update local state so the marker stays visible
+                    // after clearing the search — no full page reload needed.
+                    if (onFacilityPatch) {
+                      onFacilityPatch(facility.id, { day_assignment: day });
+                    }
+
+                    // Track this facility so it stays on the map even when
+                    // the search query is cleared.
+                    setRecentlyAssignedIds(prev => new Set(prev).add(facility.id));
+
+                    // Show brief in-map success toast instead of blocking alert
+                    setAssignSuccessMsg(`Added ${facility.name} to Day ${day}`);
+                    setTimeout(() => setAssignSuccessMsg(null), 3000);
+
+                    // Also trigger a full data refresh in the background so
+                    // the route optimization picks up the new assignment.
                     if (onFacilitiesChange) {
                       onFacilitiesChange();
                     }
-
-                    // Show success message
-                    alert(`Assigned ${facility.name} to Day ${day}. Route will be re-optimized.`);
                   } catch (err) {
                     console.error('Error assigning facility to day:', err);
-                    alert('Failed to assign facility to day');
+                    setAssignSuccessMsg('Failed to add facility to route');
+                    setTimeout(() => setAssignSuccessMsg(null), 3000);
                   }
                 });
               }
@@ -2210,7 +2236,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
     }
-  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, triggerFitBounds, surveyType, showOnlyRouteFacilities]);
+  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {
@@ -3804,7 +3830,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             {isFullScreen && (
               <div className="relative">
                 <button
-                  onClick={() => setShowSearch(!showSearch)}
+                  onClick={() => {
+                    const next = !showSearch;
+                    setShowSearch(next);
+                    if (!next) {
+                      // Closing search — clear query and reset recently-assigned
+                      // tracking (the markers that were assigned will stay because
+                      // their day_assignment is now set and they survive the normal
+                      // non-route rendering path).
+                      setSearchQuery('');
+                      setRecentlyAssignedIds(new Set());
+                    }
+                  }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showSearch
                     ? 'bg-blue-600 text-white hover:bg-blue-700'
                     : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
@@ -3825,11 +3862,34 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           <SearchInput
             ref={searchInputRef}
             value={searchQuery}
-            onChange={setSearchQuery}
+            onChange={(val) => {
+              setSearchQuery(val);
+              // When search is cleared, keep recently-assigned facilities
+              // visible — they remain in recentlyAssignedIds so the map
+              // will still render them on the next effect run.
+            }}
             placeholder="Search facilities by name..."
             size="lg"
             autoFocus
           />
+          {searchQuery.trim().length > 0 && (
+            <p className="text-xs text-gray-500 mt-1 pl-1">
+              Showing facilities matching &ldquo;{searchQuery.trim()}&rdquo; — tap a pin to add it to your route
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* In-map success / error toast for quick-add actions */}
+      {assignSuccessMsg && (
+        <div
+          className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[10000] px-4 py-2 rounded-lg shadow-lg text-sm font-semibold text-white pointer-events-none"
+          style={{
+            backgroundColor: assignSuccessMsg.startsWith('Failed') ? '#DC2626' : '#059669',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {assignSuccessMsg.startsWith('Failed') ? '⚠️' : '✅'} {assignSuccessMsg}
         </div>
       )}
 
