@@ -213,7 +213,19 @@ export default function RecertificationStatusField(
   }, [subjectView.decision, subjectView.notes, subjectView.decidedAt, isEditing, editingDateOnly]);
 
   if (!subjectView.isActive) {
-    return mode === 'compact' ? <span className="text-gray-400 dark:text-gray-500">—</span> : null;
+    // Plan-kind in full mode is the editable source of truth — always
+    // render so the user can review/edit a previously recorded decision
+    // after the recert window has closed (e.g. right after a successful
+    // recertification, when the 5-year clock has just reset and the
+    // facility-level isActive flips to false but the per-berm card still
+    // shows the Recertification Review block via its wider gate). Without
+    // this, the parent rendered "Record or update this berm's
+    // recertification decision." with no controls underneath.
+    if (subjectView.writable && mode === 'full') {
+      // fall through to the normal render path
+    } else {
+      return mode === 'compact' ? <span className="text-gray-400 dark:text-gray-500">—</span> : null;
+    }
   }
 
   const decision = subjectView.decision;

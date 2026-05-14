@@ -409,20 +409,38 @@ export default function BermPlanCard({
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setEditingPeDate(true)}
-                    className={`mt-0.5 inline-flex items-center gap-1 text-xs group ${
-                      darkMode ? 'text-gray-400' : 'text-gray-500'
-                    }`}
-                  >
-                    <span>
-                      {plan.pe_stamp_date
-                        ? `PE Stamped: ${formatDate(plan.pe_stamp_date)}`
-                        : 'PE Stamp date not set'}
-                    </span>
-                    <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+                  <div className="mt-0.5 space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditingPeDate(true)}
+                      className={`inline-flex items-center gap-1 text-xs group ${
+                        darkMode ? 'text-gray-400' : 'text-gray-500'
+                      }`}
+                    >
+                      <span>
+                        {plan.pe_stamp_date
+                          ? `PE Stamped: ${formatDate(plan.pe_stamp_date)}`
+                          : 'PE Stamp date not set'}
+                      </span>
+                      <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                    {/* Recertified date — sits directly beneath the PE stamp
+                        line so the user can see at a glance which baseline
+                        is driving the 5-year clock (recertified_date wins
+                        over pe_stamp_date when present). Only rendered when
+                        a recertification has actually been recorded. */}
+                    {plan.recertified_date && (
+                      <p
+                        className={`text-xs inline-flex items-center gap-1 ${
+                          darkMode ? 'text-emerald-400' : 'text-emerald-700'
+                        }`}
+                        title="Latest recertification — resets the 5-year clock"
+                      >
+                        <CheckCircle className="w-3 h-3" />
+                        Recertified: {formatDate(plan.recertified_date)}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
