@@ -101,7 +101,16 @@ export function getFacilityPhotosState(
   if (total === 0) {
     return facility.photos_taken ? 'all' : 'none';
   }
-  if (withPhotos === 0) return 'none';
+  // UX safety net: if the per-berm aggregate says no berm has photos but
+  // the facility-level flag says photos WERE taken, trust the facility
+  // flag. This catches the lingering data-drift from toggle paths that
+  // wrote facilities.photos_taken without also flipping spcc_plans (see
+  // migration 20260513000000). Without this fallback the badge keeps
+  // showing "No Photos Yet" even when the user just edited the visit
+  // date and the field flag is true.
+  if (withPhotos === 0) {
+    return facility.photos_taken ? 'all' : 'none';
+  }
   if (withPhotos >= total) return 'all';
   return 'partial';
 }
