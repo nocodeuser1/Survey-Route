@@ -242,8 +242,19 @@ export default function BermPlanCard({
     const wasPhotosOn = photosTaken;
     if (!wasPhotosOn) setPhotosTaken(true);
 
-    const updateData: Record<string, any> = { field_visit_date: parsedIso };
-    if (!wasPhotosOn) updateData.photos_taken = true;
+    // ALWAYS write photos_taken = true alongside the date. User reported
+    // photos_taken flipping OFF after correcting a date — even though the
+    // previous code only wrote the photos flag when it WASN'T already on,
+    // any stale-state race upstream (the optimistic toggle hadn't synced
+    // back, the parent refetch hadn't landed, etc.) could leave the DB
+    // in a state where the trigger's bool_and rollup turned the facility
+    // badge red. Writing both fields in one update makes the date edit
+    // atomic: date set → photos asserted on, no matter what the local
+    // state thinks.
+    const updateData: Record<string, any> = {
+      field_visit_date: parsedIso,
+      photos_taken: true,
+    };
 
     try {
       const { error } = await supabase

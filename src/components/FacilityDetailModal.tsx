@@ -782,12 +782,60 @@ export default function FacilityDetailModal({
     if (visitDateValue && !isoDate) return;
     setSavingDate(true);
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ field_visit_date: isoDate })
-        .eq('id', facility.id);
-      if (error) throw error;
+      // Prefer writing through spcc_plans for single-berm facilities so the
+      // mirror trigger keeps facilities.field_visit_date AND the per-berm
+      // photos_taken aggregate in sync. The previous direct facilities-write
+      // bypassed the trigger entirely, which could leave berms_with_photos_count
+      // stale relative to facilities.photos_taken — the user-reported "edit
+      // the date, photos_taken flips off" symptom traces back here when a
+      // later spcc_plans touch (anything else on the page) fired the trigger
+      // and re-mirrored from the stale spcc_plans row.
+      //
+      // Also asserts photos_taken = true on a non-null date for the same
+      // reason as the other date-edit paths (BermPlanCard / FieldOperationsSection):
+      // editing a visit date implies photos were taken on that date.
+      const single = (facility.berms_total_count ?? 0) === 1;
+      let writeError: any = null;
+      if (single) {
+        const { data: planRow, error: fetchErr } = await supabase
+          .from('spcc_plans')
+          .select('id')
+          .eq('facility_id', facility.id)
+          .order('berm_index', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (fetchErr) throw fetchErr;
+        if (planRow?.id) {
+          const update: Record<string, any> = { field_visit_date: isoDate };
+          if (isoDate) update.photos_taken = true;
+          const { error } = await supabase
+            .from('spcc_plans')
+            .update(update)
+            .eq('id', planRow.id);
+          writeError = error;
+        } else {
+          // No plan row yet — fall back to facilities directly.
+          const update: Record<string, any> = { field_visit_date: isoDate };
+          if (isoDate) update.photos_taken = true;
+          const { error } = await supabase
+            .from('facilities')
+            .update(update)
+            .eq('id', facility.id);
+          writeError = error;
+        }
+      } else {
+        // Multi-berm: writing field_visit_date at facility level is
+        // ambiguous (which berm?). Keep the old direct-to-facilities
+        // behavior; the user has the per-berm editors for fine control.
+        const { error } = await supabase
+          .from('facilities')
+          .update({ field_visit_date: isoDate })
+          .eq('id', facility.id);
+        writeError = error;
+      }
+      if (writeError) throw writeError;
       facility.field_visit_date = isoDate;
+      if (isoDate) facility.photos_taken = true;
       setEditingVisitDate(false);
     } catch (err) {
       console.error('Error saving visit date:', err);

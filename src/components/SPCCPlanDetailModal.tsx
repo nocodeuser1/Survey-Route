@@ -142,8 +142,15 @@ function FieldOperationsSection({
     const wasPhotosOn = photosTaken;
     if (!wasPhotosOn) setPhotosTaken(true);
 
-    const updateData: Record<string, any> = { field_visit_date: parsedIso };
-    if (!wasPhotosOn) updateData.photos_taken = true;
+    // ALWAYS write photos_taken = true alongside the date. User reported
+    // photos_taken flipping OFF after correcting a date — making the
+    // write atomic (date + photos in a single update) prevents any race
+    // where a stale local state could leave photos_taken off in the DB.
+    // See matching fix in BermPlanCard.commitVisitDate.
+    const updateData: Record<string, any> = {
+      field_visit_date: parsedIso,
+      photos_taken: true,
+    };
 
     try {
       const { error } = singlePlan
