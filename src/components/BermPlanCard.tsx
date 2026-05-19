@@ -12,8 +12,11 @@ import {
   Edit2,
   Camera,
   CheckCircle,
+  PenLine,
+  Loader2,
+  X as XIcon,
 } from 'lucide-react';
-import { supabase, type Facility, type SPCCPlan } from '../lib/supabase';
+import { supabase, type Facility, type SPCCPlan, type UserSignature } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
 import { formatDate } from '../utils/dateUtils';
 import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
@@ -22,6 +25,7 @@ import RecertificationStatusField from './RecertificationStatusField';
 import RecertificationPagePickerModal from './RecertificationPagePickerModal';
 import { useAuth } from '../contexts/AuthContext';
 import { FilePlus2, RefreshCw } from 'lucide-react';
+import { stampManagementSignature } from '../utils/managementSignaturePDF';
 
 /** Parse mm/dd/yy or mm/dd/yyyy → ISO YYYY-MM-DD. Mirrors the helper used in
  *  SPCCPlanDetailModal so the per-berm and facility-level visit-date editors
@@ -113,6 +117,19 @@ export default function BermPlanCard({
   const [pickerMode, setPickerMode] = useState<null | 'create' | 'regenerate'>(null);
   const { user } = useAuth();
 
+  // Add Management Signature flow ------------------------------------------
+  // Pipeline: fetch user signature → fetch the plan PDF from storage →
+  // overlay signature image + PE-stamp date on §5.2 and §5.3 pages →
+  // re-upload to the same path. When the plan has no PE stamp date yet,
+  // surface an inline date prompt instead of running the flow.
+  const [mgmtSigState, setMgmtSigState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'needs_pe_date'; draft: string }
+    | { kind: 'signing' }
+    | { kind: 'done' }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
   // Sync drafts if the plan prop changes upstream (e.g. after a refetch)
   useEffect(() => {
     setLabelDraft(plan.berm_label || '');
@@ -175,6 +192,146 @@ export default function BermPlanCard({
     } finally {
       setSavingPeDate(false);
     }
+  };
+
+  // --- Add Management Signature handler ------------------------------------
+  //
+  // Stamps the user's saved signature + the PE-stamp date onto §5.2 and §5.3
+  // of the SPCC plan PDF. Uses the same Supabase Storage path (upsert) so
+  // the stable per-berm download link keeps working.
+  //
+  // Click flow:
+  //   1. If no PE date on the plan: surface a date input. User saves date.
+  //   2. Fetch user_signatures row (per-account/per-user). Error out cleanly
+  //      if they haven't set up a signature yet.
+  //   3. Fetch the current PDF bytes from the public URL.
+  //   4. Stamp via util/managementSignaturePDF.
+  //   5. Upload back with upsert + short cache TTL (phones drop stale fast).
+  //   6. Add a system audit comment on the facility.
+  //   7. onPlanChange() so the parent refetches.
+  const runMgmtSignatureStamp = async (peDateIso: string) => {
+    if (!plan.plan_url) {
+      setMgmtSigState({ kind: 'error', message: 'No plan PDF on file to sign.' });
+      return;
+    }
+    if (!user) {
+      setMgmtSigState({ kind: 'error', message: 'You must be signed in.' });
+      return;
+    }
+    setMgmtSigState({ kind: 'signing' });
+    try {
+      // 1. Resolve the account context — use the facility's account so we
+      //    don't require AccountContext here.
+      const accountId = facility.account_id;
+      if (!accountId) {
+        throw new Error('Facility has no account id — cannot look up signature.');
+      }
+
+      // 2. Pull the user's saved signature (same shape inspections use).
+      const { data: sigRow, error: sigErr } = await supabase
+        .from('user_signatures')
+        .select('id, signature_data')
+        .eq('account_id', accountId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (sigErr) throw sigErr;
+      if (!sigRow?.signature_data) {
+        throw new Error(
+          'No saved signature for your account yet. Add one in Settings → Signatures, then try again.',
+        );
+      }
+      const signature = sigRow as Pick<UserSignature, 'id' | 'signature_data'>;
+
+      // 3. Fetch the current PDF bytes.
+      const pdfRes = await fetch(plan.plan_url);
+      if (!pdfRes.ok) throw new Error(`Couldn't download the plan PDF (HTTP ${pdfRes.status}).`);
+      const sourceBytes = await pdfRes.arrayBuffer();
+
+      // 4. Stamp.
+      const merged = await stampManagementSignature({
+        sourcePdfBytes: sourceBytes,
+        signatureDataUrl: signature.signature_data,
+        peStampDateIso: peDateIso,
+      });
+
+      // 5. Upload back to the same storage path. Same upsert pattern the
+      //    recertification flow uses so the public URL stays stable.
+      const storagePath = plan.plan_url.replace(/^.*\/spcc-plans\//, '');
+      const { error: uploadErr } = await supabase.storage
+        .from('spcc-plans')
+        .upload(storagePath, new Blob([merged], { type: 'application/pdf' }), {
+          contentType: 'application/pdf',
+          upsert: true,
+          cacheControl: '60',
+        });
+      if (uploadErr) throw uploadErr;
+
+      // 6. System audit comment so the action is traceable.
+      const today = new Date().toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      });
+      const bermLabel = getBermShortLabel(plan);
+      await supabase
+        .from('facility_comments')
+        .insert({
+          facility_id: facility.id,
+          user_id: user.id,
+          author_name: 'System',
+          body: `[SYSTEM] Management signature stamped on §5.2 + §5.3 of ${bermLabel} on ${today}. Date used: ${peDateIso}.`,
+        });
+
+      setMgmtSigState({ kind: 'done' });
+      // Fade the "Signed" pip after a short window so the action button is
+      // re-usable without a page refresh (e.g. the user re-stamps after
+      // updating the PE date).
+      setTimeout(() => setMgmtSigState({ kind: 'idle' }), 2500);
+      onPlanChange();
+    } catch (err: any) {
+      console.error('[BermPlanCard] Management signature stamp failed:', err);
+      setMgmtSigState({
+        kind: 'error',
+        message: err?.message || 'Could not stamp the signature. See console for details.',
+      });
+    }
+  };
+
+  const handleAddMgmtSignature = () => {
+    // PE-stamp date drives the date field on both signing pages. If it's
+    // not set, prompt for one inline. The user can also clear the prompt
+    // and edit PE date via the existing pencil-icon editor up top.
+    if (!plan.pe_stamp_date) {
+      setMgmtSigState({ kind: 'needs_pe_date', draft: '' });
+      return;
+    }
+    runMgmtSignatureStamp(plan.pe_stamp_date);
+  };
+
+  const handleSavePeDateAndStamp = async () => {
+    if (mgmtSigState.kind !== 'needs_pe_date') return;
+    const parsed = parseDateInput(mgmtSigState.draft);
+    if (!parsed) {
+      setMgmtSigState({
+        kind: 'error',
+        message: 'PE stamp date must be mm/dd/yy or mm/dd/yyyy.',
+      });
+      return;
+    }
+    setMgmtSigState({ kind: 'signing' });
+    try {
+      const { error } = await supabase
+        .from('spcc_plans')
+        .update({ pe_stamp_date: parsed })
+        .eq('id', plan.id);
+      if (error) throw error;
+    } catch (err: any) {
+      console.error('[BermPlanCard] Saving PE stamp date failed:', err);
+      setMgmtSigState({
+        kind: 'error',
+        message: err?.message || 'Could not save the PE stamp date.',
+      });
+      return;
+    }
+    await runMgmtSignatureStamp(parsed);
   };
 
   // --- Per-berm Photos Taken handlers --------------------------------------
@@ -522,6 +679,130 @@ export default function BermPlanCard({
                 Regenerate Recertification PDF
               </button>
             )}
+
+            {/* Add Management Signature — stamps the saved user signature
+                on §5.2 and §5.3 of the plan PDF, dated with the PE stamp
+                date. If no PE date is set yet, surfaces an inline date
+                input first (per user spec: "if blank prompt me to set it").
+                Idempotent: re-clicking just re-stamps over the existing
+                location (safe — same path upserts).  */}
+            <div className="mt-3">
+              {mgmtSigState.kind === 'needs_pe_date' ? (
+                <div
+                  className={`rounded-lg border p-3 ${
+                    darkMode
+                      ? 'border-blue-700/40 bg-blue-900/20'
+                      : 'border-blue-200 bg-blue-50/60'
+                  }`}
+                >
+                  <p
+                    className={`text-xs font-medium mb-2 ${
+                      darkMode ? 'text-blue-200' : 'text-blue-800'
+                    }`}
+                  >
+                    Set PE Stamp Date to use on the signature
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="mm/dd/yyyy"
+                      value={mgmtSigState.draft}
+                      onChange={(e) =>
+                        setMgmtSigState({ kind: 'needs_pe_date', draft: e.target.value })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSavePeDateAndStamp();
+                        } else if (e.key === 'Escape') {
+                          setMgmtSigState({ kind: 'idle' });
+                        }
+                      }}
+                      autoFocus
+                      className={`text-sm px-2 py-1 rounded border w-36 ${
+                        darkMode
+                          ? 'bg-gray-700 border-gray-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-900'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSavePeDateAndStamp}
+                      className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 inline-flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3" /> Save &amp; Sign
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMgmtSigState({ kind: 'idle' })}
+                      className={`px-2 py-1 text-xs rounded ${
+                        darkMode
+                          ? 'text-gray-300 hover:bg-gray-700'
+                          : 'text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAddMgmtSignature}
+                  disabled={mgmtSigState.kind === 'signing'}
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
+                    mgmtSigState.kind === 'done'
+                      ? darkMode
+                        ? 'text-emerald-400'
+                        : 'text-emerald-700'
+                      : darkMode
+                        ? 'text-blue-400 hover:text-blue-300'
+                        : 'text-blue-700 hover:text-blue-800'
+                  }`}
+                  title="Stamp the saved user signature + PE stamp date on §5.2 and §5.3 of the plan PDF"
+                >
+                  {mgmtSigState.kind === 'signing' ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Stamping signature…
+                    </>
+                  ) : mgmtSigState.kind === 'done' ? (
+                    <>
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Signature added
+                    </>
+                  ) : (
+                    <>
+                      <PenLine className="w-3.5 h-3.5" />
+                      Add Mgmt Signature
+                    </>
+                  )}
+                </button>
+              )}
+              {mgmtSigState.kind === 'error' && (
+                <div
+                  className={`mt-2 flex items-start gap-2 text-xs rounded-lg px-3 py-2 ${
+                    darkMode
+                      ? 'bg-red-900/30 text-red-200'
+                      : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">{mgmtSigState.message}</div>
+                  <button
+                    type="button"
+                    onClick={() => setMgmtSigState({ kind: 'idle' })}
+                    className={`flex-shrink-0 p-0.5 rounded ${
+                      darkMode ? 'hover:bg-red-900/50' : 'hover:bg-red-100'
+                    }`}
+                    aria-label="Dismiss"
+                  >
+                    <XIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </div>
           </>
         ) : (
           // Empty or replacing → inline drop zone
