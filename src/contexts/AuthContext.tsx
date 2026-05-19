@@ -178,6 +178,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw error;
     }
     console.log('Sign in successful:', data.user?.email);
+    // Force a hard refresh so the new tab starts with the latest JS bundle.
+    // Supabase persists the session to localStorage before this resolves, so
+    // after reload the AuthProvider restores the session and the user lands
+    // in the app — just with the freshest deployed code.
+    window.location.reload();
   }
 
   async function signOut() {
