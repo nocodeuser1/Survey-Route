@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Building2, Users, Key, AlertCircle, CheckCircle, Mail, UserPlus, X, Copy, RefreshCw } from 'lucide-react';
+import { Building2, Users, Key, AlertCircle, CheckCircle, Mail, UserPlus, X, Copy, RefreshCw, Shield, Trash2 } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
+import { useAuth } from '../contexts/AuthContext';
 import StripeProductConfig from './StripeProductConfig';
 import CompanyNotificationSettings from './CompanyNotificationSettings';
 
@@ -36,9 +37,32 @@ interface Invitation {
   token: string;
 }
 
+interface CoOwner {
+  user_id: string;
+  email: string;
+  full_name: string | null;
+  granted_at: string;
+  last_sign_in_at: string | null;
+}
+
 export default function AgencySettings({ agency, onClose, onUpdate }: AgencySettingsProps) {
   const { currentAccount } = useAccount();
-  const [activeTab, setActiveTab] = useState<'users' | 'stripe' | 'rename' | 'transfer' | 'notifications'>('users');
+  const { user: authUser } = useAuth();
+  const isPrimaryOwner =
+    !!authUser?.email &&
+    authUser.email.toLowerCase() === agency.owner_email.toLowerCase();
+  const [activeTab, setActiveTab] = useState<
+    'users' | 'coOwners' | 'stripe' | 'rename' | 'transfer' | 'notifications'
+  >('users');
+
+  // Co-owners state
+  const [coOwners, setCoOwners] = useState<CoOwner[]>([]);
+  const [coOwnersLoading, setCoOwnersLoading] = useState(false);
+  const [coOwnersError, setCoOwnersError] = useState('');
+  const [coOwnersSuccess, setCoOwnersSuccess] = useState('');
+  const [newCoOwnerEmail, setNewCoOwnerEmail] = useState('');
+  const [addingCoOwner, setAddingCoOwner] = useState(false);
+  const [removingCoOwnerId, setRemovingCoOwnerId] = useState<string | null>(null);
 
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -76,8 +100,88 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
       loadAllUsers();
       loadAccountsList();
       loadInvitations();
+    } else if (activeTab === 'coOwners') {
+      loadCoOwners();
     }
   }, [activeTab]);
+
+  async function loadCoOwners() {
+    setCoOwnersLoading(true);
+    setCoOwnersError('');
+    try {
+      const { data, error } = await supabase.rpc('list_agency_co_owners', {
+        target_agency_id: agency.id,
+      });
+      if (error) throw error;
+      setCoOwners(
+        (data || []).map((c: any) => ({
+          user_id: c.user_id,
+          email: c.email,
+          full_name: c.full_name,
+          granted_at: c.granted_at,
+          last_sign_in_at: c.last_sign_in_at ?? null,
+        }))
+      );
+    } catch (err: any) {
+      setCoOwnersError(err.message || 'Failed to load co-owners');
+    } finally {
+      setCoOwnersLoading(false);
+    }
+  }
+
+  async function handleAddCoOwner() {
+    const emailTrimmed = newCoOwnerEmail.trim();
+    if (!emailTrimmed) {
+      setCoOwnersError('Enter an email address');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailTrimmed)) {
+      setCoOwnersError('Enter a valid email address');
+      return;
+    }
+
+    setAddingCoOwner(true);
+    setCoOwnersError('');
+    setCoOwnersSuccess('');
+    try {
+      const { error } = await supabase.rpc('add_agency_co_owner', {
+        target_agency_id: agency.id,
+        target_email: emailTrimmed,
+      });
+      if (error) throw error;
+      setCoOwnersSuccess(`${emailTrimmed} added as co-owner`);
+      setNewCoOwnerEmail('');
+      await loadCoOwners();
+      setTimeout(() => setCoOwnersSuccess(''), 3000);
+    } catch (err: any) {
+      setCoOwnersError(err.message || 'Failed to add co-owner');
+    } finally {
+      setAddingCoOwner(false);
+    }
+  }
+
+  async function handleRemoveCoOwner(userId: string, email: string) {
+    if (!confirm(`Remove ${email} as co-owner of this agency? They will lose access to all accounts under it.`)) {
+      return;
+    }
+    setRemovingCoOwnerId(userId);
+    setCoOwnersError('');
+    try {
+      const { error } = await supabase.rpc('remove_agency_co_owner', {
+        target_agency_id: agency.id,
+        target_user_id: userId,
+      });
+      if (error) throw error;
+      setCoOwnersSuccess(`${email} removed as co-owner`);
+      await loadCoOwners();
+      setTimeout(() => setCoOwnersSuccess(''), 3000);
+    } catch (err: any) {
+      setCoOwnersError(err.message || 'Failed to remove co-owner');
+    } finally {
+      setRemovingCoOwnerId(null);
+    }
+  }
 
   const loadAllUsers = async () => {
     if (!agency) return;
@@ -516,6 +620,17 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
             >
               User Management
             </button>
+            {isPrimaryOwner && (
+              <button
+                onClick={() => setActiveTab('coOwners')}
+                className={`flex-shrink-0 px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'coOwners'
+                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                  : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                  }`}
+              >
+                Co-Owners
+              </button>
+            )}
             {currentAccount && (
               <button
                 onClick={() => setActiveTab('stripe')}
@@ -699,6 +814,129 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'coOwners' && isPrimaryOwner && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-800">
+                  <strong>Co-owners</strong> have the same powers as you across every account in this agency
+                  (Agency Dashboard, all accounts, admin on every account). They <strong>cannot</strong> remove
+                  you as the primary owner. Only you (the primary owner) can add or remove co-owners.
+                </p>
+                <p className="text-xs text-blue-700 mt-2">
+                  Adding a co-owner requires that the person has already signed in at least once.
+                  If they haven't, invite them to any account first via User Management.
+                </p>
+              </div>
+
+              {coOwnersSuccess && (
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                  <p className="text-sm text-green-800">{coOwnersSuccess}</p>
+                </div>
+              )}
+
+              {coOwnersError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-800">{coOwnersError}</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Add Co-Owner by Email
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="email"
+                      value={newCoOwnerEmail}
+                      onChange={(e) => setNewCoOwnerEmail(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !addingCoOwner) handleAddCoOwner(); }}
+                      className="form-input pl-10 w-full"
+                      placeholder="user@example.com"
+                      disabled={addingCoOwner}
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddCoOwner}
+                    disabled={addingCoOwner || !newCoOwnerEmail.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 whitespace-nowrap"
+                  >
+                    {addingCoOwner ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="w-4 h-4" />
+                    )}
+                    Add Co-Owner
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+                  Current Co-Owners
+                </h3>
+                <div className="space-y-2">
+                  <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex items-center gap-3">
+                    <Shield className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 dark:text-white truncate">
+                        {agency.owner_email}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Primary owner (you)</p>
+                    </div>
+                  </div>
+
+                  {coOwnersLoading ? (
+                    <div className="text-center py-6">
+                      <RefreshCw className="w-5 h-5 animate-spin text-gray-400 mx-auto" />
+                    </div>
+                  ) : coOwners.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-4">
+                      No co-owners yet. Add one above.
+                    </p>
+                  ) : (
+                    coOwners.map((co) => (
+                      <div
+                        key={co.user_id}
+                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex items-center gap-3"
+                      >
+                        <Shield className="w-5 h-5 text-purple-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 dark:text-white truncate">
+                            {co.full_name || co.email}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            {co.email}
+                            {' • '}
+                            Added {new Date(co.granted_at).toLocaleDateString()}
+                            {co.last_sign_in_at && (
+                              <> {' • '} Last login {new Date(co.last_sign_in_at).toLocaleDateString()}</>
+                            )}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveCoOwner(co.user_id, co.email)}
+                          disabled={removingCoOwnerId === co.user_id}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded transition-colors disabled:opacity-50"
+                        >
+                          {removingCoOwnerId === co.user_id ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3 h-3" />
+                          )}
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
