@@ -1675,15 +1675,15 @@ export default function TeamManagement() {
                         : <span className="text-gray-400 dark:text-gray-500 italic">Never</span>}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                      <div className="flex items-center justify-end gap-2">
                         {authUser?.isAgencyOwner && (
                           <button
                             onClick={() => openManageAccounts(member)}
-                            className="inline-flex items-center gap-1 px-3 py-1 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900 rounded transition-colors"
-                            title="Add or remove this user from other accounts in the agency"
+                            className="inline-flex items-center justify-center p-1.5 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900 rounded transition-colors"
+                            title="Manage which accounts this user can access"
+                            aria-label="Manage accounts"
                           >
-                            <Layers className="w-3 h-3" />
-                            Manage Accounts
+                            <Layers className="w-4 h-4" />
                           </button>
                         )}
                         <button
