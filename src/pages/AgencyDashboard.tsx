@@ -190,6 +190,10 @@ export default function AgencyDashboard() {
 
   async function handleEnterAccount(accountId: string) {
     localStorage.setItem('currentAccountId', accountId);
+    // Always land on Facilities when entering an account from the agency view —
+    // the saved view is per-user and would otherwise leak across accounts
+    // (e.g. last left in Settings on Account A → opens Account B in Settings).
+    localStorage.setItem('currentView', 'facilities');
     navigate('/app');
   }
 
