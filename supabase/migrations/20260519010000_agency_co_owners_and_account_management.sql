@@ -244,6 +244,8 @@ $$;
 ---------------------------------------------------------------------------
 -- 5. Manage-Accounts modal RPCs
 ---------------------------------------------------------------------------
+-- Note: `current_role` is a reserved Postgres keyword (returns the active
+-- role name), so the column is named `member_role` instead.
 CREATE OR REPLACE FUNCTION get_agency_accounts_for_user(
   target_agency_id uuid,
   target_user_id   uuid
@@ -251,7 +253,7 @@ CREATE OR REPLACE FUNCTION get_agency_accounts_for_user(
 RETURNS TABLE (
   account_id   uuid,
   account_name text,
-  current_role text
+  member_role  text
 )
 LANGUAGE plpgsql
 SECURITY DEFINER

@@ -768,7 +768,8 @@ export default function TeamManagement() {
         (data || []).map((a: any) => ({
           account_id: a.account_id,
           account_name: a.account_name,
-          current_role: (a.current_role as 'account_admin' | 'user' | null) ?? null,
+          // RPC returns `member_role` (avoiding the reserved keyword `current_role`)
+          current_role: (a.member_role as 'account_admin' | 'user' | null) ?? null,
         }))
       );
     } catch (err: any) {

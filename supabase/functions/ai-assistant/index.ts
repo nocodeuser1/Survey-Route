@@ -195,9 +195,14 @@ async function verifyAccountAccess(authUserId: string, accountId: string): Promi
   // Hand-rolled join. We can't use the user_has_account_access RPC here
   // because that helper reads auth.uid() from the JWT context — and we're
   // calling it with the SERVICE ROLE client, where auth.uid() is null.
+  // Disambiguate the embed: `account_users` has TWO foreign keys to `users`
+  // (user_id and invited_by), so a bare `account_users(...)` embed returns
+  // PGRST201 and `profile` ends up null — meaning every auth'd user got
+  // bounced as "No access to this account". Pinning to the user_id FK
+  // gives us the membership rows the access check actually cares about.
   const { data: profile } = await supabase
     .from('users')
-    .select('id, is_agency_owner, email, account_users(account_id)')
+    .select('id, is_agency_owner, email, account_users!account_users_user_id_fkey(account_id)')
     .eq('auth_user_id', authUserId)
     .maybeSingle();
   if (!profile) return false;
