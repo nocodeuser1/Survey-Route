@@ -1,7 +1,34 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Loader2, Sparkles } from 'lucide-react';
+import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import { supabase } from '../lib/supabase';
+
+/**
+ * Model picker — must match the server-side ALLOWED_MODELS allowlist in
+ * supabase/functions/ai-assistant/index.ts. Anything not in this list
+ * gets rejected at the request boundary.
+ *
+ *   pro:   gemini-3.1-pro       — smarter, slower, dynamic thinking budget
+ *   flash: gemini-3.1-flash     — fast + cheap; default
+ *
+ * Persisted to localStorage so the user's choice survives reloads.
+ */
+type ModelId = 'gemini-3.1-pro' | 'gemini-3.1-flash';
+const MODEL_OPTIONS: { id: ModelId; label: string; sub: string; icon: typeof Zap }[] = [
+  { id: 'gemini-3.1-flash', label: 'Flash', sub: 'Fast / cheap', icon: Zap },
+  { id: 'gemini-3.1-pro',   label: 'Pro',   sub: 'Best reasoning', icon: Brain },
+];
+const MODEL_STORAGE_KEY = 'ai-assistant-model';
+
+function loadModel(): ModelId {
+  try {
+    const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (stored && MODEL_OPTIONS.some((m) => m.id === stored)) return stored as ModelId;
+  } catch {
+    // localStorage unavailable — fall back to default.
+  }
+  return 'gemini-3.1-flash';
+}
 
 /**
  * Floating AI assistant bubble. Lives in the bottom-right corner of the app
@@ -38,6 +65,11 @@ export default function AIAssistantBubble() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [model, setModelState] = useState<ModelId>(() => loadModel());
+  const setModel = (next: ModelId) => {
+    setModelState(next);
+    try { localStorage.setItem(MODEL_STORAGE_KEY, next); } catch { /* ignore */ }
+  };
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -98,6 +130,7 @@ export default function AIAssistantBubble() {
         body: JSON.stringify({
           accountId: currentAccount.id,
           messages: nextMessages,
+          model,
         }),
         signal: controller.signal,
       });
@@ -148,10 +181,10 @@ export default function AIAssistantBubble() {
       let msg = err instanceof Error ? err.message : 'Something went wrong';
       // The browser surfaces network-level fetch failures as "Failed to fetch".
       // That happens before any HTTP response — usually because the function
-      // isn't deployed, ANTHROPIC_API_KEY isn't set, or CORS preflight failed.
+      // isn't deployed, GEMINI_API_KEY isn't set, or CORS preflight failed.
       // Replace the unhelpful default with a setup-aware message.
       if (msg === 'Failed to fetch') {
-        msg = "Couldn't reach the assistant service. Make sure the ai-assistant Edge Function is deployed and ANTHROPIC_API_KEY is set in Supabase secrets.";
+        msg = "Couldn't reach the assistant service. Make sure the ai-assistant Edge Function is deployed and GEMINI_API_KEY is set in Supabase secrets.";
       }
       console.error('[AIAssistant] Request failed:', err);
       setError(msg);
@@ -193,33 +226,68 @@ export default function AIAssistantBubble() {
       {isOpen && (
         <div className="fixed bottom-5 right-5 z-40 w-[min(420px,calc(100vw-2.5rem))] h-[min(640px,calc(100vh-2.5rem))] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-[fadeIn_0.15s_ease-out]">
           {/* Header */}
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-600 to-blue-700 text-white flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-4 h-4" />
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-600 to-blue-700 text-white flex flex-col gap-2 flex-shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm leading-tight">Survey-Route Assistant</p>
+                  <p className="text-[11px] text-blue-100 leading-tight truncate">Ask about your facilities, dates, and statuses</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-sm leading-tight">Survey-Route Assistant</p>
-                <p className="text-[11px] text-blue-100 leading-tight truncate">Ask about your facilities, dates, and statuses</p>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {messages.length > 0 && (
+                  <button
+                    onClick={handleClear}
+                    title="Clear conversation"
+                    className="text-xs px-2 py-1 rounded hover:bg-white/15 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsOpen(false)}
+                  aria-label="Close assistant"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/15 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {messages.length > 0 && (
-                <button
-                  onClick={handleClear}
-                  title="Clear conversation"
-                  className="text-xs px-2 py-1 rounded hover:bg-white/15 transition-colors"
-                >
-                  Clear
-                </button>
-              )}
-              <button
-                onClick={() => setIsOpen(false)}
-                aria-label="Close assistant"
-                className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/15 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+            {/* Model selector. Segmented control matches the rest of the
+                app's "small pill toggle" pattern (e.g. the SPCC mode
+                toggle in the Facilities header). Disabled while a stream
+                is in flight — switching mid-response would orphan the
+                stream. Choice persists to localStorage. */}
+            <div
+              role="radiogroup"
+              aria-label="AI model"
+              className="inline-flex self-start rounded-lg bg-white/15 p-0.5 text-[11px]"
+            >
+              {MODEL_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const active = model === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    role="radio"
+                    aria-checked={active}
+                    disabled={isStreaming}
+                    onClick={() => setModel(opt.id)}
+                    title={`${opt.label} — ${opt.sub}`}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      active
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-blue-100 hover:text-white'
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

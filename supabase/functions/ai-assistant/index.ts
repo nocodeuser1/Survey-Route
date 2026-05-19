@@ -34,14 +34,26 @@ const supabase = createClient(
 );
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
-// Gemini 3.1 Flash Lite — newest stable Gemini at ship time. Google bills
-// it as "frontier-class performance rivaling larger models at a fraction
-// of the cost." For SPCC chat (counting, filtering, reading dates from a
-// JSON snapshot) it's plenty smart and very fast/cheap. Bump to
-// `gemini-2.5-pro` or `gemini-3.1-pro-preview` if answers look shallow on
-// hard analytical queries.
-const GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`;
+
+/**
+ * Allowlist of models the client is allowed to request. Anything outside
+ * this list is rejected at the request boundary so a malicious client
+ * can't bill us against an arbitrary upstream model.
+ *
+ * Keys are the client-facing IDs; values are what we pass to Gemini's
+ * URL. Two layers of indirection means we can rename ids without breaking
+ * stored preferences.
+ */
+const ALLOWED_MODELS: Record<string, { upstream: string; thinkingBudget: number }> = {
+  'gemini-3.1-pro':        { upstream: 'gemini-3.1-pro',        thinkingBudget: -1 },
+  'gemini-3.1-flash':      { upstream: 'gemini-3.1-flash',      thinkingBudget: 0 },
+  'gemini-3.1-flash-lite': { upstream: 'gemini-3.1-flash-lite', thinkingBudget: 0 },
+};
+const DEFAULT_MODEL = 'gemini-3.1-flash';
+
+function geminiEndpoint(upstream: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${upstream}:streamGenerateContent?alt=sse`;
+}
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -64,6 +76,8 @@ interface ChatMessage {
 interface RequestBody {
   accountId: string;
   messages: ChatMessage[];
+  /** Optional client-side override. Must match ALLOWED_MODELS. */
+  model?: string;
 }
 
 /**
@@ -257,9 +271,15 @@ Deno.serve(async (req) => {
     const recentMessages = body.messages.slice(-12);
     const contents = toGeminiContents(recentMessages);
 
+    // Resolve the model: client picks from ALLOWED_MODELS, otherwise default.
+    // Pro gets a dynamic thinking budget (it's smart enough that giving it
+    // room to reason helps); Flash variants run thinking off for speed.
+    const requestedModel = body.model ?? DEFAULT_MODEL;
+    const modelConfig = ALLOWED_MODELS[requestedModel] ?? ALLOWED_MODELS[DEFAULT_MODEL];
+
     // Call Gemini's streaming endpoint. SSE format: each event is a JSON
     // object with `candidates[0].content.parts[0].text` carrying the delta.
-    const geminiResp = await fetch(GEMINI_ENDPOINT, {
+    const geminiResp = await fetch(geminiEndpoint(modelConfig.upstream), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -271,10 +291,9 @@ Deno.serve(async (req) => {
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2048,
-          // Let 2.5 Flash decide how much to think (-1 = dynamic; 0 = off).
-          // Disabled here to keep latency low for short factual queries —
-          // bump to -1 if answers seem under-thought on harder questions.
-          thinkingConfig: { thinkingBudget: 0 },
+          // -1 = dynamic thinking (Gemini decides); 0 = off. Per ALLOWED_MODELS:
+          // Pro defaults to dynamic; Flash variants stay off for low latency.
+          thinkingConfig: { thinkingBudget: modelConfig.thinkingBudget },
         },
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
