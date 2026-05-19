@@ -26,3 +26,6 @@ dist-ssr
 # Per-Claude local config (launch.json for preview MCP, worktrees cache, etc.)
 # Collaboration rules live in CLAUDE.md, not here.
 .claude/
+
+# Supabase CLI scratch (linked-project.json etc.) — local-only state
+supabase/.temp/
