@@ -22,7 +22,14 @@
     Invite User for those emails (it goes through the proper auth/email flow).
   - `first_prod_date` is populated from the spreadsheet's DSU_PSD column
     (Drilling Spacing Unit Production Start Date).
+  - Pre-creates `accounts.default_state_code` and `facilities.state_code`
+    columns if missing (the standalone state-code migration may not have
+    been applied yet).
 */
+
+-- Prerequisite: ensure state-code columns exist (no-op if already applied)
+ALTER TABLE accounts   ADD COLUMN IF NOT EXISTS default_state_code text;
+ALTER TABLE facilities ADD COLUMN IF NOT EXISTS state_code         text;
 
 DO $$
 DECLARE
@@ -85,7 +92,7 @@ BEGIN
      AND account_name = 'Validus';
 
   IF v_validus_account_id IS NULL THEN
-    INSERT INTO accounts (agency_id, account_name, created_by, status, state_code)
+    INSERT INTO accounts (agency_id, account_name, created_by, status, default_state_code)
     VALUES (v_agency_id, 'Validus', v_owner_user_id, 'active', 'OK')
     RETURNING id INTO v_validus_account_id;
     RAISE NOTICE 'Created Validus account: %', v_validus_account_id;
