@@ -8,6 +8,31 @@ interface Account {
   agencyId: string;
   status: string;
   createdAt: string;
+  // Raw DB columns. The accounts table is hydrated via `select('*')` so
+  // these snake_case fields exist at runtime; declaring them lets us
+  // pick `company_name` over the (often-legacy) `account_name` when
+  // rendering the brand label.
+  account_name?: string | null;
+  company_name?: string | null;
+}
+
+/**
+ * Pick the best human-readable label for an account. Prefer the brand-
+ * facing `company_name` (e.g. "Camino", "Validus") and fall back to the
+ * raw `account_name` (which for some legacy rows is literally
+ * "Default Account") and finally a generic "Account" so we never render
+ * an empty string. Exported so the header + account switcher in App.tsx
+ * stay in sync with anywhere else that needs a display label.
+ */
+export function getAccountDisplayName(
+  acc: Partial<Account> | null | undefined,
+): string {
+  if (!acc) return 'Account';
+  const company = acc.company_name?.trim();
+  if (company) return company;
+  const name = acc.account_name?.trim() || acc.accountName?.trim();
+  if (name) return name;
+  return 'Account';
 }
 
 interface AccountMembership {

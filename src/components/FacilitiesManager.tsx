@@ -437,6 +437,54 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showWells2to6, setShowWells2to6] = useState(false);
   const [hideEmptyFields, setHideEmptyFields] = useState(facPrefs.hide_empty_fields);
   const [showFilters, setShowFilters] = useState(false);
+  // Viewport-anchored coords for the Filters dropdown. Computed on open
+  // and whenever the window resizes so the dropdown always fits on
+  // screen and is internally scrollable, regardless of where the
+  // toolbar button happens to sit. Without this the panel could extend
+  // below the fold and the user couldn't reach its scrollbar.
+  const filtersTriggerRef = useRef<HTMLDivElement | null>(null);
+  const [filtersDropdownStyle, setFiltersDropdownStyle] = useState<{
+    top: number;
+    right: number;
+    maxHeight: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!showFilters) {
+      setFiltersDropdownStyle(null);
+      return;
+    }
+    const SM_BREAKPOINT = 640; // matches Tailwind's `sm:`
+    const computeCoords = () => {
+      // On true mobile, fall back to the centred-modal layout (no inline
+      // style) — that's already friendly on phones. Only override on
+      // sm+ where the dropdown anchors to the toolbar button and we
+      // need to bound it to the visible viewport.
+      if (window.innerWidth < SM_BREAKPOINT) {
+        setFiltersDropdownStyle(null);
+        return;
+      }
+      const trigger = filtersTriggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const margin = 16;
+      const gap = 8;
+      const top = Math.min(
+        rect.bottom + gap,
+        Math.max(margin, window.innerHeight - 200),
+      );
+      const right = Math.max(margin, window.innerWidth - rect.right);
+      const maxHeight = Math.max(160, window.innerHeight - top - margin);
+      setFiltersDropdownStyle({ top, right, maxHeight });
+    };
+    computeCoords();
+    window.addEventListener('resize', computeCoords);
+    window.addEventListener('scroll', computeCoords, true);
+    return () => {
+      window.removeEventListener('resize', computeCoords);
+      window.removeEventListener('scroll', computeCoords, true);
+    };
+  }, [showFilters]);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [showSoldFacilities, setShowSoldFacilities] = useState(facPrefs.show_sold_facilities);
@@ -628,16 +676,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return fieldHasData(fieldId);
   };
 
-  // Reload column order and visibility when report type or spccMode changes
+  // Reload column order and visibility when report type, spccMode, or the
+  // async-loaded preferences change. We depend on facPrefs.columns so that
+  // after the Supabase load completes (or another user edits the columns
+  // for this account from a different device) the new layout reaches the
+  // UI without a manual reload. This is what makes column edits sticky
+  // per-account and per-mode: writes go to user_settings keyed by
+  // account_id with last-writer-wins, and this effect picks them up here.
   const isFirstRender = useRef(true);
   const userChangedMode = useRef(false);
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    const isInitial = isFirstRender.current;
+    isFirstRender.current = false;
+
     const colsKey = `${selectedReportType}_${spccMode}`;
     const prefsCols = facPrefs.columns[colsKey];
+
+    // Don't clobber initial state with a re-derivation that would yield
+    // the same values — the useState initializers already did this work.
+    // We still want to run the sync on every subsequent change (mode
+    // switch, async prefs hydration, cross-device update).
+    if (isInitial) return;
 
     // Try preferences first, then localStorage fallback
     if (prefsCols?.order) {
@@ -662,7 +721,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (userChangedMode.current) {
       userChangedMode.current = false;
     }
-  }, [selectedReportType, spccMode]);
+  }, [selectedReportType, spccMode, facPrefs.columns]);
 
   useEffect(() => {
     // Wait for ref to be available
@@ -3580,7 +3639,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
               {/* View controls group */}
               <div className="flex items-center gap-1">
-                <div className="relative">
+                <div className="relative" ref={filtersTriggerRef}>
                   <TouchTooltipButton
                     id="tb-filters"
                     tooltip="Toggle Filters"
@@ -3606,7 +3665,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         className="fixed inset-0 bg-black/50 sm:bg-transparent z-40"
                         onClick={() => setShowFilters(false)}
                       />
-                      <div className="fixed sm:absolute left-4 right-4 top-1/2 -translate-y-1/2 sm:translate-y-0 sm:left-0 sm:top-auto w-auto sm:w-80 mt-0 sm:mt-2 max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3">
+                      {/* Desktop/tablet: viewport-anchored with computed
+                          maxHeight so the panel never extends past the
+                          bottom edge — its own scrollbar is always
+                          reachable. Mobile (<sm): centered modal-style
+                          with 80vh cap, same as before. */}
+                      <div
+                        className="fixed inset-x-4 top-1/2 -translate-y-1/2 sm:inset-x-auto sm:translate-y-0 sm:left-auto sm:right-auto w-auto sm:w-80 max-h-[80vh] sm:max-h-none overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3"
+                        style={filtersDropdownStyle ? {
+                          top: filtersDropdownStyle.top,
+                          right: filtersDropdownStyle.right,
+                          maxHeight: filtersDropdownStyle.maxHeight,
+                        } : undefined}
+                      >
                         {/* Custom-rule builder. Stays at the top of the
                             dropdown — it's the most expressive control and
                             the one the user will reach for when the canned

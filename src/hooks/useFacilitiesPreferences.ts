@@ -56,11 +56,31 @@ export function useFacilitiesPreferences(accountId: string, userId: string) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestPrefsRef = useRef(preferences);
   const hasLocalChanges = useRef(false);
+  // Track the accountId the current `preferences` snapshot belongs to so we
+  // can detect cross-account contamination. Without this, the useState
+  // initializer's `readCache(accountId)` only runs once — switching from
+  // Camino → Validus leaves Camino's filters/columns in state until the
+  // async Supabase load completes (or never, if `hasLocalChanges` was set
+  // before the switch).
+  const prefsAccountRef = useRef(accountId);
 
   // Keep ref in sync
   latestPrefsRef.current = preferences;
 
-  // Load from Supabase on mount
+  // Reset local state when the active account changes. This is the cure for
+  // the "stale filter on account switch" bug: any custom_filter_rules,
+  // status_filter, etc. saved against the previous account were leaking
+  // through and making the new account's facility list appear empty.
+  useEffect(() => {
+    if (prefsAccountRef.current === accountId) return;
+    prefsAccountRef.current = accountId;
+    hasLocalChanges.current = false;
+    setLoaded(false);
+    setPreferences(readCache(accountId) || DEFAULT_PREFS);
+  }, [accountId]);
+
+  // Load from Supabase on mount (and whenever the account changes — the
+  // reset above re-runs this load with a clean slate).
   useEffect(() => {
     let cancelled = false;
 
@@ -81,11 +101,19 @@ export function useFacilitiesPreferences(accountId: string, userId: string) {
             ...data.facilities_ui_preferences,
           } as FacilitiesPreferences;
 
-          // Only apply remote if user hasn't made local changes since mount
+          // Only apply remote if user hasn't made local changes since mount.
+          // The account-switch effect above resets this ref so we always
+          // honour the new account's persisted prefs.
           if (!hasLocalChanges.current) {
             setPreferences(remote);
             writeCache(accountId, remote);
           }
+        } else if (!hasLocalChanges.current) {
+          // No saved prefs for this account → ensure we're sitting on a
+          // clean default snapshot rather than whatever the previous
+          // account's cache may have seeded.
+          setPreferences(DEFAULT_PREFS);
+          writeCache(accountId, DEFAULT_PREFS);
         }
       } catch (err) {
         console.error('[useFacilitiesPreferences] Failed to load:', err);

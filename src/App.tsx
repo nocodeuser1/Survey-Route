@@ -30,7 +30,7 @@ import LoadingScreen from './components/LoadingScreen';
 import { calculateDistanceMatrix } from './services/osrm';
 import { optimizeRoutes, OptimizationResult, FacilityWithIndex, optimizeRouteOrder, calculateDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
 import { useAuth } from './contexts/AuthContext';
-import { useAccount } from './contexts/AccountContext';
+import { useAccount, getAccountDisplayName } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { isInspectionValid, getFacilityInspectionExpiry } from './utils/inspectionUtils';
@@ -2966,7 +2966,7 @@ function App() {
                   <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Survey-Route</h1>
                   <p className="text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</p>
                   <div className="flex items-center gap-2">
-                    <p className="text-sm text-gray-600 dark:text-gray-300">{currentAccount.accountName}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300">{getAccountDisplayName(currentAccount)}</p>
                     {teamCount > 1 && effectiveUserTeam && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">
                         Team {effectiveUserTeam}
@@ -3045,11 +3045,11 @@ function App() {
                                       ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium cursor-default'
                                       : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
                                   }`}
-                                  title={isCurrent ? 'Currently active' : `Switch to ${acc.account_name}`}
+                                  title={isCurrent ? 'Currently active' : `Switch to ${getAccountDisplayName(acc)}`}
                                 >
                                   <span className="flex items-center gap-2.5 min-w-0">
                                     <Building2 className="w-4 h-4 flex-shrink-0" />
-                                    <span className="truncate">{acc.account_name}</span>
+                                    <span className="truncate">{getAccountDisplayName(acc)}</span>
                                   </span>
                                   {isCurrent && <CheckCircle className="w-4 h-4 flex-shrink-0" />}
                                 </button>
@@ -3257,6 +3257,12 @@ function App() {
 
         <div className={currentView === 'facilities' ? '' : 'hidden'}>
           <FacilitiesManager
+            // Remount on account switch so every per-account state
+            // initializer (filters, columns, sort, search) re-hydrates
+            // from the new account's prefs instead of carrying over the
+            // previous account's snapshot. Belt-and-braces alongside
+            // the accountId reset in useFacilitiesPreferences.
+            key={currentAccount.id}
             facilities={facilities}
             accountId={currentAccount.id}
             userId={user?.authUserId || ''}
