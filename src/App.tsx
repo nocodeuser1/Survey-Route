@@ -545,8 +545,31 @@ function App() {
 
   useEffect(() => {
     if (currentAccount && currentAccount.id !== loadedAccountRef.current) {
+      const isAccountSwitch = loadedAccountRef.current !== null;
       loadedAccountRef.current = currentAccount.id;
       lastLoadTimeRef.current = Date.now();
+
+      // CRITICAL on account switch: clear per-account state immediately.
+      // Without this, the UI keeps showing the OLD account's facilities /
+      // inspections / route until the new account's network fetch
+      // completes (~hundreds of ms). User saw this as "I switched to
+      // Validus and it's still showing Camino's 150 facilities." DB
+      // partitioning is fine — this is purely a UI transition concern.
+      //
+      // Only clear on an actual account SWITCH, not on the very first
+      // load — clearing during the initial mount would race with the
+      // stale-while-revalidate cache restore inside loadData().
+      if (isAccountSwitch) {
+        setFacilities([]);
+        setInspections([]);
+        setHomeBases([]);
+        setHomeBase(null);
+        setOptimizationResult(null);
+        setCurrentRouteId(null);
+        setRouteFacilityIds(null);
+        setShowOnlyRouteFacilities(false);
+      }
+
       // Set loading state when switching accounts
       setIsLoadingFacilities(true);
       loadData();
