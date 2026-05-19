@@ -265,7 +265,14 @@ Deno.serve(async (req) => {
 
     const hasAccess = await verifyAccountAccess(user.id, body.accountId);
     if (!hasAccess) {
-      return jsonResponse({ error: 'No access to this account' }, 403);
+      // Diagnostic enrichment: surface the signed-in email + the account
+      // the request asked for. Lets the user (or me debugging on their
+      // behalf) see at a glance whether the user is signed in as the
+      // wrong identity vs. genuinely missing a membership row. Safe to
+      // expose: the user already owns their own auth email.
+      return jsonResponse({
+        error: `No access to this account. You are signed in as ${user.email ?? '(unknown email)'} (auth id ${user.id}); the request asked for account ${body.accountId}.`,
+      }, 403);
     }
 
     const snapshot = await loadSnapshot(body.accountId);
