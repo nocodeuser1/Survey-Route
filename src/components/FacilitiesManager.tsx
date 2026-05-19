@@ -258,7 +258,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('spcc_inspection_internal');
+  const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('all');
   const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection'>(() => {
     if (globalSurveyType === 'spcc_plan') return 'plan';
     if (globalSurveyType === 'spcc_inspection') return 'inspection';
@@ -757,17 +757,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (data?.selected_report_type) {
           setSelectedReportType(data.selected_report_type);
         } else {
-          // If no saved preference, set and save default as 'spcc_inspection_internal'
-          setSelectedReportType('spcc_inspection_internal');
-          await supabase
-            .from('user_settings')
-            .upsert({
-              account_id: accountId,
-              user_id: userId,
-              selected_report_type: 'spcc_inspection_internal'
-            }, {
-              onConflict: 'account_id'
-            });
+          // No saved preference — default to 'all' so a brand-new
+          // account opens with every facility visible. We don't auto-
+          // persist anything; the row only picks up a value once the
+          // user actually picks a report type via the Filters dropdown.
+          // (Older builds auto-saved 'spcc_inspection_internal' here,
+          // which hid every facility on accounts with no inspections.)
+          setSelectedReportType('all');
         }
       } catch (err) {
         console.error('Error loading report type preference:', err);
@@ -1061,6 +1057,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const matchesReportTypeFilter = (facility: Facility): boolean => {
+    // The "All" mode tab means "show every facility" — full stop. Without
+    // this short-circuit a stale persisted selectedReportType (e.g. an
+    // auto-saved 'spcc_inspection_internal' from earlier code paths)
+    // would silently filter the All view down to facilities with a
+    // valid inspection on file. New Validus accounts had no inspections
+    // and so the list rendered as 0/30 with no visible filter chip to
+    // disable. The Filters dropdown's Report Type select still works in
+    // Plans/Inspections modes; in All mode it's not meaningful.
+    if (spccMode === 'all') return true;
+
     if (selectedReportType === 'all') return true;
 
     if (selectedReportType === 'spcc_plan') {
