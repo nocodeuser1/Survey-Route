@@ -241,6 +241,24 @@ export function findField(fieldId: string): CustomFilterField | undefined {
   return FILTER_FIELDS.find((f) => f.id === fieldId);
 }
 
+/**
+ * Resolve the display label for a field given a brand-aware override for
+ * the camino_facility_id row. Returns the field's static label for every
+ * other field. Used by CustomFilterBuilder and describeRule so the
+ * "Camino Facility ID" choice shows up as "Validus Facility ID" in the
+ * Validus account, etc. Pass `brandedFacilityIdLabel = undefined` to
+ * keep the static "Camino Facility ID" wording.
+ */
+export function getFieldDisplayLabel(
+  field: CustomFilterField,
+  brandedFacilityIdLabel?: string,
+): string {
+  if (field.id === 'camino_facility_id' && brandedFacilityIdLabel) {
+    return brandedFacilityIdLabel;
+  }
+  return field.label;
+}
+
 export function findOperator(
   field: CustomFilterField,
   operatorId: string
@@ -341,14 +359,20 @@ export function makeRulesPredicate(rules: CustomRule[]) {
 /** Builds a description of the current rule that's safe to render in a
  *  short pill (e.g. "Photos Status is Partial"). Returns null if the rule
  *  is incomplete (no value chosen for an op that needs one). */
-export function describeRule(rule: CustomRule): string | null {
+export function describeRule(
+  rule: CustomRule,
+  /** Optional brand-aware override for the camino_facility_id field's
+   *  display label. Pass the result of useFacilityIdLabel().long. */
+  brandedFacilityIdLabel?: string,
+): string | null {
   const field = findField(rule.fieldId);
   if (!field) return null;
   const op = findOperator(field, rule.operatorId);
   if (!op) return null;
+  const fieldLabel = getFieldDisplayLabel(field, brandedFacilityIdLabel);
 
   if (!op.needsValue) {
-    return `${field.label} ${op.label}`;
+    return `${fieldLabel} ${op.label}`;
   }
   if (rule.value == null || rule.value === '') return null;
 
@@ -359,7 +383,7 @@ export function describeRule(rule: CustomRule): string | null {
     if (match) valueLabel = match.label;
   }
 
-  return `${field.label} ${op.label} ${valueLabel}`;
+  return `${fieldLabel} ${op.label} ${valueLabel}`;
 }
 
 /** Crypto.randomUUID() works in modern browsers; cheap fallback for older

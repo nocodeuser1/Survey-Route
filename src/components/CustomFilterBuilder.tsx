@@ -4,10 +4,12 @@ import {
   FIELD_GROUP_LABELS,
   findField,
   findOperator,
+  getFieldDisplayLabel,
   newRuleId,
   type CustomFilterField,
   type CustomRule,
 } from '../utils/customFilters';
+import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 
 /**
  * Custom-filter builder rendered inside the Facilities → Filters dropdown.
@@ -31,6 +33,10 @@ export default function CustomFilterBuilder({
   rules,
   onChange,
 }: CustomFilterBuilderProps) {
+  // Brand-aware override for the "Camino Facility ID" field in the rule
+  // builder. Threaded down to the row component which renders the
+  // <option> list. See useFacilityIdLabel for the fallback rules.
+  const brandedFacilityIdLabel = useFacilityIdLabel().long;
   const addRule = () => {
     // Default to the first field with the first operator. The user almost
     // always edits at least one of these on add anyway, so picking sensible
@@ -115,6 +121,7 @@ export default function CustomFilterBuilder({
             <CustomFilterRuleRow
               key={rule.id}
               rule={rule}
+              brandedFacilityIdLabel={brandedFacilityIdLabel}
               onFieldChange={(id) => onFieldChange(rule, id)}
               onOperatorChange={(id) => onOperatorChange(rule, id)}
               onValueChange={(v) => updateRule(rule.id, { value: v })}
@@ -142,6 +149,9 @@ export default function CustomFilterBuilder({
 
 interface RuleRowProps {
   rule: CustomRule;
+  /** Brand-aware override forwarded from the parent. Substituted for the
+   *  static "Camino Facility ID" label of that one registry entry. */
+  brandedFacilityIdLabel?: string;
   onFieldChange: (fieldId: string) => void;
   onOperatorChange: (operatorId: string) => void;
   onValueChange: (value: string | null) => void;
@@ -150,6 +160,7 @@ interface RuleRowProps {
 
 function CustomFilterRuleRow({
   rule,
+  brandedFacilityIdLabel,
   onFieldChange,
   onOperatorChange,
   onValueChange,
@@ -177,7 +188,7 @@ function CustomFilterRuleRow({
               >
                 {fields.map((f) => (
                   <option key={f.id} value={f.id}>
-                    {f.label}
+                    {getFieldDisplayLabel(f, brandedFacilityIdLabel)}
                   </option>
                 ))}
               </optgroup>

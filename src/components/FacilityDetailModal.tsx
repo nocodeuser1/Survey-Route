@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useReducer } from 'react';
+import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -126,6 +127,9 @@ export default function FacilityDetailModal({
   initialTab = 'general'
 }: FacilityDetailModalProps) {
   const { user } = useAuth();
+  // Brand-aware facility-id label (e.g. "Camino Facility ID" /
+  // "Validus Facility ID" / generic "Facility ID"). See hook src.
+  const facilityIdLabel = useFacilityIdLabel();
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [facilityComments, setFacilityComments] = useState<FacilityComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -1276,12 +1280,12 @@ export default function FacilityDetailModal({
                 </select>
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Camino Facility ID</p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">{facilityIdLabel.long}</p>
                 <InlineEditField
                   value={facility.camino_facility_id ?? null}
                   type="text"
                   emptyPlaceholder="Not available"
-                  ariaLabel="Camino Facility ID"
+                  ariaLabel={facilityIdLabel.long}
                   displayClassName="text-sm font-medium text-gray-900 dark:text-white"
                   onSave={(next) => updateFacilityField('camino_facility_id', (next as string | null) || null)}
                 />

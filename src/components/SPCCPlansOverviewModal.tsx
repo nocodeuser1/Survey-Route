@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { X, FileText, AlertTriangle, CheckCircle, Clock, Building2, ChevronLeft, ChevronRight, ExternalLink, Calendar, Shield, ShieldAlert } from 'lucide-react';
 import { Facility } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { getSPCCPlanStatus, formatDayCount, type SPCCPlanStatus } from '../utils/spccStatus';
 import { formatDate } from '../utils/dateUtils';
 
@@ -33,6 +34,9 @@ export default function SPCCPlansOverviewModal({
   accountId,
 }: SPCCPlansOverviewModalProps) {
   const { darkMode } = useDarkMode();
+  // Brand-aware facility-id label so the detail row reads
+  // "Validus Facility ID" when in Validus etc. instead of always "Camino".
+  const facilityIdLabel = useFacilityIdLabel();
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
@@ -558,7 +562,7 @@ function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: bo
           />
           {facility.camino_facility_id && (
             <DetailRow
-              label="Camino Facility ID"
+              label={facilityIdLabel.long}
               value={facility.camino_facility_id}
               darkMode={darkMode}
             />

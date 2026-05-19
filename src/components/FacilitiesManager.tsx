@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
@@ -223,6 +224,18 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 
 export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
+
+  // Brand-aware label for the external facility-id field. Camino-specific
+  // for the Camino account; "Validus Facility ID" for Validus; generic
+  // "Facility ID" for any account without a company_name set. The DB
+  // column is still named `camino_facility_id` (historical) — only the
+  // visible label switches. See src/hooks/useFacilityIdLabel.ts.
+  const facilityIdLabel = useFacilityIdLabel();
+  // Reuse COLUMN_LABELS but override the one entry that's account-branded.
+  const columnLabels = useMemo<Record<ColumnId, string>>(
+    () => ({ ...COLUMN_LABELS, camino_facility_id: facilityIdLabel.long }),
+    [facilityIdLabel.long],
+  );
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
@@ -2058,7 +2071,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const performExport = () => {
     const headers = exportColumnOrder
       .filter(col => exportVisibleColumns.includes(col))
-      .map(col => COLUMN_LABELS[col]);
+      .map(col => columnLabels[col]);
 
     const csvRows: string[][] = [headers];
 
@@ -2248,7 +2261,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const baseUrl = window.location.origin;
       const otherColumns = visibleColumns.filter(c => c !== 'name');
 
-      const headers = ['Facility Name', 'Share Links', ...otherColumns.map(c => COLUMN_LABELS[c])];
+      const headers = ['Facility Name', 'Share Links', ...otherColumns.map(c => columnLabels[c])];
 
       const rows: string[][] = filteredFacilities.map(facility => {
         const plans = (plansByFacility.get(facility.id) ?? []).sort((a, b) => a.berm_index - b.berm_index);
@@ -2965,13 +2978,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   )}
                   {isFieldVisible('camino_facility_id') && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Camino Facility ID</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{facilityIdLabel.long}</label>
                       <input
                         type="text"
                         value={mobileEditFormData.camino_facility_id || ''}
                         onChange={(e) => setMobileEditFormData({ ...mobileEditFormData, camino_facility_id: e.target.value })}
                         className="w-full px-3 py-2.5 text-sm border border-white/50 dark:border-white/15 rounded-lg bg-white/60 dark:bg-white/[0.08] text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                        placeholder="Camino Facility ID"
+                        placeholder={facilityIdLabel.long}
                       />
                     </div>
                   )}
@@ -3467,7 +3480,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               {customFilterRules.length > 0 && (
                 <div className="hidden sm:flex items-center gap-1.5 flex-wrap ml-1">
                   {customFilterRules.map((r) => {
-                    const desc = describeRule(r);
+                    const desc = describeRule(r, facilityIdLabel.long);
                     return (
                       <button
                         key={r.id}
@@ -3560,7 +3573,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder="Search name, address, or Camino ID..."
+                placeholder={`Search name, address, or ${facilityIdLabel.short}...`}
                 size="sm"
                 containerClassName="relative flex-1 min-w-[180px]"
               />
@@ -4085,7 +4098,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         }}
                       >
                         <div className="flex items-center gap-1">
-                          <span>{COLUMN_LABELS[columnId]}</span>
+                          <span>{columnLabels[columnId]}</span>
                           {sortColumn === columnId && (
                             <span className="text-blue-500 dark:text-blue-400">
                               {sortDirection === 'asc' ? (
@@ -4238,10 +4251,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const selectedColumns = exportColumnOrder.filter(id => exportVisibleColumns.includes(id));
         const unselectedColumns = exportColumnOrder.filter(id => !exportVisibleColumns.includes(id));
         const filteredSelected = selectedColumns.filter(id =>
-          COLUMN_LABELS[id].toLowerCase().includes(exportSearchLower)
+          columnLabels[id].toLowerCase().includes(exportSearchLower)
         );
         const filteredUnselected = unselectedColumns.filter(id =>
-          COLUMN_LABELS[id].toLowerCase().includes(exportSearchLower)
+          columnLabels[id].toLowerCase().includes(exportSearchLower)
         );
         return (
           <div
@@ -4333,7 +4346,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             <CheckCircle className="w-3 h-3 text-white" />
                           </button>
                           <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">
-                            {COLUMN_LABELS[columnId]}
+                            {columnLabels[columnId]}
                           </span>
                           {!exportColumnSearch && (
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4380,7 +4393,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           >
                           </button>
                           <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">
-                            {COLUMN_LABELS[columnId]}
+                            {columnLabels[columnId]}
                           </span>
                         </div>
                       ))}
@@ -4839,11 +4852,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       {showColumnSelector && (() => {
         const searchLower = columnSearch.toLowerCase();
         const filteredVisible = draftVisibleColumns.filter(id =>
-          COLUMN_LABELS[id].toLowerCase().includes(searchLower)
+          columnLabels[id].toLowerCase().includes(searchLower)
         );
         const hiddenColumns = draftColumnOrder.filter(id => !draftVisibleColumns.includes(id));
         const filteredHidden = hiddenColumns.filter(id =>
-          COLUMN_LABELS[id].toLowerCase().includes(searchLower)
+          columnLabels[id].toLowerCase().includes(searchLower)
         );
         const hasChanges = JSON.stringify(draftVisibleColumns) !== JSON.stringify(visibleColumns)
           || JSON.stringify(draftColumnOrder) !== JSON.stringify(columnOrder);
@@ -4933,7 +4946,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             <CheckCircle className="w-3 h-3 text-white" />
                           </button>
                           <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">
-                            {COLUMN_LABELS[columnId]}
+                            {columnLabels[columnId]}
                           </span>
                           {!columnSearch && (
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4991,7 +5004,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           >
                           </button>
                           <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">
-                            {COLUMN_LABELS[columnId]}
+                            {columnLabels[columnId]}
                           </span>
                         </div>
                       ))}
