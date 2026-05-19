@@ -568,6 +568,13 @@ function App() {
         setCurrentRouteId(null);
         setRouteFacilityIds(null);
         setShowOnlyRouteFacilities(false);
+        // Reset the global survey-type filter back to "All" on every
+        // account switch. Without this, switching from Camino (where the
+        // user may have been in Plans or Inspections mode) into Validus
+        // lands the user in the same scoped mode, which felt arbitrary
+        // and made the facility list look filtered/empty before they'd
+        // touched anything. "All" is the safe, unsurprising landing.
+        setSurveyType('all');
       }
 
       // Set loading state when switching accounts
