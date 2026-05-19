@@ -123,7 +123,7 @@ const filterFacilitiesByTeam = (
 
 function App() {
   const { user, signOut } = useAuth();
-  const { currentAccount, accountRole, loading: accountLoading } = useAccount();
+  const { currentAccount, accounts, accountRole, loading: accountLoading, selectAccount } = useAccount();
   const { darkMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const { logTabView, logActivity } = useActivityLogger();
@@ -3010,7 +3010,7 @@ function App() {
                   </button>
 
                   {showProfileDropdown && (
-                    <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
+                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
                       {/* User info header */}
                       <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
                         <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
@@ -3020,6 +3020,45 @@ function App() {
                           {user?.email}
                         </p>
                       </div>
+
+                      {accounts.length > 1 && (
+                        <>
+                          <div className="px-4 pt-3 pb-1">
+                            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              Switch Account
+                            </p>
+                          </div>
+                          <div className="max-h-56 overflow-y-auto py-1">
+                            {accounts.map((acc) => {
+                              const isCurrent = currentAccount?.id === acc.id;
+                              return (
+                                <button
+                                  key={acc.id}
+                                  onClick={async () => {
+                                    setShowProfileDropdown(false);
+                                    if (isCurrent) return;
+                                    await selectAccount(acc.id);
+                                    setCurrentView('facilities');
+                                  }}
+                                  className={`w-full flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
+                                    isCurrent
+                                      ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium cursor-default'
+                                      : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                  }`}
+                                  title={isCurrent ? 'Currently active' : `Switch to ${acc.account_name}`}
+                                >
+                                  <span className="flex items-center gap-2.5 min-w-0">
+                                    <Building2 className="w-4 h-4 flex-shrink-0" />
+                                    <span className="truncate">{acc.account_name}</span>
+                                  </span>
+                                  {isCurrent && <CheckCircle className="w-4 h-4 flex-shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                        </>
+                      )}
 
                       <button
                         onClick={() => {
