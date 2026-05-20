@@ -302,10 +302,22 @@ Deno.serve(async (req) => {
     const contents = toGeminiContents(recentMessages);
 
     // Resolve the model: client picks from ALLOWED_MODELS, otherwise default.
-    // Pro gets a dynamic thinking budget (it's smart enough that giving it
-    // room to reason helps); Flash variants run thinking off for speed.
+    // Pro reasons at 'high'; Flash variants run at 'minimal' for low latency.
     const requestedModel = body.model ?? DEFAULT_MODEL;
     const modelConfig = ALLOWED_MODELS[requestedModel] ?? ALLOWED_MODELS[DEFAULT_MODEL];
+
+    // Diagnostic header — visible in Supabase function logs. Keeps the
+    // bytes counts so we can tell at a glance whether a hang was on the
+    // snapshot side or the Gemini side.
+    console.log('[ai-assistant] req', JSON.stringify({
+      account: body.accountId,
+      requestedModel,
+      upstream: modelConfig.upstream,
+      thinkingLevel: modelConfig.thinkingLevel,
+      facilityCount: snapshot.facilities.length,
+      systemPromptBytes: systemPrompt.length,
+      conversationTurns: recentMessages.length,
+    }));
 
     // Call Gemini's streaming endpoint. SSE format: each event is a JSON
     // object with `candidates[0].content.parts[0].text` carrying the delta.
@@ -349,6 +361,16 @@ Deno.serve(async (req) => {
       async start(controller) {
         const reader = geminiResp.body!.getReader();
         let buffer = '';
+        // Track whether we ever emitted text. If Gemini's stream closes
+        // without producing any (e.g. blocked by safety, MAX_TOKENS
+        // consumed by hidden thoughts, mis-configured thinking field
+        // returning empty candidates), we surface a structured error
+        // instead of letting the client sit on an empty placeholder
+        // forever. Also collect the most recent finishReason for the
+        // diagnostic.
+        let emittedAnyText = false;
+        let lastFinish: string | undefined;
+        let totalChunks = 0;
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -362,15 +384,16 @@ Deno.serve(async (req) => {
             for (const event of events) {
               const line = event.split('\n').find((l) => l.startsWith('data: '));
               if (!line) continue;
+              totalChunks++;
               try {
                 const json = JSON.parse(line.slice(6));
                 const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (text) {
+                  emittedAnyText = true;
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
                 }
-                // Surface a finish reason once, when the stream ends. Gemini
-                // sets `finishReason` on the last chunk's candidate.
                 const finish: string | undefined = json?.candidates?.[0]?.finishReason;
+                if (finish) lastFinish = finish;
                 if (finish && finish !== 'STOP') {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: `Stopped: ${finish}` })}\n\n`));
                 }
@@ -379,9 +402,20 @@ Deno.serve(async (req) => {
               }
             }
           }
+          if (!emittedAnyText) {
+            // The upstream stream closed cleanly but produced no text.
+            // The most common cause once 3.5 landed was sending the
+            // legacy `thinkingBudget` field, which yields empty
+            // candidates with no error. Surface enough context so it's
+            // obvious in the UI rather than spinning forever.
+            const diag = `No text returned by ${modelConfig.upstream} (chunks: ${totalChunks}${lastFinish ? `, finish: ${lastFinish}` : ''}).`;
+            console.error('[ai-assistant] empty stream:', diag);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: diag })}\n\n`));
+          }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
+          console.error('[ai-assistant] stream relay failed:', message);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`));
         } finally {
           controller.close();

@@ -122,6 +122,11 @@ export default function AIAssistantBubble() {
     setInput('');
     setIsStreaming(true);
 
+    // Hoisted so the catch can tell apart user-cancel (silent) from
+    // the watchdog timeout (show message) — both surface as AbortError
+    // and only this flag distinguishes them.
+    let didTimeOut = false;
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not signed in');
@@ -137,6 +142,18 @@ export default function AIAssistantBubble() {
 
       const controller = new AbortController();
       abortRef.current = controller;
+
+      // Hard-cap the round trip so a true upstream hang surfaces as a
+      // clean error instead of letting the user stare at "Thinking…"
+      // forever. 75s comfortably covers Pro reasoning over a
+      // multi-hundred-facility snapshot; Flash should land in well
+      // under 10s. We distinguish a timeout abort from a user-cancel
+      // abort via the hoisted `didTimeOut` flag so the catch handler
+      // can render the appropriate message.
+      const timeoutId = window.setTimeout(() => {
+        didTimeOut = true;
+        controller.abort();
+      }, 75_000);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -154,31 +171,46 @@ export default function AIAssistantBubble() {
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({ error: 'Request failed' }));
+        clearTimeout(timeoutId);
         throw new Error(errBody.error ?? `HTTP ${response.status}`);
       }
-      if (!response.body) throw new Error('No response body');
+      if (!response.body) {
+        clearTimeout(timeoutId);
+        throw new Error('No response body');
+      }
 
       // Parse SSE: each `data: {...}\n\n` chunk is a partial event.
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let assistantText = '';
+      // Capture any structured error event emitted by the server. Don't
+      // throw inside the chunk loop — the inner try-catch around
+      // JSON.parse would swallow it. Surface AFTER the stream completes
+      // so partial text up to the error point still renders.
+      let serverError: string | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        // Split on the SSE delimiter; keep any incomplete tail in the buffer.
-        const events = buffer.split('\n\n');
-        buffer = events.pop() ?? '';
+          // Split on the SSE delimiter; keep any incomplete tail in the buffer.
+          const events = buffer.split('\n\n');
+          buffer = events.pop() ?? '';
 
-        for (const event of events) {
-          const line = event.split('\n').find((l) => l.startsWith('data: '));
-          if (!line) continue;
-          try {
-            const payload = JSON.parse(line.slice(6));
-            if (payload.type === 'text') {
+          for (const event of events) {
+            const line = event.split('\n').find((l) => l.startsWith('data: '));
+            if (!line) continue;
+            let payload: { type?: string; text?: string; error?: string };
+            try {
+              payload = JSON.parse(line.slice(6));
+            } catch (parseErr) {
+              console.error('[AIAssistant] Failed to parse SSE chunk:', line, parseErr);
+              continue;
+            }
+            if (payload.type === 'text' && payload.text) {
               assistantText += payload.text;
               setMessages((prev) => {
                 const copy = [...prev];
@@ -186,15 +218,24 @@ export default function AIAssistantBubble() {
                 return copy;
               });
             } else if (payload.type === 'error') {
-              throw new Error(payload.error);
+              serverError = payload.error ?? 'Assistant returned an error';
             }
-          } catch (parseErr) {
-            console.error('[AIAssistant] Failed to parse SSE chunk:', line, parseErr);
           }
         }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (serverError) throw new Error(serverError);
+      if (!assistantText) {
+        throw new Error('The assistant returned no response. Please try again or switch models.');
       }
     } catch (err) {
-      if ((err as Error).name === 'AbortError') return;
+      if ((err as Error).name === 'AbortError') {
+        if (!didTimeOut) return; // user cancelled via X — silent
+        // Fall through with a timeout message so the user sees why.
+        err = new Error('The assistant timed out after 75s. Try again — Flash should be much faster.');
+      }
       let msg = err instanceof Error ? err.message : 'Something went wrong';
       // The browser surfaces network-level fetch failures as "Failed to fetch".
       // That happens before any HTTP response — usually because the function
