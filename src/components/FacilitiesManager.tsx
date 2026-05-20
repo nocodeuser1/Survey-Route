@@ -47,7 +47,9 @@ interface FacilitiesManagerProps {
   initialFacilityToEdit?: Facility | null;
   onFacilityEditHandled?: () => void;
   isLoading?: boolean;
-  onCreateRoute?: (facilityIds: string[], surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
+  // surveyType is now 'all' | 'spcc_inspection' | 'spcc_plan' | <survey_types.id UUID>
+  // (widened 2026-05-20 to support custom survey types as first-class route modes)
+  onCreateRoute?: (facilityIds: string[], surveyType: string) => void;
   // Survey type filtering
   surveyTypes?: SurveyType[];
   activeSurveyTypeId?: string | null;
@@ -57,9 +59,9 @@ interface FacilitiesManagerProps {
   getSurveyData?: (facilityId: string, surveyTypeId: string) => FacilitySurveyData[];
   getCompletionStatus?: (facilityId: string, surveyTypeId: string) => { completed: number; total: number; percent: number };
   onSurveyDataSaved?: () => void;
-  // Global mode sync (all/plan/inspection)
-  globalSurveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
-  onGlobalSurveyTypeChange?: (surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
+  // Global mode sync — see note above re: widening to string.
+  globalSurveyType?: string;
+  onGlobalSurveyTypeChange?: (surveyType: string) => void;
 }
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';

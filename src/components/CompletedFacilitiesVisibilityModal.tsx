@@ -13,7 +13,8 @@ export interface CompletedVisibility {
 
 interface CompletedFacilitiesVisibilityModalProps {
   visibility: CompletedVisibility;
-  surveyType: 'all' | 'spcc_inspection' | 'spcc_plan';
+  // Widened 2026-05-20 to accept survey_types.id UUIDs as well as the legacy enum.
+  surveyType: string;
   onClose: () => void;
   onApply: (visibility: CompletedVisibility) => void;
   onApplyAndRefreshRoute?: (visibility: CompletedVisibility) => void;

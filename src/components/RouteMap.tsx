@@ -53,7 +53,10 @@ interface RouteMapProps {
   onEditFacility?: (facility: Facility) => void;
   locationTracking?: boolean;
   onLocationTrackingChange?: (enabled: boolean) => void;
-  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
+  // Widened 2026-05-20: 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID for custom>.
+  // Internal string-equality checks against the SPCC enum members continue to work
+  // for legacy values; UUID values simply don't match those branches.
+  surveyType?: string;
   showOnlyRouteFacilities?: boolean;
 }
 

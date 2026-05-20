@@ -48,12 +48,15 @@ interface RouteResultsProps {
   };
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onApplyWithTimeRefresh?: () => Promise<void>;
-  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
-  onSurveyTypeChange?: (type: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
+  // Widened 2026-05-20: now accepts 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID>
+  // so custom survey types can be selected as route modes.
+  surveyType?: string;
+  onSurveyTypeChange?: (type: string) => void;
 }
 
-// Survey type for route planning filtering
-type SurveyType = 'all' | 'spcc_inspection' | 'spcc_plan';
+// Survey type for route planning filtering.
+// String to allow either the legacy SPCC enum members OR a survey_types.id UUID.
+type SurveyType = string;
 
 export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());

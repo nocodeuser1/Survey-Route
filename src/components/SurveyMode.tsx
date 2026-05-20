@@ -49,8 +49,9 @@ interface SurveyModeProps {
   userRole?: 'owner' | 'admin' | 'user';
   onFacilitiesChange?: () => void;
   onShowOnMap?: (latitude: number, longitude: number) => void;
-  surveyType?: 'all' | 'spcc_inspection' | 'spcc_plan';
-  onSurveyTypeChange?: (surveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => void;
+  // Widened 2026-05-20: 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID>
+  surveyType?: string;
+  onSurveyTypeChange?: (surveyType: string) => void;
 }
 
 interface FacilityWithDistance extends Facility {

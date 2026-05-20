@@ -9,7 +9,7 @@ import RouteResults from './components/RouteResults';
 import RouteMap from './components/RouteMap';
 import SurveyMode from './components/SurveyMode';
 import StickyStatsBar from './components/StickyStatsBar';
-import { supabase, Facility, HomeBase as HomeBaseType, UserSettings, RoutePlan, Inspection } from './lib/supabase';
+import { supabase, Facility, HomeBase as HomeBaseType, UserSettings, RoutePlan, Inspection, SurveyType } from './lib/supabase';
 import RouteSettings from './components/RouteSettings';
 import TeamManagement from './components/TeamManagement';
 import UserSignatureManagement from './components/UserSignatureManagement';
@@ -50,14 +50,46 @@ const isActiveFacility = (facility: Facility): boolean => {
   return facility.day_assignment !== -1 && facility.day_assignment !== -2 && facility.status !== 'sold';
 };
 
-// Returns the appropriate visit duration based on the active survey type
+/**
+ * Returns a discriminator for the active survey type, normalizing both the
+ * legacy enum strings ('spcc_inspection' / 'spcc_plan' / 'all') AND new
+ * survey_type UUIDs to one of four cases. This lets new custom-type modes
+ * coexist with the hardwired SPCC paths without rewriting every call site.
+ */
+const getSurveyTypeKind = (
+  surveyType: string,
+  dbSurveyTypes: SurveyType[]
+): 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' => {
+  if (surveyType === 'all') return 'all';
+  if (surveyType === 'spcc_inspection') return 'spcc_inspection';
+  if (surveyType === 'spcc_plan') return 'spcc_plan';
+  const row = dbSurveyTypes.find(t => t.id === surveyType);
+  if (row?.system_kind === 'spcc_inspection') return 'spcc_inspection';
+  if (row?.system_kind === 'spcc_plan') return 'spcc_plan';
+  if (row) return 'custom';
+  // Unknown UUID (e.g. before dbSurveyTypes has loaded) — treat as 'all'.
+  return 'all';
+};
+
+// Returns the appropriate visit duration based on the active survey type.
+//
+// Precedence: per-type override (survey_types.visit_duration_minutes) →
+// legacy account-wide SPCC settings → facility default → account default.
 const getVisitDuration = (
   facility: Facility | undefined,
   settings: UserSettings,
-  surveyType: 'all' | 'spcc_inspection' | 'spcc_plan'
+  surveyType: string,
+  dbSurveyTypes: SurveyType[]
 ): number => {
-  if (surveyType === 'spcc_inspection') return settings.inspection_visit_duration_minutes ?? 30;
-  if (surveyType === 'spcc_plan') return settings.plan_visit_duration_minutes ?? 60;
+  // Per-type override (set in the New Survey Type modal's Route Planning section)
+  const row = dbSurveyTypes.find(t => t.id === surveyType);
+  if (row?.visit_duration_minutes != null) return row.visit_duration_minutes;
+
+  // Legacy account-wide SPCC settings — preserved so behavior matches pre-2026-05-20
+  const kind = getSurveyTypeKind(surveyType, dbSurveyTypes);
+  if (kind === 'spcc_inspection') return settings.inspection_visit_duration_minutes ?? 30;
+  if (kind === 'spcc_plan') return settings.plan_visit_duration_minutes ?? 60;
+
   return facility?.visit_duration_minutes || settings.default_visit_duration_minutes;
 };
 
@@ -200,10 +232,13 @@ function App() {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
-  const [surveyType, setSurveyType] = useState<'all' | 'spcc_inspection' | 'spcc_plan'>(() => {
+  // surveyType is the active route mode. Values:
+  //   'all'                          → no filter
+  //   'spcc_inspection' / 'spcc_plan' → legacy SPCC enum strings (still accepted)
+  //   <UUID>                         → custom or system survey_types.id (new in 2026-05-20)
+  const [surveyType, setSurveyType] = useState<string>(() => {
     const saved = localStorage.getItem('surveyType');
-    if (saved === 'spcc_inspection' || saved === 'spcc_plan') return saved;
-    return 'all';
+    return saved || 'all';
   });
   const [routeFacilityIds, setRouteFacilityIds] = useState<string[] | null>(null);
   const [showOnlyRouteFacilities, setShowOnlyRouteFacilities] = useState(false);
@@ -237,6 +272,31 @@ function App() {
     refreshSurveyData,
     loading: surveyTypesLoading,
   } = useSurveyTypes(currentAccount?.id || '');
+
+  // Derived: the active survey_types row, when surveyType is a UUID we recognize.
+  // Null for 'all' / legacy SPCC enum strings / unknown UUIDs.
+  const activeSurveyTypeRow = useMemo<SurveyType | null>(
+    () => dbSurveyTypes.find(t => t.id === surveyType) ?? null,
+    [dbSurveyTypes, surveyType]
+  );
+
+  // Derived: discriminator that normalizes legacy enums + UUIDs to one of:
+  // 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom'.
+  // Use this instead of bare string equality for new code paths.
+  const surveyTypeKind = useMemo(
+    () => getSurveyTypeKind(surveyType, dbSurveyTypes),
+    [surveyType, dbSurveyTypes]
+  );
+
+  // One-shot migration: if localStorage still holds the legacy 'spcc_inspection' /
+  // 'spcc_plan' string, swap it for the corresponding system_kind row's UUID so
+  // the rest of the app uses a single canonical identifier going forward.
+  useEffect(() => {
+    if (surveyType !== 'spcc_inspection' && surveyType !== 'spcc_plan') return;
+    if (dbSurveyTypes.length === 0) return;
+    const match = dbSurveyTypes.find(t => t.system_kind === surveyType);
+    if (match) setSurveyType(match.id);
+  }, [dbSurveyTypes, surveyType]);
 
   // Calculate visible facility count based on completedVisibility settings and surveyType
   const visibleFacilityCount = useMemo(() => {
@@ -334,15 +394,21 @@ function App() {
         if (hiddenFacilityIds.has(facilityData.id)) return;
 
         // Apply survey type filter
-        if (surveyType === 'spcc_inspection' && !facilityNeedsInspection(facilityData)) return;
-        if (surveyType === 'spcc_plan' && !facilityNeedsSPCCPlan(facilityData)) return;
+        if (surveyTypeKind === 'spcc_inspection' && !facilityNeedsInspection(facilityData)) return;
+        if (surveyTypeKind === 'spcc_plan' && !facilityNeedsSPCCPlan(facilityData)) return;
+        if (surveyTypeKind === 'custom' && activeSurveyTypeRow) {
+          // Custom modes: only show facilities that need this survey done
+          // (incomplete data for this type).
+          const status = getCompletionStatus(facilityData.id, activeSurveyTypeRow.id);
+          if (status.total > 0 && status.percent >= 100) return;
+        }
 
         visibleCount++;
       });
     });
 
     return visibleCount;
-  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType, showOnlyRouteFacilities, routeFacilityIds]);
+  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType, surveyTypeKind, activeSurveyTypeRow, getCompletionStatus, showOnlyRouteFacilities, routeFacilityIds]);
 
   // Apply team filtering to optimization results and facilities
   // Default to team 1 if user has no assignment
@@ -382,7 +448,7 @@ function App() {
       } catch { }
     }
     // First-time defaults per survey type
-    if (surveyType === 'spcc_inspection') {
+    if (surveyTypeKind === 'spcc_inspection') {
       setCompletedVisibility({
         hideAllCompleted: true,
         hideInternallyCompleted: true,
@@ -390,7 +456,7 @@ function App() {
         hideValidPlans: false,
         hideExpiringPlans: false,
       });
-    } else if (surveyType === 'spcc_plan') {
+    } else if (surveyTypeKind === 'spcc_plan') {
       setCompletedVisibility({
         hideAllCompleted: false,
         hideInternallyCompleted: false,
@@ -399,6 +465,8 @@ function App() {
         hideExpiringPlans: false,
       });
     } else {
+      // 'all' and 'custom' modes — show everything by default; custom modes do
+      // their own completion-based filtering elsewhere.
       setCompletedVisibility({
         hideAllCompleted: false,
         hideInternallyCompleted: false,
@@ -407,7 +475,7 @@ function App() {
         hideExpiringPlans: false,
       });
     }
-  }, [surveyType]);
+  }, [surveyType, surveyTypeKind]);
 
   // Recalculate route times when surveyType changes (different modes have different onsite durations)
   useEffect(() => {
@@ -420,7 +488,7 @@ function App() {
           const facilityRecord = facilities.find(fac => fac.name === f.name);
           return {
             ...f,
-            visitDuration: getVisitDuration(facilityRecord, lastUsedSettings, surveyType),
+            visitDuration: getVisitDuration(facilityRecord, lastUsedSettings, surveyType, dbSurveyTypes),
           };
         }),
       };
@@ -1344,10 +1412,10 @@ function App() {
     setShowOnlyRouteFacilities(false);
 
     try {
-      // In specific survey modes (SPCC Plans/Inspections), include all non-sold facilities
-      // since day_assignment=-1 exclusions are for general routing, not targeted SPCC routing.
+      // In specific survey modes (SPCC Plans/Inspections/Custom), include all non-sold facilities
+      // since day_assignment=-1 exclusions are for general routing, not targeted survey routing.
       // Only manually removed (-2) and sold facilities remain excluded.
-      let activeFacilities = (surveyType === 'spcc_plan' || surveyType === 'spcc_inspection')
+      let activeFacilities = (surveyTypeKind === 'spcc_plan' || surveyTypeKind === 'spcc_inspection' || surveyTypeKind === 'custom')
         ? facilities.filter(f => f.day_assignment !== -2 && f.status !== 'sold')
         : facilities.filter(isActiveFacility);
 
@@ -1436,10 +1504,10 @@ function App() {
       }
 
       // Survey type filtering: only route facilities relevant to the selected mode
-      if (surveyType === 'spcc_plan') {
+      if (surveyTypeKind === 'spcc_plan') {
         facilitiesForRouting = facilitiesForRouting.filter(f => facilityNeedsSPCCPlan(f));
         console.log(`SPCC Plans mode: ${facilitiesForRouting.length} facilities need plan attention`);
-      } else if (surveyType === 'spcc_inspection') {
+      } else if (surveyTypeKind === 'spcc_inspection') {
         facilitiesForRouting = facilitiesForRouting.filter(f => {
           const insp = inspections.find(i => i.facility_id === f.id);
           const expiry = getFacilityInspectionExpiry(f, insp);
@@ -1447,6 +1515,16 @@ function App() {
           return expiry.status !== 'valid';
         });
         console.log(`SPCC Inspections mode: ${facilitiesForRouting.length} facilities need inspection`);
+      } else if (surveyTypeKind === 'custom' && activeSurveyTypeRow) {
+        // Custom modes: route only facilities that don't yet have complete data
+        // for this survey type. Types with no fields defined yet route nothing
+        // (no point routing to a survey that has nothing to fill out).
+        facilitiesForRouting = facilitiesForRouting.filter(f => {
+          const status = getCompletionStatus(f.id, activeSurveyTypeRow.id);
+          if (status.total === 0) return false;
+          return status.percent < 100;
+        });
+        console.log(`Custom mode "${activeSurveyTypeRow.name}": ${facilitiesForRouting.length} facilities need surveying`);
       }
 
       if (facilitiesForRouting.length === 0) {
@@ -1529,7 +1607,7 @@ function App() {
             name: f.name,
             latitude: Number(f.latitude),
             longitude: Number(f.longitude),
-            visitDuration: getVisitDuration(f, settings, surveyType),
+            visitDuration: getVisitDuration(f, settings, surveyType, dbSurveyTypes),
           }));
 
           const teamResult = optimizeRoutes(
@@ -1575,7 +1653,7 @@ function App() {
           name: f.name,
           latitude: Number(f.latitude),
           longitude: Number(f.longitude),
-          visitDuration: getVisitDuration(f, settings, surveyType),
+          visitDuration: getVisitDuration(f, settings, surveyType, dbSurveyTypes),
         }));
 
         result = optimizeRoutes(
@@ -1786,7 +1864,7 @@ function App() {
     }
   };
 
-  const handleCreateRouteFromSelection = async (facilityIds: string[], sourceSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan') => {
+  const handleCreateRouteFromSelection = async (facilityIds: string[], sourceSurveyType: string) => {
     if (!homeBase) {
       setError('Please configure your home base first');
       return;
@@ -1868,7 +1946,7 @@ function App() {
         name: f.name,
         latitude: Number(f.latitude),
         longitude: Number(f.longitude),
-        visitDuration: getVisitDuration(f, settings, sourceSurveyType),
+        visitDuration: getVisitDuration(f, settings, sourceSurveyType, dbSurveyTypes),
       }));
 
       const result = optimizeRoutes(
@@ -1908,14 +1986,18 @@ function App() {
         }
       }
 
-      // Build descriptive name
+      // Build descriptive name — use sourceSurveyType (param) since setSurveyType is async.
       const now = new Date();
       const dateStr = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+      const sourceKind = getSurveyTypeKind(sourceSurveyType, dbSurveyTypes);
+      const sourceRow = dbSurveyTypes.find(t => t.id === sourceSurveyType);
       let routeName: string;
-      if (surveyType === 'spcc_plan') {
+      if (sourceKind === 'spcc_plan') {
         routeName = `SPCC Plan Route ${dateStr}`;
-      } else if (surveyType === 'spcc_inspection') {
+      } else if (sourceKind === 'spcc_inspection') {
         routeName = `SPCC Inspection Route ${dateStr}`;
+      } else if (sourceKind === 'custom' && sourceRow) {
+        routeName = `${sourceRow.name} Route ${dateStr}`;
       } else {
         routeName = `Selected Facilities Route ${dateStr}`;
       }
@@ -1998,7 +2080,7 @@ function App() {
             const facilityRecord = facilities.find(fac => fac.name === f.name);
             return {
               ...f,
-              visitDuration: getVisitDuration(facilityRecord, latestSettings as UserSettings, surveyType)
+              visitDuration: getVisitDuration(facilityRecord, latestSettings as UserSettings, surveyType, dbSurveyTypes)
             };
           })
         };
