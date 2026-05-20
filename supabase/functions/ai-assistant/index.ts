@@ -70,7 +70,14 @@ const ALLOWED_MODELS: Record<string, { upstream: string; thinkingLevel: Thinking
 const DEFAULT_MODEL = 'gemini-3.1-flash';
 
 function geminiEndpoint(upstream: string): string {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${upstream}:streamGenerateContent?alt=sse`;
+  // Use the non-streaming endpoint. We previously used
+  // :streamGenerateContent?alt=sse but it returned chunks: 0 for both
+  // Flash and Pro in production — the SSE buffer never matched the
+  // `data: …\n\n` framing Google sends, leaving the user staring at a
+  // generic error. The regular endpoint returns the entire generation
+  // as one JSON blob (errors and all), which we then re-emit as SSE
+  // chunks below so the UI keeps its typing-style animation.
+  return `https://generativelanguage.googleapis.com/v1beta/models/${upstream}:generateContent`;
 }
 
 const CORS_HEADERS = {
@@ -347,76 +354,64 @@ Deno.serve(async (req) => {
       }),
     });
 
-    if (!geminiResp.ok || !geminiResp.body) {
+    if (!geminiResp.ok) {
       const errText = await geminiResp.text().catch(() => '');
       console.error('[ai-assistant] Gemini error:', geminiResp.status, errText);
       return jsonResponse({ error: `Gemini API ${geminiResp.status}: ${errText.slice(0, 500)}` }, 502);
     }
 
-    // Re-emit the upstream SSE stream as our own SSE shape so the frontend
-    // doesn't need to know which provider is behind the function.
+    // Non-streaming: parse the full JSON response, then re-emit as SSE
+    // chunks so the frontend keeps its progressive-text UX. This
+    // tradeoff vs. true streaming buys us bullet-proof error
+    // visibility — any malformed shape from Gemini surfaces as a
+    // clear server-emitted error event instead of an opaque
+    // "chunks: 0" diagnostic.
+    const geminiJson = await geminiResp.json().catch((err) => {
+      console.error('[ai-assistant] failed to parse Gemini JSON:', err);
+      return null;
+    });
+
+    const candidate = geminiJson?.candidates?.[0];
+    const parts: Array<{ text?: string }> = candidate?.content?.parts ?? [];
+    const fullText = parts.map((p) => p.text ?? '').join('').trim();
+    const finishReason: string | undefined = candidate?.finishReason;
+    const promptFeedback = geminiJson?.promptFeedback;
+
+    console.log('[ai-assistant] gemini ok', JSON.stringify({
+      finishReason,
+      textLen: fullText.length,
+      partsLen: parts.length,
+      blockReason: promptFeedback?.blockReason,
+    }));
+
     const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
     const responseStream = new ReadableStream({
       async start(controller) {
-        const reader = geminiResp.body!.getReader();
-        let buffer = '';
-        // Track whether we ever emitted text. If Gemini's stream closes
-        // without producing any (e.g. blocked by safety, MAX_TOKENS
-        // consumed by hidden thoughts, mis-configured thinking field
-        // returning empty candidates), we surface a structured error
-        // instead of letting the client sit on an empty placeholder
-        // forever. Also collect the most recent finishReason for the
-        // diagnostic.
-        let emittedAnyText = false;
-        let lastFinish: string | undefined;
-        let totalChunks = 0;
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            // Gemini's SSE uses `data: {json}\n\n` delimiters.
-            const events = buffer.split('\n\n');
-            buffer = events.pop() ?? '';
-
-            for (const event of events) {
-              const line = event.split('\n').find((l) => l.startsWith('data: '));
-              if (!line) continue;
-              totalChunks++;
-              try {
-                const json = JSON.parse(line.slice(6));
-                const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) {
-                  emittedAnyText = true;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
-                }
-                const finish: string | undefined = json?.candidates?.[0]?.finishReason;
-                if (finish) lastFinish = finish;
-                if (finish && finish !== 'STOP') {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: `Stopped: ${finish}` })}\n\n`));
-                }
-              } catch (parseErr) {
-                console.error('[ai-assistant] SSE parse error:', parseErr, line);
-              }
+          if (!fullText) {
+            // Empty response — surface why (block, MAX_TOKENS, etc.)
+            // with enough context to action.
+            const detail = promptFeedback?.blockReason
+              ? `Blocked by safety filter: ${promptFeedback.blockReason}`
+              : finishReason && finishReason !== 'STOP'
+                ? `Stopped: ${finishReason}`
+                : `Empty response from ${modelConfig.upstream}`;
+            console.error('[ai-assistant] empty response:', detail, JSON.stringify(geminiJson)?.slice(0, 500));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: detail })}\n\n`));
+          } else {
+            // Re-chunk the response so the UI still types out
+            // progressively. ~40-char windows feel snappy without
+            // flooding React with state updates.
+            const CHUNK_SIZE = 40;
+            for (let i = 0; i < fullText.length; i += CHUNK_SIZE) {
+              const text = fullText.slice(i, i + CHUNK_SIZE);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
+            }
+            if (finishReason && finishReason !== 'STOP') {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: `Stopped: ${finishReason}` })}\n\n`));
             }
           }
-          if (!emittedAnyText) {
-            // The upstream stream closed cleanly but produced no text.
-            // The most common cause once 3.5 landed was sending the
-            // legacy `thinkingBudget` field, which yields empty
-            // candidates with no error. Surface enough context so it's
-            // obvious in the UI rather than spinning forever.
-            const diag = `No text returned by ${modelConfig.upstream} (chunks: ${totalChunks}${lastFinish ? `, finish: ${lastFinish}` : ''}).`;
-            console.error('[ai-assistant] empty stream:', diag);
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: diag })}\n\n`));
-          }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error('[ai-assistant] stream relay failed:', message);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`));
         } finally {
           controller.close();
         }
