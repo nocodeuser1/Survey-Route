@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Settings, Users, Building2, Lock, FileText, ScanLine, Route, Map } from 'lucide-react';
+import { Settings, Users, Building2, Lock, FileText, ScanLine, Route, Map, FileImage } from 'lucide-react';
 
 interface SettingsTab {
   id: string;
@@ -75,6 +75,8 @@ export function getSettingsIcon(tabId: string) {
       return <FileText className="w-5 h-5" />;
     case 'spcc-extraction':
       return <ScanLine className="w-5 h-5" />;
+    case 'management-signature':
+      return <FileImage className="w-5 h-5" />;
     case 'security':
       return <Lock className="w-5 h-5" />;
     default:

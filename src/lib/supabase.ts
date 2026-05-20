@@ -383,6 +383,8 @@ export interface Account {
   timezone?: string;
   /** 2-letter US state code applied to new facilities by default. Editable per facility. */
   default_state_code?: string | null;
+  /** Public URL of the transparent PNG used as the management signature on SPCC plans. */
+  management_signature_url?: string | null;
   created_by: string | null;
   status: string;
   created_at: string;

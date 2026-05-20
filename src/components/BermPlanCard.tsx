@@ -227,61 +227,35 @@ export default function BermPlanCard({
         throw new Error('Facility has no account id — cannot look up signature.');
       }
 
-      // 2. Pull the user's saved signature (same shape inspections use).
-      //    Falls back to team_signatures if the per-account row is missing —
-      //    users who set up their signature via SignatureSetup (inspection flow)
-      //    end up with a team_signatures row but no user_signatures row, which
-      //    used to surface as "No saved signature for your account yet" here.
-      //    When we find one via the fallback we also self-heal by copying it
-      //    into user_signatures so Settings → Signatures reflects it.
-      const { data: sigRow, error: sigErr } = await supabase
-        .from('user_signatures')
-        .select('id, signature_data')
-        .eq('account_id', accountId)
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (sigErr) throw sigErr;
-
-      let signatureData = sigRow?.signature_data ?? null;
-
-      if (!signatureData) {
-        const { data: teamSig, error: teamSigErr } = await supabase
-          .from('team_signatures')
-          .select('signature_data, inspector_name')
-          .eq('user_id', user.id)
-          .not('signature_data', 'is', null)
-          .order('team_number', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (teamSigErr) throw teamSigErr;
-
-        if (teamSig?.signature_data) {
-          signatureData = teamSig.signature_data;
-          // Self-heal: copy to user_signatures so future lookups find it directly.
-          // Best-effort; if it fails we still proceed with the stamp.
-          await supabase
-            .from('user_signatures')
-            .upsert(
-              {
-                user_id: user.id,
-                account_id: accountId,
-                signature_name: teamSig.inspector_name || 'Management',
-                signature_data: teamSig.signature_data,
-              },
-              { onConflict: 'user_id,account_id' },
-            )
-            .then(({ error }) => {
-              if (error) console.warn('[BermPlanCard] Self-heal copy to user_signatures failed:', error);
-            });
-        }
-      }
-
-      if (!signatureData) {
+      // 2. Pull the account's management signature (a transparent PNG uploaded
+      //    once per account by an admin via Settings → Management Signature).
+      //    This is intentionally NOT the per-user drawn signature — management
+      //    sign-off is the same image regardless of which admin is stamping.
+      const { data: acctRow, error: acctErr } = await supabase
+        .from('accounts')
+        .select('management_signature_url')
+        .eq('id', accountId)
+        .single();
+      if (acctErr) throw acctErr;
+      if (!acctRow?.management_signature_url) {
         throw new Error(
-          'No saved signature for your account yet. Add one in Settings → Signatures, then try again.',
+          'No management signature uploaded for this account yet. An admin can upload a transparent PNG in Settings → Management Signature, then try again.',
         );
       }
-      const signature: Pick<UserSignature, 'signature_data'> = { signature_data: signatureData };
+
+      // Fetch the PNG bytes and convert to a base64 data URL so we can pass
+      // it through the existing stamp util unchanged. Bust browser cache so
+      // a freshly replaced signature is picked up immediately.
+      const sigRes = await fetch(`${acctRow.management_signature_url}?t=${Date.now()}`);
+      if (!sigRes.ok) throw new Error(`Couldn't download the management signature (HTTP ${sigRes.status}).`);
+      const sigBlob = await sigRes.blob();
+      const signatureDataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(sigBlob);
+      });
+      const signature: Pick<UserSignature, 'signature_data'> = { signature_data: signatureDataUrl };
 
       // 3. Fetch the current PDF bytes.
       const pdfRes = await fetch(plan.plan_url);

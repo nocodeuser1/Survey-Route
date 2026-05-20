@@ -21,6 +21,7 @@ import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
 import ProfileModal from './components/ProfileModal';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
+import ManagementSignatureSettings from './components/ManagementSignatureSettings';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
 import SPCCExtractionSettings from './components/SPCCExtractionSettings';
 import SurveyTypesSettings from './components/SurveyTypesSettings';
@@ -4101,6 +4102,15 @@ function App() {
                         />
                       ),
                     }] : []),
+                    // Management signature is visible to everyone (so non-admins know what's set)
+                    // but the upload/remove buttons inside are gated to admins.
+                    {
+                      id: 'management-signature',
+                      label: 'Management Signature',
+                      section: 'compliance' as const,
+                      icon: getSettingsIcon('management-signature'),
+                      content: <ManagementSignatureSettings />,
+                    },
                     // — Administration —
                     ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
                       id: 'account',
