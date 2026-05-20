@@ -258,6 +258,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+
+  // Esc clears the row selection. Skipped when the user is typing in an
+  // input/textarea/contenteditable (so search-bar Esc behavior isn't
+  // hijacked) and when the Complete modal is open (so Esc closes the
+  // modal first without dropping the underlying selection on the way out).
+  useEffect(() => {
+    if (selectedFacilityIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+      if (showCompletionModal) return;
+      setSelectedFacilityIds(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedFacilityIds.size, showCompletionModal]);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('all');
@@ -4143,15 +4161,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <span className="hidden md:inline">Delete</span>
                     </button>
                   </div>
-
-                  {/* Clear button */}
-                  <button
-                    onClick={() => setSelectedFacilityIds(new Set())}
-                    className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-full hover:bg-gray-200/80 dark:hover:bg-gray-700/80 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 active:scale-90 transition-all shrink-0"
-                    title="Clear Selection"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
             </div>
