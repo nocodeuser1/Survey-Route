@@ -172,6 +172,46 @@ export default function ManagementSignatureSettings() {
     }
   }
 
+  async function handleRecrop() {
+    if (!currentAccount || !signatureUrl) return;
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${signatureUrl}?t=${Date.now()}`);
+      if (!res.ok) throw new Error(`Couldn't fetch signature (HTTP ${res.status})`);
+      const blob = await res.blob();
+      const originalDataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const croppedDataUrl = await autocropSignature(originalDataUrl);
+      const croppedBlob = await (await fetch(croppedDataUrl)).blob();
+
+      const storagePath = `${currentAccount.id}.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from('management-signatures')
+        .upload(storagePath, croppedBlob, {
+          contentType: 'image/png',
+          upsert: true,
+          cacheControl: '60',
+        });
+      if (uploadErr) throw uploadErr;
+
+      // URL is unchanged (same path); bust the preview cache.
+      setPreviewBust(Date.now());
+      setSuccess('Re-cropped to fit the signature.');
+      void refreshAccounts();
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err: any) {
+      setError(err.message || 'Re-crop failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function handleRemove() {
     if (!currentAccount) return;
     if (!confirm('Remove the management signature? SPCC plan stamping will be unavailable until a new one is uploaded.')) {
@@ -265,28 +305,42 @@ export default function ManagementSignatureSettings() {
           <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Current Signature
           </p>
-          {/* Checkerboard background so transparency is visible */}
-          <div
-            className="border border-gray-200 dark:border-gray-700 rounded p-3 flex items-center justify-center min-h-[120px]"
-            style={{
-              backgroundImage:
-                'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-              backgroundSize: '16px 16px',
-              backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
-            }}
-          >
-            <img
-              src={`${signatureUrl}?t=${previewBust}`}
-              alt="Management signature"
-              className="max-h-32 max-w-full object-contain"
-            />
+          {/* Outer wrapper centers the checkerboard box; the box itself is
+              inline-block so its dimensions hug the image's actual pixels.
+              That makes the crop result obvious — checkerboard around a tight
+              image == cropped; checkerboard sprawling out == not cropped. */}
+          <div className="flex items-center justify-center">
+            <div
+              className="inline-block border border-gray-200 dark:border-gray-700 rounded p-2"
+              style={{
+                backgroundImage:
+                  'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
+                backgroundSize: '16px 16px',
+                backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
+              }}
+            >
+              <img
+                src={`${signatureUrl}?t=${previewBust}`}
+                alt="Management signature"
+                className="block max-h-32"
+              />
+            </div>
           </div>
           {isAdmin && (
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <p className="text-xs text-gray-500 dark:text-gray-400 italic">
                 Drag a PNG here to replace, or use the buttons.
               </p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={handleRecrop}
+                  disabled={uploading || removing}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Re-run auto-crop on the current signature (trims transparent whitespace)"
+                >
+                  {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Re-crop
+                </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading || removing}
