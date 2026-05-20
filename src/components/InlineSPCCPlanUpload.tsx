@@ -165,9 +165,18 @@ export default function InlineSPCCPlanUpload({
         kind: 'plan',
         date: peStampDate,
       });
+      // upsert:true so the Replace flow can overwrite the prior PDF at the
+      // same deterministic storage path. Without it Supabase returns "The
+      // resource already exists" the moment a user tries to swap the file.
+      // cacheControl:60 matches the management-signature stamp upload so
+      // mobile clients drop stale copies fast.
       const { error: uploadError } = await supabase.storage
         .from('spcc-plans')
-        .upload(fileName, staged.blob, { contentType: 'application/pdf' });
+        .upload(fileName, staged.blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+          cacheControl: '60',
+        });
       if (uploadError) throw uploadError;
 
       const {
@@ -180,6 +189,12 @@ export default function InlineSPCCPlanUpload({
           plan_url: publicUrl,
           pe_stamp_date: peStampDate,
           workflow_status: 'pe_stamped',
+          // A freshly uploaded PDF has not been stamped with the management
+          // signature yet, so clear the per-berm marker. The Signed pill on
+          // BermPlanCard reverts to the Add Mgmt Signature button, and the
+          // mirror trigger pulls the facility back from completed_uploaded
+          // (worst-case across berms).
+          management_signature_applied_at: null,
         })
         .eq('id', plan.id);
       if (updateError) throw updateError;
