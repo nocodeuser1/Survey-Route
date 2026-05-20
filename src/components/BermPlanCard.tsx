@@ -656,7 +656,17 @@ export default function BermPlanCard({
 
             <div className="flex gap-2">
               <a
-                href={plan.plan_url}
+                href={(() => {
+                  // Cache-bust on plan.updated_at so View Plan always opens
+                  // the latest PDF after a Replace or Add Mgmt Signature
+                  // without a page refresh. updated_at advances on any row
+                  // mutation; the Supabase Storage URL itself stays stable
+                  // (path is deterministic per facility/berm/date) but with
+                  // a different ?v= the browser bypasses its 60s cache.
+                  if (!plan.plan_url) return undefined;
+                  const sep = plan.plan_url.includes('?') ? '&' : '?';
+                  return `${plan.plan_url}${sep}v=${encodeURIComponent(plan.updated_at)}`;
+                })()}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${

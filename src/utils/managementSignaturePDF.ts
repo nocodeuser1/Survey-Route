@@ -207,7 +207,7 @@ export async function stampManagementSignature(opts: {
     SIG_DRAW_WIDTH = SIG_MAX_HEIGHT / sigAspect;
   }
   const SIG_X_GAP = 6;
-  const SIG_VERTICAL_NUDGE = -4; // negative = lower; tunes baseline alignment
+  const SIG_VERTICAL_NUDGE = -9; // negative = lower; tunes baseline alignment (Israel: down 5pt from -4)
   const DATE_X_GAP = 6;
   const DATE_FONT_SIZE = 10;
 
