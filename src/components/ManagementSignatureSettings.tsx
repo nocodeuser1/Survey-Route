@@ -3,6 +3,7 @@ import { Upload, Trash2, AlertCircle, CheckCircle, FileImage, RefreshCw, ShieldA
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { autocropSignature } from '../utils/signatureAutocrop';
 
 /**
  * Admin-only uploader for the per-account management signature used to stamp
@@ -113,10 +114,33 @@ export default function ManagementSignatureSettings() {
 
     setUploading(true);
     try {
+      // Auto-crop to the bounding box of non-transparent pixels (with small
+      // padding) so the stored PNG hugs the signature. Mirrors what the
+      // drawn-signature flow does in UserSignatureManagement. Removes the
+      // huge-whitespace problem where the transparent grid surrounded mostly
+      // empty space.
+      const originalDataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      let uploadBlob: Blob;
+      try {
+        const croppedDataUrl = await autocropSignature(originalDataUrl);
+        uploadBlob = await (await fetch(croppedDataUrl)).blob();
+      } catch (cropErr) {
+        // If autocrop fails for any reason (e.g. unusual image), fall back to
+        // uploading the original — the user still gets their signature stored.
+        console.warn('[ManagementSignatureSettings] Autocrop failed, uploading original:', cropErr);
+        uploadBlob = file;
+      }
+
       const storagePath = `${currentAccount.id}.png`;
       const { error: uploadErr } = await supabase.storage
         .from('management-signatures')
-        .upload(storagePath, file, {
+        .upload(storagePath, uploadBlob, {
           contentType: 'image/png',
           upsert: true,
           cacheControl: '60',
@@ -136,7 +160,7 @@ export default function ManagementSignatureSettings() {
 
       setSignatureUrl(publicUrl);
       setPreviewBust(Date.now());
-      setSuccess('Management signature uploaded. SPCC plan stamping will use this file.');
+      setSuccess('Management signature uploaded and auto-cropped to fit. SPCC plan stamping will use this file.');
       // Refresh AccountContext so other components pick up the new URL without a reload.
       void refreshAccounts();
       setTimeout(() => setSuccess(''), 4000);
