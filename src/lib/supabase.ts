@@ -160,6 +160,12 @@ export interface SPCCPlan {
    *  mirrored onto this berm). Gates the "Regenerate Recertification PDF"
    *  button. See migration 20260430030000_track_recertification_pdf_generated.sql. */
   recertification_pdf_generated_at: string | null;
+  /** Timestamp of the most recent successful management-signature stamp on
+   *  this berm's plan PDF. Set by BermPlanCard's runMgmtSignatureStamp
+   *  alongside workflow_status='completed_uploaded'. NULL = signature has
+   *  not been applied (UI shows the "Add Mgmt Signature" button). See
+   *  migration 20260520020000_add_mgmt_signature_applied_at.sql. */
+  management_signature_applied_at: string | null;
   created_at: string;
   updated_at: string;
 }

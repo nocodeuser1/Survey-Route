@@ -281,7 +281,33 @@ export default function BermPlanCard({
         });
       if (uploadErr) throw uploadErr;
 
-      // 6. System audit comment so the action is traceable.
+      // 6. Mark the berm as signed + flip workflow_status to completed_uploaded.
+      //    The existing sync_facility_from_spcc_plans trigger uses worst-case
+      //    rollup, so:
+      //      - Single-berm facility → facility.spcc_workflow_status flips to
+      //        'completed_uploaded' immediately.
+      //      - Multi-berm facility → facility flips to 'completed_uploaded'
+      //        only once EVERY berm hits 'completed_uploaded'; otherwise the
+      //        unsigned berms keep the facility at the lower (worst-case)
+      //        status.
+      const signedAt = new Date().toISOString();
+      const { error: planUpdateErr } = await supabase
+        .from('spcc_plans')
+        .update({
+          management_signature_applied_at: signedAt,
+          workflow_status: 'completed_uploaded',
+        })
+        .eq('id', plan.id);
+      if (planUpdateErr) {
+        // Non-fatal: the PDF is already stamped + uploaded. Surface a warning
+        // in the console; the audit comment below still records the action.
+        console.warn(
+          '[BermPlanCard] Stamp succeeded but updating spcc_plans flags failed:',
+          planUpdateErr,
+        );
+      }
+
+      // 7. System audit comment so the action is traceable.
       const today = new Date().toLocaleDateString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric',
       });
@@ -296,9 +322,9 @@ export default function BermPlanCard({
         });
 
       setMgmtSigState({ kind: 'done' });
-      // Fade the "Signed" pip after a short window so the action button is
-      // re-usable without a page refresh (e.g. the user re-stamps after
-      // updating the PE date).
+      // The persistent "Signed" badge takes over once the parent refetches —
+      // dial back the local 'done' pip after a short window for snappy
+      // feedback in case the refetch lags.
       setTimeout(() => setMgmtSigState({ kind: 'idle' }), 2500);
       onPlanChange();
     } catch (err: any) {
@@ -761,6 +787,25 @@ export default function BermPlanCard({
                     </button>
                   </div>
                 </div>
+              ) : plan.management_signature_applied_at ? (
+                // Persistent "Signed" status indicator. Replaces the button
+                // once the berm has been signed; the PDF on Storage is the
+                // stamped version, so re-stamping is normally not needed.
+                // The user can still trigger a re-stamp via "Replace" (which
+                // clears the signature) if the plan PDF is swapped out.
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
+                    darkMode
+                      ? 'bg-emerald-900/40 text-emerald-300 ring-1 ring-emerald-700/60'
+                      : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                  }`}
+                  title={`Management signature stamped on ${new Date(
+                    plan.management_signature_applied_at,
+                  ).toLocaleString()}`}
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Mgmt Signature Applied
+                </span>
               ) : (
                 <button
                   type="button"
