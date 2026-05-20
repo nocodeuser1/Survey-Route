@@ -421,6 +421,119 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (saved) return JSON.parse(saved);
     return getDefaultVisibleColumns(spccMode);
   });
+  // Per-column pixel widths from drag-resize + double-click auto-fit.
+  // Persisted to user_settings via facPrefs.column_widths so the layout
+  // sticks per-account (last-writer-wins, same as visibility/order).
+  const MIN_COL_WIDTH = 60;
+  const MAX_COL_WIDTH = 800;
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
+    () => (facPrefs.column_widths && typeof facPrefs.column_widths === 'object' ? facPrefs.column_widths : {})
+  );
+  const resizingRef = useRef<{ columnId: ColumnId; startX: number; startWidth: number } | null>(null);
+
+  const persistColumnWidths = useCallback((next: Record<string, number>) => {
+    updateFacPrefs({ column_widths: next });
+  }, [updateFacPrefs]);
+
+  // Begin a drag-resize from the right-edge handle on a <th>. We attach
+  // mousemove/mouseup to `document` (not the handle) so the drag keeps
+  // tracking even if the cursor leaves the handle's 6px slice.
+  const startColumnResize = (e: React.MouseEvent, columnId: ColumnId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const headerEl = (e.currentTarget as HTMLElement).closest('th') as HTMLElement | null;
+    const startWidth = columnWidths[columnId] ?? headerEl?.getBoundingClientRect().width ?? 160;
+    resizingRef.current = { columnId, startX, startWidth };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const delta = ev.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(
+        MIN_COL_WIDTH,
+        Math.min(MAX_COL_WIDTH, Math.round(resizingRef.current.startWidth + delta)),
+      );
+      setColumnWidths(prev => (
+        prev[resizingRef.current!.columnId] === newWidth
+          ? prev
+          : { ...prev, [resizingRef.current!.columnId]: newWidth }
+      ));
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Persist whatever the final width landed on. Read via state
+      // setter to avoid a stale closure on columnWidths.
+      setColumnWidths(prev => {
+        persistColumnWidths(prev);
+        return prev;
+      });
+      resizingRef.current = null;
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  // Double-click on the resize handle: shrink/grow the column so the
+  // widest visible cell (header or any rendered td) fits without
+  // wrapping or truncation. Measures via scrollWidth after forcing
+  // nowrap on the cells so cells that currently wrap report their
+  // natural width.
+  const autoFitColumn = (columnId: ColumnId) => {
+    const container = tableContainerRef.current;
+    if (!container) return;
+    const cells = container.querySelectorAll<HTMLElement>(`[data-col="${columnId}"]`);
+    if (cells.length === 0) return;
+    const restorers: Array<() => void> = [];
+    cells.forEach(cell => {
+      const prevWhitespace = cell.style.whiteSpace;
+      const prevMaxWidth = cell.style.maxWidth;
+      cell.style.whiteSpace = 'nowrap';
+      cell.style.maxWidth = 'none';
+      restorers.push(() => {
+        cell.style.whiteSpace = prevWhitespace;
+        cell.style.maxWidth = prevMaxWidth;
+      });
+    });
+    let maxWidth = 0;
+    cells.forEach(cell => {
+      // scrollWidth reflects the un-clipped natural content width once
+      // we've forced nowrap above. Plus a touch of padding so text
+      // doesn't crowd the border.
+      maxWidth = Math.max(maxWidth, cell.scrollWidth);
+    });
+    restorers.forEach(r => r());
+    const finalWidth = Math.max(
+      MIN_COL_WIDTH,
+      Math.min(MAX_COL_WIDTH, Math.ceil(maxWidth) + 8),
+    );
+    setColumnWidths(prev => {
+      const next = { ...prev, [columnId]: finalWidth };
+      persistColumnWidths(next);
+      return next;
+    });
+  };
+
+  // Sync column widths from prefs when the async load completes / when
+  // another device updates the row (same trigger model used by
+  // visibleColumns / columnOrder above).
+  useEffect(() => {
+    if (!facPrefs.column_widths || typeof facPrefs.column_widths !== 'object') return;
+    setColumnWidths(prev => {
+      const incoming = facPrefs.column_widths;
+      // Cheap shallow compare to avoid render loops.
+      const sameKeys = Object.keys(incoming).length === Object.keys(prev).length;
+      if (sameKeys && Object.entries(incoming).every(([k, v]) => prev[k] === v)) return prev;
+      return incoming;
+    });
+  }, [facPrefs.column_widths]);
+
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
   const [draftVisibleColumns, setDraftVisibleColumns] = useState<ColumnId[]>([]);
@@ -4164,7 +4277,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     {visibleColumns.map(columnId => (
                       <th
                         key={columnId}
-                        className="px-2 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors select-none"
+                        data-col={columnId}
+                        style={columnWidths[columnId] ? { width: columnWidths[columnId], minWidth: columnWidths[columnId], maxWidth: columnWidths[columnId] } : undefined}
+                        className="relative px-2 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors select-none"
                         onClick={() => {
                           if (sortColumn === columnId) {
                             setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -4174,10 +4289,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           }
                         }}
                       >
-                        <div className="flex items-center gap-1">
-                          <span>{columnLabels[columnId]}</span>
+                        <div className="flex items-center gap-1 overflow-hidden">
+                          <span className="truncate">{columnLabels[columnId]}</span>
                           {sortColumn === columnId && (
-                            <span className="text-blue-500 dark:text-blue-400">
+                            <span className="text-blue-500 dark:text-blue-400 flex-shrink-0">
                               {sortDirection === 'asc' ? (
                                 <ArrowUp className="w-3.5 h-3.5" />
                               ) : (
@@ -4186,6 +4301,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             </span>
                           )}
                         </div>
+                        {/* Resize handle — drag to set a custom width,
+                            double-click to auto-fit the widest cell.
+                            Sits over the right border so it's
+                            discoverable without changing the visual
+                            chrome. Stops propagation so the click
+                            doesn't accidentally trigger sort. */}
+                        <div
+                          onMouseDown={(e) => startColumnResize(e, columnId)}
+                          onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); autoFitColumn(columnId); }}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Drag to resize · Double-click to auto-fit"
+                          className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-400/60 active:bg-blue-500/80 transition-colors z-10"
+                        />
                       </th>
                     ))}
                     <th className={`px-6 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky
@@ -4257,7 +4385,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         {visibleColumns.map(columnId => (
                           <td
                             key={columnId}
-                            className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap'
+                            data-col={columnId}
+                            style={columnWidths[columnId] ? { width: columnWidths[columnId], minWidth: columnWidths[columnId], maxWidth: columnWidths[columnId] } : undefined}
+                            className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnWidths[columnId] ? 'overflow-hidden whitespace-nowrap text-ellipsis' : (columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap')
                               } ${columnId === 'spcc_status' || columnId === 'inspection_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;

@@ -15,6 +15,12 @@ export interface FacilitiesPreferences {
    *  filters. Stored as JSON inside facilities_ui_preferences (no schema
    *  change needed). See src/utils/customFilters.ts for the rule shape. */
   custom_filter_rules: CustomRule[];
+  /** Per-column pixel widths chosen via the drag-resize / double-click
+   *  auto-fit interaction on the Facilities table. Keyed by columnId,
+   *  shared across all spccMode/reportType combinations because a
+   *  column means the same thing regardless of which mode is showing
+   *  it. Missing entries fall back to the browser's natural sizing. */
+  column_widths: Record<string, number>;
 }
 
 const DEFAULT_PREFS: FacilitiesPreferences = {
@@ -27,6 +33,7 @@ const DEFAULT_PREFS: FacilitiesPreferences = {
   spcc_plan_filter: 'all',
   show_sold_facilities: false,
   custom_filter_rules: [],
+  column_widths: {},
 };
 
 const CACHE_KEY = (accountId: string) => `facilities_prefs_${accountId}`;
