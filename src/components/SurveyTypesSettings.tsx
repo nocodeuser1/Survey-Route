@@ -5,7 +5,9 @@ import {
   FileText, ClipboardCheck, Shield, HardHat, Droplets, Wrench, Flame,
   CheckCircle, AlertTriangle, Lock, GripVertical, Type, Hash, Calendar,
   List, CheckSquare, Camera, PenTool, MapPin, Star, AlignLeft, Clock,
-  Mic, Headphones, Tags
+  Mic, Headphones, Tags,
+  // Added 2026-05-20 for the redesigned New Survey Type modal:
+  Clipboard, FileCheck, Search, Leaf, Truck, Gauge, Eye, Check, Info, Route
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { SurveyType, SurveyField } from '../lib/supabase';
@@ -66,6 +68,11 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
   const [formDescription, setFormDescription] = useState('');
   const [formIcon, setFormIcon] = useState('clipboard');
   const [formColor, setFormColor] = useState('#3B82F6');
+  // Added 2026-05-20 — Route Planning section fields:
+  const [formShowAsRouteMode, setFormShowAsRouteMode] = useState(true);
+  const [formVisitDurationMinutes, setFormVisitDurationMinutes] = useState<string>(''); // string so input can be cleared; parsed on save
+  const [formHandsFreeEnabled, setFormHandsFreeEnabled] = useState(false);
+  const [formNameError, setFormNameError] = useState<string | null>(null);
 
   // Fields drill-down state
   const [selectedType, setSelectedType] = useState<SurveyTypeWithCount | null>(null);
@@ -85,21 +92,43 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
   const [fieldFormOptions, setFieldFormOptions] = useState<string[]>([]);
   const [newOptionValue, setNewOptionValue] = useState('');
 
-  const iconOptions = [
-    { value: 'clipboard', label: 'Clipboard' },
-    { value: 'file-text', label: 'Document' },
-    { value: 'clipboard-check', label: 'Checklist' },
-    { value: 'shield', label: 'Shield' },
-    { value: 'hard-hat', label: 'Safety' },
-    { value: 'droplets', label: 'Environmental' },
-    { value: 'wrench', label: 'Maintenance' },
-    { value: 'flame', label: 'Fire Safety' },
+  // Expanded 2026-05-20 to match the full set rendered by SurveyTypeSelector,
+  // so users can preview every icon that may appear elsewhere in the app.
+  const iconOptions: { value: string; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
+    { value: 'clipboard', label: 'Clipboard', Icon: Clipboard },
+    { value: 'clipboard-list', label: 'List', Icon: ClipboardList },
+    { value: 'file-text', label: 'Document', Icon: FileText },
+    { value: 'clipboard-check', label: 'Checklist', Icon: ClipboardCheck },
+    { value: 'file-check', label: 'Report', Icon: FileCheck },
+    { value: 'shield', label: 'Shield', Icon: Shield },
+    { value: 'hard-hat', label: 'Safety', Icon: HardHat },
+    { value: 'droplets', label: 'Environmental', Icon: Droplets },
+    { value: 'wrench', label: 'Maintenance', Icon: Wrench },
+    { value: 'flame', label: 'Fire Safety', Icon: Flame },
+    { value: 'leaf', label: 'Sustainability', Icon: Leaf },
+    { value: 'truck', label: 'Transport', Icon: Truck },
+    { value: 'gauge', label: 'Metering', Icon: Gauge },
+    { value: 'eye', label: 'Observation', Icon: Eye },
+    { value: 'search', label: 'Audit', Icon: Search },
+    { value: 'alert-triangle', label: 'Hazard', Icon: AlertTriangle },
   ];
 
-  const colorOptions = [
-    '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-    '#EC4899', '#06B6D4', '#F97316',
+  const colorOptions: { value: string; label: string }[] = [
+    { value: '#3B82F6', label: 'Blue' },
+    { value: '#10B981', label: 'Green' },
+    { value: '#F59E0B', label: 'Amber' },
+    { value: '#EF4444', label: 'Red' },
+    { value: '#8B5CF6', label: 'Purple' },
+    { value: '#EC4899', label: 'Pink' },
+    { value: '#06B6D4', label: 'Cyan' },
+    { value: '#F97316', label: 'Orange' },
   ];
+
+  // Shared icon resolver used by the live preview chip and the list rendering.
+  const resolveIcon = (name: string): React.ComponentType<{ className?: string; style?: React.CSSProperties }> => {
+    const found = iconOptions.find(o => o.value === name);
+    return found?.Icon || ClipboardList;
+  };
 
   useEffect(() => {
     loadSurveyTypes();
@@ -199,6 +228,10 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
     setFormDescription('');
     setFormIcon('clipboard');
     setFormColor('#3B82F6');
+    setFormShowAsRouteMode(true);
+    setFormVisitDurationMinutes('');
+    setFormHandsFreeEnabled(false);
+    setFormNameError(null);
     setShowModal(true);
   };
 
@@ -208,26 +241,49 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
     setFormDescription(type.description || '');
     setFormIcon(type.icon);
     setFormColor(type.color);
+    setFormShowAsRouteMode(type.show_as_route_mode ?? true);
+    setFormVisitDurationMinutes(
+      type.visit_duration_minutes != null ? String(type.visit_duration_minutes) : ''
+    );
+    setFormHandsFreeEnabled(type.hands_free_enabled ?? false);
+    setFormNameError(null);
     setShowModal(true);
   };
 
   const handleSave = async () => {
-    if (!formName.trim()) {
-      showMessage('error', 'Please enter a name');
+    const trimmedName = formName.trim();
+    if (!trimmedName) {
+      setFormNameError('Please enter a name');
       return;
+    }
+
+    // Parse visit duration: blank → null (use account default); otherwise positive int
+    let visitDurationMinutes: number | null = null;
+    const rawDuration = formVisitDurationMinutes.trim();
+    if (rawDuration) {
+      const parsed = parseInt(rawDuration, 10);
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        showMessage('error', 'Visit duration must be a positive number of minutes');
+        return;
+      }
+      visitDurationMinutes = parsed;
     }
 
     try {
       setSaving(true);
+      setFormNameError(null);
 
       if (editingType) {
         const { error } = await supabase
           .from('survey_types')
           .update({
-            name: formName.trim(),
+            name: trimmedName,
             description: formDescription.trim() || null,
             icon: formIcon,
             color: formColor,
+            show_as_route_mode: formShowAsRouteMode,
+            visit_duration_minutes: visitDurationMinutes,
+            hands_free_enabled: formHandsFreeEnabled,
           })
           .eq('id', editingType.id);
 
@@ -241,13 +297,16 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
           .from('survey_types')
           .insert({
             account_id: accountId,
-            name: formName.trim(),
+            name: trimmedName,
             description: formDescription.trim() || null,
             icon: formIcon,
             color: formColor,
             is_system: false,
             enabled: true,
             sort_order: maxSort + 1,
+            show_as_route_mode: formShowAsRouteMode,
+            visit_duration_minutes: visitDurationMinutes,
+            hands_free_enabled: formHandsFreeEnabled,
           });
 
         if (error) throw error;
@@ -658,17 +717,8 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
   // ─── Rendering helpers ───
 
   const getIconComponent = (iconName: string, color: string) => {
-    const props = { className: 'w-5 h-5', style: { color } };
-    switch (iconName) {
-      case 'file-text': return <FileText {...props} />;
-      case 'clipboard-check': return <ClipboardCheck {...props} />;
-      case 'shield': return <Shield {...props} />;
-      case 'hard-hat': return <HardHat {...props} />;
-      case 'droplets': return <Droplets {...props} />;
-      case 'wrench': return <Wrench {...props} />;
-      case 'flame': return <Flame {...props} />;
-      default: return <ClipboardList {...props} />;
-    }
+    const Icon = resolveIcon(iconName);
+    return <Icon className="w-5 h-5" style={{ color }} />;
   };
 
   if (loading) {
@@ -1320,117 +1370,249 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
       </div>
 
       {/* Add/Edit Survey Type Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-          <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-6">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {editingType ? 'Edit Survey Type' : 'New Survey Type'}
-              </h3>
-              <button
-                onClick={() => setShowModal(false)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Form */}
-            <div className="space-y-4">
-              {/* Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="e.g., Tank Inspection"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={formDescription}
-                  onChange={e => setFormDescription(e.target.value)}
-                  placeholder="Brief description of this survey type"
-                  rows={2}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                />
-              </div>
-
-              {/* Color */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Color
-                </label>
-                <div className="flex gap-2 flex-wrap">
-                  {colorOptions.map(color => (
-                    <button
-                      key={color}
-                      onClick={() => setFormColor(color)}
-                      className={`w-8 h-8 rounded-full transition-all ${
-                        formColor === color
-                          ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-800 ring-blue-500 scale-110'
-                          : 'hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
+      {showModal && (() => {
+        const PreviewIcon = resolveIcon(formIcon);
+        const previewName = formName.trim() || (editingType ? editingType.name : 'New survey type');
+        const isSystem = !!editingType?.is_system;
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowModal(false)} />
+            <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700">
+              {/* Sticky header */}
+              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {editingType ? 'Edit Survey Type' : 'New Survey Type'}
+                  </h3>
+                  {isSystem && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      System type — cannot be deleted, but you can adjust appearance and route behavior
+                    </p>
+                  )}
                 </div>
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
               </div>
 
-              {/* Icon */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Icon
-                </label>
-                <div className="flex gap-2 flex-wrap">
-                  {iconOptions.map(opt => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setFormIcon(opt.value)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        formIcon === opt.value
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-300'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
+              <div className="px-6 py-5 space-y-5">
+                {/* Live preview chip */}
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                    Preview
+                  </label>
+                  <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-dashed border-gray-300 dark:border-gray-600">
+                    <span
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white"
+                      style={{ backgroundColor: formColor }}
                     >
-                      {opt.label}
-                    </button>
-                  ))}
+                      <PreviewIcon className="w-4 h-4" />
+                      <span>{previewName}</span>
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      This is how the type appears in route tabs and selectors.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={e => {
+                      setFormName(e.target.value);
+                      if (formNameError) setFormNameError(null);
+                    }}
+                    placeholder="e.g., Tank Inspection"
+                    className={`w-full px-3 py-2 rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:border-transparent ${
+                      formNameError
+                        ? 'border-red-400 focus:ring-red-500'
+                        : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+                    }`}
+                    autoFocus
+                  />
+                  {formNameError && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      {formNameError}
+                    </p>
+                  )}
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={formDescription}
+                    onChange={e => setFormDescription(e.target.value)}
+                    placeholder="Brief description of this survey type"
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                  />
+                </div>
+
+                {/* Color */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Color
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {colorOptions.map(opt => {
+                      const isActive = formColor === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setFormColor(opt.value)}
+                          aria-label={opt.label}
+                          title={opt.label}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
+                            isActive
+                              ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-800 ring-gray-900 dark:ring-white scale-110'
+                              : 'hover:scale-110'
+                          }`}
+                          style={{ backgroundColor: opt.value }}
+                        >
+                          {isActive && <Check className="w-4 h-4 text-white drop-shadow" strokeWidth={3} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Icon */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Icon
+                  </label>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {iconOptions.map(opt => {
+                      const isActive = formIcon === opt.value;
+                      const Icon = opt.Icon;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setFormIcon(opt.value)}
+                          title={opt.label}
+                          className={`flex flex-col items-center gap-1 px-2 py-2 rounded-lg text-[10px] font-medium transition-all ${
+                            isActive
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2'
+                              : 'bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                          style={isActive ? { borderColor: formColor, boxShadow: `0 0 0 2px ${formColor}` } : undefined}
+                        >
+                          <Icon className="w-5 h-5" />
+                          <span className="leading-tight text-center">{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ─── Route Planning section ─── */}
+                <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2 mb-3 mt-3">
+                    <Route className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Route Planning</h4>
+                  </div>
+
+                  {/* Show as route mode toggle */}
+                  <label className="flex items-start gap-3 cursor-pointer group mb-3">
+                    <input
+                      type="checkbox"
+                      checked={formShowAsRouteMode}
+                      onChange={e => setFormShowAsRouteMode(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Show as route filter mode
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Appears as a tab in Route Results alongside SPCC Plans / Inspections.
+                        Selecting the tab filters the route to facilities that need this survey.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Visit duration */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Visit duration (minutes)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={formVisitDurationMinutes}
+                        onChange={e => setFormVisitDurationMinutes(e.target.value)}
+                        placeholder="Use account default"
+                        disabled={!formShowAsRouteMode}
+                        className="w-40 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                        <Info className="w-3 h-3" />
+                        Used when this mode is active; leave blank to fall back to per-facility / account default.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Hands-free toggle */}
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={formHandsFreeEnabled}
+                      onChange={e => setFormHandsFreeEnabled(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                        <Mic className="w-3.5 h-3.5" />
+                        Enable hands-free voice input
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Lets surveyors fill out this type by voice. Per-field voice keywords are
+                        configurable after creating the type.
+                      </div>
+                    </div>
+                  </label>
                 </div>
               </div>
-            </div>
 
-            {/* Modal Footer */}
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !formName.trim()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-              >
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {editingType ? 'Save Changes' : 'Create'}
-              </button>
+              {/* Sticky footer */}
+              <div className="sticky bottom-0 flex justify-end gap-3 px-6 py-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !formName.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+                >
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {editingType ? 'Save Changes' : 'Create'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
