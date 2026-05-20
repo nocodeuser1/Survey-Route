@@ -4048,7 +4048,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         {isBulkDownloading
                           ? 'Zipping...'
                           : spccMode === 'plan'
-                            ? `Plans (${filteredFacilities.filter(f => f.spcc_plan_url).length})`
+                            ? (() => {
+                                // Match the tooltip's scoping rule: if rows are
+                                // selected, count plans on JUST those rows;
+                                // otherwise count plans across the filtered list.
+                                const scope = selectedFacilityIds.size > 0
+                                  ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+                                  : filteredFacilities;
+                                return `Plans (${scope.filter((f) => f.spcc_plan_url).length})`;
+                              })()
                             : 'Reports'
                         }
                       </span>
