@@ -28,8 +28,47 @@ export default function ManagementSignatureSettings() {
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   // Bust browser cache when a fresh upload replaces a prior file at the same path.
   const [previewBust, setPreviewBust] = useState<number>(Date.now());
+  // Drag-and-drop visual state. dragDepth tracks nested dragenter/leave so the
+  // highlight doesn't flicker when the cursor crosses a child element.
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
 
   const isAdmin = !!user?.isAgencyOwner || accountRole === 'account_admin';
+
+  function onDragEnter(e: React.DragEvent) {
+    if (!isAdmin || uploading || removing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    if (!isAdmin || uploading || removing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragging(false);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    if (!isAdmin || uploading || removing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDrop(e: React.DragEvent) {
+    if (!isAdmin || uploading || removing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void handleFileSelected(file);
+  }
 
   useEffect(() => {
     if (!currentAccount) return;
@@ -188,7 +227,17 @@ export default function ManagementSignatureSettings() {
           <RefreshCw className="w-5 h-5 animate-spin text-gray-400 mx-auto" />
         </div>
       ) : signatureUrl ? (
-        <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
+        <div
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          className={`relative border rounded-lg p-4 space-y-3 transition-colors ${
+            isDragging
+              ? 'border-blue-500 dark:border-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
+              : 'border-gray-200 dark:border-gray-700'
+          }`}
+        >
           <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Current Signature
           </p>
@@ -209,32 +258,61 @@ export default function ManagementSignatureSettings() {
             />
           </div>
           {isAdmin && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || removing}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Upload className="w-4 h-4" />
-                Replace
-              </button>
-              <button
-                onClick={handleRemove}
-                disabled={uploading || removing}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {removing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Remove
-              </button>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                Drag a PNG here to replace, or use the buttons.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || removing}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload className="w-4 h-4" />
+                  Replace
+                </button>
+                <button
+                  onClick={handleRemove}
+                  disabled={uploading || removing}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {removing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+          {isDragging && (
+            <div className="absolute inset-0 rounded-lg pointer-events-none flex items-center justify-center bg-blue-500/10 border-2 border-dashed border-blue-500">
+              <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                Drop PNG to replace
+              </p>
             </div>
           )}
         </div>
       ) : (
-        <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center">
-          <FileImage className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-            No management signature uploaded for this account yet.
+        <div
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+            isDragging
+              ? 'border-blue-500 dark:border-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
+              : 'border-gray-300 dark:border-gray-700'
+          }`}
+        >
+          <FileImage className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-1">
+            {isDragging
+              ? 'Drop PNG to upload'
+              : 'No management signature uploaded for this account yet.'}
           </p>
+          {isAdmin && !isDragging && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              Drag a PNG file here, or click to choose one.
+            </p>
+          )}
           {isAdmin && (
             <button
               onClick={() => fileInputRef.current?.click()}
