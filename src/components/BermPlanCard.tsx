@@ -228,6 +228,12 @@ export default function BermPlanCard({
       }
 
       // 2. Pull the user's saved signature (same shape inspections use).
+      //    Falls back to team_signatures if the per-account row is missing —
+      //    users who set up their signature via SignatureSetup (inspection flow)
+      //    end up with a team_signatures row but no user_signatures row, which
+      //    used to surface as "No saved signature for your account yet" here.
+      //    When we find one via the fallback we also self-heal by copying it
+      //    into user_signatures so Settings → Signatures reflects it.
       const { data: sigRow, error: sigErr } = await supabase
         .from('user_signatures')
         .select('id, signature_data')
@@ -235,12 +241,47 @@ export default function BermPlanCard({
         .eq('user_id', user.id)
         .maybeSingle();
       if (sigErr) throw sigErr;
-      if (!sigRow?.signature_data) {
+
+      let signatureData = sigRow?.signature_data ?? null;
+
+      if (!signatureData) {
+        const { data: teamSig, error: teamSigErr } = await supabase
+          .from('team_signatures')
+          .select('signature_data, inspector_name')
+          .eq('user_id', user.id)
+          .not('signature_data', 'is', null)
+          .order('team_number', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (teamSigErr) throw teamSigErr;
+
+        if (teamSig?.signature_data) {
+          signatureData = teamSig.signature_data;
+          // Self-heal: copy to user_signatures so future lookups find it directly.
+          // Best-effort; if it fails we still proceed with the stamp.
+          await supabase
+            .from('user_signatures')
+            .upsert(
+              {
+                user_id: user.id,
+                account_id: accountId,
+                signature_name: teamSig.inspector_name || 'Management',
+                signature_data: teamSig.signature_data,
+              },
+              { onConflict: 'user_id,account_id' },
+            )
+            .then(({ error }) => {
+              if (error) console.warn('[BermPlanCard] Self-heal copy to user_signatures failed:', error);
+            });
+        }
+      }
+
+      if (!signatureData) {
         throw new Error(
           'No saved signature for your account yet. Add one in Settings → Signatures, then try again.',
         );
       }
-      const signature = sigRow as Pick<UserSignature, 'id' | 'signature_data'>;
+      const signature: Pick<UserSignature, 'signature_data'> = { signature_data: signatureData };
 
       // 3. Fetch the current PDF bytes.
       const pdfRes = await fetch(plan.plan_url);
