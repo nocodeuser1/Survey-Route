@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Upload, Trash2, AlertCircle, CheckCircle, FileImage, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Upload, Trash2, AlertCircle, CheckCircle, FileImage, RefreshCw, ShieldAlert, Crop, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,6 +33,9 @@ export default function ManagementSignatureSettings() {
   // highlight doesn't flicker when the cursor crosses a child element.
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
+
+  // Manual crop modal state
+  const [showCropper, setShowCropper] = useState(false);
 
   const isAdmin = !!user?.isAgencyOwner || accountRole === 'account_admin';
 
@@ -169,6 +172,34 @@ export default function ManagementSignatureSettings() {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  // Called by the cropper modal when the user clicks Apply.
+  async function handleManualCropApply(croppedBlob: Blob) {
+    if (!currentAccount) return;
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const storagePath = `${currentAccount.id}.png`;
+      const { error: uploadErr } = await supabase.storage
+        .from('management-signatures')
+        .upload(storagePath, croppedBlob, {
+          contentType: 'image/png',
+          upsert: true,
+          cacheControl: '60',
+        });
+      if (uploadErr) throw uploadErr;
+      setPreviewBust(Date.now());
+      setSuccess('Crop applied.');
+      void refreshAccounts();
+      setShowCropper(false);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err: any) {
+      setError(err.message || 'Apply crop failed');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -342,6 +373,15 @@ export default function ManagementSignatureSettings() {
                   Re-crop
                 </button>
                 <button
+                  onClick={() => setShowCropper(true)}
+                  disabled={uploading || removing}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Drag the corner handles to crop manually"
+                >
+                  <Crop className="w-4 h-4" />
+                  Crop manually
+                </button>
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading || removing}
                   className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -419,6 +459,251 @@ export default function ManagementSignatureSettings() {
           if (file) void handleFileSelected(file);
         }}
       />
+
+      {showCropper && signatureUrl && (
+        <SignatureCropperModal
+          imageUrl={signatureUrl}
+          loading={uploading}
+          onApply={handleManualCropApply}
+          onCancel={() => setShowCropper(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Inline manual cropper. Renders the signature with a draggable crop rectangle
+// + 4 corner handles. Coordinates stored as normalized 0..1 so the displayed
+// image size doesn't affect the result. Uses pointer events so mouse + touch
+// + pen all work.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const MIN_CROP_SIZE = 0.05; // 5% of the image's smaller dimension
+function clamp(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+interface SignatureCropperModalProps {
+  imageUrl: string;
+  loading: boolean;
+  onApply: (croppedBlob: Blob) => void | Promise<void>;
+  onCancel: () => void;
+}
+
+function SignatureCropperModal({ imageUrl, loading, onApply, onCancel }: SignatureCropperModalProps) {
+  const imgWrapperRef = useRef<HTMLDivElement>(null);
+  // Cache-bust so re-cropping pulls the latest stored bytes instead of a CDN copy.
+  const urlForCrop = `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, width: 1, height: 1 });
+  const dragRef = useRef<{
+    mode: 'move' | 'tl' | 'tr' | 'bl' | 'br';
+    startClientX: number;
+    startClientY: number;
+    startCrop: CropRect;
+  } | null>(null);
+
+  function startDrag(mode: 'move' | 'tl' | 'tr' | 'bl' | 'br', e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = {
+      mode,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startCrop: { ...crop },
+    };
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragRef.current || !imgWrapperRef.current) return;
+    const rect = imgWrapperRef.current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const dx = (e.clientX - dragRef.current.startClientX) / rect.width;
+    const dy = (e.clientY - dragRef.current.startClientY) / rect.height;
+    const start = dragRef.current.startCrop;
+
+    let next: CropRect = { ...start };
+    if (dragRef.current.mode === 'move') {
+      next.x = clamp(start.x + dx, 0, 1 - start.width);
+      next.y = clamp(start.y + dy, 0, 1 - start.height);
+    } else {
+      const mode = dragRef.current.mode;
+      // Left edge moving
+      if (mode === 'tl' || mode === 'bl') {
+        const newX = clamp(start.x + dx, 0, start.x + start.width - MIN_CROP_SIZE);
+        next.width = start.width - (newX - start.x);
+        next.x = newX;
+      }
+      // Right edge moving
+      if (mode === 'tr' || mode === 'br') {
+        next.width = clamp(start.width + dx, MIN_CROP_SIZE, 1 - start.x);
+      }
+      // Top edge moving
+      if (mode === 'tl' || mode === 'tr') {
+        const newY = clamp(start.y + dy, 0, start.y + start.height - MIN_CROP_SIZE);
+        next.height = start.height - (newY - start.y);
+        next.y = newY;
+      }
+      // Bottom edge moving
+      if (mode === 'bl' || mode === 'br') {
+        next.height = clamp(start.height + dy, MIN_CROP_SIZE, 1 - start.y);
+      }
+    }
+    setCrop(next);
+  }
+
+  function endDrag() {
+    dragRef.current = null;
+  }
+
+  function resetCrop() {
+    setCrop({ x: 0, y: 0, width: 1, height: 1 });
+  }
+
+  async function handleApplyClick() {
+    // Load the source image at its native resolution and crop via canvas.
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Could not load image for cropping'));
+      img.src = urlForCrop;
+    });
+    const sx = Math.round(crop.x * img.naturalWidth);
+    const sy = Math.round(crop.y * img.naturalHeight);
+    const sw = Math.max(1, Math.round(crop.width * img.naturalWidth));
+    const sh = Math.max(1, Math.round(crop.height * img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not get canvas context');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
+    if (!blob) throw new Error('Could not export cropped image');
+    await onApply(blob);
+  }
+
+  const checkerboardStyle: React.CSSProperties = {
+    backgroundImage:
+      'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
+    backgroundSize: '16px 16px',
+    backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <Crop className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            Crop Management Signature
+          </h3>
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-50"
+            aria-label="Cancel"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-6 space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Drag the blue rectangle to move it. Drag the corner handles to resize.
+            Anything outside the rectangle will be removed.
+          </p>
+
+          <div className="flex justify-center bg-gray-100 dark:bg-gray-900 rounded p-4">
+            <div
+              ref={imgWrapperRef}
+              className="relative inline-block select-none touch-none"
+              style={checkerboardStyle}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            >
+              <img
+                src={urlForCrop}
+                alt="Signature to crop"
+                draggable={false}
+                className="block max-w-[600px] max-h-[400px] pointer-events-none"
+              />
+              {/* Crop rectangle overlay */}
+              <div
+                className="absolute border-2 border-blue-500 cursor-move"
+                style={{
+                  left: `${crop.x * 100}%`,
+                  top: `${crop.y * 100}%`,
+                  width: `${crop.width * 100}%`,
+                  height: `${crop.height * 100}%`,
+                  boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)',
+                }}
+                onPointerDown={(e) => startDrag('move', e)}
+              >
+                {/* Corner handles */}
+                {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => {
+                  const pos: React.CSSProperties = {
+                    position: 'absolute',
+                    width: 14,
+                    height: 14,
+                    backgroundColor: '#3b82f6',
+                    border: '2px solid white',
+                    borderRadius: 2,
+                  };
+                  if (corner === 'tl') Object.assign(pos, { left: -8, top: -8, cursor: 'nwse-resize' });
+                  if (corner === 'tr') Object.assign(pos, { right: -8, top: -8, cursor: 'nesw-resize' });
+                  if (corner === 'bl') Object.assign(pos, { left: -8, bottom: -8, cursor: 'nesw-resize' });
+                  if (corner === 'br') Object.assign(pos, { right: -8, bottom: -8, cursor: 'nwse-resize' });
+                  return (
+                    <div
+                      key={corner}
+                      style={pos}
+                      onPointerDown={(e) => startDrag(corner, e)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+          <button
+            onClick={resetCrop}
+            disabled={loading}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:opacity-50"
+          >
+            Reset selection
+          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              disabled={loading}
+              className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApplyClick}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Crop className="w-4 h-4" />}
+              Apply Crop
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
