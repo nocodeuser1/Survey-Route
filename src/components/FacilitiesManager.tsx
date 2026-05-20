@@ -2443,7 +2443,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
    * zero plans get an empty Share Links cell rather than being skipped.
    */
   const handleShareLinksExport = async () => {
-    const facilityIds = filteredFacilities.map(f => f.id);
+    // Same scoping rule as handleBulkPdfDownload: ticked rows win,
+    // otherwise the filtered list.
+    const targetFacilities =
+      selectedFacilityIds.size > 0
+        ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+        : filteredFacilities;
+    const facilityIds = targetFacilities.map((f) => f.id);
     if (facilityIds.length === 0) {
       setError('No facilities to export.');
       return;
@@ -2471,7 +2477,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
       const headers = ['Facility Name', 'Share Links', ...otherColumns.map(c => columnLabels[c])];
 
-      const rows: string[][] = filteredFacilities.map(facility => {
+      const rows: string[][] = targetFacilities.map(facility => {
         const plans = (plansByFacility.get(facility.id) ?? []).sort((a, b) => a.berm_index - b.berm_index);
         const isMultiBerm = plans.length > 1;
         const shareLinks = plans
@@ -4823,7 +4829,28 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
 
       {/* Report Type Picker (All mode) */}
-      {showReportTypePicker && (
+      {showReportTypePicker && (() => {
+        // ─── Scope: ticked rows win; otherwise the filtered list ──────────
+        const scopedFacilities =
+          selectedFacilityIds.size > 0
+            ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+            : filteredFacilities;
+        const scopedPlanCount = scopedFacilities.filter((f) => f.spcc_plan_url).length;
+        const scopedFacilityCount = scopedFacilities.length;
+        const usingSelection = selectedFacilityIds.size > 0;
+        const scopeBadge = usingSelection
+          ? `${scopedFacilityCount} selected`
+          : `${scopedFacilityCount} from current filter`;
+
+        // ─── Mode-aware visibility ────────────────────────────────────────
+        // This picker is only opened from non-inspection modes (spccMode
+        // 'plan' or 'all'). 'plan' mode hides the inspection-only options
+        // so the menu doesn't suggest things that don't match what the
+        // user has filtered to. 'all' mode shows everything, grouped.
+        const showPlansSection = spccMode !== 'inspection';
+        const showInspectionsSection = spccMode !== 'plan';
+
+        return (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
           onClick={() => setShowReportTypePicker(false)}
@@ -4833,77 +4860,129 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Reports</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose which reports to download.</p>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Export Reports</h3>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    usingSelection
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  {scopeBadge}
+                </span>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {usingSelection
+                  ? 'Counts below reflect only the rows you have selected.'
+                  : 'Counts below reflect every facility matching your current filters.'}
+              </p>
             </div>
-            <div className="p-4 space-y-2">
-              <button
-                onClick={() => {
-                  setShowReportTypePicker(false);
-                  handleBulkPdfDownload();
-                }}
-                disabled={isBulkDownloading || !filteredFacilities.some(f => f.spcc_plan_url)}
-                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                  <FileText className="w-5 h-5" />
+            <div className="p-4 space-y-3">
+              {/* ─── Plans section ─────────────────────────────────────── */}
+              {showPlansSection && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
+                    SPCC Plans
+                  </p>
+                  <button
+                    onClick={() => {
+                      setShowReportTypePicker(false);
+                      handleBulkPdfDownload();
+                    }}
+                    disabled={isBulkDownloading || scopedPlanCount === 0}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">All Plans (ZIP)</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {scopedPlanCount === 0
+                          ? 'No plans uploaded for these facilities yet'
+                          : `${scopedPlanCount} plan PDF${scopedPlanCount === 1 ? '' : 's'}, named in canonical format`}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowReportTypePicker(false);
+                      handleShareLinksExport();
+                    }}
+                    disabled={isBulkDownloading || scopedFacilityCount === 0}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:border-amber-300 dark:hover:border-amber-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                      <LinkIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Share Links Spreadsheet</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        XLSX, {scopedFacilityCount} row{scopedFacilityCount === 1 ? '' : 's'} · per-berm download URLs + your visible columns
+                      </p>
+                    </div>
+                  </button>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">All Plans (ZIP)</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{filteredFacilities.filter(f => f.spcc_plan_url).length} plan PDFs, named in canonical format</p>
+              )}
+
+              {/* ─── Inspections section ──────────────────────────────── */}
+              {showInspectionsSection && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
+                    SPCC Inspections
+                  </p>
+                  <button
+                    onClick={() => {
+                      setShowReportTypePicker(false);
+                      setShowExportPopup(true);
+                    }}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left"
+                  >
+                    <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                      <ClipboardList className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Inspection Reports</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        HTML inspection reports for {scopedFacilityCount} facilit{scopedFacilityCount === 1 ? 'y' : 'ies'} (chosen in the next step)
+                      </p>
+                    </div>
+                  </button>
                 </div>
-              </button>
-              <button
-                onClick={() => {
-                  setShowReportTypePicker(false);
-                  handleShareLinksExport();
-                }}
-                disabled={isBulkDownloading || filteredFacilities.length === 0}
-                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:border-amber-300 dark:hover:border-amber-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                  <LinkIcon className="w-5 h-5" />
+              )}
+
+              {/* ─── Combo (only in All mode) ─────────────────────────── */}
+              {showPlansSection && showInspectionsSection && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
+                    Combined
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setShowReportTypePicker(false);
+                      if (scopedPlanCount > 0) {
+                        await handleBulkPdfDownload('Plans');
+                      }
+                      setShowExportPopup(true);
+                    }}
+                    disabled={isBulkDownloading}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 dark:hover:border-green-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                      <Download className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">All Reports</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {scopedPlanCount > 0
+                          ? `${scopedPlanCount} plan PDF${scopedPlanCount === 1 ? '' : 's'} (ZIP) + inspection report selector`
+                          : 'Inspection report selector (no plans to bundle)'}
+                      </p>
+                    </div>
+                  </button>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">Share Links Spreadsheet</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">XLSX with per-berm download URLs + your visible columns</p>
-                </div>
-              </button>
-              <button
-                onClick={() => {
-                  setShowReportTypePicker(false);
-                  setShowExportPopup(true);
-                }}
-                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left"
-              >
-                <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-                  <ClipboardList className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">Inspection Reports</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Generate HTML inspection reports</p>
-                </div>
-              </button>
-              <button
-                onClick={async () => {
-                  setShowReportTypePicker(false);
-                  // Download plans first, then open inspection modal
-                  if (filteredFacilities.some(f => f.spcc_plan_url)) {
-                    await handleBulkPdfDownload('Plans');
-                  }
-                  setShowExportPopup(true);
-                }}
-                disabled={isBulkDownloading}
-                className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 dark:hover:border-green-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
-                  <Download className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">All Reports</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Plans ZIP + Inspection report selector</p>
-                </div>
-              </button>
+              )}
             </div>
             <div className="p-3 border-t border-gray-200 dark:border-gray-700">
               <button
@@ -4915,7 +4994,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* mobileEditingField is no longer used for inline editing */}
 
