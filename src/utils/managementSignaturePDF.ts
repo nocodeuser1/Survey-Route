@@ -75,7 +75,7 @@ async function findLabelAnchor(
   pdf: pdfjsLib.PDFDocumentProxy,
   pageNumOneBased: number,
   label: string,
-): Promise<{ x: number; y: number; width: number } | null> {
+): Promise<{ x: number; y: number; width: number; matchedStr: string } | null> {
   const page = await pdf.getPage(pageNumOneBased);
   const content = await page.getTextContent();
   const items = (content.items as unknown as TextItem[]).filter(
@@ -93,6 +93,7 @@ async function findLabelAnchor(
       x: startsWith.transform[4],
       y: startsWith.transform[5],
       width: startsWith.width || 0,
+      matchedStr: startsWith.str,
     };
   }
 
@@ -106,6 +107,7 @@ async function findLabelAnchor(
       x: equals.transform[4],
       y: equals.transform[5],
       width: equals.width || 0,
+      matchedStr: equals.str,
     };
   }
 
@@ -115,14 +117,17 @@ async function findLabelAnchor(
     let combined = items[i].str.trim().toLowerCase();
     if (combined.length === 0) continue;
     let widthSum = items[i].width || 0;
+    let combinedRaw = items[i].str;
     for (let j = i + 1; j < Math.min(i + 5, items.length); j++) {
       combined += items[j].str.trim().toLowerCase();
       widthSum += items[j].width || 0;
+      combinedRaw += items[j].str;
       if (combined.startsWith(labelLower)) {
         return {
           x: items[i].transform[4],
           y: items[i].transform[5],
           width: widthSum,
+          matchedStr: combinedRaw,
         };
       }
       // Stop expanding once we've outgrown the label length to keep it cheap.
@@ -186,8 +191,19 @@ export async function stampManagementSignature(opts: {
   const sigImage = await pdfDoc.embedPng(dataUrlToPngBytes(signatureDataUrl));
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+  // Width is fixed so the signature fits inside the underline; height is
+  // derived from the source PNG's natural aspect ratio so the signature isn't
+  // squashed or stretched. Cap the height so a very tall signature (e.g. one
+  // with a big looped descender) doesn't overrun the row above.
   const SIG_WIDTH = 110;
-  const SIG_HEIGHT = 22;
+  const SIG_MAX_HEIGHT = 32;
+  const sigAspect = sigImage.height / sigImage.width;
+  let SIG_HEIGHT = SIG_WIDTH * sigAspect;
+  let SIG_DRAW_WIDTH = SIG_WIDTH;
+  if (SIG_HEIGHT > SIG_MAX_HEIGHT) {
+    SIG_HEIGHT = SIG_MAX_HEIGHT;
+    SIG_DRAW_WIDTH = SIG_MAX_HEIGHT / sigAspect;
+  }
   const SIG_X_GAP = 6;
   const SIG_VERTICAL_NUDGE = -4; // negative = lower; tunes baseline alignment
   const DATE_X_GAP = 6;
@@ -204,7 +220,7 @@ export async function stampManagementSignature(opts: {
       page.drawImage(sigImage, {
         x: sigPos.x + sigPos.width + SIG_X_GAP,
         y: sigPos.y + SIG_VERTICAL_NUDGE,
-        width: SIG_WIDTH,
+        width: SIG_DRAW_WIDTH,
         height: SIG_HEIGHT,
       });
       stampsApplied++;
@@ -212,8 +228,42 @@ export async function stampManagementSignature(opts: {
       missReport.push(`${sectionLabel}: "Signature:" label not found`);
     }
     if (datePos) {
+      // If the matched text item also contains the underline (e.g. the item
+      // pdfjs returned was "Date: ___________"), center the date over the
+      // underline portion instead of placing it to the right of the whole
+      // thing. We estimate the label vs underline split by computing
+      // proportional widths in Helvetica (close enough for proportional
+      // fonts — we just need a reasonable midpoint, not pixel-perfect).
+      const dateTextWidth = font.widthOfTextAtSize(dateLabel, DATE_FONT_SIZE);
+      const matchedStr = datePos.matchedStr;
+      const labelIdx = matchedStr.toLowerCase().indexOf('date:');
+      const afterLabel =
+        labelIdx >= 0 ? matchedStr.slice(labelIdx + 'date:'.length) : '';
+      const hasUnderline =
+        afterLabel.length > 2 && /[_\s]/.test(afterLabel);
+
+      let drawX = datePos.x + datePos.width + DATE_X_GAP;
+      if (hasUnderline) {
+        // Proportional widths in our embedded Helvetica — the actual PDF font
+        // may differ, but the ratio of label-width to total-width is similar
+        // across proportional fonts (Helvetica, Arial, Times, etc.).
+        const probeSize = 10;
+        const labelWidthProbe = font.widthOfTextAtSize(
+          // Include the colon + one trailing space so we land just after "Date: "
+          matchedStr.slice(0, labelIdx + 'date:'.length + 1),
+          probeSize,
+        );
+        const fullWidthProbe = font.widthOfTextAtSize(matchedStr, probeSize);
+        const labelProp = fullWidthProbe > 0 ? labelWidthProbe / fullWidthProbe : 0.25;
+        const labelActualWidth = datePos.width * labelProp;
+        const underlineStartX = datePos.x + labelActualWidth;
+        const underlineWidth = datePos.width - labelActualWidth;
+        const underlineMidX = underlineStartX + underlineWidth / 2;
+        drawX = underlineMidX - dateTextWidth / 2;
+      }
+
       page.drawText(dateLabel, {
-        x: datePos.x + datePos.width + DATE_X_GAP,
+        x: drawX,
         y: datePos.y,
         size: DATE_FONT_SIZE,
         font,
