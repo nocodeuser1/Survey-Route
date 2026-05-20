@@ -105,9 +105,9 @@ export default function ManagementSignatureSettings() {
       setError('Only PNG files are accepted. PNG preserves transparency so the signature blends cleanly with the plan page.');
       return;
     }
-    // Sanity cap — signatures should be under ~2MB. Higher means it's probably a screenshot, not a signature.
-    if (file.size > 2 * 1024 * 1024) {
-      setError('That file is larger than 2 MB. Re-export the signature as a smaller PNG (signatures should be a few hundred KB at most).');
+    // Sanity cap — Israel set the management-signature ceiling at 5 MB.
+    if (file.size > 5 * 1024 * 1024) {
+      setError('That file is larger than 5 MB. Re-export the signature as a smaller PNG.');
       return;
     }
 
@@ -327,7 +327,7 @@ export default function ManagementSignatureSettings() {
       )}
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Format: transparent PNG, under 2 MB. The signature is stamped at its native resolution; export it
+        Format: transparent PNG, up to 5 MB. The signature is stamped at its native resolution; export it
         roughly the size you want it to appear on the plan page (e.g. 300–600 px wide).
       </p>
 
