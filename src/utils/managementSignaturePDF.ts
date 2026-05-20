@@ -218,9 +218,51 @@ export async function stampManagementSignature(opts: {
     const page = pdfDoc.getPage(zeroBasedIndex);
     const sigPos = await findLabelAnchor(pdfjsDoc, zeroBasedIndex + 1, 'Signature:');
     const datePos = await findLabelAnchor(pdfjsDoc, zeroBasedIndex + 1, 'Date:');
+
+    // Two distinct page layouts exist in real SPCC plans:
+    //
+    //   STACKED (§5.2 Approval by Management): "Signature:" sits on its own
+    //     line; "Date:" is a separate row well below it. The matched text
+    //     items for each label typically include the underline as part of the
+    //     same text run (e.g. "Date: __________"), so we can compute an
+    //     underline midpoint by splitting that item proportionally.
+    //
+    //   INLINE (§5.3 Substantial Harm Criteria): "Signature:" and "Date:" are
+    //     on the SAME line, with the underlines drawn as separate graphics
+    //     (not as text characters). The matched item for each is just the
+    //     label by itself, so the proportional-split trick is useless — we
+    //     have to derive each underline's extent from the surrounding layout
+    //     instead.
+    //
+    // Detect inline layout by checking whether Signature and Date were
+    // matched on (approximately) the same baseline, with Date to the right
+    // of Signature.
+    const inlineLayout =
+      sigPos !== null &&
+      datePos !== null &&
+      Math.abs(sigPos.y - datePos.y) < 5 &&
+      datePos.x > sigPos.x;
+
+    const pageWidth = page.getWidth();
+    const PAGE_RIGHT_PADDING = 60; // approx page-right margin in points
+
     if (sigPos) {
+      let drawX: number;
+      if (inlineLayout) {
+        // Signature underline runs from just past sigPos to just before the
+        // Date label. Center the stamp on that span.
+        const ulStart = sigPos.x + sigPos.width + 2;
+        const ulEnd = datePos!.x - 4;
+        drawX = (ulStart + ulEnd) / 2 - SIG_DRAW_WIDTH / 2;
+      } else {
+        // Stacked layout: original behavior — sit on the underline starting
+        // right after the label. The signature visually anchors to the
+        // line's left side, which is how it had been signed by hand on the
+        // calibration sample.
+        drawX = sigPos.x + sigPos.width + SIG_X_GAP;
+      }
       page.drawImage(sigImage, {
-        x: sigPos.x + sigPos.width + SIG_X_GAP,
+        x: drawX,
         y: sigPos.y + SIG_VERTICAL_NUDGE,
         width: SIG_DRAW_WIDTH,
         height: SIG_HEIGHT,
@@ -229,39 +271,44 @@ export async function stampManagementSignature(opts: {
     } else {
       missReport.push(`${sectionLabel}: "Signature:" label not found`);
     }
-    if (datePos) {
-      // If the matched text item also contains the underline (e.g. the item
-      // pdfjs returned was "Date: ___________"), center the date over the
-      // underline portion instead of placing it to the right of the whole
-      // thing. We estimate the label vs underline split by computing
-      // proportional widths in Helvetica (close enough for proportional
-      // fonts — we just need a reasonable midpoint, not pixel-perfect).
-      const dateTextWidth = font.widthOfTextAtSize(dateLabel, DATE_FONT_SIZE);
-      const matchedStr = datePos.matchedStr;
-      const labelIdx = matchedStr.toLowerCase().indexOf('date:');
-      const afterLabel =
-        labelIdx >= 0 ? matchedStr.slice(labelIdx + 'date:'.length) : '';
-      const hasUnderline =
-        afterLabel.length > 2 && /[_\s]/.test(afterLabel);
 
-      let drawX = datePos.x + datePos.width + DATE_X_GAP;
-      if (hasUnderline) {
-        // Proportional widths in our embedded Helvetica — the actual PDF font
-        // may differ, but the ratio of label-width to total-width is similar
-        // across proportional fonts (Helvetica, Arial, Times, etc.).
-        const probeSize = 10;
-        const labelWidthProbe = font.widthOfTextAtSize(
-          // Include the colon + one trailing space so we land just after "Date: "
-          matchedStr.slice(0, labelIdx + 'date:'.length + 1),
-          probeSize,
-        );
-        const fullWidthProbe = font.widthOfTextAtSize(matchedStr, probeSize);
-        const labelProp = fullWidthProbe > 0 ? labelWidthProbe / fullWidthProbe : 0.25;
-        const labelActualWidth = datePos.width * labelProp;
-        const underlineStartX = datePos.x + labelActualWidth;
-        const underlineWidth = datePos.width - labelActualWidth;
-        const underlineMidX = underlineStartX + underlineWidth / 2;
-        drawX = underlineMidX - dateTextWidth / 2;
+    if (datePos) {
+      const dateTextWidth = font.widthOfTextAtSize(dateLabel, DATE_FONT_SIZE);
+      let drawX: number;
+
+      if (inlineLayout) {
+        // Date underline runs from just past datePos to the page right
+        // margin. Center the date text on that span.
+        const ulStart = datePos.x + datePos.width + 2;
+        const ulEnd = pageWidth - PAGE_RIGHT_PADDING;
+        drawX = (ulStart + ulEnd) / 2 - dateTextWidth / 2;
+      } else {
+        // Stacked layout: if the matched item also contains the underline
+        // (e.g. "Date: __________"), proportionally split the item width to
+        // find the underline midpoint and center on it. Otherwise fall back
+        // to placing the date just past the label.
+        const matchedStr = datePos.matchedStr;
+        const labelIdx = matchedStr.toLowerCase().indexOf('date:');
+        const afterLabel =
+          labelIdx >= 0 ? matchedStr.slice(labelIdx + 'date:'.length) : '';
+        const hasUnderline =
+          afterLabel.length > 2 && /[_\s]/.test(afterLabel);
+
+        drawX = datePos.x + datePos.width + DATE_X_GAP;
+        if (hasUnderline) {
+          const probeSize = 10;
+          const labelWidthProbe = font.widthOfTextAtSize(
+            matchedStr.slice(0, labelIdx + 'date:'.length + 1),
+            probeSize,
+          );
+          const fullWidthProbe = font.widthOfTextAtSize(matchedStr, probeSize);
+          const labelProp = fullWidthProbe > 0 ? labelWidthProbe / fullWidthProbe : 0.25;
+          const labelActualWidth = datePos.width * labelProp;
+          const underlineStartX = datePos.x + labelActualWidth;
+          const underlineWidth = datePos.width - labelActualWidth;
+          const underlineMidX = underlineStartX + underlineWidth / 2;
+          drawX = underlineMidX - dateTextWidth / 2;
+        }
       }
 
       page.drawText(dateLabel, {
