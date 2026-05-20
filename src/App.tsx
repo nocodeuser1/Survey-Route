@@ -899,67 +899,24 @@ function App() {
     const loadStartTime = Date.now();
     console.log('[loadData] Starting data load for account:', currentAccount.id);
 
-    // ── Stale-while-revalidate: restore from IndexedDB cache immediately ──────
-    // This is the key fix for mobile: when iOS evicts the page from memory and
-    // reloads it, we show cached data instantly instead of a blank loading screen.
-    // The Supabase fetch below then refreshes everything silently in the background.
+    // ── Wait for fresh data before rendering ─────────────────────────────────
+    // Previously this branch did stale-while-revalidate: show cached IndexedDB
+    // facilities instantly, then silently swap in the fresh fetch. That made
+    // first-load (e.g. sign-in) flash stale data — different facility list
+    // size, stale inspection statuses — and then resnap to truth ~5s later.
+    //
+    // Now we keep the loading spinner up until the fresh Supabase fetch below
+    // resolves and `setFacilities(facilitiesData)` runs. The IndexedDB writes
+    // further down (cacheOfflineFacilities, cacheOfflineHomeBases) still run,
+    // so offline mode keeps working — we just don't render from the cache on
+    // initial load.
+    //
+    // Trade-off: iOS Capacitor page-eviction resumes now show the loading
+    // spinner instead of an instant cached view. If that becomes a problem,
+    // gate the cache-first display on a freshness window (e.g. cache age < 60s).
     if (facilities.length === 0) {
-      try {
-        const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
-          getOfflineFacilities(currentAccount.id).catch(() => []),
-          getOfflineHomeBases(user?.id ?? '').catch(() => []),
-          getOfflineRoutePlans(user?.id ?? '').catch(() => []),
-        ]);
-
-        if (cachedFacilities.length > 0) {
-          console.log('[loadData] Cache hit — showing', cachedFacilities.length, 'facilities instantly');
-          setFacilities(cachedFacilities);
-
-          if (cachedHomeBases.length > 0) {
-            setHomeBases(cachedHomeBases);
-            setHomeBase(cachedHomeBases[0]);
-            setTeamCount(cachedHomeBases.length);
-          }
-
-          const lastViewed = cachedRoutePlans.find((p: any) => p.is_last_viewed);
-          if (lastViewed && !optimizationResult) {
-            setOptimizationResult(lastViewed.plan_data);
-            setCurrentRouteId(lastViewed.id);
-            setRouteVersion(prev => prev + 1);
-
-            const savedIds = lastViewed.plan_data?._routeFacilityIds;
-            if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
-              setRouteFacilityIds(savedIds);
-              setShowOnlyRouteFacilities(true);
-            } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
-              const routeFacIds: string[] = [];
-              lastViewed.plan_data.routes.forEach((route: any) => {
-                route.facilities?.forEach((rf: any) => {
-                  const match = cachedFacilities.find((f: any) => f.name === rf.name);
-                  if (match) routeFacIds.push(match.id);
-                });
-              });
-              if (routeFacIds.length > 0) {
-                setRouteFacilityIds(routeFacIds);
-                setShowOnlyRouteFacilities(true);
-              }
-            }
-          }
-
-          // Cache restored — dismiss loading screen immediately so the user
-          // sees their route while the fresh fetch runs silently.
-          setIsLoadingFacilities(false);
-          setIsLoadingRoutes(false);
-        } else {
-          // No cache yet (first load) — keep loading screen up.
-          setIsLoadingFacilities(true);
-        }
-      } catch (cacheErr) {
-        console.warn('[loadData] Cache restore failed, proceeding with network load:', cacheErr);
-        setIsLoadingFacilities(true);
-      }
+      setIsLoadingFacilities(true);
     } else {
-      // If we already have facilities in memory, don't show the loading screen.
       console.log('[loadData] Background refresh (facilities already in memory)');
     }
     // ─────────────────────────────────────────────────────────────────────────
