@@ -44,10 +44,21 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
  * URL. Two layers of indirection means we can rename ids without breaking
  * stored preferences.
  */
+// Client-facing id → upstream Gemini model name. Google's stable IDs as
+// of May 2026:
+//   * gemini-3.1-pro-preview (Pro tier; still on the -preview suffix)
+//   * gemini-3.5-flash       (stable Flash — replaced gemini-3-flash-preview
+//                              at I/O 2026 with Pro-level intelligence at
+//                              Flash speed/price)
+//   * gemini-3.1-flash-lite  (stable, cheapest)
+// Earlier code paths used the bare "gemini-3.1-flash" string, which 404s
+// against generateContent because no such SKU exists. The frontend
+// button IDs (gemini-3.1-pro / gemini-3.1-flash) stay put — only the
+// upstream resolution changes, so stored user prefs keep working.
 const ALLOWED_MODELS: Record<string, { upstream: string; thinkingBudget: number }> = {
-  'gemini-3.1-pro':        { upstream: 'gemini-3.1-pro',        thinkingBudget: -1 },
-  'gemini-3.1-flash':      { upstream: 'gemini-3.1-flash',      thinkingBudget: 0 },
-  'gemini-3.1-flash-lite': { upstream: 'gemini-3.1-flash-lite', thinkingBudget: 0 },
+  'gemini-3.1-pro':        { upstream: 'gemini-3.1-pro-preview', thinkingBudget: -1 },
+  'gemini-3.1-flash':      { upstream: 'gemini-3.5-flash',       thinkingBudget: 0 },
+  'gemini-3.1-flash-lite': { upstream: 'gemini-3.1-flash-lite',  thinkingBudget: 0 },
 };
 const DEFAULT_MODEL = 'gemini-3.1-flash';
 
