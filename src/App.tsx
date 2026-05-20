@@ -899,23 +899,81 @@ function App() {
     const loadStartTime = Date.now();
     console.log('[loadData] Starting data load for account:', currentAccount.id);
 
-    // ── Wait for fresh data before rendering ─────────────────────────────────
-    // Previously this branch did stale-while-revalidate: show cached IndexedDB
-    // facilities instantly, then silently swap in the fresh fetch. That made
-    // first-load (e.g. sign-in) flash stale data — different facility list
-    // size, stale inspection statuses — and then resnap to truth ~5s later.
+    // ── Freshness-gated cache-first display ──────────────────────────────────
+    // Show IndexedDB cache instantly ONLY if it was written within the last
+    // CACHE_FRESHNESS_MS. Otherwise wait for the fresh Supabase fetch below
+    // so the user doesn't see stale facility lists / stale SPCC statuses on
+    // sign-in (the previous unconditional cache-first display caused a 5s
+    // flash from 158 facilities + "Upcoming" to 150 facilities + "Inspected").
     //
-    // Now we keep the loading spinner up until the fresh Supabase fetch below
-    // resolves and `setFacilities(facilitiesData)` runs. The IndexedDB writes
-    // further down (cacheOfflineFacilities, cacheOfflineHomeBases) still run,
-    // so offline mode keeps working — we just don't render from the cache on
-    // initial load.
-    //
-    // Trade-off: iOS Capacitor page-eviction resumes now show the loading
-    // spinner instead of an instant cached view. If that becomes a problem,
-    // gate the cache-first display on a freshness window (e.g. cache age < 60s).
+    // The freshness window covers the iOS Capacitor page-eviction case (a
+    // resume happens seconds after the last fetch, so the cache is fresh) but
+    // not the sign-in-after-a-while case (cache is hours/days old). Timestamp
+    // is set after every successful fresh fetch below.
+    const CACHE_FRESHNESS_MS = 60_000;
+    const cacheTsKey = `cache-ts-${currentAccount.id}`;
+    const cacheTsRaw = localStorage.getItem(cacheTsKey);
+    const cacheTs = cacheTsRaw ? parseInt(cacheTsRaw, 10) : 0;
+    const cacheAgeMs = Date.now() - cacheTs;
+    const cacheIsFresh = cacheTs > 0 && cacheAgeMs < CACHE_FRESHNESS_MS;
+
     if (facilities.length === 0) {
-      setIsLoadingFacilities(true);
+      if (cacheIsFresh) {
+        try {
+          const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
+            getOfflineFacilities(currentAccount.id).catch(() => []),
+            getOfflineHomeBases(user?.id ?? '').catch(() => []),
+            getOfflineRoutePlans(user?.id ?? '').catch(() => []),
+          ]);
+
+          if (cachedFacilities.length > 0) {
+            console.log('[loadData] Fresh cache (age', cacheAgeMs, 'ms) — showing', cachedFacilities.length, 'facilities instantly');
+            setFacilities(cachedFacilities);
+
+            if (cachedHomeBases.length > 0) {
+              setHomeBases(cachedHomeBases);
+              setHomeBase(cachedHomeBases[0]);
+              setTeamCount(cachedHomeBases.length);
+            }
+
+            const lastViewed = cachedRoutePlans.find((p: any) => p.is_last_viewed);
+            if (lastViewed && !optimizationResult) {
+              setOptimizationResult(lastViewed.plan_data);
+              setCurrentRouteId(lastViewed.id);
+              setRouteVersion(prev => prev + 1);
+
+              const savedIds = lastViewed.plan_data?._routeFacilityIds;
+              if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
+                setRouteFacilityIds(savedIds);
+                setShowOnlyRouteFacilities(true);
+              } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
+                const routeFacIds: string[] = [];
+                lastViewed.plan_data.routes.forEach((route: any) => {
+                  route.facilities?.forEach((rf: any) => {
+                    const match = cachedFacilities.find((f: any) => f.name === rf.name);
+                    if (match) routeFacIds.push(match.id);
+                  });
+                });
+                if (routeFacIds.length > 0) {
+                  setRouteFacilityIds(routeFacIds);
+                  setShowOnlyRouteFacilities(true);
+                }
+              }
+            }
+
+            setIsLoadingFacilities(false);
+            setIsLoadingRoutes(false);
+          } else {
+            setIsLoadingFacilities(true);
+          }
+        } catch (cacheErr) {
+          console.warn('[loadData] Cache restore failed, proceeding with network load:', cacheErr);
+          setIsLoadingFacilities(true);
+        }
+      } else {
+        console.log('[loadData] Cache stale or missing (age', cacheAgeMs, 'ms) — waiting for fresh fetch');
+        setIsLoadingFacilities(true);
+      }
     } else {
       console.log('[loadData] Background refresh (facilities already in memory)');
     }
@@ -968,6 +1026,11 @@ function App() {
       const homeBaseData = homeBaseResult.data;
       const inspectionsData = inspectionsResult.data;
       const lastRoutePlan = routePlanResult.data;
+
+      // Mark cache as fresh (read by the freshness-gated cache-first path on next mount)
+      try {
+        localStorage.setItem(`cache-ts-${currentAccount.id}`, Date.now().toString());
+      } catch { /* ignore quota errors */ }
 
       const autoRefresh = settingsData?.auto_refresh_route ?? false;
       const currentSettings = settingsData;
