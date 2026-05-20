@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain } from 'lucide-react';
+import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2 } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import { supabase } from '../lib/supabase';
 
@@ -265,6 +265,31 @@ export default function AIAssistantBubble() {
     setInput('');
   };
 
+  /**
+   * "Edit + fork from here" for user prompts. Pops the chosen message
+   * back into the composer, truncates the conversation at that point
+   * (drops the message itself plus everything after — including the
+   * assistant's reply to it), and focuses the input. Hitting Send
+   * then re-runs from that exact point with the edited prompt,
+   * effectively forking the conversation without losing the earlier
+   * turns. Disabled while a stream is in flight so we don't shred
+   * state mid-response.
+   */
+  const editAndForkFrom = (messageIndex: number) => {
+    if (isStreaming) return;
+    const target = messages[messageIndex];
+    if (!target || target.role !== 'user') return;
+    setMessages(messages.slice(0, messageIndex));
+    setInput(target.content);
+    setError(null);
+    // setTimeout so the new value is in the DOM before focusing,
+    // otherwise the cursor lands at position 0 on some browsers.
+    setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(target.content.length, target.content.length);
+    }, 0);
+  };
+
   return (
     <>
       {/* Floating launcher bubble */}
@@ -376,8 +401,27 @@ export default function AIAssistantBubble() {
               messages.map((msg, i) => (
                 <div
                   key={i}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  className={`group flex items-center gap-1.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
+                  {/* Edit-and-fork affordance for past user prompts.
+                      Sits left of the bubble (since user messages are
+                      right-aligned), hidden until row-hover so it
+                      doesn't crowd the conversation. Clicking pops
+                      the prompt back into the composer and truncates
+                      the conversation at that point — see
+                      editAndForkFrom. */}
+                  {msg.role === 'user' && msg.content && (
+                    <button
+                      type="button"
+                      onClick={() => editAndForkFrom(i)}
+                      disabled={isStreaming}
+                      title="Edit and resend from here (forks the conversation)"
+                      aria-label="Edit this prompt and resend"
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <div
                     className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                       msg.role === 'user'
