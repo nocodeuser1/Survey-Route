@@ -2301,19 +2301,29 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   /**
-   * Bulk download every SPCC plan PDF for the currently-filtered facilities
-   * as a single ZIP. Iterates the per-berm `spcc_plans` rows (not the
-   * worst-case `facilities.spcc_plan_url` mirror) so multi-berm facilities
-   * contribute one PDF per berm. Each file is named in the canonical
-   * `Name - Camino ID - SPCC Plan|Renewal (MM-DD-YY).pdf` format. Multi-
-   * berm collisions get a " - Berm N" suffix appended before the .pdf so
-   * the zip never overwrites entries silently.
+   * Bulk download every SPCC plan PDF for the targeted facilities as a
+   * single ZIP. Targeting rule: if any rows are selected via the row
+   * checkboxes, those wins; otherwise every currently-filtered facility
+   * is included. Iterates the per-berm `spcc_plans` rows (not the
+   * worst-case `facilities.spcc_plan_url` mirror) so multi-berm
+   * facilities contribute one PDF per berm. Each file is named in the
+   * canonical `Name - Camino ID - SPCC Plan|Renewal (MM-DD-YY).pdf`
+   * format. Multi-berm collisions get a " - Berm N" suffix appended
+   * before the .pdf so the zip never overwrites entries silently.
    *
    * `subfolder` nests files inside a single folder in the zip (used by
    * the "All Reports" combo flow).
    */
   const handleBulkPdfDownload = async (subfolder?: string) => {
-    const facilityIds = filteredFacilities.map(f => f.id);
+    // Honor the row selection if present; otherwise fall back to the
+    // currently-filtered list. This matches the user's mental model: if
+    // they've ticked specific rows, those are what they want; if none are
+    // ticked, "Download SPCC Plans" means "download what I can see".
+    const targetFacilities =
+      selectedFacilityIds.size > 0
+        ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+        : filteredFacilities;
+    const facilityIds = targetFacilities.map((f) => f.id);
     if (facilityIds.length === 0) {
       setError('No facilities to download.');
       return;
@@ -4001,7 +4011,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       id="tb-reports"
                       tooltip={
                         spccMode === 'plan'
-                          ? `Download ${filteredFacilities.filter(f => f.spcc_plan_url).length} SPCC Plans`
+                          ? (() => {
+                              // If rows are selected, count plans on JUST those rows;
+                              // otherwise count plans across the filtered list.
+                              const scope = selectedFacilityIds.size > 0
+                                ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+                                : filteredFacilities;
+                              const planCount = scope.filter((f) => f.spcc_plan_url).length;
+                              const scopeNote = selectedFacilityIds.size > 0 ? ' from selected' : '';
+                              return `Download ${planCount} SPCC Plans${scopeNote}`;
+                            })()
                           : spccMode === 'inspection'
                             ? 'Export Inspection Reports'
                             : 'Export Reports'
