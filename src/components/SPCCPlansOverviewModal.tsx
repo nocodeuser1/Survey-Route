@@ -136,9 +136,16 @@ export default function SPCCPlansOverviewModal({
 
   const selectedItem = selectedIndex !== null ? sortedData[selectedIndex] : null;
 
+  // X / overlay-click behavior:
+  //   - in the detail view (an item is selected) → go back to the list
+  //   - in the list view (nothing selected) → close the whole modal
+  // This lets the user open/close multiple rows without re-opening the overview each time.
   const handleClose = () => {
-    setSelectedIndex(null);
-    onClose();
+    if (selectedIndex !== null) {
+      setSelectedIndex(null);
+    } else {
+      onClose();
+    }
   };
 
   const navigateReport = (direction: number) => {
