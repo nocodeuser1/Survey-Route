@@ -257,8 +257,14 @@ export default function BermPlanCard({
       });
       const signature: Pick<UserSignature, 'signature_data'> = { signature_data: signatureDataUrl };
 
-      // 3. Fetch the current PDF bytes.
-      const pdfRes = await fetch(plan.plan_url);
+      // 3. Fetch the current PDF bytes. Critical: bypass the browser cache
+      //    AND any CDN cache, otherwise a Replace + immediate Stamp will
+      //    layer a fresh signature on top of the PRIOR stamped PDF (browser
+      //    serves the cached copy of the URL because the path is the same
+      //    after upsert). Both ?t=Date.now() and { cache: 'no-store' } are
+      //    set so neither layer can serve stale bytes.
+      const cacheBust = `${plan.plan_url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+      const pdfRes = await fetch(`${plan.plan_url}${cacheBust}`, { cache: 'no-store' });
       if (!pdfRes.ok) throw new Error(`Couldn't download the plan PDF (HTTP ${pdfRes.status}).`);
       const sourceBytes = await pdfRes.arrayBuffer();
 
