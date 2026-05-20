@@ -38,6 +38,7 @@ import { isInspectionValid, getFacilityInspectionExpiry } from './utils/inspecti
 import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
 import { parseLocalDate } from './utils/dateUtils';
+import { resolveSurveyTypeIcon } from './utils/surveyTypeIcons';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
 import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
@@ -3642,11 +3643,13 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Survey Type Selector - above the map */}
+                  {/* Survey Type Selector - above the map.
+                      Tabs are now driven by the survey_types table so newly-created
+                      custom types appear automatically alongside the seeded SPCC types. */}
                   {!isFullScreenMap && filteredOptimizationResult && (() => {
-                    // Compute counts for badges
+                    // Precompute the SPCC-specific count badges (unchanged).
                     const inspectionsMap = new Map(inspections.map(i => [i.facility_id, i]));
-                    const activeFacilities = filteredFacilities.filter(f => f.status !== 'sold' && f.day_assignment !== -1);
+                    const activeFacilitiesForCounts = filteredFacilities.filter(f => f.status !== 'sold' && f.day_assignment !== -1);
                     const facilitiesInRoute = new Set<string>();
                     const excludedNames = new Set(filteredFacilities.filter(f => f.day_assignment === -1).map(f => f.name));
                     filteredOptimizationResult.routes.forEach(route => {
@@ -3660,17 +3663,11 @@ function App() {
                     let inspectionInRouteCount = 0;
                     let inspectionPastDueCount = 0;
 
-                    activeFacilities.forEach(f => {
+                    activeFacilitiesForCounts.forEach(f => {
                       const isInRoute = facilitiesInRoute.has(f.name);
-                      // SPCC Plan counts
                       const s = getSPCCPlanStatus(f);
-                      if (s.status === 'initial_overdue' || s.status === 'expired') {
-                        planPastDueCount++;
-                      }
-                      if (facilityNeedsSPCCPlan(f) && isInRoute) {
-                        planInRouteCount++;
-                      }
-                      // SPCC Inspection counts
+                      if (s.status === 'initial_overdue' || s.status === 'expired') planPastDueCount++;
+                      if (facilityNeedsSPCCPlan(f) && isInRoute) planInRouteCount++;
                       const insp = inspectionsMap.get(f.id);
                       const inspExpiry = getFacilityInspectionExpiry(f, insp);
                       if (inspExpiry.status !== 'valid') {
@@ -3678,6 +3675,27 @@ function App() {
                         if (inspExpiry.status === 'expired') inspectionPastDueCount++;
                       }
                     });
+
+                    // Build the ordered list of route-mode tabs from the database.
+                    const routeModeTypes = dbSurveyTypes
+                      .filter(t => t.enabled && t.show_as_route_mode)
+                      .slice()
+                      .sort((a, b) => a.sort_order - b.sort_order);
+
+                    // Active-tab check: matches either the row.id OR the legacy SPCC
+                    // enum string if migration hasn't fired yet.
+                    const isTypeActive = (type: SurveyType): boolean =>
+                      surveyType === type.id || (type.system_kind != null && surveyType === type.system_kind);
+
+                    // Count "needs surveying" for a custom type (incomplete completion).
+                    const customNeedsCount = (typeId: string): number => {
+                      let n = 0;
+                      activeFacilitiesForCounts.forEach(f => {
+                        const status = getCompletionStatus(f.id, typeId);
+                        if (status.total > 0 && status.percent < 100) n++;
+                      });
+                      return n;
+                    };
 
                     return (
                       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
@@ -3687,6 +3705,7 @@ function App() {
                             <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
+                            {/* All Facilities tab — always first */}
                             <button
                               onClick={() => setSurveyType('all')}
                               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
@@ -3696,96 +3715,44 @@ function App() {
                             >
                               All Facilities
                             </button>
-                            <div className="relative group/inspection">
-                              <button
-                                onClick={() => setSurveyType('spcc_inspection')}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+
+                            {/* Dynamic tabs from survey_types */}
+                            {routeModeTypes.map(type => {
+                              const Icon = resolveSurveyTypeIcon(type.icon);
+                              const isActive = isTypeActive(type);
+                              const isSpccInsp = type.system_kind === 'spcc_inspection';
+                              const isSpccPlan = type.system_kind === 'spcc_plan';
+                              const inRouteCount = isSpccInsp ? inspectionInRouteCount : isSpccPlan ? planInRouteCount : customNeedsCount(type.id);
+                              const overdueCount = isSpccInsp ? inspectionPastDueCount : isSpccPlan ? planPastDueCount : 0;
+
+                              return (
+                                <button
+                                  key={type.id}
+                                  onClick={() => setSurveyType(type.id)}
+                                  title={type.description || type.name}
+                                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${isActive
+                                    ? 'text-white'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                                   }`}
-                              >
-                                <FileText className="w-4 h-4" />
-                                SPCC Inspections
-                                {inspectionInRouteCount > 0 && (
-                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
-                                    {inspectionInRouteCount}
-                                  </span>
-                                )}
-                                {inspectionPastDueCount > 0 && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
-                                    {inspectionPastDueCount} overdue
-                                  </span>
-                                )}
-                              </button>
-                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 opacity-0 pointer-events-none group-hover/inspection:opacity-100 transition-opacity duration-200 z-[9999]">
-                                <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-l border-t border-white/50 dark:border-white/10" />
-                                  <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Inspections</div>
-                                  <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
-                                    {inspectionInRouteCount > 0 && (
-                                      <div className="flex items-start gap-2">
-                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
-                                        <span><strong>{inspectionInRouteCount}</strong> needing inspection are in this route</span>
-                                      </div>
-                                    )}
-                                    {inspectionPastDueCount > 0 && (
-                                      <div className="flex items-start gap-2">
-                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
-                                        <span><strong>{inspectionPastDueCount}</strong> overdue — last inspected over 1 year ago or never</span>
-                                      </div>
-                                    )}
-                                    {inspectionInRouteCount === 0 && inspectionPastDueCount === 0 && (
-                                      <span>Filter to facilities needing yearly SPCC inspection</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="relative group/plan">
-                              <button
-                                onClick={() => setSurveyType('spcc_plan')}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                  }`}
-                              >
-                                <FileCheck className="w-4 h-4" />
-                                SPCC Plans
-                                {planInRouteCount > 0 && (
-                                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
-                                    {planInRouteCount}
-                                  </span>
-                                )}
-                                {planPastDueCount > 0 && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
-                                    {planPastDueCount} overdue
-                                  </span>
-                                )}
-                              </button>
-                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 opacity-0 pointer-events-none group-hover/plan:opacity-100 transition-opacity duration-200 z-[9999]">
-                                <div className="px-4 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl backdrop-saturate-150 text-xs rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] border border-white/50 dark:border-white/10 w-64">
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-white/90 dark:bg-gray-800/90 border-l border-t border-white/50 dark:border-white/10" />
-                                  <div className="font-semibold text-gray-900 dark:text-white mb-1.5">SPCC Plans</div>
-                                  <div className="space-y-1 text-gray-600 dark:text-gray-300 leading-relaxed">
-                                    {planInRouteCount > 0 && (
-                                      <div className="flex items-start gap-2">
-                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
-                                        <span><strong>{planInRouteCount}</strong> needing attention are in this route</span>
-                                      </div>
-                                    )}
-                                    {planPastDueCount > 0 && (
-                                      <div className="flex items-start gap-2">
-                                        <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-500" />
-                                        <span><strong>{planPastDueCount}</strong> overdue — expired or missed filing deadline</span>
-                                      </div>
-                                    )}
-                                    {planInRouteCount === 0 && planPastDueCount === 0 && (
-                                      <span>Filter to facilities needing SPCC plan attention</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
+                                  style={isActive ? { backgroundColor: type.color } : undefined}
+                                >
+                                  <Icon className="w-4 h-4" />
+                                  <span>{type.name}</span>
+                                  {inRouteCount > 0 && (
+                                    <span
+                                      className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${isActive ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                                    >
+                                      {inRouteCount}
+                                    </span>
+                                  )}
+                                  {overdueCount > 0 && (
+                                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
+                                      {overdueCount} overdue
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
