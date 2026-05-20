@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useReducer } from 'react';
+import { useState, useEffect, useRef, useReducer, useCallback } from 'react';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { createPortal } from 'react-dom';
 import {
@@ -32,7 +32,9 @@ import {
   GripVertical,
   Copy,
 } from 'lucide-react';
-import { supabase, Facility, FacilityComment, Inspection, UserSettings } from '../lib/supabase';
+import { supabase, Facility, FacilityComment, Inspection, UserSettings, SPCCPlan } from '../lib/supabase';
+import BermPlanCard from './BermPlanCard';
+import { useDarkMode } from '../contexts/DarkModeContext';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
@@ -522,6 +524,91 @@ export default function FacilityDetailModal({
   // `facility.<field> = …` rather than threading state through the parent.
   // Lets the InlineEditField cards re-render with the new value after save.
   const [, bumpFacilityRender] = useReducer((n: number) => n + 1, 0);
+  const { darkMode } = useDarkMode();
+
+  // SPCC berm plans for the Plan Document section. Mirrors the load+realtime
+  // pattern in SPCCPlanDetailModal so the UX is the same: every berm row gets
+  // its own BermPlanCard (View / Share / Replace / Add Mgmt Signature). Add /
+  // remove berms + reassign wells stays in the SPCC Plan Detail modal — this
+  // section focuses on the plan-document affordances Israel asked for.
+  const [bermPlans, setBermPlans] = useState<SPCCPlan[]>([]);
+  const [bermPlansLoading, setBermPlansLoading] = useState(true);
+  const [bermPlansError, setBermPlansError] = useState<string | null>(null);
+  const [creatingFirstBerm, setCreatingFirstBerm] = useState(false);
+
+  const refetchBermPlans = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('spcc_plans')
+        .select('*')
+        .eq('facility_id', facility.id)
+        .order('berm_index', { ascending: true });
+      if (error) throw error;
+      setBermPlans((data || []) as SPCCPlan[]);
+      setBermPlansError(null);
+    } catch (err: any) {
+      console.error('[FacilityDetailModal] Error loading berm plans:', err);
+      setBermPlansError(err?.message || 'Could not load SPCC plans for this facility.');
+    } finally {
+      setBermPlansLoading(false);
+    }
+  }, [facility.id]);
+
+  useEffect(() => {
+    setBermPlansLoading(true);
+    refetchBermPlans();
+    // Realtime: pick up changes from another tab / the SPCC Plan Detail modal.
+    const channel = supabase
+      .channel(`fdm_spcc_plans_${facility.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'spcc_plans',
+          filter: `facility_id=eq.${facility.id}`,
+        },
+        () => {
+          refetchBermPlans();
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [facility.id, refetchBermPlans]);
+
+  // For facilities created after the per-berm backfill (no auto-create trigger
+  // exists), the spcc_plans table may have zero rows. This creates a default
+  // berm 1 covering every well currently on the facility.
+  const handleCreateFirstBerm = async () => {
+    if (creatingFirstBerm) return;
+    setCreatingFirstBerm(true);
+    try {
+      const wellIndices: number[] = [];
+      for (let i = 1; i <= 6; i++) {
+        if ((facility as any)[`well_name_${i}`]) wellIndices.push(i);
+      }
+      const { error } = await supabase.from('spcc_plans').insert({
+        facility_id: facility.id,
+        berm_index: 1,
+        berm_label: null,
+        plan_url: null,
+        pe_stamp_date: null,
+        workflow_status: null,
+        workflow_status_overridden: false,
+        assigned_well_indices: wellIndices,
+      });
+      if (error) throw error;
+      await refetchBermPlans();
+      bumpFacilityRender();
+    } catch (err: any) {
+      console.error('[FacilityDetailModal] Error creating berm 1:', err);
+      alert(err?.message || 'Could not create berm 1. Please try again.');
+    } finally {
+      setCreatingFirstBerm(false);
+    }
+  };
 
   /**
    * Generic per-field save used by all the General-tab InlineEditField cards.
@@ -2216,31 +2303,76 @@ export default function FacilityDetailModal({
         )}
 
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Plan Document</h3>
-          {facility.spcc_plan_url ? (
-            <div className="flex items-center gap-4 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/60">
-              <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-gray-900 dark:text-white">SPCC Plan on File</p>
-                {facility.spcc_pe_stamp_date && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">PE Stamped: {formatDate(facility.spcc_pe_stamp_date)}</p>
-                )}
-              </div>
-              <a
-                href={facility.spcc_plan_url}
-                target="_blank"
-                rel="noreferrer"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Plan Document</h3>
+            {onViewSPCCPlan && bermPlans.length > 0 && (
+              <button
+                onClick={onViewSPCCPlan}
+                className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                title="Open the SPCC Plan detail modal to manage berms, wells, and the recertification workflow"
               >
-                View Plan
-              </a>
+                Open SPCC Plan detail →
+              </button>
+            )}
+          </div>
+
+          {bermPlansLoading ? (
+            <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+              Loading SPCC plans…
+            </div>
+          ) : bermPlansError ? (
+            <div className="text-center py-8 text-sm text-red-600 dark:text-red-400">
+              {bermPlansError}
+            </div>
+          ) : bermPlans.length === 0 ? (
+            <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg space-y-3">
+              <FileText className="w-10 h-10 text-gray-400 dark:text-gray-500 mx-auto" />
+              <p className="text-gray-500 dark:text-gray-400">No SPCC plan uploaded</p>
+              <button
+                onClick={handleCreateFirstBerm}
+                disabled={creatingFirstBerm}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+              >
+                {creatingFirstBerm ? 'Creating…' : 'Add SPCC Plan'}
+              </button>
             </div>
           ) : (
-            <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-              <FileText className="w-10 h-10 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
-              <p className="text-gray-500 dark:text-gray-400">No SPCC plan uploaded</p>
+            <div className="space-y-4">
+              {bermPlans.map((plan) => (
+                <BermPlanCard
+                  key={plan.id}
+                  plan={plan}
+                  facility={facility}
+                  darkMode={darkMode}
+                  isOnlyBerm={bermPlans.length === 1}
+                  // Multi-berm photos toggle is handled in SPCCPlanDetailModal —
+                  // here we keep the single facility-level toggle in the Field
+                  // Operations card above, so we hide the per-berm toggle.
+                  showPhotosToggle={false}
+                  onPlanChange={() => {
+                    refetchBermPlans();
+                    bumpFacilityRender();
+                  }}
+                  // Wells assignment lives in the SPCC Plan detail modal —
+                  // delegate via onViewSPCCPlan if the parent wired it up.
+                  onOpenWellAssignment={() => {
+                    if (onViewSPCCPlan) {
+                      onViewSPCCPlan();
+                    } else {
+                      alert('Open the SPCC Plan detail modal to reassign wells.');
+                    }
+                  }}
+                  // Removing berms also lives in the SPCC Plan detail modal so
+                  // we don't have to duplicate the well-reassignment flow here.
+                  onRemove={() => {
+                    if (onViewSPCCPlan) {
+                      onViewSPCCPlan();
+                    } else {
+                      alert('Open the SPCC Plan detail modal to remove a berm.');
+                    }
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
