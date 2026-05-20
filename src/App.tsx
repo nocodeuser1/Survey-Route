@@ -4042,6 +4042,7 @@ function App() {
               userRole={user?.isAgencyOwner ? 'owner' : accountRole === 'account_admin' ? 'admin' : 'user'}
               surveyType={surveyType}
               onSurveyTypeChange={setSurveyType}
+              dbSurveyTypes={dbSurveyTypes}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;
                 if (batchId) {

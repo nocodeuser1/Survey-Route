@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { Facility, Inspection, supabase, UserSettings, SPCCPlan } from '../lib/supabase';
+import { Facility, Inspection, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
@@ -52,6 +52,9 @@ interface SurveyModeProps {
   // Widened 2026-05-20: 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID>
   surveyType?: string;
   onSurveyTypeChange?: (surveyType: string) => void;
+  /** All survey types loaded for this account. Used to map UUID surveyType values
+   *  back to view modes via system_kind. Optional for backward compatibility. */
+  dbSurveyTypes?: DBSurveyType[];
 }
 
 interface FacilityWithDistance extends Facility {
@@ -65,7 +68,31 @@ type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
 type ViewModeType = 'all' | 'inspections' | 'plans';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange }: SurveyModeProps) {
+export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes }: SurveyModeProps) {
+  // Helper: normalize a surveyType prop (which can be 'all', a legacy SPCC enum
+  // string, or a survey_types.id UUID) to an internal ViewModeType.
+  const mapSurveyTypeToViewMode = (st: string | undefined): 'all' | 'inspections' | 'plans' | null => {
+    if (!st) return null;
+    if (st === 'spcc_plan') return 'plans';
+    if (st === 'spcc_inspection') return 'inspections';
+    if (st === 'all') return 'all';
+    // UUID — look up via system_kind, default to 'all' for custom types.
+    const row = dbSurveyTypes?.find(t => t.id === st);
+    if (row?.system_kind === 'spcc_plan') return 'plans';
+    if (row?.system_kind === 'spcc_inspection') return 'inspections';
+    return 'all';
+  };
+
+  // Helper: pick the right outgoing value when the sidebar's view-mode buttons
+  // are clicked. Prefer the system_kind UUID (post-migration canonical form);
+  // fall back to the legacy enum string so the App.tsx migration useEffect
+  // can convert it on first load.
+  const viewModeToSurveyType = (mode: 'all' | 'inspections' | 'plans'): string => {
+    if (mode === 'all') return 'all';
+    const target = mode === 'plans' ? 'spcc_plan' : 'spcc_inspection';
+    const row = dbSurveyTypes?.find(t => t.system_kind === target);
+    return row?.id ?? target;
+  };
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [facilitiesWithDistance, setFacilitiesWithDistance] = useState<FacilityWithDistance[]>([]);
   const [inspectingFacility, setInspectingFacility] = useState<Facility | null>(null);
@@ -104,9 +131,8 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const [showDraftRecovery, setShowDraftRecovery] = useState(false);
   const [recoveredDraftFacility, setRecoveredDraftFacility] = useState<Facility | null>(null);
   const [viewMode, setViewModeInternal] = useState<ViewModeType>(() => {
-    if (externalSurveyType === 'spcc_plan') return 'plans';
-    if (externalSurveyType === 'spcc_inspection') return 'inspections';
-    if (externalSurveyType === 'all') return 'all';
+    const fromProp = mapSurveyTypeToViewMode(externalSurveyType);
+    if (fromProp) return fromProp;
     return statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
   });
 
@@ -131,19 +157,19 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   // 'all'. Keyed by facility_id.
   const [plansByFacility, setPlansByFacility] = useState<Record<string, SPCCPlan[]>>({});
 
-  // Sync from external surveyType
+  // Sync from external surveyType. Handles both the legacy SPCC enum strings
+  // and post-migration UUIDs (via system_kind lookup in mapSurveyTypeToViewMode).
   useEffect(() => {
-    if (!externalSurveyType) return;
-    const mapped: ViewModeType = externalSurveyType === 'spcc_plan' ? 'plans' : externalSurveyType === 'spcc_inspection' ? 'inspections' : 'all';
-    if (mapped !== viewMode) setViewModeInternal(mapped);
-  }, [externalSurveyType]);
+    const mapped = mapSurveyTypeToViewMode(externalSurveyType);
+    if (mapped && mapped !== viewMode) setViewModeInternal(mapped);
+  }, [externalSurveyType, dbSurveyTypes]);
 
-  // Wrapper to sync outward
+  // Wrapper to sync outward — emits the system_kind row's UUID if known,
+  // falling back to legacy enum strings so App.tsx can self-heal via migration.
   const setViewMode = (mode: ViewModeType) => {
     setViewModeInternal(mode);
     if (onSurveyTypeChange) {
-      const mapped = mode === 'plans' ? 'spcc_plan' : mode === 'inspections' ? 'spcc_inspection' : 'all';
-      onSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
+      onSurveyTypeChange(viewModeToSurveyType(mode));
     }
   };
 
