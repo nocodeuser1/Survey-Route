@@ -55,10 +55,17 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
 // against generateContent because no such SKU exists. The frontend
 // button IDs (gemini-3.1-pro / gemini-3.1-flash) stay put — only the
 // upstream resolution changes, so stored user prefs keep working.
-const ALLOWED_MODELS: Record<string, { upstream: string; thinkingBudget: number }> = {
-  'gemini-3.1-pro':        { upstream: 'gemini-3.1-pro-preview', thinkingBudget: -1 },
-  'gemini-3.1-flash':      { upstream: 'gemini-3.5-flash',       thinkingBudget: 0 },
-  'gemini-3.1-flash-lite': { upstream: 'gemini-3.1-flash-lite',  thinkingBudget: 0 },
+//
+// Thinking control: Gemini 3.5 replaced the integer `thinkingBudget`
+// with a string enum `thinkingLevel` (minimal | low | medium | high).
+// Sending the old field to 3.5 Flash silently returns no candidates —
+// which surfaces in the UI as a "Thinking…" spinner that never
+// resolves. We send `thinkingLevel` uniformly for all 3.x models.
+type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+const ALLOWED_MODELS: Record<string, { upstream: string; thinkingLevel: ThinkingLevel }> = {
+  'gemini-3.1-pro':        { upstream: 'gemini-3.1-pro-preview', thinkingLevel: 'high' },
+  'gemini-3.1-flash':      { upstream: 'gemini-3.5-flash',       thinkingLevel: 'minimal' },
+  'gemini-3.1-flash-lite': { upstream: 'gemini-3.1-flash-lite',  thinkingLevel: 'minimal' },
 };
 const DEFAULT_MODEL = 'gemini-3.1-flash';
 
@@ -314,9 +321,10 @@ Deno.serve(async (req) => {
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2048,
-          // -1 = dynamic thinking (Gemini decides); 0 = off. Per ALLOWED_MODELS:
-          // Pro defaults to dynamic; Flash variants stay off for low latency.
-          thinkingConfig: { thinkingBudget: modelConfig.thinkingBudget },
+          // Per ALLOWED_MODELS: Pro reasons at 'high', Flash variants
+          // run at 'minimal' for low latency. NEVER send both
+          // thinkingLevel + thinkingBudget — Gemini 3.5 returns 400.
+          thinkingConfig: { thinkingLevel: modelConfig.thinkingLevel },
         },
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },

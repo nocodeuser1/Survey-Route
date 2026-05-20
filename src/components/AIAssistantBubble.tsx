@@ -88,6 +88,23 @@ export default function AIAssistantBubble() {
     }
   }, [isOpen]);
 
+  // Escape minimizes the panel. Registered globally (window-level) so
+  // it works no matter where focus is — input field, message body, or
+  // an unfocused panel. Only listens while the bubble is open so we
+  // don't intercept Escape for the rest of the app (modals, dropdowns,
+  // etc. have their own Escape handling).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
   // Cancel any in-flight stream when the component unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
 
