@@ -485,6 +485,14 @@ export interface FacilityInspectionSchedule {
   updated_at: string;
 }
 
+/**
+ * Discriminator for legacy SPCC-specific filter/duration logic.
+ * - null  → custom (user-created) type, uses generic completion-based filtering
+ * - 'spcc_plan'        → seeded SPCC Plan row; uses getSPCCPlanStatus filter
+ * - 'spcc_inspection'  → seeded SPCC Inspection row; uses facilityNeedsInspection filter
+ */
+export type SurveyTypeSystemKind = 'spcc_plan' | 'spcc_inspection' | null;
+
 export interface SurveyType {
   id: string;
   account_id: string;
@@ -496,6 +504,12 @@ export interface SurveyType {
   enabled: boolean;
   hands_free_enabled: boolean;
   sort_order: number;
+  /** See SurveyTypeSystemKind. Added 2026-05-20. */
+  system_kind: SurveyTypeSystemKind;
+  /** Visit duration in minutes for route planning. NULL falls back to facility/account default. Added 2026-05-20. */
+  visit_duration_minutes: number | null;
+  /** If true, this type renders as a tab in Route Results. Defaults true. Added 2026-05-20. */
+  show_as_route_mode: boolean;
   created_at: string;
   updated_at: string;
 }
