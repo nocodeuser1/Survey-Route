@@ -195,8 +195,10 @@ export async function stampManagementSignature(opts: {
   // derived from the source PNG's natural aspect ratio so the signature isn't
   // squashed or stretched. Cap the height so a very tall signature (e.g. one
   // with a big looped descender) doesn't overrun the row above.
-  const SIG_WIDTH = 110;
-  const SIG_MAX_HEIGHT = 32;
+  // Sized up 30% from the original 110×32 baseline per Israel — the stamped
+  // signature was reading too small relative to the printed name below it.
+  const SIG_WIDTH = 143;
+  const SIG_MAX_HEIGHT = 42;
   const sigAspect = sigImage.height / sigImage.width;
   let SIG_HEIGHT = SIG_WIDTH * sigAspect;
   let SIG_DRAW_WIDTH = SIG_WIDTH;
