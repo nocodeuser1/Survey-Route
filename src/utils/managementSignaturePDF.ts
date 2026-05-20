@@ -61,8 +61,15 @@ export async function findSignaturePagesInPDF(pdfBytes: ArrayBuffer): Promise<{
  * if the label isn't there. Uses pdfjs' text-content transform matrix:
  * transform[4]=x, transform[5]=y (PDF points, bottom-left origin).
  *
- * We deliberately match the FIRST occurrence of the label. Both signing
- * pages have exactly one "Signature:" and one "Date:" each.
+ * Tries three matching strategies in order so the function copes with
+ * different SPCC plan templates:
+ *   1. A single text item that starts with the label (e.g. "Signature: ___").
+ *   2. A single text item whose trimmed value EQUALS the label
+ *      (e.g. just "Signature:" with the underline rendered separately).
+ *   3. Adjacent items whose concatenated value starts with the label
+ *      (e.g. "Signature" + ":" split across font-run boundaries).
+ *
+ * The first match wins. Returns null if none of the strategies hit.
  */
 async function findLabelAnchor(
   pdf: pdfjsLib.PDFDocumentProxy,
@@ -74,15 +81,56 @@ async function findLabelAnchor(
   const items = (content.items as unknown as TextItem[]).filter(
     (it) => typeof it.str === 'string',
   );
-  const target = items.find((i) =>
-    i.str.trim().toLowerCase().startsWith(label.toLowerCase()),
+  const labelLower = label.toLowerCase();
+  const labelLowerNoColon = labelLower.replace(/:\s*$/, '');
+
+  // Strategy 1: single item starts with the label.
+  const startsWith = items.find((i) =>
+    i.str.trim().toLowerCase().startsWith(labelLower),
   );
-  if (!target) return null;
-  return {
-    x: target.transform[4],
-    y: target.transform[5],
-    width: target.width || 0,
-  };
+  if (startsWith) {
+    return {
+      x: startsWith.transform[4],
+      y: startsWith.transform[5],
+      width: startsWith.width || 0,
+    };
+  }
+
+  // Strategy 2: single item equals the label (with or without the trailing colon).
+  const equals = items.find((i) => {
+    const t = i.str.trim().toLowerCase();
+    return t === labelLower || t === labelLowerNoColon;
+  });
+  if (equals) {
+    return {
+      x: equals.transform[4],
+      y: equals.transform[5],
+      width: equals.width || 0,
+    };
+  }
+
+  // Strategy 3: adjacent items concatenated start with the label
+  //   (e.g. "Signature" + ":" + " " split across runs).
+  for (let i = 0; i < items.length; i++) {
+    let combined = items[i].str.trim().toLowerCase();
+    if (combined.length === 0) continue;
+    let widthSum = items[i].width || 0;
+    for (let j = i + 1; j < Math.min(i + 5, items.length); j++) {
+      combined += items[j].str.trim().toLowerCase();
+      widthSum += items[j].width || 0;
+      if (combined.startsWith(labelLower)) {
+        return {
+          x: items[i].transform[4],
+          y: items[i].transform[5],
+          width: widthSum,
+        };
+      }
+      // Stop expanding once we've outgrown the label length to keep it cheap.
+      if (combined.length > labelLower.length + 4) break;
+    }
+  }
+
+  return null;
 }
 
 /** `data:image/png;base64,...` → raw PNG bytes. */
@@ -145,7 +193,10 @@ export async function stampManagementSignature(opts: {
   const DATE_X_GAP = 6;
   const DATE_FONT_SIZE = 10;
 
-  const stampPage = async (zeroBasedIndex: number) => {
+  let stampsApplied = 0;
+  const missReport: string[] = [];
+
+  const stampPage = async (zeroBasedIndex: number, sectionLabel: string) => {
     const page = pdfDoc.getPage(zeroBasedIndex);
     const sigPos = await findLabelAnchor(pdfjsDoc, zeroBasedIndex + 1, 'Signature:');
     const datePos = await findLabelAnchor(pdfjsDoc, zeroBasedIndex + 1, 'Date:');
@@ -156,6 +207,9 @@ export async function stampManagementSignature(opts: {
         width: SIG_WIDTH,
         height: SIG_HEIGHT,
       });
+      stampsApplied++;
+    } else {
+      missReport.push(`${sectionLabel}: "Signature:" label not found`);
     }
     if (datePos) {
       page.drawText(dateLabel, {
@@ -164,14 +218,44 @@ export async function stampManagementSignature(opts: {
         size: DATE_FONT_SIZE,
         font,
       });
+      stampsApplied++;
+    } else {
+      missReport.push(`${sectionLabel}: "Date:" label not found`);
+    }
+
+    if (!sigPos || !datePos) {
+      // Dump the first chunk of text items so the user can paste the console
+      // output back and we can calibrate to whatever the template actually
+      // uses. Cheap to log; only fires on misses.
+      try {
+        const p = await pdfjsDoc.getPage(zeroBasedIndex + 1);
+        const content = await p.getTextContent();
+        const items = (content.items as Array<{ str?: string }>)
+          .map((it) => (it.str ?? '').trim())
+          .filter((s) => s.length > 0)
+          .slice(0, 80);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[managementSignaturePDF] ${sectionLabel} (page ${zeroBasedIndex + 1}) — labels missed. First text items:`,
+          items,
+        );
+      } catch {
+        /* logging best-effort */
+      }
     }
   };
 
   if (pages.managementApprovalIndex !== null) {
-    await stampPage(pages.managementApprovalIndex);
+    await stampPage(pages.managementApprovalIndex, '§5.2 Approval by Management');
   }
   if (pages.substantialHarmIndex !== null) {
-    await stampPage(pages.substantialHarmIndex);
+    await stampPage(pages.substantialHarmIndex, '§5.3 Substantial Harm Criteria');
+  }
+
+  if (stampsApplied === 0) {
+    throw new Error(
+      `Couldn't find any "Signature:" or "Date:" labels on §5.2 or §5.3 of this PDF, so nothing was stamped. The template may differ from the expected layout. Details: ${missReport.join('; ')}. Open the browser console for the list of text items extracted from the matched pages.`,
+    );
   }
 
   return pdfDoc.save();
