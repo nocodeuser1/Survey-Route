@@ -1373,11 +1373,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               no_ip_date: 8,
             };
             const group = statusOrder[result.status] ?? 9;
-            // Encode group in the high bits, days in the low bits
-            // For overdue/expired (groups 0-1), sort by most overdue first (most negative daysUntilDue)
-            // For others, sort by soonest due first
-            const days = result.daysUntilDue ?? Number.MAX_SAFE_INTEGER;
-            return group * 1e10 + days;
+            // Encode group in the high bits, days in the low bits.
+            // Previously this used MAX_SAFE_INTEGER (9e15) as the
+            // null-days sentinel, which OVERFLOWED the 1e10 group
+            // multiplier — pushing awaiting_pe_stamp (always
+            // daysUntilDue=null) past every other group instead of
+            // keeping it in rank 1 right after Overdue. Clamp to a
+            // sane ±1e6 window (covers ~2,700 years) so the group
+            // bucket always dominates.
+            const rawDays = result.daysUntilDue ?? 0;
+            const days = Math.max(-1e6, Math.min(1e6, rawDays));
+            return group * 1e7 + days;
           }
           case 'inspection_status': {
             // Sort severity-first so the user sees what needs attention at the
