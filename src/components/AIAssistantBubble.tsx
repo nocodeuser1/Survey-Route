@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2 } from 'lucide-react';
+import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2, History } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import { supabase, Facility } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
@@ -51,6 +51,67 @@ function loadModel(): ModelId {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+/**
+ * Persisted session — a snapshot of a previous conversation the user can
+ * pick back up. Stored in localStorage; we keep at most HISTORY_MAX of them.
+ */
+interface ChatSession {
+  id: string;
+  savedAt: number;
+  title: string;
+  messages: ChatMessage[];
+}
+
+const HISTORY_KEY = 'ai-assistant-history-v1';
+const HISTORY_MAX = 2;
+
+function loadHistory(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (s: any) =>
+          s &&
+          typeof s.id === 'string' &&
+          typeof s.savedAt === 'number' &&
+          typeof s.title === 'string' &&
+          Array.isArray(s.messages),
+      )
+      .slice(0, HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history: ChatSession[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, HISTORY_MAX)));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+function deriveTitle(messages: ChatMessage[]): string {
+  const firstUser = messages.find((m) => m.role === 'user');
+  if (firstUser?.content) {
+    const trimmed = firstUser.content.trim();
+    return trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
+  }
+  return 'Chat';
+}
+
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return 'Just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  const days = Math.floor(diff / 86_400_000);
+  return `${days}d ago`;
 }
 
 const SUGGESTED_PROMPTS = [
@@ -338,7 +399,65 @@ export default function AIAssistantBubble({
     sendMessage(input);
   };
 
+  // ─── Session history ───────────────────────────────────────────────────
+  // Up to HISTORY_MAX previous conversations live in localStorage so the
+  // user can pop back to them after starting a new chat. handleClear and
+  // loadSession both archive the current chat (if non-empty) before
+  // discarding/replacing it.
+  const [history, setHistory] = useState<ChatSession[]>(() => loadHistory());
+  const [showHistory, setShowHistory] = useState(false);
+  const historyMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close the history dropdown on outside click.
+  useEffect(() => {
+    if (!showHistory) return;
+    const onClick = (e: MouseEvent) => {
+      if (!historyMenuRef.current?.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    // Defer one tick so the click that opened it doesn't immediately close it.
+    const id = setTimeout(() => document.addEventListener('mousedown', onClick), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [showHistory]);
+
+  const archiveCurrentToHistory = (): ChatSession[] => {
+    if (messages.length === 0) return history;
+    const session: ChatSession = {
+      id:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      savedAt: Date.now(),
+      title: deriveTitle(messages),
+      messages,
+    };
+    const next = [session, ...history].slice(0, HISTORY_MAX);
+    setHistory(next);
+    saveHistory(next);
+    return next;
+  };
+
+  const loadSession = (sessionId: string) => {
+    const target = history.find((s) => s.id === sessionId);
+    if (!target) return;
+    // Archive current first so it's not lost when we replace it.
+    const archived = archiveCurrentToHistory();
+    // Drop the loaded session from history — it's now the active chat.
+    const next = archived.filter((s) => s.id !== sessionId);
+    setHistory(next);
+    saveHistory(next);
+    setMessages(target.messages);
+    setError(null);
+    setInput('');
+    setShowHistory(false);
+  };
+
   const handleClear = () => {
+    archiveCurrentToHistory();
     setMessages([]);
     setError(null);
     setInput('');
@@ -416,10 +535,50 @@ export default function AIAssistantBubble({
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
+                {history.length > 0 && (
+                  <div className="relative" ref={historyMenuRef}>
+                    <button
+                      onClick={() => setShowHistory((v) => !v)}
+                      title={`${history.length} saved chat${history.length === 1 ? '' : 's'}`}
+                      className="text-xs px-2 py-1 rounded hover:bg-white/15 transition-colors inline-flex items-center gap-1"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">History</span>
+                      <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-white/20 text-[10px] font-semibold">
+                        {history.length}
+                      </span>
+                    </button>
+                    {showHistory && (
+                      <div className="absolute right-0 mt-1 w-72 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-20 overflow-hidden">
+                        <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Previous chats
+                        </div>
+                        <ul className="max-h-72 overflow-y-auto">
+                          {history.map((s) => (
+                            <li key={s.id}>
+                              <button
+                                onClick={() => loadSession(s.id)}
+                                className="w-full px-3 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex flex-col gap-0.5"
+                              >
+                                <span className="text-sm font-medium truncate">{s.title}</span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {formatRelativeTime(s.savedAt)} · {s.messages.length} message{s.messages.length === 1 ? '' : 's'}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="px-3 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700">
+                          Loading a chat archives the current one (kept up to {HISTORY_MAX} total).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {messages.length > 0 && (
                   <button
                     onClick={handleClear}
-                    title="Clear conversation"
+                    title="Save current chat to history and start a new one"
                     className="text-xs px-2 py-1 rounded hover:bg-white/15 transition-colors"
                   >
                     Clear
@@ -624,20 +783,32 @@ function AIMarkdown({ source, facilityByName, onOpenFacility }: AIMarkdownProps)
           // Paragraphs — keep them tight inside the bubble
           p: ({ children }) => <p className="leading-relaxed">{children}</p>,
 
-          // Bold — linkify to facility detail when text matches a facility name
+          // Bold — linkify to facility detail when text matches a facility name.
+          // Rendered as a plain inline <span role="button"> rather than a real
+          // <button>: native <button>s don't word-wrap their content cleanly,
+          // and inline-flex was forcing a block break before (Due: …) AND
+          // center-aligning the wrapped second line. A span wraps naturally
+          // with the surrounding markdown text.
           strong: ({ children }) => {
             const text = childrenToString(children).trim();
             const match = facilityByName.get(text.toLowerCase());
             if (match && onOpenFacility) {
               return (
-                <button
-                  type="button"
+                <span
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onOpenFacility(match)}
-                  className="inline-flex items-baseline gap-0.5 font-semibold text-blue-600 dark:text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300 hover:decoration-blue-500 transition-colors cursor-pointer"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenFacility(match);
+                    }
+                  }}
+                  className="font-semibold text-blue-600 dark:text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300 hover:decoration-blue-500 transition-colors cursor-pointer"
                   title={`Open ${match.name}`}
                 >
                   {children}
-                </button>
+                </span>
               );
             }
             return <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>;
