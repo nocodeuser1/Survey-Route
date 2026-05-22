@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Calendar,
   Droplets,
+  Gauge,
   Camera,
   RotateCw,
   MessageSquare,
@@ -71,7 +72,7 @@ interface FacilityDetailModalProps {
   initialTab?: FacilityTab;
 }
 
-type FacilityTab = 'general' | 'inspections' | 'documents' | 'spcc';
+type FacilityTab = 'general' | 'inspections' | 'documents' | 'spcc' | 'ldar';
 
 type DerivedRegulation = {
   name: string;
@@ -1029,11 +1030,28 @@ export default function FacilityDetailModal({
           ? 'Audio, visual, and olfactory monitoring has inspection history on record.'
           : 'Audio, visual, and olfactory monitoring applies to all facilities.',
     },
+    // LDAR (Leak Detection And Repair) site plan — only listed in the
+    // Regulations panel once it's actually been marked completed. Mirrors
+    // the SPCC pattern of gating on real data rather than always-showing.
+    ...(facility.ldar_site_plan_completed
+      ? [
+          {
+            name: 'LDAR Site Plan',
+            type: 'plan' as const,
+            effectiveDate: facility.ldar_site_plan_completed_at ?? null,
+            status: facility.ldar_site_plan_url ? 'Completed — file on record' : 'Completed',
+            notes: facility.ldar_site_plan_url
+              ? 'LDAR site plan has been completed and a file is attached.'
+              : 'LDAR site plan has been marked completed (no file attached — upload is optional).',
+          },
+        ]
+      : []),
   ];
 
   const tabItems: Array<{ id: FacilityTab; label: string; icon: typeof Building2 }> = [
     { id: 'general', label: 'General', icon: Building2 },
     { id: 'spcc', label: 'SPCC Plan', icon: ShieldCheck },
+    { id: 'ldar', label: 'LDAR', icon: Gauge },
     { id: 'inspections', label: 'Inspections', icon: Shield },
     { id: 'documents', label: 'Documents', icon: Files },
   ];
@@ -1904,14 +1922,9 @@ export default function FacilityDetailModal({
             )}
           </div>
 
-          {/* LDAR Site Plan — same component as in SPCCPlanDetailModal so the
-              user has consistent affordances from either entry point. Marking
-              complete + uploading both work here without leaving this modal. */}
-          <LDARSitePlanSection
-            facility={facility}
-            darkMode={darkMode}
-            onChange={bumpFacilityRender}
-          />
+          {/* LDAR Site Plan lives in its own top-level tab now — see the
+              'ldar' tab in tabItems and renderLDARTab(). Previously rendered
+              inline here; removed 2026-05-21 to avoid duplicate UI. */}
 
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
             <div className="flex items-center gap-3 mb-4">
@@ -2390,6 +2403,45 @@ export default function FacilityDetailModal({
     );
   };
 
+  /**
+   * LDAR (Leak Detection And Repair) tab. Renders the same LDARSitePlanSection
+   * the SPCCPlanDetailModal embeds, plus a small header so the tab has the
+   * same look-and-feel as the SPCC / Inspections / Documents tabs.
+   *
+   * The LDAR workflow is intentionally narrow: one boolean (completed yes/no),
+   * one optional uploaded PDF. No berms, no PE stamps, no derived statuses —
+   * everything else is just chrome around those two pieces of state. If the
+   * workflow grows (multiple LDAR reports per facility, EPA Method 21
+   * frequency tracking, etc.) this is the place to expand.
+   */
+  const renderLDARTab = () => (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 p-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+            <Gauge className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-blue-900 dark:text-blue-100">
+              LDAR Site Plan
+            </h3>
+            <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+              Leak Detection And Repair tracking. Mark as completed when finished —
+              uploading the site plan PDF is optional. Status appears in the
+              Regulations panel on the General tab once completed.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <LDARSitePlanSection
+        facility={facility}
+        darkMode={darkMode}
+        onChange={bumpFacilityRender}
+      />
+    </div>
+  );
+
   const renderDocumentsTab = () => (
     <div className="space-y-6">
       <div>
@@ -2708,6 +2760,7 @@ export default function FacilityDetailModal({
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50 dark:bg-gray-900/40 md:rounded-b-lg">
           {activeTab === 'general' && renderGeneralTab()}
           {activeTab === 'spcc' && renderSPCCPlanTab()}
+          {activeTab === 'ldar' && renderLDARTab()}
           {activeTab === 'inspections' && renderInspectionsTab()}
           {activeTab === 'documents' && renderDocumentsTab()}
           <div className="h-20 md:h-6" /> {/* Spacer for mobile bottom padding */}
