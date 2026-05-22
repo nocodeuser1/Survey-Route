@@ -39,7 +39,7 @@ import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import SPCCStatusBadge from './SPCCStatusBadge';
-import LDRSitePlanSection from './LDRSitePlanSection';
+import LDARSitePlanSection from './LDARSitePlanSection';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
@@ -1904,10 +1904,10 @@ export default function FacilityDetailModal({
             )}
           </div>
 
-          {/* LDR Site Plan — same component as in SPCCPlanDetailModal so the
+          {/* LDAR Site Plan — same component as in SPCCPlanDetailModal so the
               user has consistent affordances from either entry point. Marking
               complete + uploading both work here without leaving this modal. */}
-          <LDRSitePlanSection
+          <LDARSitePlanSection
             facility={facility}
             darkMode={darkMode}
             onChange={bumpFacilityRender}

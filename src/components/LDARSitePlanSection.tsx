@@ -2,42 +2,42 @@ import { useState } from 'react';
 import { CheckCircle2, FileText, ExternalLink, RefreshCcw, Circle, Loader2 } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import { formatDate } from '../utils/dateUtils';
-import InlineLDRSitePlanUpload from './InlineLDRSitePlanUpload';
+import InlineLDARSitePlanUpload from './InlineLDARSitePlanUpload';
 
 /**
- * "LDR Site Plan" panel — facility-level completion tracking + optional file
+ * "LDAR Site Plan" panel — facility-level completion tracking + optional file
  * upload. Lives alongside the SPCC plan UI but is intentionally independent:
- * marking the LDR side complete does NOT touch any spcc_* column.
+ * marking the LDAR side complete does NOT touch any spcc_* column.
  *
  * Two interaction paths:
- *   1. **Upload a file.** Drops/picks a PDF → uses InlineLDRSitePlanUpload
+ *   1. **Upload a file.** Drops/picks a PDF → uses InlineLDARSitePlanUpload
  *      (the tested-and-true fork of InlineSPCCPlanUpload) → file lands in
- *      `ldr-site-plans` bucket, facility row gets the URL + filename, and
- *      ldr_site_plan_completed is auto-set to true.
+ *      `ldar-site-plans` bucket, facility row gets the URL + filename, and
+ *      ldar_site_plan_completed is auto-set to true.
  *   2. **Mark completed without a file.** Clicks the "Mark as Completed"
- *      toggle. Sets ldr_site_plan_completed=true with no file. Israel
+ *      toggle. Sets ldar_site_plan_completed=true with no file. Israel
  *      explicitly called out that an upload is optional ("some completed
  *      that will not be uploaded").
  *
- * The toggle can also un-complete the LDR (e.g. if it was marked by mistake).
+ * The toggle can also un-complete the LDAR (e.g. if it was marked by mistake).
  * Un-completing does NOT delete the uploaded file, on the assumption that
  * the user will likely re-complete shortly; the file is still accessible
  * via the stored URL.
  */
 
-interface LDRSitePlanSectionProps {
+interface LDARSitePlanSectionProps {
   facility: Facility;
   darkMode: boolean;
   onChange: () => void;
 }
 
-export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDRSitePlanSectionProps) {
+export default function LDARSitePlanSection({ facility, darkMode, onChange }: LDARSitePlanSectionProps) {
   const [isToggling, setIsToggling] = useState(false);
   const [showReupload, setShowReupload] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isCompleted = !!facility.ldr_site_plan_completed;
-  const hasFile = !!facility.ldr_site_plan_url;
+  const isCompleted = !!facility.ldar_site_plan_completed;
+  const hasFile = !!facility.ldar_site_plan_url;
 
   const handleToggleCompleted = async () => {
     setIsToggling(true);
@@ -50,9 +50,9 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
       if (isCompleted) {
         // Un-complete. Keep the file URL intact (user may re-complete soon).
         const patch = {
-          ldr_site_plan_completed: false,
-          ldr_site_plan_completed_at: null,
-          ldr_site_plan_completed_by: null,
+          ldar_site_plan_completed: false,
+          ldar_site_plan_completed_at: null,
+          ldar_site_plan_completed_by: null,
         };
         const { error: updateError } = await supabase
           .from('facilities')
@@ -65,9 +65,9 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
         Object.assign(facility, patch);
       } else {
         const patch = {
-          ldr_site_plan_completed: true,
-          ldr_site_plan_completed_at: nowIso,
-          ldr_site_plan_completed_by: completedBy,
+          ldar_site_plan_completed: true,
+          ldar_site_plan_completed_at: nowIso,
+          ldar_site_plan_completed_by: completedBy,
         };
         const { error: updateError } = await supabase
           .from('facilities')
@@ -78,8 +78,8 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
       }
       onChange();
     } catch (err: any) {
-      console.error('Error toggling LDR completion:', err);
-      setError(err.message || 'Failed to update LDR status');
+      console.error('Error toggling LDAR completion:', err);
+      setError(err.message || 'Failed to update LDAR status');
     } finally {
       setIsToggling(false);
     }
@@ -100,7 +100,7 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
         <div className="flex items-center gap-2">
           <FileText className={`w-4 h-4 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`} />
           <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            LDR Site Plan
+            LDAR Site Plan
           </h3>
         </div>
         {isCompleted ? (
@@ -152,9 +152,9 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
               <p className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 {isCompleted ? 'Site Plan Completed' : 'Mark Site Plan as Completed'}
               </p>
-              {isCompleted && facility.ldr_site_plan_completed_at ? (
+              {isCompleted && facility.ldar_site_plan_completed_at ? (
                 <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Completed {formatDate(facility.ldr_site_plan_completed_at)}
+                  Completed {formatDate(facility.ldar_site_plan_completed_at)}
                 </p>
               ) : (
                 <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -187,19 +187,19 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
               </div>
               <div className="min-w-0">
                 <a
-                  href={facility.ldr_site_plan_url!}
+                  href={facility.ldar_site_plan_url!}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`text-sm font-medium hover:underline inline-flex items-center gap-1 truncate ${
                     darkMode ? 'text-blue-300' : 'text-blue-700'
                   }`}
                 >
-                  <span className="truncate">{facility.ldr_site_plan_filename || 'Site Plan.pdf'}</span>
+                  <span className="truncate">{facility.ldar_site_plan_filename || 'Site Plan.pdf'}</span>
                   <ExternalLink className="w-3 h-3 flex-shrink-0" />
                 </a>
-                {facility.ldr_site_plan_uploaded_at && (
+                {facility.ldar_site_plan_uploaded_at && (
                   <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Uploaded {formatDate(facility.ldr_site_plan_uploaded_at)}
+                    Uploaded {formatDate(facility.ldar_site_plan_uploaded_at)}
                   </p>
                 )}
               </div>
@@ -217,7 +217,7 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
           </div>
         ) : (
           <div>
-            <InlineLDRSitePlanUpload
+            <InlineLDARSitePlanUpload
               facility={facility}
               darkMode={darkMode}
               onUploaded={() => {

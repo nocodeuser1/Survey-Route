@@ -67,18 +67,18 @@ export interface Facility {
   spcc_pe_stamp_date?: string | null;
   spcc_workflow_status?: 'awaiting_pe_stamp' | 'site_visited' | 'pe_stamped' | 'completed_uploaded' | null;
   spcc_workflow_status_overridden?: boolean | null;
-  // LDR site plan — parallel to (and intentionally independent of) the SPCC
+  // LDAR site plan — parallel to (and intentionally independent of) the SPCC
   // plan workflow. Added 2026-05-21. See migration
-  // 20260521000000_ldr_site_plans.sql for details and the
-  // src/components/InlineLDRSitePlanUpload.tsx component for the upload UX.
-  // Upload is optional: a facility can be ldr_site_plan_completed=true with
-  // ldr_site_plan_url=null when the work was done but no file was attached.
-  ldr_site_plan_completed?: boolean;
-  ldr_site_plan_completed_at?: string | null;
-  ldr_site_plan_completed_by?: string | null;
-  ldr_site_plan_url?: string | null;
-  ldr_site_plan_filename?: string | null;
-  ldr_site_plan_uploaded_at?: string | null;
+  // 20260521010000_ldar_site_plans.sql for details and the
+  // src/components/InlineLDARSitePlanUpload.tsx component for the upload UX.
+  // Upload is optional: a facility can be ldar_site_plan_completed=true with
+  // ldar_site_plan_url=null when the work was done but no file was attached.
+  ldar_site_plan_completed?: boolean;
+  ldar_site_plan_completed_at?: string | null;
+  ldar_site_plan_completed_by?: string | null;
+  ldar_site_plan_url?: string | null;
+  ldar_site_plan_filename?: string | null;
+  ldar_site_plan_uploaded_at?: string | null;
   // Detail fields
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;

@@ -4,25 +4,25 @@ import { supabase, type Facility } from '../lib/supabase';
 import { compressPDF, formatBytesMB } from '../utils/compressPDF';
 
 /**
- * Inline drag-and-drop upload zone for the LDR site plan PDF on a facility.
+ * Inline drag-and-drop upload zone for the LDAR site plan PDF on a facility.
  *
  * Forked 2026-05-21 from InlineSPCCPlanUpload.tsx, which is the "tested and
  * true" pattern Israel asked us to reuse. Differences from the SPCC version:
  *
  *   - Facility-level (not per-berm). No SPCCPlan row.
- *   - No PE stamp date input — LDR doesn't have one.
- *   - Writes to facilities.ldr_site_plan_* columns, not spcc_plans.
- *   - Stores in the `ldr-site-plans` bucket (its own bucket per Israel's ask).
- *   - Uploading auto-marks the LDR as completed (ldr_site_plan_completed=true)
+ *   - No PE stamp date input — LDAR doesn't have one.
+ *   - Writes to facilities.ldar_site_plan_* columns, not spcc_plans.
+ *   - Stores in the `ldar-site-plans` bucket (its own bucket per Israel's ask).
+ *   - Uploading auto-marks the LDAR as completed (ldar_site_plan_completed=true)
  *     so the user doesn't have to do two clicks. They can still mark complete
- *     without uploading via the parent LDRSitePlanSection.
+ *     without uploading via the parent LDARSitePlanSection.
  *
  * On file drop:
  *   1. Validate (PDF, ≤15 MB)
  *   2. If >2 MB, run the MuPDF compression pipeline (lazy-loaded WASM).
  *   3. If still >2 MB after compression, show a helpful error.
  *   4. Stage the file locally; user reviews + clicks Save.
- *   5. Save uploads to `ldr-site-plans/{facility_id}/site-plan.pdf`
+ *   5. Save uploads to `ldar-site-plans/{facility_id}/site-plan.pdf`
  *      (deterministic path with upsert:true so Replace overwrites cleanly,
  *      matching the SPCC pattern) and updates the facilities row.
  */
@@ -40,18 +40,18 @@ interface StagedFile {
   compressionApplied: boolean;
 }
 
-interface InlineLDRSitePlanUploadProps {
+interface InlineLDARSitePlanUploadProps {
   facility: Facility;
   darkMode: boolean;
   /** Called after a successful upload + DB update so the parent can refetch. */
   onUploaded: () => void;
 }
 
-export default function InlineLDRSitePlanUpload({
+export default function InlineLDARSitePlanUpload({
   facility,
   darkMode,
   onUploaded,
-}: InlineLDRSitePlanUploadProps) {
+}: InlineLDARSitePlanUploadProps) {
   const [staged, setStaged] = useState<StagedFile | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -122,7 +122,7 @@ export default function InlineLDRSitePlanUpload({
         compressionApplied: result.usedCompressed,
       });
     } catch (err: any) {
-      console.error('LDR compression pipeline failed:', err);
+      console.error('LDAR compression pipeline failed:', err);
       setError('Could not process this PDF. Please try a different file.');
     } finally {
       setIsProcessing(false);
@@ -150,7 +150,7 @@ export default function InlineLDRSitePlanUpload({
       const storagePath = `${facility.id}/site-plan.pdf`;
 
       const { error: uploadError } = await supabase.storage
-        .from('ldr-site-plans')
+        .from('ldar-site-plans')
         .upload(storagePath, staged.blob, {
           contentType: 'application/pdf',
           upsert: true,
@@ -162,24 +162,24 @@ export default function InlineLDRSitePlanUpload({
 
       const {
         data: { publicUrl },
-      } = supabase.storage.from('ldr-site-plans').getPublicUrl(storagePath);
+      } = supabase.storage.from('ldar-site-plans').getPublicUrl(storagePath);
 
-      // Uploading the file auto-completes the LDR side. The user can still
-      // toggle completed=false later from the LDRSitePlanSection.
+      // Uploading the file auto-completes the LDAR side. The user can still
+      // toggle completed=false later from the LDARSitePlanSection.
       const nowIso = new Date().toISOString();
       const { data: userData } = await supabase.auth.getUser();
       const completedBy = userData?.user?.id ?? null;
 
       const patch = {
-        ldr_site_plan_url: publicUrl,
-        ldr_site_plan_filename: staged.name,
-        ldr_site_plan_uploaded_at: nowIso,
+        ldar_site_plan_url: publicUrl,
+        ldar_site_plan_filename: staged.name,
+        ldar_site_plan_uploaded_at: nowIso,
         // Auto-complete on upload — but don't clobber an existing completion
         // timestamp / completed_by if the user already marked it complete
         // before uploading.
-        ldr_site_plan_completed: true,
-        ldr_site_plan_completed_at: facility.ldr_site_plan_completed_at ?? nowIso,
-        ldr_site_plan_completed_by: facility.ldr_site_plan_completed_by ?? completedBy,
+        ldar_site_plan_completed: true,
+        ldar_site_plan_completed_at: facility.ldar_site_plan_completed_at ?? nowIso,
+        ldar_site_plan_completed_by: facility.ldar_site_plan_completed_by ?? completedBy,
       };
 
       const { error: updateError } = await supabase
@@ -195,7 +195,7 @@ export default function InlineLDRSitePlanUpload({
 
       onUploaded();
     } catch (err: any) {
-      console.error('Error uploading LDR site plan:', err);
+      console.error('Error uploading LDAR site plan:', err);
       setError(err.message || 'Failed to upload site plan.');
     } finally {
       setIsUploading(false);
@@ -257,7 +257,7 @@ export default function InlineLDRSitePlanUpload({
           }`}
         />
         <p className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          {isDragging ? 'Drop LDR site plan PDF' : 'Drag & drop LDR site plan PDF'}
+          {isDragging ? 'Drop LDAR site plan PDF' : 'Drag & drop LDAR site plan PDF'}
         </p>
         <p className={`text-xs mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
           or click to browse · auto-compresses up to {INLINE_MAX_INPUT_MB} MB · optional
