@@ -25,7 +25,8 @@ import RecertificationStatusField from './RecertificationStatusField';
 import RecertificationPagePickerModal from './RecertificationPagePickerModal';
 import { useAuth } from '../contexts/AuthContext';
 import { FilePlus2, RefreshCw } from 'lucide-react';
-import { stampManagementSignature } from '../utils/managementSignaturePDF';
+import { stampManagementSignature, NoSignaturePagesFoundError } from '../utils/managementSignaturePDF';
+import ManagementSignaturePagePickerModal from './ManagementSignaturePagePickerModal';
 
 /** Parse mm/dd/yy or mm/dd/yyyy → ISO YYYY-MM-DD. Mirrors the helper used in
  *  SPCCPlanDetailModal so the per-berm and facility-level visit-date editors
@@ -122,12 +123,28 @@ export default function BermPlanCard({
   // overlay signature image + PE-stamp date on §5.2 and §5.3 pages →
   // re-upload to the same path. When the plan has no PE stamp date yet,
   // surface an inline date prompt instead of running the flow.
+  // State machine for the Add Mgmt Signature flow:
+  //   idle            → button visible
+  //   needs_pe_date   → inline date prompt (now ALWAYS shown on click, not
+  //                     just when pe_stamp_date is empty — Israel wants to
+  //                     override the date for the stamp without touching the
+  //                     underlying PE stamp date column)
+  //   signing         → stamping in progress
+  //   done            → flash confirmation pip (auto-revert to idle)
+  //   error           → generic error banner with dismiss
+  //   error_no_pages  → §5.2/§5.3 not auto-detected → offer manual picker.
+  //                     Carries the date the user already confirmed so we
+  //                     can retry with overrides without re-prompting.
+  //   picking_pages   → page-picker modal open. Carries the date for the
+  //                     same reason.
   const [mgmtSigState, setMgmtSigState] = useState<
     | { kind: 'idle' }
     | { kind: 'needs_pe_date'; draft: string }
     | { kind: 'signing' }
     | { kind: 'done' }
     | { kind: 'error'; message: string }
+    | { kind: 'error_no_pages'; message: string; dateIso: string }
+    | { kind: 'picking_pages'; dateIso: string }
   >({ kind: 'idle' });
 
   // Sync drafts if the plan prop changes upstream (e.g. after a refetch)
@@ -209,7 +226,10 @@ export default function BermPlanCard({
   //   5. Upload back with upsert + short cache TTL (phones drop stale fast).
   //   6. Add a system audit comment on the facility.
   //   7. onPlanChange() so the parent refetches.
-  const runMgmtSignatureStamp = async (peDateIso: string) => {
+  const runMgmtSignatureStamp = async (
+    peDateIso: string,
+    overrides?: { managementApprovalIndex: number | null; substantialHarmIndex: number | null },
+  ) => {
     if (!plan.plan_url) {
       setMgmtSigState({ kind: 'error', message: 'No plan PDF on file to sign.' });
       return;
@@ -268,11 +288,14 @@ export default function BermPlanCard({
       if (!pdfRes.ok) throw new Error(`Couldn't download the plan PDF (HTTP ${pdfRes.status}).`);
       const sourceBytes = await pdfRes.arrayBuffer();
 
-      // 4. Stamp.
+      // 4. Stamp. If `overrides` was supplied (manual page picker), pass it
+      //    through so stampManagementSignature skips auto-detection for those
+      //    sections and uses the user-chosen page indices instead.
       const merged = await stampManagementSignature({
         sourcePdfBytes: sourceBytes,
         signatureDataUrl: signature.signature_data,
         peStampDateIso: peDateIso,
+        overrides,
       });
 
       // 5. Upload back to the same storage path. Same upsert pattern the
@@ -335,6 +358,18 @@ export default function BermPlanCard({
       onPlanChange();
     } catch (err: any) {
       console.error('[BermPlanCard] Management signature stamp failed:', err);
+      // Special-case the "neither §5.2 nor §5.3 detected" failure: offer the
+      // manual page picker instead of just showing a dead-end error. Detected
+      // by instanceof check on the typed error exported from the util — no
+      // string-matching on the message.
+      if (err instanceof NoSignaturePagesFoundError) {
+        setMgmtSigState({
+          kind: 'error_no_pages',
+          message: err.message,
+          dateIso: peDateIso,
+        });
+        return;
+      }
       setMgmtSigState({
         kind: 'error',
         message: err?.message || 'Could not stamp the signature. See console for details.',
@@ -343,14 +378,13 @@ export default function BermPlanCard({
   };
 
   const handleAddMgmtSignature = () => {
-    // PE-stamp date drives the date field on both signing pages. If it's
-    // not set, prompt for one inline. The user can also clear the prompt
-    // and edit PE date via the existing pencil-icon editor up top.
-    if (!plan.pe_stamp_date) {
-      setMgmtSigState({ kind: 'needs_pe_date', draft: '' });
-      return;
-    }
-    runMgmtSignatureStamp(plan.pe_stamp_date);
+    // Always show the date prompt now (changed 2026-05-22 per Israel: the
+    // manager may have signed on a different date from the PE, so we need to
+    // let them override the date used on the stamped pages without touching
+    // the plan's pe_stamp_date column). Pre-populate with the existing PE
+    // stamp date in mm/dd/yyyy form when set, blank otherwise.
+    const draft = plan.pe_stamp_date ? formatDateMmddyy(plan.pe_stamp_date) : '';
+    setMgmtSigState({ kind: 'needs_pe_date', draft });
   };
 
   const handleSavePeDateAndStamp = async () => {
@@ -359,24 +393,32 @@ export default function BermPlanCard({
     if (!parsed) {
       setMgmtSigState({
         kind: 'error',
-        message: 'PE stamp date must be mm/dd/yy or mm/dd/yyyy.',
+        message: 'Date must be mm/dd/yy or mm/dd/yyyy.',
       });
       return;
     }
     setMgmtSigState({ kind: 'signing' });
-    try {
-      const { error } = await supabase
-        .from('spcc_plans')
-        .update({ pe_stamp_date: parsed })
-        .eq('id', plan.id);
-      if (error) throw error;
-    } catch (err: any) {
-      console.error('[BermPlanCard] Saving PE stamp date failed:', err);
-      setMgmtSigState({
-        kind: 'error',
-        message: err?.message || 'Could not save the PE stamp date.',
-      });
-      return;
+    // Only persist to spcc_plans.pe_stamp_date when it wasn't set before —
+    // i.e. this is the first time the user has provided one. If pe_stamp_date
+    // was already set, the entered value is treated as an override for the
+    // stamp only and does NOT overwrite the column. Matches Israel's intent:
+    // "override the PE stamp date that will be applied to the management
+    // signature pages in case the manager signed on a different date."
+    if (!plan.pe_stamp_date) {
+      try {
+        const { error } = await supabase
+          .from('spcc_plans')
+          .update({ pe_stamp_date: parsed })
+          .eq('id', plan.id);
+        if (error) throw error;
+      } catch (err: any) {
+        console.error('[BermPlanCard] Saving PE stamp date failed:', err);
+        setMgmtSigState({
+          kind: 'error',
+          message: err?.message || 'Could not save the PE stamp date.',
+        });
+        return;
+      }
     }
     await runMgmtSignatureStamp(parsed);
   };
@@ -753,12 +795,25 @@ export default function BermPlanCard({
                   }`}
                 >
                   <p
-                    className={`text-xs font-medium mb-2 ${
+                    className={`text-xs font-medium mb-1 ${
                       darkMode ? 'text-blue-200' : 'text-blue-800'
                     }`}
                   >
-                    Set PE Stamp Date to use on the signature
+                    {plan.pe_stamp_date
+                      ? 'Date to stamp on the management signature pages'
+                      : 'Set the date to stamp on the management signature pages'}
                   </p>
+                  {plan.pe_stamp_date && (
+                    <p
+                      className={`text-[10px] mb-2 ${
+                        darkMode ? 'text-blue-300/70' : 'text-blue-700/70'
+                      }`}
+                    >
+                      Pre-filled with the PE stamp date. Override if the manager
+                      signed on a different day — only the stamped date changes;
+                      the PE stamp date on file stays put.
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="text"
@@ -878,7 +933,67 @@ export default function BermPlanCard({
                   </button>
                 </div>
               )}
+              {/* §5.2/§5.3 auto-detection failed — offer a manual page picker
+                  so the user can point at the right pages themselves and
+                  retry. The date the user already confirmed is carried in
+                  state so the retry doesn't re-prompt for it. */}
+              {mgmtSigState.kind === 'error_no_pages' && (() => {
+                const { message, dateIso } = mgmtSigState;
+                return (
+                  <div
+                    className={`mt-2 flex flex-col gap-2 text-xs rounded-lg px-3 py-2 ${
+                      darkMode
+                        ? 'bg-red-900/30 text-red-200'
+                        : 'bg-red-50 text-red-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">{message}</div>
+                      <button
+                        type="button"
+                        onClick={() => setMgmtSigState({ kind: 'idle' })}
+                        className={`flex-shrink-0 p-0.5 rounded ${
+                          darkMode ? 'hover:bg-red-900/50' : 'hover:bg-red-100'
+                        }`}
+                        aria-label="Dismiss"
+                      >
+                        <XIcon className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMgmtSigState({ kind: 'picking_pages', dateIso })}
+                      className={`self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-medium transition-colors ${
+                        darkMode
+                          ? 'bg-red-800/40 hover:bg-red-800/60 text-red-100 ring-1 ring-red-700/50'
+                          : 'bg-white hover:bg-red-100 text-red-700 ring-1 ring-red-200'
+                      }`}
+                    >
+                      <FileText className="w-3 h-3" />
+                      Select pages manually
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
+            {/* Manual page-picker modal — opens from the error_no_pages banner.
+                Returns the user's chosen 0-based page indices and we retry
+                the stamp with them as overrides. */}
+            {mgmtSigState.kind === 'picking_pages' && (() => {
+              const { dateIso } = mgmtSigState;
+              return (
+                <ManagementSignaturePagePickerModal
+                  plan={plan}
+                  darkMode={darkMode}
+                  onCancel={() => setMgmtSigState({ kind: 'idle' })}
+                  onConfirm={(indices) => {
+                    setMgmtSigState({ kind: 'signing' });
+                    runMgmtSignatureStamp(dateIso, indices);
+                  }}
+                />
+              );
+            })()}
           </>
         ) : (
           // Empty or replacing → inline drop zone

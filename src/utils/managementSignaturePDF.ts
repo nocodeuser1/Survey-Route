@@ -149,6 +149,23 @@ function dataUrlToPngBytes(dataUrl: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Thrown by stampManagementSignature when neither §5.2 nor §5.3 can be auto-
+ * detected in the PDF and no manual overrides were supplied. Carries the same
+ * message the function previously threw as a plain Error so callers that
+ * surface err.message keep showing the same text. The callsite in
+ * BermPlanCard checks `instanceof NoSignaturePagesFoundError` to offer the
+ * manual page-picker fallback rather than match on the message string.
+ */
+export class NoSignaturePagesFoundError extends Error {
+  constructor() {
+    super(
+      'Neither the Approval by Management page (§5.2) nor the Substantial Harm Criteria page (§5.3) was found in this PDF.',
+    );
+    this.name = 'NoSignaturePagesFoundError';
+  }
+}
+
 /** ISO YYYY-MM-DD → "mm/dd/yy" matching Israel's hand-written sample. */
 export function formatPeDateShort(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -174,15 +191,46 @@ export async function stampManagementSignature(opts: {
   sourcePdfBytes: ArrayBuffer;
   signatureDataUrl: string;
   peStampDateIso: string; // YYYY-MM-DD
+  /**
+   * Optional 0-based page indices to use instead of auto-detection. Supplied
+   * by the manual page-picker fallback in BermPlanCard when text-based
+   * detection can't find §5.2/§5.3 (added 2026-05-22). When provided, both
+   * fields override the corresponding auto-detected value:
+   *   - undefined or absent → auto-detect for that section as before
+   *   - null               → explicitly skip stamping that section
+   *   - number             → use this 0-based page index
+   * If at least one override is a non-null number we trust the user and
+   * skip the "neither page found" guard — the user has explicitly pointed
+   * at a page.
+   */
+  overrides?: {
+    managementApprovalIndex?: number | null;
+    substantialHarmIndex?: number | null;
+  };
 }): Promise<Uint8Array> {
-  const { sourcePdfBytes, signatureDataUrl, peStampDateIso } = opts;
+  const { sourcePdfBytes, signatureDataUrl, peStampDateIso, overrides } = opts;
   const dateLabel = formatPeDateShort(peStampDateIso);
 
-  const pages = await findSignaturePagesInPDF(sourcePdfBytes);
+  // If the caller provided overrides, honor them; otherwise auto-detect.
+  let pages: { managementApprovalIndex: number | null; substantialHarmIndex: number | null };
+  if (overrides) {
+    const auto = await findSignaturePagesInPDF(sourcePdfBytes);
+    pages = {
+      managementApprovalIndex:
+        overrides.managementApprovalIndex === undefined
+          ? auto.managementApprovalIndex
+          : overrides.managementApprovalIndex,
+      substantialHarmIndex:
+        overrides.substantialHarmIndex === undefined
+          ? auto.substantialHarmIndex
+          : overrides.substantialHarmIndex,
+    };
+  } else {
+    pages = await findSignaturePagesInPDF(sourcePdfBytes);
+  }
+
   if (pages.managementApprovalIndex === null && pages.substantialHarmIndex === null) {
-    throw new Error(
-      'Neither the Approval by Management page (§5.2) nor the Substantial Harm Criteria page (§5.3) was found in this PDF.',
-    );
+    throw new NoSignaturePagesFoundError();
   }
 
   // Two doc handles: pdfjs for text-position scanning, pdf-lib for stamping.
