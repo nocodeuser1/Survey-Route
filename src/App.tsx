@@ -3605,48 +3605,95 @@ function App() {
                     </div>
                   )}
 
+                  {/* Stat-card set. All four cards share the same shape and
+                      height (flex column with the headline number vertically
+                      centred), differentiated by a colored left-edge accent
+                      strip and a tinted icon chip in the top-right. Keeps
+                      the eye scanning across cleanly instead of being
+                      thrown off by the taller Days card. */}
                   <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Calendar className="w-4 h-4 md:w-5 md:h-5 text-blue-600 dark:text-blue-400" />
-                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Days / Time</h3>
-                      </div>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{filteredOptimizationResult?.totalDays || 0} days</p>
-                      <p className="text-xs md:text-sm text-gray-600 dark:text-gray-300 mt-1">
-                        {isNaN(filteredOptimizationResult?.totalTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalTime || 0) % 60)}m`} total
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        ({isNaN(filteredOptimizationResult?.totalDriveTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalDriveTime || 0) % 60)}m`} drive + {isNaN(filteredOptimizationResult?.totalVisitTime || 0) ? '0h 0m' : `${Math.floor((filteredOptimizationResult?.totalVisitTime || 0) / 60)}h ${Math.round((filteredOptimizationResult?.totalVisitTime || 0) % 60)}m`} onsite)
-                      </p>
-                    </div>
+                    {(() => {
+                      const totalTime = filteredOptimizationResult?.totalTime || 0;
+                      const driveTime = filteredOptimizationResult?.totalDriveTime || 0;
+                      const visitTime = filteredOptimizationResult?.totalVisitTime || 0;
+                      const fmtHM = (mins: number) =>
+                        isNaN(mins) ? '0h 0m' : `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
 
-                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <MapPin className="w-4 h-4 md:w-5 md:h-5 text-green-600 dark:text-green-400" />
-                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Facilities</h3>
-                      </div>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{visibleFacilityCount}</p>
-                    </div>
+                      const cards: Array<{
+                        key: string;
+                        label: string;
+                        value: string;
+                        sub?: string;
+                        accent: string;
+                        iconBg: string;
+                        iconColor: string;
+                        Icon: typeof Calendar;
+                      }> = [
+                        {
+                          key: 'days',
+                          label: 'Total Days',
+                          value: `${filteredOptimizationResult?.totalDays || 0}`,
+                          sub: `${fmtHM(totalTime)} • ${fmtHM(driveTime)} drive + ${fmtHM(visitTime)} onsite`,
+                          accent: 'before:bg-blue-500',
+                          iconBg: 'bg-blue-100 dark:bg-blue-900/40',
+                          iconColor: 'text-blue-600 dark:text-blue-400',
+                          Icon: Calendar,
+                        },
+                        {
+                          key: 'facilities',
+                          label: 'Total Facilities',
+                          value: `${visibleFacilityCount}`,
+                          accent: 'before:bg-emerald-500',
+                          iconBg: 'bg-emerald-100 dark:bg-emerald-900/40',
+                          iconColor: 'text-emerald-600 dark:text-emerald-400',
+                          Icon: MapPin,
+                        },
+                        {
+                          key: 'miles',
+                          label: 'Total Miles',
+                          value: (filteredOptimizationResult?.totalMiles || 0).toFixed(1),
+                          accent: 'before:bg-orange-500',
+                          iconBg: 'bg-orange-100 dark:bg-orange-900/40',
+                          iconColor: 'text-orange-600 dark:text-orange-400',
+                          Icon: TrendingUp,
+                        },
+                        {
+                          key: 'drive',
+                          label: 'Drive Time',
+                          value: `${Math.round(driveTime / 60)}h`,
+                          accent: 'before:bg-purple-500',
+                          iconBg: 'bg-purple-100 dark:bg-purple-900/40',
+                          iconColor: 'text-purple-600 dark:text-purple-400',
+                          Icon: Clock,
+                        },
+                      ];
 
-                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-orange-600 dark:text-orange-400" />
-                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Total Miles</h3>
-                      </div>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
-                        {(filteredOptimizationResult?.totalMiles || 0).toFixed(1)}
-                      </p>
-                    </div>
-
-                    <div className="bg-white/70 dark:bg-gray-900/60 backdrop-blur-xl rounded-lg shadow-lg border border-white/30 dark:border-white/10 p-3 md:p-4 transition-colors duration-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Clock className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
-                        <h3 className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Drive Time</h3>
-                      </div>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
-                        {Math.round((filteredOptimizationResult?.totalDriveTime || 0) / 60)}h
-                      </p>
-                    </div>
+                      return cards.map(({ key, label, value, sub, accent, iconBg, iconColor, Icon }) => (
+                        <div
+                          key={key}
+                          className={`relative flex flex-col min-h-[112px] bg-white/85 dark:bg-gray-900/70 backdrop-blur-xl rounded-xl shadow-sm border border-gray-200/60 dark:border-white/10 px-4 py-3 transition-all hover:shadow-md hover:-translate-y-px overflow-hidden before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 ${accent}`}
+                        >
+                          <div className="flex items-start justify-between mb-1.5 pl-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                              {label}
+                            </span>
+                            <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconBg}`}>
+                              <Icon className={`w-4 h-4 ${iconColor}`} />
+                            </span>
+                          </div>
+                          <div className="pl-1 flex-1 flex flex-col justify-center">
+                            <p className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white leading-none">
+                              {value}
+                            </p>
+                            {sub && (
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1.5 leading-snug">
+                                {sub}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
 
                   {/* Survey Type Selector - above the map.
@@ -3703,6 +3750,7 @@ function App() {
                       return n;
                     };
 
+                    const allActive = surveyType === 'all';
                     return (
                       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -3710,13 +3758,19 @@ function App() {
                             <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                             <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          {/* Segmented slider — same visual model as the
+                              All/Plans/Inspections switcher on the Facilities
+                              tab. Active option floats on a white pill with
+                              soft shadow; inactive options are muted text
+                              that pop on hover. Count badges sit inside
+                              each option without breaking the row. */}
+                          <div className="inline-flex flex-wrap rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 gap-0.5">
                             {/* All Facilities tab — always first */}
                             <button
                               onClick={() => setSurveyType('all')}
-                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${surveyType === 'all'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                              className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${allActive
+                                ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                 }`}
                             >
                               All Facilities
@@ -3736,23 +3790,27 @@ function App() {
                                   key={type.id}
                                   onClick={() => setSurveyType(type.id)}
                                   title={type.description || type.name}
-                                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${isActive
-                                    ? 'text-white'
-                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                  }`}
-                                  style={isActive ? { backgroundColor: type.color } : undefined}
+                                  className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 ${isActive
+                                    ? 'bg-white dark:bg-gray-800 shadow-sm'
+                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
+                                    }`}
+                                  // Active tab uses the type's own color for
+                                  // the icon + text — keeps the segmented
+                                  // chrome uniform while still letting each
+                                  // type carry its identity.
+                                  style={isActive ? { color: type.color } : undefined}
                                 >
                                   <Icon className="w-4 h-4" />
                                   <span>{type.name}</span>
                                   {inRouteCount > 0 && (
                                     <span
-                                      className={`ml-1 px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${isActive ? 'bg-white/20' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                                      className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${isActive ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
                                     >
                                       {inRouteCount}
                                     </span>
                                   )}
                                   {overdueCount > 0 && (
-                                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white whitespace-nowrap">
+                                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500 text-white whitespace-nowrap">
                                       {overdueCount} overdue
                                     </span>
                                   )}
