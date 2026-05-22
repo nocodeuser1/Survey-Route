@@ -41,6 +41,7 @@ import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import LDARSitePlanSection from './LDARSitePlanSection';
+import LDARObservationPathEditor from './LDARObservationPathEditor';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
@@ -181,6 +182,9 @@ export default function FacilityDetailModal({
   const [editingVisitDate, setEditingVisitDate] = useState(false);
   const [visitDateValue, setVisitDateValue] = useState(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
   const [savingDate, setSavingDate] = useState(false);
+  // LDAR Observation Path editor — toggled from the LDAR tab. Rendered as a
+  // full-screen overlay above the modal.
+  const [showLDARPathEditor, setShowLDARPathEditor] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2439,6 +2443,69 @@ export default function FacilityDetailModal({
         darkMode={darkMode}
         onChange={bumpFacilityRender}
       />
+
+      {/* Walking path / observation path overlay — AI-generated + hand-edited.
+          Disabled until a site plan PDF has been uploaded. */}
+      <div
+        className={`rounded-xl border ${
+          darkMode ? 'border-gray-700 bg-gray-800/40' : 'border-gray-200 bg-white'
+        }`}
+      >
+        <div
+          className={`flex items-center justify-between px-4 py-3 border-b ${
+            darkMode ? 'border-gray-700' : 'border-gray-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Navigation className={`w-4 h-4 ${darkMode ? 'text-purple-400' : 'text-purple-600'}`} />
+            <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              Observation Path
+            </h3>
+          </div>
+          {facility.ldar_observation_path_data?.stops?.length ? (
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                darkMode ? 'bg-purple-900/30 text-purple-300' : 'bg-purple-100 text-purple-700'
+              }`}
+            >
+              {facility.ldar_observation_path_data.stops.length} stops
+            </span>
+          ) : (
+            <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>Not drawn</span>
+          )}
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Numbered walking path drawn on top of the LDAR site plan. The AI proposes the
+            route based on the labeled equipment; you can drag, edit numbers, and adjust
+            the legend before saving.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowLDARPathEditor(true)}
+            disabled={!facility.ldar_site_plan_url}
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-white transition-colors ${
+              !facility.ldar_site_plan_url
+                ? 'bg-purple-600/40 cursor-not-allowed'
+                : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+            }`}
+            title={
+              facility.ldar_site_plan_url
+                ? 'Open the walking-path editor'
+                : 'Upload an LDAR site plan PDF first'
+            }
+          >
+            {facility.ldar_observation_path_data?.stops?.length
+              ? 'Open Walking Path Editor'
+              : 'Generate Walking Path with AI'}
+          </button>
+          {!facility.ldar_site_plan_url && (
+            <p className={`text-xs italic ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              Upload a site plan PDF above to enable the walking-path editor.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -2800,6 +2867,16 @@ export default function FacilityDetailModal({
           onClose={() => {
             setShowNearbyAlert(false);
             setNearbyFacilitiesData([]);
+          }}
+        />
+      )}
+      {showLDARPathEditor && (
+        <LDARObservationPathEditor
+          facility={facility}
+          darkMode={darkMode}
+          onClose={() => setShowLDARPathEditor(false)}
+          onSaved={() => {
+            bumpFacilityRender();
           }}
         />
       )}

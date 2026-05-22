@@ -17,6 +17,62 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+/**
+ * Walking-path overlay drawn on top of the LDAR site plan PDF. All coords
+ * are normalized 0..1 to the source page so the overlay scales with any
+ * zoom/window-resize. See migration 20260521020000_ldar_observation_path.sql
+ * and src/components/LDARObservationPathEditor.tsx.
+ */
+export interface LDARObservationPathStop {
+  /** Stable id (uuid-ish) so React keys + selection survive reorders. */
+  id: string;
+  /** User-set number shown in the red circle. The legend lists stops in
+   *  ascending order by this number. Users may edit it to fix AI mistakes,
+   *  so duplicates and gaps are allowed. */
+  number: number;
+  /** Normalized 0..1 position on the source page. */
+  x: number;
+  y: number;
+  /** Short label used in the legend (e.g. "Wellheads (2x)", "Combustor System"). */
+  label: string;
+}
+
+export interface LDARObservationPathWaypoint {
+  /** Stable id for React keys + drag refs. */
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface LDARObservationPathLegend {
+  /** Normalized 0..1 bounds of the legend box. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Optional title shown at the top of the legend. */
+  title?: string;
+}
+
+export interface LDARObservationPathData {
+  stops: LDARObservationPathStop[];
+  /** Shape-only points along the curve between the first and last stop.
+   *  The smoothed path is computed as catmull-rom through:
+   *  [firstStop, ...waypoints, lastStop] (in the order they're laid out
+   *  by following stop.number ascending). */
+  waypoints: LDARObservationPathWaypoint[];
+  legend: LDARObservationPathLegend;
+  /** Pixel size of the source page render that produced these coords.
+   *  Used for diagnostics only — the overlay re-renders at the current
+   *  display size using normalized coords. */
+  imageSize?: { w: number; h: number };
+  /** Upstream Gemini model that generated this path (for support / model rollout). */
+  model?: string;
+  generated_at?: string;
+  /** Bumped on every save so we can detect concurrent edits if we ever need to. */
+  edited_at?: string;
+}
+
 export interface Facility {
   id: string;
   user_id: string;
@@ -79,6 +135,11 @@ export interface Facility {
   ldar_site_plan_url?: string | null;
   ldar_site_plan_filename?: string | null;
   ldar_site_plan_uploaded_at?: string | null;
+  // AI-generated + user-edited walking-path overlay drawn on top of the LDAR
+  // site plan PDF. NULL = "no path yet". See migration
+  // 20260521020000_ldar_observation_path.sql for the JSON shape and
+  // src/components/LDARObservationPathEditor.tsx for the editor.
+  ldar_observation_path_data?: LDARObservationPathData | null;
   // Detail fields
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;
