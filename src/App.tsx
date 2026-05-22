@@ -3526,6 +3526,34 @@ function App() {
                     />
                   )}
 
+                  {/* Custom Route callout sits ABOVE the toolbar so the
+                      "you're scoped to a selection" context registers
+                      before the user reaches for any Update / Save /
+                      Export action. Reset-to-All uses a soft blue chip
+                      instead of a solid CTA blue so it doesn't compete
+                      with the Update Route button below. */}
+                  {showOnlyRouteFacilities && routeFacilityIds && (
+                    <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-2.5">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Custom Route: {routeFacilityIds.length} facilities selected</span>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setRouteFacilityIds(null);
+                          setShowOnlyRouteFacilities(false);
+                          if (lastUsedSettings) {
+                            await handleGenerateRoutes(lastUsedSettings);
+                          }
+                        }}
+                        className="flex items-center gap-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-medium px-2.5 py-1 rounded transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                        Reset to All
+                      </button>
+                    </div>
+                  )}
+
                   {!isFullScreenMap && (
                     <RouteResults
                       result={optimizationResult}
@@ -3581,28 +3609,6 @@ function App() {
                       showOnlySettings={true}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                     />
-                  )}
-
-                  {showOnlyRouteFacilities && routeFacilityIds && (
-                    <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-2.5">
-                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
-                        <CheckCircle className="w-4 h-4" />
-                        <span>Custom Route: {routeFacilityIds.length} facilities selected</span>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          setRouteFacilityIds(null);
-                          setShowOnlyRouteFacilities(false);
-                          if (lastUsedSettings) {
-                            await handleGenerateRoutes(lastUsedSettings);
-                          }
-                        }}
-                        className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-2.5 py-1 rounded transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                        Reset to All
-                      </button>
-                    </div>
                   )}
 
                   {/* Stat-card set. All four cards share the same shape and
@@ -3802,14 +3808,20 @@ function App() {
                                 >
                                   <Icon className="w-4 h-4" />
                                   <span>{type.name}</span>
-                                  {inRouteCount > 0 && (
+                                  {/* Count + overdue badges only surface on
+                                      the ACTIVE tab. Inactive tabs stay
+                                      clean text so the user isn't pre-
+                                      bombarded with alerts for modes
+                                      they haven't picked yet — the
+                                      counts are still one click away. */}
+                                  {isActive && inRouteCount > 0 && (
                                     <span
-                                      className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${isActive ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                                      className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200"
                                     >
                                       {inRouteCount}
                                     </span>
                                   )}
-                                  {overdueCount > 0 && (
+                                  {isActive && overdueCount > 0 && (
                                     <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500 text-white whitespace-nowrap">
                                       {overdueCount} overdue
                                     </span>

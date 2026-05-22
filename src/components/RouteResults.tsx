@@ -1209,83 +1209,72 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
         {settings && (
-          <div className="bg-white/90 dark:bg-gray-800/80 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200 overflow-visible relative z-10">
+          // Toolbar redesign: actions now read as a labelled chip cluster
+          // sitting in a soft tinted pill on the left ("Route" toolset),
+          // with Update Route as the primary action on the right. The
+          // labels make the row feel intentional instead of four faint
+          // icons drifting in space, and the matched chip / button
+          // heights balance the bar visually.
+          <div className="bg-white/90 dark:bg-gray-800/80 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-3 py-2 transition-all duration-200 overflow-visible relative z-10">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-0.5">
+              {/* Action toolset — chip-grouped on a subtle gray pill so
+                  the four buttons read as a connected unit rather than
+                  loose icons. */}
+              <div className="inline-flex items-center gap-0.5 bg-gray-50 dark:bg-gray-900/40 rounded-lg p-0.5">
                 {onConfigureHomeBase && (
-                  <div className="relative group/tip">
-                    <button
-                      onClick={onConfigureHomeBase}
-                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
-                    >
-                      <Home className="w-4 h-4" />
-                    </button>
-                    <div className="absolute left-0 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
-                      <div className="font-medium">Home Base</div>
-                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Set where each team's route starts & ends</div>
-                      <div className="absolute bottom-full left-3 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
-                    </div>
-                  </div>
+                  <button
+                    onClick={onConfigureHomeBase}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
+                    title="Set where each team's route starts & ends"
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Home Base</span>
+                  </button>
                 )}
                 {onLoadRoute && (
-                  <div className="relative group/tip">
-                    <button
-                      onClick={() => {
-                        console.log('[showOnlySettings] Load Route button clicked');
-                        setShowLoadRoutePopup(true);
-                      }}
-                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
-                    >
-                      <FolderOpen className="w-4 h-4" />
-                    </button>
-                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
-                      <div className="font-medium">Load Route</div>
-                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Open a previously saved route plan</div>
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
-                    </div>
-                  </div>
-                )}
-                {onSaveCurrentRoute && (
-                  <div className="relative group/tip">
-                    <button
-                      onClick={() => {
-                        console.log('[showOnlySettings] Save Route button clicked');
-                        setShowSaveRoutePopup(true);
-                      }}
-                      className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
-                    >
-                      <Save className="w-4 h-4" />
-                    </button>
-                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
-                      <div className="font-medium">Save Route</div>
-                      <div className="text-gray-500 dark:text-gray-400 text-[11px]">Save the current route plan for later use</div>
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
-                    </div>
-                  </div>
-                )}
-                <div className="relative group/tip">
                   <button
                     onClick={() => {
-                      console.log('[showOnlySettings] Export Routes button clicked');
-                      setShowExportPopup(true);
+                      console.log('[showOnlySettings] Load Route button clicked');
+                      setShowLoadRoutePopup(true);
                     }}
-                    className="p-1.5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10 rounded-lg transition-all"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
+                    title="Open a previously saved route plan"
                   >
-                    <Download className="w-4 h-4" />
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Load</span>
                   </button>
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2.5 py-1.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl backdrop-saturate-150 text-gray-900 dark:text-white text-xs rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/40 dark:border-white/10 whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-150 z-[9999]">
-                    <div className="font-medium">Export Routes</div>
-                    <div className="text-gray-500 dark:text-gray-400 text-[11px]">Download route schedule as a CSV file</div>
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-white/80 dark:border-b-gray-800/80" />
-                  </div>
-                </div>
+                )}
+                {onSaveCurrentRoute && (
+                  <button
+                    onClick={() => {
+                      console.log('[showOnlySettings] Save Route button clicked');
+                      setShowSaveRoutePopup(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
+                    title="Save the current route plan for later use"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Save</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    console.log('[showOnlySettings] Export Routes button clicked');
+                    setShowExportPopup(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
+                  title="Download route schedule as a CSV file"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Export</span>
+                </button>
               </div>
 
               <div className="flex items-center gap-2">
                 {excludedCount > 0 && (
                   <button
                     onClick={handleRestoreExcluded}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20 transition-all"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20 transition-all"
                     title={`Restore ${excludedCount} excluded facilit${excludedCount === 1 ? 'y' : 'ies'}`}
                   >
                     <Undo2 className="w-3.5 h-3.5" />
@@ -1294,9 +1283,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 )}
                 <button
                   onClick={() => setShowRefreshOptions(true)}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl hover:from-blue-700 hover:to-blue-800 shadow-[0_2px_8px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.4)] transition-all active:scale-[0.98]"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 shadow-[0_2px_8px_rgba(59,130,246,0.25)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.35)] transition-all active:scale-[0.98]"
                 >
-                  <Settings className="w-4 h-4" />
+                  <Settings className="w-3.5 h-3.5" />
                   <span>Update Route</span>
                 </button>
               </div>
