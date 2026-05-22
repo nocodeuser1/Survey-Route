@@ -4430,6 +4430,9 @@ function App() {
         <AIAssistantBubble
           facilities={facilities}
           onOpenFacility={setAiOpenedFacility}
+          // When the AI-opened facility modal is in front, Esc should close
+          // the modal (which has its own handler), not the bubble behind it.
+          escapeDisabled={!!aiOpenedFacility}
         />
       )}
 

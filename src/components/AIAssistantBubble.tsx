@@ -65,11 +65,34 @@ interface AIAssistantBubbleProps {
   facilities?: Facility[];
   /** Called when the user clicks a linkified facility mention. */
   onOpenFacility?: (facility: Facility) => void;
+  /** When true, the bubble's window-level Escape handler no-ops. The parent
+   *  uses this when a top-level modal owned by the AI flow (e.g. the
+   *  facility-detail modal opened by clicking a linkified mention) is
+   *  visible — Esc should close the modal in front, not the bubble behind. */
+  escapeDisabled?: boolean;
+}
+
+const PANEL_WIDTH_KEY = 'ai-assistant-panel-width';
+const PANEL_WIDTH_MIN = 320;
+const PANEL_WIDTH_MAX = 900;
+const PANEL_WIDTH_DEFAULT = 420;
+
+function loadPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(PANEL_WIDTH_KEY);
+    if (!raw) return PANEL_WIDTH_DEFAULT;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n)) return PANEL_WIDTH_DEFAULT;
+    return Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, n));
+  } catch {
+    return PANEL_WIDTH_DEFAULT;
+  }
 }
 
 export default function AIAssistantBubble({
   facilities = [],
   onOpenFacility,
+  escapeDisabled = false,
 }: AIAssistantBubbleProps = {}) {
   const { currentAccount } = useAccount();
 
@@ -101,6 +124,32 @@ export default function AIAssistantBubble({
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Persisted panel width (px). User drags the left-edge handle to resize.
+  const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
+  const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  function onResizeDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    resizeStartRef.current = { startX: e.clientX, startWidth: panelWidth };
+  }
+  function onResizeMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizeStartRef.current) return;
+    // Dragging LEFT grows the panel (the panel is anchored to bottom-right).
+    const delta = resizeStartRef.current.startX - e.clientX;
+    const next = Math.max(
+      PANEL_WIDTH_MIN,
+      Math.min(PANEL_WIDTH_MAX, resizeStartRef.current.startWidth + delta),
+    );
+    setPanelWidth(next);
+  }
+  function onResizeUp() {
+    if (!resizeStartRef.current) return;
+    resizeStartRef.current = null;
+    try { localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth)); } catch { /* ignore */ }
+  }
+
   // Auto-scroll to the bottom whenever a new chunk arrives or the user posts.
   useEffect(() => {
     if (scrollRef.current) {
@@ -123,14 +172,17 @@ export default function AIAssistantBubble({
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setIsOpen(false);
-      }
+      if (e.key !== 'Escape') return;
+      // Skip when a child modal is in front (e.g. the AI-opened facility
+      // detail modal). Esc belongs to that modal first; the bubble should
+      // only close when it's the topmost element on screen.
+      if (escapeDisabled) return;
+      e.stopPropagation();
+      setIsOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen]);
+  }, [isOpen, escapeDisabled]);
 
   // Cancel any in-flight stream when the component unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -334,7 +386,23 @@ export default function AIAssistantBubble({
 
       {/* Chat panel */}
       {isOpen && (
-        <div className="fixed bottom-5 right-5 z-40 w-[min(420px,calc(100vw-2.5rem))] h-[min(640px,calc(100vh-2.5rem))] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-[fadeIn_0.15s_ease-out]">
+        <div
+          className="fixed bottom-5 right-5 z-40 h-[min(640px,calc(100vh-2.5rem))] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-[fadeIn_0.15s_ease-out]"
+          style={{ width: `min(${panelWidth}px, calc(100vw - 2.5rem))` }}
+        >
+          {/* Left-edge resize handle. Drag to expand the panel toward the
+              left; cursor flips to ew-resize on hover so it's discoverable.
+              Width persisted to localStorage on release. */}
+          <div
+            onPointerDown={onResizeDown}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeUp}
+            onPointerCancel={onResizeUp}
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-10"
+            title="Drag to resize"
+            aria-label="Resize AI assistant panel"
+          />
+
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-600 to-blue-700 text-white flex flex-col gap-2 flex-shrink-0">
             <div className="flex items-center justify-between gap-2">
@@ -589,7 +657,14 @@ function AIMarkdown({ source, facilityByName, onOpenFacility }: AIMarkdownProps)
               {children}
             </ol>
           ),
-          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          li: ({ children }) => (
+            // [&>p]:my-0 keeps tight spacing inside list items when the AI
+            // emits a "loose" markdown list (blank lines between items) —
+            // CommonMark wraps each item's content in <p> tags, and the
+            // browser's default 1em paragraph margin makes single bullet
+            // lines look like they have two line breaks of padding.
+            <li className="leading-relaxed [&>p]:my-0">{children}</li>
+          ),
 
           // Headings — keep them small inside the bubble so they don't dwarf the body
           h1: ({ children }) => <h3 className="text-base font-bold text-gray-900 dark:text-white mt-3 mb-1">{children}</h3>,
