@@ -8,6 +8,7 @@ import { formatDate } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
+import LDRSitePlanSection from './LDRSitePlanSection';
 
 interface SPCCPlanDetailModalProps {
   facility: Facility;
@@ -1436,6 +1437,15 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               )}
             </div>
           </div>
+
+          {/* LDR Site Plan — facility-level, parallel to (but independent of)
+              the SPCC berm workflow above. See LDRSitePlanSection for full
+              rationale. */}
+          <LDRSitePlanSection
+            facility={facility}
+            darkMode={darkMode}
+            onChange={onFacilitiesChange}
+          />
 
           {/* Action buttons */}
           <div className="space-y-2">
