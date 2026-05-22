@@ -28,6 +28,8 @@ import {
   type TextBoundingBox,
 } from '../utils/findTextInPdfPage';
 import { svgToPdfBlob } from '../utils/svgToPdfBlob';
+import { detectSitePlanInLoadedPdf } from '../utils/spccSitePlanDetector';
+import { extractPageAsPdf } from '../utils/extractPdfPage';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
@@ -270,6 +272,81 @@ function emptyPathData(): LDARObservationPathData {
   return { stops: [], waypoints: [], legend: { x: 0.04, y: 0.82, w: 0.42, h: 0.14, title: 'LDAR OBSERVATION PATH' } };
 }
 
+/**
+ * Re-extract the Facility Site Plan page from the facility's SPCC PDF
+ * and overwrite the source LDAR site-plan file in storage with the
+ * fresh page. Returns the rendered image + the new URL/timestamp so
+ * the caller can update the editor's pageImage and the facility prop.
+ *
+ * Pre-two-file-model versions of the editor used to bake annotations
+ * into the source on Save (instead of writing to a separate
+ * -annotated.pdf path). Facilities that went through that code path
+ * have a source PDF with the walking path already baked in — if AI
+ * then sees that as input, it produces stacked / duplicated paths.
+ * Running this helper before AI generation guarantees a clean canvas
+ * regardless of any prior state.
+ *
+ * No-op (returns null) for facilities without an SPCC plan (user
+ * uploaded their own LDAR PDF directly — we trust their upload).
+ */
+async function refreshSourceFromSPCC(
+  facility: Facility,
+): Promise<
+  | { dataUrl: string; w: number; h: number; newUrl: string; newUploadedAt: string }
+  | null
+> {
+  if (!facility.spcc_plan_url) return null;
+
+  const resp = await fetch(facility.spcc_plan_url);
+  if (!resp.ok) throw new Error(`Could not fetch SPCC plan (${resp.status})`);
+  const buf = await resp.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+
+  // Re-run page detection each time. Cheap (text-content extraction
+  // only, no AI), and avoids stale page numbers if the SPCC plan was
+  // re-uploaded with a different layout.
+  const detection = await detectSitePlanInLoadedPdf(pdf);
+  const pageNumber = detection.detectedPage ?? 1;
+
+  // Extract just that page → upload to the deterministic source path.
+  const pdfBlob = await extractPageAsPdf(buf, pageNumber);
+  const storagePath = `${facility.id}/site-plan.pdf`;
+  const { error: uploadError } = await supabase.storage
+    .from('ldar-site-plans')
+    .upload(storagePath, pdfBlob, {
+      contentType: 'application/pdf',
+      upsert: true,
+      cacheControl: '60',
+    });
+  if (uploadError) throw uploadError;
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('ldar-site-plans').getPublicUrl(storagePath);
+  const newUploadedAt = new Date().toISOString();
+
+  // Patch the facility row so the link cache-buster picks up the new
+  // version and future opens fetch the clean source.
+  const { error: tsErr } = await supabase
+    .from('facilities')
+    .update({ ldar_site_plan_url: publicUrl, ldar_site_plan_uploaded_at: newUploadedAt })
+    .eq('id', facility.id);
+  if (tsErr) throw tsErr;
+
+  // Render the FRESH page to image. Append the timestamp as a query so
+  // the browser doesn't serve us the just-overwritten file from cache.
+  const cacheBustUrl = `${publicUrl}?t=${encodeURIComponent(newUploadedAt)}`;
+  const rendered = await renderPdfPageToImage(cacheBustUrl, { scale: 2 });
+
+  return {
+    dataUrl: rendered.dataUrl,
+    w: rendered.width,
+    h: rendered.height,
+    newUrl: publicUrl,
+    newUploadedAt,
+  };
+}
+
 /** Make sure every stop and waypoint has a stable id. The AI returns them
  *  without ids (just numbers / coords); older saved data may also lack
  *  them. Without this, useState-based mutations would lose track of which
@@ -486,6 +563,41 @@ export default function LDARObservationPathEditor({
     setIsGenerating(true);
     setGenerateError(null);
     try {
+      // ---- Step A: refresh the source PDF from the SPCC plan, if
+      // available. Two reasons this matters:
+      //   1. Defensive: pre–two-file-model versions of this editor used
+      //      to bake annotations into the source on Save, leaving a
+      //      doubly-annotated PDF behind. If we just send that to AI,
+      //      it produces a stacked walking path on top of the old one.
+      //   2. Future-proof: ensures every Generate starts from a known-
+      //      clean canvas regardless of any prior tinkering.
+      // For facilities WITHOUT an SPCC plan (user uploaded their own
+      // LDAR PDF), we trust the existing source and skip this step.
+      let workingImage = pageImage;
+      if (facility.spcc_plan_url) {
+        try {
+          const fresh = await refreshSourceFromSPCC(facility);
+          if (fresh) {
+            workingImage = { dataUrl: fresh.dataUrl, w: fresh.w, h: fresh.h };
+            setPageImage(workingImage);
+            // Mutate the prop so subsequent reads (handleSave, link in
+            // LDARSitePlanSection) see the refreshed URL + cache-buster.
+            Object.assign(facility, {
+              ldar_site_plan_url: fresh.newUrl,
+              ldar_site_plan_uploaded_at: fresh.newUploadedAt,
+            });
+          }
+        } catch (refreshErr) {
+          // Non-fatal: log + continue with existing source. The user
+          // may end up with stacked annotations but at least Generate
+          // doesn't fail outright.
+          console.warn(
+            'Source refresh from SPCC failed; using existing source PDF:',
+            refreshErr,
+          );
+        }
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) throw new Error('Not signed in.');
@@ -499,7 +611,7 @@ export default function LDARObservationPathEditor({
         },
         body: JSON.stringify({
           facilityId: facility.id,
-          imageBase64: pageImage.dataUrl,
+          imageBase64: workingImage.dataUrl,
           imageMimeType: 'image/png',
         }),
       });
@@ -519,7 +631,7 @@ export default function LDARObservationPathEditor({
           id: shortId(`w${i}`),
         })),
         legend: json.legend,
-        imageSize: { w: pageImage.w, h: pageImage.h },
+        imageSize: { w: workingImage.w, h: workingImage.h },
         model: json.model,
         generated_at: json.generated_at,
       };
