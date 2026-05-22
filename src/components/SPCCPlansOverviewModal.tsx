@@ -4,7 +4,38 @@ import { Facility } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { getSPCCPlanStatus, formatDayCount, type SPCCPlanStatus } from '../utils/spccStatus';
+import { downloadPlanWithCanonicalFilename } from '../utils/spccPlans';
 import { formatDate } from '../utils/dateUtils';
+
+/**
+ * Shared handler for the modal's two "View" affordances (list-row icon
+ * button + detail-view primary button). Fetches the plan PDF and
+ * triggers a browser download using the canonical filename — the same
+ * naming the bulk-download zip produces. Falls back to opening the raw
+ * URL in a new tab if the fetch fails (CORS, network) so the user is
+ * never left without a way to reach the document.
+ */
+async function viewPlanWithCanonicalFilename(facility: Facility) {
+  if (!facility.spcc_plan_url) return;
+  // The modal works off the facilities table directly (no per-berm
+  // spcc_plans rows here) so we infer renewal vs initial from the
+  // recertified_date mirror, and use the most informative date we have.
+  const isRenewal = !!facility.recertified_date;
+  const date =
+    (isRenewal ? facility.recertified_date : facility.spcc_pe_stamp_date) ||
+    new Date().toISOString().slice(0, 10);
+  try {
+    await downloadPlanWithCanonicalFilename({
+      url: facility.spcc_plan_url,
+      facility,
+      isRenewal,
+      date,
+    });
+  } catch (err) {
+    console.error('Plan download failed, opening raw URL:', err);
+    window.open(facility.spcc_plan_url, '_blank', 'noopener,noreferrer');
+  }
+}
 
 interface SPCCPlansOverviewModalProps {
   isOpen: boolean;
@@ -429,9 +460,10 @@ export default function SPCCPlansOverviewModal({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(item.facility.spcc_plan_url!, '_blank');
+                                viewPlanWithCanonicalFilename(item.facility);
                               }}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                              title="Download with the canonical filename"
                             >
                               <ExternalLink className="w-3 h-3" />
                               View
@@ -607,19 +639,20 @@ function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: bo
         </div>
       </div>
 
-      {/* View Plan Button */}
+      {/* View Plan Button — downloads with the canonical filename
+          (same format the bulk-download zip uses). */}
       {item.hasPlan && (
         <div className="flex justify-center">
-          <a
-            href={facility.spcc_plan_url!}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => viewPlanWithCanonicalFilename(facility)}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors shadow-lg hover:shadow-xl"
+            title="Download with the canonical filename"
           >
             <FileText className="w-5 h-5" />
             View SPCC Plan PDF
             <ExternalLink className="w-4 h-4" />
-          </a>
+          </button>
         </div>
       )}
 

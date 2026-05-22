@@ -176,6 +176,62 @@ export function pickFacilityFilenameName(facility: Pick<Facility, 'name' | 'matc
 }
 
 /**
+ * Fetch a stored SPCC plan PDF and trigger a browser download with the
+ * canonical filename (the same nomenclature used by the bulk-download
+ * zip — see FacilitiesManager). Used by every "View Plan" affordance
+ * so a one-off click produces the same well-named file as the bulk
+ * action.
+ *
+ * Why fetch-and-save (not <a download=...>): the `download` attribute
+ * is silently ignored for cross-origin URLs, which is what Supabase
+ * Storage URLs are. Fetching to a Blob and clicking a same-origin
+ * blob: URL lets the browser honour the filename.
+ *
+ * `pickFacilityFilenameName` + `buildPlanFilename` provide the format;
+ * this helper is just the IO + download trigger.
+ */
+export async function downloadPlanWithCanonicalFilename(opts: {
+  url: string;
+  facility: Pick<Facility, 'name' | 'matched_facility_name' | 'camino_facility_id'>;
+  /** Whether this is the recertified PDF (true) or the original plan (false). */
+  isRenewal: boolean;
+  /** ISO date or timestamp; only YYYY-MM-DD is read. */
+  date: string;
+  /** Optional berm index — only appended when `multipleBerm` is true so
+   *  multi-berm facilities get a per-berm suffix in their filename. */
+  bermIndex?: number;
+  multipleBerm?: boolean;
+}): Promise<void> {
+  let filename = buildPlanFilename({
+    facilityName: pickFacilityFilenameName(opts.facility),
+    caminoFacilityId: opts.facility.camino_facility_id,
+    kind: opts.isRenewal ? 'renewal' : 'plan',
+    date: opts.date,
+  });
+  if (opts.multipleBerm && opts.bermIndex !== undefined) {
+    filename = filename.replace(/\.pdf$/i, ` - Berm ${opts.bermIndex}.pdf`);
+  }
+
+  const response = await fetch(opts.url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Defer revocation by a tick so the download is actually initiated
+    // before we free the URL — some browsers will silently fail the
+    // download otherwise.
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+  }
+}
+
+/**
  * Storage object path for a plan upload. Berm-aware: plans are grouped
  * under `{facility_id}/berm-{index}/` so it's obvious which PDF belongs
  * to which berm when poking around the Supabase dashboard. The filename
