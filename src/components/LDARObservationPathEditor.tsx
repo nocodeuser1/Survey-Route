@@ -66,11 +66,16 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 // ============================================================
 
 const VISUAL = {
-  stopRadius: 22,        // px, in the canonical viewBox
+  // Stop sizes tightened ~20% per Israel's feedback — 22 → 18, 26 → 21.
+  // Stroke width unchanged; stops just feel less heavy on the page.
+  stopRadius: 18,        // px, in the canonical viewBox
   stopBorder: 3,
-  stopFontSize: 26,
+  stopFontSize: 21,
   pathStroke: 6,
-  pathDash: '14 10',
+  // Dash pattern tightened ~30% — '14 10' → '10 7'. Stroke width
+  // unchanged so the line stays the same weight; only the dash
+  // rhythm gets finer.
+  pathDash: '10 7',
   pathColor: '#facc15',  // tailwind yellow-400 — matches Israel's screenshot
   pathOutline: '#1f2937',
   stopFill: '#dc2626',   // red-600
