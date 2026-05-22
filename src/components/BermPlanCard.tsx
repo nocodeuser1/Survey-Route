@@ -1032,8 +1032,15 @@ export default function BermPlanCard({
                user can review/edit a previously recorded decision), or
             3. The facility-level rollup considers this facility in a recert
                state (e.g., facility.recertified_date is set, which is why the
-               rollup tells the user to "Edit per-berm in the SPCC Plan tab"). */}
-        {(isPlanRecertificationActive(plan)
+               rollup tells the user to "Edit per-berm in the SPCC Plan tab").
+
+            EXCEPT: once the recertification PDF has actually been generated
+            for this berm (recertification_pdf_generated_at set), the review
+            is done — hiding the card avoids showing a stale "Pending
+            Decision" pill on a berm whose recert is already on file. The
+            Regenerate Recertification PDF button rendered elsewhere on the
+            card is the way to redo the workflow from here. */}
+        {!plan.recertification_pdf_generated_at && (isPlanRecertificationActive(plan)
           || !!plan.recertification_decision
           || !!plan.recertification_decision_at
           || !!plan.recertification_decision_notes
