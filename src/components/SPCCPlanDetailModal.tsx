@@ -9,6 +9,7 @@ import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLa
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
 import LDARSitePlanSection from './LDARSitePlanSection';
+import LDARObservationPathSection from './LDARObservationPathSection';
 
 interface SPCCPlanDetailModalProps {
   facility: Facility;
@@ -1442,6 +1443,16 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               the SPCC berm workflow above. See LDARSitePlanSection for full
               rationale. */}
           <LDARSitePlanSection
+            facility={facility}
+            darkMode={darkMode}
+            onChange={onFacilitiesChange}
+          />
+
+          {/* LDAR Observation Path — the AI-assisted walking-path overlay
+              that pairs with the LDAR Site Plan. Will use the uploaded LDAR
+              PDF if present, otherwise pulls the Facility Site Plan figure
+              out of the SPCC plan above. */}
+          <LDARObservationPathSection
             facility={facility}
             darkMode={darkMode}
             onChange={onFacilitiesChange}
