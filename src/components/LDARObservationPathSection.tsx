@@ -3,6 +3,7 @@ import { Navigation, Trash2 } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import LDARObservationPathEditor from './LDARObservationPathEditor';
 import LDARSourceSelector from './LDARSourceSelector';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * "Observation Path" panel — companion to LDARSitePlanSection. Lets the
@@ -36,6 +37,11 @@ export default function LDARObservationPathSection({
   darkMode,
   onChange,
 }: LDARObservationPathSectionProps) {
+  // Access-gate: this section is agency-owner-only. Non-owners see
+  // nothing (no header, no button) so the LDAR tab / SPCC plan modal
+  // stay tidy for them. Hook is called unconditionally above the early
+  // return to keep the hook order stable across re-renders.
+  const { user } = useAuth();
   const [showEditor, setShowEditor] = useState(false);
   const [showSourceSelector, setShowSourceSelector] = useState(false);
   // True when the editor should auto-fire AI generation as soon as it
@@ -99,6 +105,13 @@ export default function LDARObservationPathSection({
       setDeletingPath(false);
     }
   };
+
+  // Agency-owner-only feature — render nothing for regular users / admins.
+  // This must come AFTER all hook calls above to keep the hook order
+  // consistent across renders (React's rules of hooks).
+  if (!user?.isAgencyOwner) {
+    return null;
+  }
 
   return (
     <>

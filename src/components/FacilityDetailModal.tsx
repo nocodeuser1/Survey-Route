@@ -2436,20 +2436,24 @@ export default function FacilityDetailModal({
       </div>
 
       {/* Two-column layout on wide screens — the LDAR Site Plan and
-          Observation Path sections sit side by side instead of stretching
-          across the full modal width. Falls back to single column under
-          lg (~1024px). */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          Observation Path sections sit side by side. When the user is
+          NOT an agency owner the Observation Path section hides itself
+          (renders null) and the Site Plan section spans full width
+          alone, so we collapse the grid to one column to avoid leaving
+          half the modal empty. */}
+      <div
+        className={`grid gap-6 items-start ${
+          user?.isAgencyOwner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'
+        }`}
+      >
         <LDARSitePlanSection
           facility={facility}
           darkMode={darkMode}
           onChange={bumpFacilityRender}
         />
 
-        {/* Observation Path panel — companion to LDAR Site Plan. Owns its
-            own editor + source-selector modals internally so this slot is
-            a one-liner. Also lives in SPCCPlanDetailModal next to the
-            LDAR Site Plan section there. */}
+        {/* Observation Path panel — agency-owner-only, self-gates via
+            useAuth() and returns null for non-owners. */}
         <LDARObservationPathSection
           facility={facility}
           darkMode={darkMode}
