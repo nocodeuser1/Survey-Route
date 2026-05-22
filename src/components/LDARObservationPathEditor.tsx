@@ -22,6 +22,11 @@ import {
   type LDARObservationPathWaypoint,
 } from '../lib/supabase';
 import { renderPdfPageToImage } from '../utils/renderPdfPageToImage';
+import { findTextInPdfPage, type TextBoundingBox } from '../utils/findTextInPdfPage';
+import { svgToPdfBlob } from '../utils/svgToPdfBlob';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 /**
  * LDAR Observation Path Editor
@@ -292,6 +297,12 @@ export default function LDARObservationPathEditor({
   const [pageImage, setPageImage] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoadingPage, setIsLoadingPage] = useState(true);
+  // Bounding box (normalized 0..1) of "FACILITY SITE PLAN" text in the
+  // source PDF's title block. Used to render a white-rect cover + an
+  // "LDAR OBSERVATION PLAN" replacement in the editor SVG (which then
+  // bakes into the exported annotated PDF on save). Null if the text
+  // isn't found in the PDF.
+  const [siteplanTitlePos, setSiteplanTitlePos] = useState<TextBoundingBox | null>(null);
 
   // The editable path. Sanitized at construction so every stop / waypoint
   // has a stable id (the AI returns them id-less). Subsequent mutations
@@ -351,6 +362,21 @@ export default function LDARObservationPathEditor({
         const rendered = await renderPdfPageToImage(facility.ldar_site_plan_url, { scale: 2 });
         if (cancelled) return;
         setPageImage({ dataUrl: rendered.dataUrl, w: rendered.width, h: rendered.height });
+
+        // Also extract "FACILITY SITE PLAN" text position from the source
+        // PDF so the export can substitute "LDAR OBSERVATION PLAN" in the
+        // title block. Best-effort — if the text isn't found we just skip
+        // the overlay.
+        try {
+          const arrayBuffer = await (await fetch(facility.ldar_site_plan_url!)).arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const page = await pdf.getPage(1);
+          const pos = await findTextInPdfPage(page, 'FACILITY SITE PLAN');
+          if (!cancelled) setSiteplanTitlePos(pos);
+        } catch (err) {
+          // Non-fatal: title-block substitution is a nice-to-have.
+          console.warn('LDAR editor: title-block text lookup failed', err);
+        }
       } catch (err) {
         if (cancelled) return;
         console.error('LDAR editor: failed to render PDF page', err);
@@ -479,12 +505,15 @@ export default function LDARObservationPathEditor({
   }, [autoGenerate, pageImage, stops.length, isGenerating, handleGenerate]);
 
   // -----------------------------------------------------------
-  // Save to DB.
+  // Save to DB + bake annotated PDF and overwrite the site-plan file.
   // -----------------------------------------------------------
+  const [saveStage, setSaveStage] = useState<'idle' | 'json' | 'pdf'>('idle');
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     setSaveError(null);
+    setSaveStage('json');
     try {
+      // 1. JSON — fast write, this is the source of truth for the editor.
       const toSave: LDARObservationPathData = {
         ...pathData,
         edited_at: new Date().toISOString(),
@@ -494,9 +523,44 @@ export default function LDARObservationPathEditor({
         .update({ ldar_observation_path_data: toSave })
         .eq('id', facility.id);
       if (error) throw error;
-      // Mutate the prop so the parent re-renders with the new state. Mirrors
-      // the updateFacilityField pattern used elsewhere.
       Object.assign(facility, { ldar_observation_path_data: toSave });
+
+      // 2. PDF — render the editor SVG (which already includes the
+      //    background page image + walking-path overlay + title-block
+      //    text substitution) to a flat single-page PDF and overwrite
+      //    the storage file. Wrapped in its own try so a PDF failure
+      //    doesn't undo a successful JSON save.
+      if (svgRef.current && pageImage) {
+        setSaveStage('pdf');
+        try {
+          const pdfBlob = await svgToPdfBlob(svgRef.current, pageImage.w, pageImage.h);
+          const storagePath = `${facility.id}/site-plan.pdf`;
+          const { error: uploadError } = await supabase.storage
+            .from('ldar-site-plans')
+            .upload(storagePath, pdfBlob, {
+              contentType: 'application/pdf',
+              upsert: true,
+              cacheControl: '60',
+            });
+          if (uploadError) throw uploadError;
+          // Bump uploaded_at so the LDAR Site Plan section can use it as
+          // a cache-buster on the public URL.
+          const nowIso = new Date().toISOString();
+          const { error: tsErr } = await supabase
+            .from('facilities')
+            .update({ ldar_site_plan_uploaded_at: nowIso })
+            .eq('id', facility.id);
+          if (tsErr) throw tsErr;
+          Object.assign(facility, { ldar_site_plan_uploaded_at: nowIso });
+        } catch (pdfErr) {
+          console.warn('Annotated PDF generation failed (JSON was saved):', pdfErr);
+          setSaveError(
+            (pdfErr instanceof Error ? pdfErr.message : 'Annotated PDF generation failed') +
+              ' — your path JSON was saved successfully; you can re-save to retry the PDF.',
+          );
+        }
+      }
+
       setHasUnsavedChanges(false);
       onSaved();
     } catch (err) {
@@ -504,8 +568,9 @@ export default function LDARObservationPathEditor({
       setSaveError(err instanceof Error ? err.message : 'Failed to save.');
     } finally {
       setIsSaving(false);
+      setSaveStage('idle');
     }
-  }, [pathData, facility, onSaved]);
+  }, [pathData, facility, onSaved, pageImage]);
 
   // -----------------------------------------------------------
   // Pointer handlers — drag for stops, waypoints, legend move/resize.
@@ -880,10 +945,10 @@ export default function LDARObservationPathEditor({
                 ? 'bg-emerald-500/40 text-white cursor-not-allowed'
                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
             }`}
-            title={hasUnsavedChanges ? 'Save changes' : 'No unsaved changes'}
+            title={hasUnsavedChanges ? 'Save changes + bake the annotated PDF' : 'No unsaved changes'}
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save
+            {saveStage === 'pdf' ? 'Baking PDF…' : saveStage === 'json' ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -962,6 +1027,45 @@ export default function LDARObservationPathEditor({
             >
               {/* Background — the rendered PDF page */}
               <image href={pageImage.dataUrl} x={0} y={0} width={W} height={H} />
+
+              {/* Title-block text substitution — when we found "FACILITY
+                  SITE PLAN" in the source PDF, cover it with a white
+                  rect and write "LDAR OBSERVATION PLAN" in its place.
+                  This bakes into the exported PDF so the saved file
+                  reads correctly for an LDAR audit. */}
+              {siteplanTitlePos && (() => {
+                const tx = siteplanTitlePos.x * W;
+                const ty = siteplanTitlePos.y * H;
+                const tw = siteplanTitlePos.w * W;
+                const th = siteplanTitlePos.h * H;
+                // Pad the cover slightly so antialiasing / descenders
+                // don't leak around the edges of the old text.
+                const padX = th * 0.3;
+                const padY = th * 0.2;
+                return (
+                  <g pointerEvents="none">
+                    <rect
+                      x={tx - padX}
+                      y={ty - padY}
+                      width={tw + padX * 2}
+                      height={th + padY * 2}
+                      fill="#ffffff"
+                    />
+                    <text
+                      x={tx + tw / 2}
+                      y={ty + th / 2}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#111827"
+                      fontSize={th * 0.78}
+                      fontWeight={600}
+                      fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
+                    >
+                      LDAR OBSERVATION PLAN
+                    </text>
+                  </g>
+                );
+              })()}
 
               {/* Walking path */}
               {pathPoints.length >= 2 && (

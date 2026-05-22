@@ -187,7 +187,16 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
               </div>
               <div className="min-w-0">
                 <a
-                  href={facility.ldar_site_plan_url!}
+                  // Append uploaded_at as a cache-buster — the storage path
+                  // is deterministic (always {facility_id}/site-plan.pdf)
+                  // so when the LDAR editor overwrites the PDF on save,
+                  // the browser would otherwise serve a cached old copy
+                  // and the user would see the un-annotated version.
+                  href={
+                    facility.ldar_site_plan_uploaded_at
+                      ? `${facility.ldar_site_plan_url}?t=${encodeURIComponent(facility.ldar_site_plan_uploaded_at)}`
+                      : facility.ldar_site_plan_url!
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`text-sm font-medium hover:underline inline-flex items-center gap-1 truncate ${
