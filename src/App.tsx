@@ -182,6 +182,10 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentRouteId, setCurrentRouteId] = useState<string | null>(null);
+  // The loaded route's name, surfaced in the Save dialog so the
+  // "Update <name>" / "Save as New" choice is concrete. Kept in sync
+  // with currentRouteId everywhere we touch it.
+  const [currentRouteName, setCurrentRouteName] = useState<string | null>(null);
   const [routeVersion, setRouteVersion] = useState(0);
   const loadedAccountRef = useRef<string | null>(null);
   const [isFullScreenMap, setIsFullScreenMap] = useState(() => {
@@ -642,6 +646,7 @@ function App() {
         setHomeBase(null);
         setOptimizationResult(null);
         setCurrentRouteId(null);
+        setCurrentRouteName(null);
         setRouteFacilityIds(null);
         setShowOnlyRouteFacilities(false);
         // Reset the global survey-type filter back to "All" on every
@@ -1016,6 +1021,7 @@ function App() {
             if (lastViewed && !optimizationResult) {
               setOptimizationResult(lastViewed.plan_data);
               setCurrentRouteId(lastViewed.id);
+              setCurrentRouteName(lastViewed.name ?? null);
               setRouteVersion(prev => prev + 1);
 
               const savedIds = lastViewed.plan_data?._routeFacilityIds;
@@ -1219,6 +1225,7 @@ function App() {
         });
         setOptimizationResult(loadedResult);
         setCurrentRouteId(lastRoutePlan.id);
+        setCurrentRouteName(lastRoutePlan.name ?? null);
         setRouteVersion(prev => prev + 1);
 
         // Restore custom facility selection if saved with the route
@@ -1323,6 +1330,7 @@ function App() {
           if (lastViewed) {
             setOptimizationResult(lastViewed.plan_data);
             setCurrentRouteId(lastViewed.id);
+            setCurrentRouteName(lastViewed.name ?? null);
             setRouteVersion(prev => prev + 1);
 
             // Restore custom facility selection from cached route
@@ -1862,6 +1870,7 @@ function App() {
 
       if (newRoute) {
         setCurrentRouteId(newRoute.id);
+        setCurrentRouteName(newRoute.name ?? null);
       }
     } catch (err: any) {
       console.error('Error generating routes:', err);
@@ -2037,6 +2046,7 @@ function App() {
       setRouteVersion(prev => prev + 1);
       if (newRoute) {
         setCurrentRouteId(newRoute.id);
+        setCurrentRouteName(newRoute.name ?? null);
       }
     } catch (err: any) {
       console.error('Error creating route from selection:', err);
@@ -2188,6 +2198,7 @@ function App() {
 
     setOptimizationResult(updatedResult);
     setCurrentRouteId(route.id);
+    setCurrentRouteName(route.name ?? null);
 
     // Restore custom facility selection if saved with the route
     const savedFacilityIds = route.plan_data._routeFacilityIds;
@@ -2859,31 +2870,51 @@ function App() {
     }
   };
 
-  const handleSaveCurrentRoute = async (name: string, forceOverwrite: boolean = false) => {
-    if (!currentRouteId || !optimizationResult || !currentAccount) return;
+  /**
+   * Save the current route under `name`. Two modes:
+   *
+   *   mode='update': UPDATE the currently-loaded row (currentRouteId).
+   *                  Used when the user picks "Update <name>" from the
+   *                  save dialog. Falls through to 'new' if nothing is
+   *                  currently loaded (no row to update).
+   *
+   *   mode='new':    INSERT a brand-new route_plans row and re-point
+   *                  currentRouteId/Name at it. Used by "Save as New"
+   *                  and by the first save in a fresh session.
+   *
+   * Name-collision handling: if a DIFFERENT row already has this name,
+   * confirm overwrite once and replace it.
+   */
+  const handleSaveCurrentRoute = async (name: string, mode: 'update' | 'new' = 'update') => {
+    if (!optimizationResult || !currentAccount) return false;
+
+    // No row loaded yet — fall back to inserting a new row even if the
+    // caller asked for update. Keeps the dialog's "Update" button safe
+    // when invoked from a fresh-but-unsaved state.
+    const effectiveMode: 'update' | 'new' =
+      mode === 'update' && currentRouteId ? 'update' : 'new';
 
     try {
-      // Check if a route with this name already exists (and it's not the current route)
-      const { data: existingRoutes, error: checkError } = await supabase
+      // Detect name collisions with OTHER rows. In update mode we
+      // exclude the currently-loaded id so renaming a route to itself
+      // doesn't trip the confirm. In new mode we don't have a current
+      // id to exclude.
+      let collisionQuery = supabase
         .from('route_plans')
         .select('id, name')
         .eq('account_id', currentAccount.id)
-        .eq('name', name)
-        .neq('id', currentRouteId);
-
+        .eq('name', name);
+      if (effectiveMode === 'update' && currentRouteId) {
+        collisionQuery = collisionQuery.neq('id', currentRouteId);
+      }
+      const { data: existingRoutes, error: checkError } = await collisionQuery;
       if (checkError) throw checkError;
 
-      // If a route with the same name exists and we haven't confirmed overwrite
-      if (existingRoutes && existingRoutes.length > 0 && !forceOverwrite) {
+      if (existingRoutes && existingRoutes.length > 0) {
         const confirmOverwrite = window.confirm(
           `A saved route named "${name}" already exists. Do you want to overwrite it?`
         );
-
-        if (!confirmOverwrite) {
-          return false; // User cancelled
-        }
-
-        // User confirmed, so delete the existing route and update current one
+        if (!confirmOverwrite) return false;
         await supabase
           .from('route_plans')
           .delete()
@@ -2896,22 +2927,54 @@ function App() {
         ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
         : optimizationResult;
 
-      // Update the current route with the new name
-      await supabase
-        .from('route_plans')
-        .update({
-          name,
-          plan_data: planDataToSave,
-          total_days: optimizationResult.totalDays,
-          total_miles: optimizationResult.totalMiles,
-          total_facilities: optimizationResult.totalFacilities,
-          settings: lastUsedSettings,
-          home_base_data: homeBase,
-        })
-        .eq('id', currentRouteId)
-        .eq('account_id', currentAccount.id);
+      if (effectiveMode === 'update') {
+        await supabase
+          .from('route_plans')
+          .update({
+            name,
+            plan_data: planDataToSave,
+            total_days: optimizationResult.totalDays,
+            total_miles: optimizationResult.totalMiles,
+            total_facilities: optimizationResult.totalFacilities,
+            settings: lastUsedSettings,
+            home_base_data: homeBase,
+          })
+          .eq('id', currentRouteId!)
+          .eq('account_id', currentAccount.id);
+        setCurrentRouteName(name);
+      } else {
+        // Clear the is_last_viewed flag on any prior row so the new one
+        // becomes the canonical "last viewed" record.
+        await supabase
+          .from('route_plans')
+          .update({ is_last_viewed: false })
+          .eq('account_id', currentAccount.id);
 
-      return true; // Successfully saved
+        const { data: newRoute, error: insertErr } = await supabase
+          .from('route_plans')
+          .insert({
+            user_id: DEMO_USER_ID,
+            account_id: currentAccount.id,
+            upload_batch_id: facilities[0]?.upload_batch_id,
+            plan_data: planDataToSave,
+            total_days: optimizationResult.totalDays,
+            total_miles: optimizationResult.totalMiles,
+            total_facilities: optimizationResult.totalFacilities,
+            name,
+            is_last_viewed: true,
+            settings: lastUsedSettings,
+            home_base_data: homeBase,
+          })
+          .select()
+          .single();
+        if (insertErr) throw insertErr;
+        if (newRoute) {
+          setCurrentRouteId(newRoute.id);
+          setCurrentRouteName(newRoute.name ?? name);
+        }
+      }
+
+      return true;
     } catch (err) {
       console.error('Error saving route:', err);
       return false;
@@ -3565,6 +3628,7 @@ function App() {
                       onSaveCurrentRoute={handleSaveCurrentRoute}
                       onLoadRoute={handleLoadRoute}
                       currentRouteId={currentRouteId || undefined}
+                      currentRouteName={currentRouteName || undefined}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                       homeBase={homeBase || undefined}
                       onUpdateResult={(newResult) => {
@@ -3883,6 +3947,7 @@ function App() {
                       onSaveCurrentRoute={handleSaveCurrentRoute}
                       onLoadRoute={handleLoadRoute}
                       currentRouteId={currentRouteId || undefined}
+                      currentRouteName={currentRouteName || undefined}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                       showRefreshOptions={showRefreshOptions}
                       onShowRefreshOptions={setShowRefreshOptions}

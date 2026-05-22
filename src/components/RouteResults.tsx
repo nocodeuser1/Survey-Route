@@ -32,9 +32,12 @@ interface RouteResultsProps {
   showOnlySettings?: boolean;
   showOnlyRouteList?: boolean;
   homeBase?: any;
-  onSaveCurrentRoute?: (name: string) => Promise<boolean | void> | void;
+  onSaveCurrentRoute?: (name: string, mode: 'update' | 'new') => Promise<boolean | void> | void;
   onLoadRoute?: (route: any) => void;
   currentRouteId?: string;
+  /** Name of the currently-loaded route, surfaced in the Save dialog
+   *  to make the "Update <name>" choice concrete. */
+  currentRouteName?: string;
   onConfigureHomeBase?: () => void;
   showRefreshOptions?: boolean;
   onShowRefreshOptions?: (show: boolean) => void;
@@ -58,7 +61,7 @@ interface RouteResultsProps {
 // String to allow either the legacy SPCC enum members OR a survey_types.id UUID.
 type SurveyType = string;
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
@@ -1688,61 +1691,23 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
 
-        {/* Save Route Popup */}
+        {/* Save Route Popup — Update vs Save as New when a route is loaded */}
         {showSaveRoutePopup && onSaveCurrentRoute && (
-          <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
-            onClick={() => setShowSaveRoutePopup(false)}
-          >
-            <div
-              className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Save Current Route</h3>
-              <input
-                type="text"
-                value={saveName}
-                onChange={(e) => setSaveName(e.target.value)}
-                placeholder="Enter route name (optional)"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-                    const success = await onSaveCurrentRoute(routeName);
-                    if (success !== false) {
-                      setSaveName('');
-                      setShowSaveRoutePopup(false);
-                    }
-                  }
-                }}
-              />
-              <p className="text-xs text-gray-500 mb-4">Leave empty to use a timestamped name</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setSaveName('');
-                    setShowSaveRoutePopup(false);
-                  }}
-                  className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-                    const success = await onSaveCurrentRoute(routeName);
-                    if (success !== false) {
-                      setSaveName('');
-                      setShowSaveRoutePopup(false);
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
+          <SaveRouteDialog
+            initialName={currentRouteName ?? saveName}
+            loadedRouteName={currentRouteName}
+            onSave={async (name, mode) => {
+              const success = await onSaveCurrentRoute(name, mode);
+              if (success !== false) {
+                setSaveName('');
+                setShowSaveRoutePopup(false);
+              }
+            }}
+            onCancel={() => {
+              setSaveName('');
+              setShowSaveRoutePopup(false);
+            }}
+          />
         )}
 
         {/* Load Route Popup */}
@@ -2900,61 +2865,23 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
 
-      {/* Save Route Popup */}
+      {/* Save Route Popup — Update vs Save as New when a route is loaded */}
       {showSaveRoutePopup && onSaveCurrentRoute && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
-          onClick={() => setShowSaveRoutePopup(false)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Save Current Route</h3>
-            <input
-              type="text"
-              value={saveName}
-              onChange={(e) => setSaveName(e.target.value)}
-              placeholder="Enter route name (optional)"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter') {
-                  const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-                  const success = await onSaveCurrentRoute(routeName);
-                  if (success !== false) {
-                    setSaveName('');
-                    setShowSaveRoutePopup(false);
-                  }
-                }
-              }}
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Leave empty to use a timestamped name</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setSaveName('');
-                  setShowSaveRoutePopup(false);
-                }}
-                className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-                  const success = await onSaveCurrentRoute(routeName);
-                  if (success !== false) {
-                    setSaveName('');
-                    setShowSaveRoutePopup(false);
-                  }
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <SaveRouteDialog
+          initialName={currentRouteName ?? saveName}
+          loadedRouteName={currentRouteName}
+          onSave={async (name, mode) => {
+            const success = await onSaveCurrentRoute(name, mode);
+            if (success !== false) {
+              setSaveName('');
+              setShowSaveRoutePopup(false);
+            }
+          }}
+          onCancel={() => {
+            setSaveName('');
+            setShowSaveRoutePopup(false);
+          }}
+        />
       )}
 
       {/* Load Route Popup */}
@@ -3250,6 +3177,146 @@ function DayActionsPopover({ facility, x, y, routes, onReassign, onViewDetails, 
         <FileText className="w-3.5 h-3.5" />
         View facility details
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SaveRouteDialog
+// ---------------------------------------------------------------------------
+//
+// Modal shown when the user clicks Save. When a route is already loaded
+// (loadedRouteName is set) it offers two actions side-by-side:
+//
+//   • Update "<loadedRouteName>" — overwrites the loaded row in place
+//   • Save as New                — inserts a fresh route_plans row
+//
+// When no route is loaded the modal collapses to a single primary
+// Save button (creates a new row). The name input is pre-populated
+// with the loaded route's name so the user can rename in place during
+// an Update without retyping.
+
+interface SaveRouteDialogProps {
+  initialName: string;
+  loadedRouteName?: string | null;
+  onSave: (name: string, mode: 'update' | 'new') => void | Promise<void>;
+  onCancel: () => void;
+}
+
+function SaveRouteDialog({ initialName, loadedRouteName, onSave, onCancel }: SaveRouteDialogProps) {
+  const [name, setName] = useState(initialName ?? '');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // Auto-focus + select the input on open so the user can either
+    // hit Enter to Update or start typing to rename.
+    const t = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const resolvedName = () =>
+    name.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+
+  const handleUpdate = () => onSave(resolvedName(), 'update');
+  const handleSaveAsNew = () => onSave(resolvedName(), 'new');
+
+  const isLoaded = Boolean(loadedRouteName && loadedRouteName.trim());
+  // Truncate the loaded name to keep the button label compact.
+  const displayLoadedName = loadedRouteName && loadedRouteName.length > 28
+    ? `${loadedRouteName.slice(0, 28)}…`
+    : loadedRouteName;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+          Save Route
+        </h3>
+        {isLoaded && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            Currently loaded: <span className="font-semibold text-gray-700 dark:text-gray-200">{loadedRouteName}</span>
+          </p>
+        )}
+
+        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
+          Name
+        </label>
+        <input
+          ref={inputRef}
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Enter route name (optional)"
+          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              // Enter follows the primary action: Update when a route
+              // is loaded (in-place save), Save (new) otherwise.
+              isLoaded ? handleUpdate() : handleSaveAsNew();
+            }
+          }}
+        />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+          Leave empty to use a timestamped name.
+        </p>
+
+        {isLoaded ? (
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={onCancel}
+              className="sm:w-24 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveAsNew}
+              className="flex-1 px-3 py-2 text-sm font-medium bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg transition-colors"
+              title="Save the current route as a brand-new entry, leaving the loaded one untouched"
+            >
+              Save as New
+            </button>
+            <button
+              onClick={handleUpdate}
+              className="flex-1 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              title={`Overwrite "${loadedRouteName}" with the current route`}
+            >
+              Update {displayLoadedName ? `"${displayLoadedName}"` : ''}
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveAsNew}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Save
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
