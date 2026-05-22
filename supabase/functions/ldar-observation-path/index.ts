@@ -158,10 +158,18 @@ Constraints, in priority order:
 1. NEVER cover a yellow label callout box. The labels are how a reader identifies what equipment they're looking at — covering one is the worst failure.
 2. NEVER let two red circles overlap each other.
 3. NEVER cover the legend.
-4. Avoid covering equipment (the photographed structures) when empty ground is available within ~10% of image dimension.
-5. The circle should be CLOSE ENOUGH to the equipment that the visual association is obvious — typically within 5-10% of image dimension from the equipment centroid.
+4. NEVER place a circle on top of these specific equipment types — they have tall vertical structures and overlapping looks wrong:
+     - Heater treaters
+     - Separators
+     - VRU (vapor recovery unit)
+     - Compressor / gas cooler
+     - Flare / combustor (place adjacent, never on it)
+     - Wellheads (place on the empty pad nearby)
+   For these, ALWAYS find empty ground adjacent to them — the bottom band below them is usually the right answer.
+5. STORAGE TANKS are the one exception. Crude oil tanks, produced-water tanks, methanol tanks, polyethylene tanks — these have flat tops and a circle drawn on them is acceptable AS A LAST RESORT if empty ground really isn't available within reach. Even then, prefer empty ground.
+6. The circle should be CLOSE ENOUGH to the equipment that the visual association is obvious — typically within 5-10% of image dimension from the equipment centroid.
 
-If you cannot satisfy all of these, prioritize NOT-covering-labels > NOT-overlapping-other-circles > NOT-covering-equipment.
+If you cannot satisfy all of these, prioritize NOT-covering-labels > NOT-overlapping-other-circles > NOT-covering-vertical-equipment > storage-tank-overlap-OK > distance.
 
 # Walking path waypoints (per-segment) — these shape the route between stops
 

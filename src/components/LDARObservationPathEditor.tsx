@@ -1170,8 +1170,10 @@ function Legend({
   // Font sizes are capped — without caps, a tall legend produced 60+ vbox-unit
   // title text that looked enormous on screen. Caps keep output sensible at
   // any legend size; user can scale up by zooming the page render scale.
+  // Item font bumped 16 → 20 cap with a higher floor; items also render bold
+  // for closer parity with the title's visual weight.
   const titleFontSize = Math.min(28, Math.max(16, w * 0.05));
-  const itemFontSize = Math.min(16, Math.max(11, w * 0.028));
+  const itemFontSize = Math.min(20, Math.max(13, w * 0.032));
   const titleHeight = Math.max(32, titleFontSize * 1.8);
 
   // Per-item geometry. The numbered circle is a fixed visual size relative
@@ -1184,7 +1186,10 @@ function Legend({
 
   // Approximate width per character for system-ui sans-serif. Slightly
   // generous so we don't under-allocate height for wrapped lines.
-  const approxCharWidth = itemFontSize * 0.58;
+  // Bold text (fontWeight: 600) is ~7% wider per glyph than regular —
+  // 0.62 accounts for that so the line-wrap estimate doesn't
+  // under-allocate height.
+  const approxCharWidth = itemFontSize * 0.62;
   const charsPerLine = Math.max(6, Math.floor(labelMaxWidth / approxCharWidth));
   const estimateLines = (text: string) => {
     if (!text) return 1;
@@ -1330,6 +1335,10 @@ function Legend({
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: itemFontSize,
+                  // Semi-bold (600) for closer visual weight to the
+                  // bold red title; full bold (700) competed with the
+                  // title in user testing.
+                  fontWeight: 600,
                   lineHeight: 1.25,
                   color: '#111827',
                   fontFamily: 'system-ui, -apple-system, sans-serif',
