@@ -157,7 +157,14 @@ export default function ManagementSignaturePagePickerModal({
   };
 
   const content = (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    // SPCCPlanDetailModal uses inline zIndex: 999999, so this picker — which
+    // is meant to sit ABOVE that modal — needs to go one tier higher. Using
+    // an inline style (not a Tailwind utility) so we don't have to extend the
+    // Tailwind z-index scale just for this case.
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      style={{ zIndex: 9999999 }}
+    >
       <div
         className={`relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl shadow-2xl border ${
           darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
