@@ -3534,15 +3534,23 @@ function App() {
               // Don't clear targetCoords - let the map handle it naturally
             }}
             onCoordinatesUpdated={(facilityId, latitude, longitude) => {
+              // Only auto-center the map on the saved coordinates when the
+              // user is ALREADY in route-planning context. Saving lat/long
+              // from the Facilities tab (or anywhere else) was previously
+              // yanking the user out of their current view and dropping
+              // them into the fullscreen map — surprising and wrong per
+              // Israel: 'This should only happen if I'm on the route
+              // planning page and I edit something from there.'
+              if (currentView !== 'route-planning') {
+                return;
+              }
               console.log('[Coordinates Updated] Showing updated facility on map');
-              // Facility coordinates were updated - center map on new location and ensure visibility
               setCompletedVisibility({
                 hideAllCompleted: false,
                 hideInternallyCompleted: false,
                 hideExternallyCompleted: false,
               });
               viewingFacilityRef.current = true;
-              setCurrentView('route-planning');
               setIsFullScreenMap(true);
               setMapTargetCoords({ latitude, longitude });
               // Don't clear targetCoords - let the map handle it naturally
