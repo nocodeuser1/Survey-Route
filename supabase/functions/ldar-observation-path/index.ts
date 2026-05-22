@@ -38,7 +38,11 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
 // vision-quality leader; Flash is too quick to reason about spatial layout
 // reliably for this task.
 const UPSTREAM_MODEL = 'gemini-3.1-pro-preview';
-const THINKING_LEVEL = 'high';
+// thinkingLevel tokens count against maxOutputTokens. At 'high', Pro was
+// burning ~3000+ tokens on reasoning and getting truncated mid-JSON with
+// finishReason MAX_TOKENS. 'medium' gives ample reasoning headroom for a
+// visual-layout task while leaving room for the full JSON output.
+const THINKING_LEVEL = 'medium';
 
 function geminiEndpoint(): string {
   return `https://generativelanguage.googleapis.com/v1beta/models/${UPSTREAM_MODEL}:generateContent`;
@@ -293,12 +297,13 @@ Deno.serve(async (req) => {
           // Low temperature: the rules are deterministic; we don't want
           // creativity, just adherence to the spec.
           temperature: 0.15,
-          // Bumped from 2048 → 4096. Pro at thinkingLevel 'high' can burn
-          // a chunk of tokens on internal reasoning; cutting it off
-          // mid-JSON produces malformed output that fails JSON.parse with
-          // "Model returned non-JSON output. Try again." Field reports
-          // show plenty of room here without paying real money.
-          maxOutputTokens: 4096,
+          // 2048 → 4096 wasn't enough: even with thinkingLevel dropped to
+          // 'medium', Pro still produces ~500-1500 thinking tokens before
+          // a large structured-JSON output. The first real attempt at
+          // 4096 hit MAX_TOKENS mid-stream after two stops. 8192 gives
+          // headroom for 10+ stops + waypoints + legend + reasoning
+          // without paying real money (the call is one-shot).
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           // Strict schema — Gemini's structured-output mode constrains
           // the model to emit JSON matching this exact shape. Without a
