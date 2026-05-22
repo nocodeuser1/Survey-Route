@@ -5,7 +5,7 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { compressPDF, formatBytesMB } from '../utils/compressPDF';
 import { buildPlanStoragePath } from '../utils/spccPlans';
 
-const MAX_FILE_SIZE_MB = 2;
+const MAX_FILE_SIZE_MB = 4;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const MAX_INPUT_MB = 15;
 const MAX_INPUT_BYTES = MAX_INPUT_MB * 1024 * 1024;
