@@ -180,6 +180,11 @@ interface LDARObservationPathEditorProps {
   onClose: () => void;
   /** Called after a successful save so the parent can refetch / reflect new state. */
   onSaved: () => void;
+  /** When true AND the facility has no existing path data, automatically
+   *  fire the AI generation once the PDF page loads. Lets the parent's
+   *  "Generate Walking Path with AI" button live up to its promise without
+   *  making the user click Generate again inside the editor. Default false. */
+  autoGenerate?: boolean;
 }
 
 type DragKind =
@@ -200,6 +205,7 @@ export default function LDARObservationPathEditor({
   darkMode,
   onClose,
   onSaved,
+  autoGenerate = false,
 }: LDARObservationPathEditorProps) {
   // The PDF page rendered as a PNG data URL + its native pixel dimensions.
   // We use these dimensions as the SVG viewBox, so 1px in viewBox = 1px in
@@ -375,6 +381,23 @@ export default function LDARObservationPathEditor({
       setIsGenerating(false);
     }
   }, [pageImage, facility.id, commitChange]);
+
+  // -----------------------------------------------------------
+  // Auto-fire generation once when the parent passed autoGenerate=true and
+  // there's nothing drawn yet. The ref guards against re-firing on
+  // re-renders (each commitChange would otherwise trigger this effect via
+  // its handleGenerate dependency).
+  // -----------------------------------------------------------
+  const autoGenFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoGenerate) return;
+    if (autoGenFiredRef.current) return;
+    if (!pageImage) return;
+    if (stops.length > 0) return; // Don't overwrite an existing path silently.
+    if (isGenerating) return;
+    autoGenFiredRef.current = true;
+    handleGenerate();
+  }, [autoGenerate, pageImage, stops.length, isGenerating, handleGenerate]);
 
   // -----------------------------------------------------------
   // Save to DB.

@@ -42,6 +42,7 @@ import NavigationPopup from './NavigationPopup';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import LDARSitePlanSection from './LDARSitePlanSection';
 import LDARObservationPathEditor from './LDARObservationPathEditor';
+import LDARSourceSelector from './LDARSourceSelector';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
@@ -185,6 +186,18 @@ export default function FacilityDetailModal({
   // LDAR Observation Path editor — toggled from the LDAR tab. Rendered as a
   // full-screen overlay above the modal.
   const [showLDARPathEditor, setShowLDARPathEditor] = useState(false);
+  // True when the editor should auto-fire AI generation as soon as it loads
+  // the PDF. Set when the user clicks the "Generate..." button (vs. the
+  // "Open Editor" button, which assumes a path already exists). Reset
+  // automatically when the editor unmounts so a subsequent re-open doesn't
+  // re-fire.
+  const [ldarEditorAutoGenerate, setLdarEditorAutoGenerate] = useState(false);
+  // LDAR Source Selector — shown when the user clicks "Generate Walking Path"
+  // on a facility that has an SPCC plan but no separately-uploaded LDAR PDF.
+  // Lets the user pick the facility-site-plan page out of the SPCC PDF
+  // (auto-detected by default). On confirm, extracts that page into the
+  // ldar-site-plans bucket and the editor opens.
+  const [showLDARSourceSelector, setShowLDARSourceSelector] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2480,30 +2493,66 @@ export default function FacilityDetailModal({
             route based on the labeled equipment; you can drag, edit numbers, and adjust
             the legend before saving.
           </p>
-          <button
-            type="button"
-            onClick={() => setShowLDARPathEditor(true)}
-            disabled={!facility.ldar_site_plan_url}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-white transition-colors ${
-              !facility.ldar_site_plan_url
-                ? 'bg-purple-600/40 cursor-not-allowed'
-                : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
-            }`}
-            title={
-              facility.ldar_site_plan_url
-                ? 'Open the walking-path editor'
-                : 'Upload an LDAR site plan PDF first'
-            }
-          >
-            {facility.ldar_observation_path_data?.stops?.length
+          {(() => {
+            // Three states for the button:
+            //   1. We already have an LDAR site plan PDF → open editor directly.
+            //   2. No LDAR PDF, but an SPCC plan is uploaded → open the source
+            //      selector to extract the Facility Site Plan page from the SPCC.
+            //   3. Neither → button disabled with a hint.
+            const hasLdarPdf = !!facility.ldar_site_plan_url;
+            const hasSpccPdf = !!facility.spcc_plan_url;
+            const canOpen = hasLdarPdf || hasSpccPdf;
+            const hasExistingPath = !!facility.ldar_observation_path_data?.stops?.length;
+            const buttonLabel = hasExistingPath
               ? 'Open Walking Path Editor'
-              : 'Generate Walking Path with AI'}
-          </button>
-          {!facility.ldar_site_plan_url && (
-            <p className={`text-xs italic ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-              Upload a site plan PDF above to enable the walking-path editor.
-            </p>
-          )}
+              : hasLdarPdf
+                ? 'Generate Walking Path with AI'
+                : hasSpccPdf
+                  ? 'Use Site Plan from SPCC + Generate with AI'
+                  : 'Generate Walking Path with AI';
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Only auto-generate when there's no existing path —
+                    // pressing "Open Editor" on an already-drawn path should
+                    // open it for review, not silently overwrite it.
+                    setLdarEditorAutoGenerate(!hasExistingPath);
+                    if (hasLdarPdf) setShowLDARPathEditor(true);
+                    else if (hasSpccPdf) setShowLDARSourceSelector(true);
+                  }}
+                  disabled={!canOpen}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-white transition-colors ${
+                    !canOpen
+                      ? 'bg-purple-600/40 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+                  }`}
+                  title={
+                    hasLdarPdf
+                      ? 'Open the walking-path editor'
+                      : hasSpccPdf
+                        ? 'Extract the Facility Site Plan page from the SPCC plan and open the editor'
+                        : 'Upload an LDAR site plan PDF or an SPCC plan first'
+                  }
+                >
+                  {buttonLabel}
+                </button>
+                {!canOpen && (
+                  <p className={`text-xs italic ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    Upload an LDAR site plan PDF above, or upload an SPCC plan, to enable the
+                    walking-path editor.
+                  </p>
+                )}
+                {!hasLdarPdf && hasSpccPdf && !hasExistingPath && (
+                  <p className={`text-xs italic ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    No separate LDAR site plan uploaded — we'll pull the Facility Site Plan
+                    figure out of your SPCC plan automatically.
+                  </p>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -2874,9 +2923,28 @@ export default function FacilityDetailModal({
         <LDARObservationPathEditor
           facility={facility}
           darkMode={darkMode}
-          onClose={() => setShowLDARPathEditor(false)}
+          autoGenerate={ldarEditorAutoGenerate}
+          onClose={() => {
+            setShowLDARPathEditor(false);
+            setLdarEditorAutoGenerate(false);
+          }}
           onSaved={() => {
             bumpFacilityRender();
+          }}
+        />
+      )}
+      {showLDARSourceSelector && (
+        <LDARSourceSelector
+          facility={facility}
+          darkMode={darkMode}
+          onClose={() => setShowLDARSourceSelector(false)}
+          onConfirmed={() => {
+            setShowLDARSourceSelector(false);
+            bumpFacilityRender();
+            // Auto-open the editor — the user just told us what page to use,
+            // so chain straight into the next step instead of making them
+            // click again.
+            setShowLDARPathEditor(true);
           }}
         />
       )}
