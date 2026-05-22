@@ -131,10 +131,14 @@ function sortStops(stops: LDARObservationPathStop[]): LDARObservationPathStop[] 
   return [...stops].sort((a, b) => a.number - b.number);
 }
 
-/** "Trace" the path through stops in number order, interleaving the array
- *  of waypoints along the way. Simple V1: all waypoints sit between first
- *  and last stop. Stops 2..N-1 act as additional pins the curve passes
- *  through. */
+/** "Trace" the path through stops in number order, inserting waypoints
+ *  into the correct inter-stop segment as identified by their
+ *  `afterStop` field. A waypoint with `afterStop = N` belongs on the
+ *  segment from stop N to the next-higher-numbered stop.
+ *
+ *  Legacy data (no afterStop on waypoints) defaults to the first stop's
+ *  number — preserves the old "all waypoints between stops 1 and 2"
+ *  rendering so saved paths don't suddenly jump around. */
 function tracedPointsSimple(
   stops: LDARObservationPathStop[],
   waypoints: LDARObservationPathWaypoint[],
@@ -142,14 +146,88 @@ function tracedPointsSimple(
   const sorted = sortStops(stops);
   if (sorted.length === 0) return [];
   if (sorted.length === 1) return sorted.map((s) => ({ x: s.x, y: s.y }));
-  // Curve goes: stop1 → waypoints → stop2 → stop3 → ... → stopN.
-  // Intermediate stops naturally pin the curve; waypoints add early-route
-  // bend. The user can drag stops or add more waypoints to refine.
-  return [
-    { x: sorted[0].x, y: sorted[0].y },
-    ...waypoints.map((w) => ({ x: w.x, y: w.y })),
-    ...sorted.slice(1).map((s) => ({ x: s.x, y: s.y })),
-  ];
+
+  const legacyAfterStop = sorted[0].number;
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const stop = sorted[i];
+    out.push({ x: stop.x, y: stop.y });
+    if (i < sorted.length - 1) {
+      // Waypoints attached to THIS stop's segment, in array order.
+      const segWps = waypoints.filter((w) => (w.afterStop ?? legacyAfterStop) === stop.number);
+      segWps.forEach((w) => out.push({ x: w.x, y: w.y }));
+    }
+  }
+  return out;
+}
+
+/** Distance from a point to a line segment (a,b). All inputs in the same
+ *  coordinate space; returned in that same space. Used by the path-click
+ *  handler to figure out which segment a new waypoint belongs to. */
+function pointToSegmentDistance(
+  p: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) {
+    const px = p.x - a.x;
+    const py = p.y - a.y;
+    return Math.sqrt(px * px + py * py);
+  }
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const projX = a.x + t * dx;
+  const projY = a.y + t * dy;
+  const ex = p.x - projX;
+  const ey = p.y - projY;
+  return Math.sqrt(ex * ex + ey * ey);
+}
+
+/** Given a click point in normalized 0..1 coords, figure out which
+ *  inter-stop segment it's closest to (using the currently rendered
+ *  trace points, which include any existing waypoints). Returns the
+ *  `afterStop` value that should be assigned to a new waypoint
+ *  inserted at this point. */
+function inferAfterStop(
+  clickN: { x: number; y: number },
+  stops: LDARObservationPathStop[],
+  waypoints: LDARObservationPathWaypoint[],
+): number {
+  const sorted = sortStops(stops);
+  if (sorted.length === 0) return 1;
+  if (sorted.length === 1) return sorted[0].number;
+  const legacyAfterStop = sorted[0].number;
+  // Build the same trace as tracedPointsSimple, but tagged with the
+  // afterStop value each point "belongs to" for click attribution.
+  type Tagged = { x: number; y: number; afterStop: number };
+  const tagged: Tagged[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const stop = sorted[i];
+    // A stop "owns" the segment that STARTS at it — i.e. afterStop = its number.
+    // For the last stop, there's no outgoing segment, so we tag it with the
+    // previous stop's number (it'll only ever be the END of a segment).
+    const afterStopForThis = i < sorted.length - 1 ? stop.number : sorted[i - 1].number;
+    tagged.push({ x: stop.x, y: stop.y, afterStop: afterStopForThis });
+    if (i < sorted.length - 1) {
+      const segWps = waypoints.filter((w) => (w.afterStop ?? legacyAfterStop) === stop.number);
+      segWps.forEach((w) => tagged.push({ x: w.x, y: w.y, afterStop: stop.number }));
+    }
+  }
+  let best = Infinity;
+  let bestAfterStop = sorted[0].number;
+  for (let i = 0; i < tagged.length - 1; i++) {
+    const a = tagged[i];
+    const b = tagged[i + 1];
+    const d = pointToSegmentDistance(clickN, a, b);
+    if (d < best) {
+      best = d;
+      bestAfterStop = a.afterStop;
+    }
+  }
+  return bestAfterStop;
 }
 
 /** Default empty path data. */
@@ -537,7 +615,16 @@ export default function LDARObservationPathEditor({
       if (!isEditMode || !pageImage) return;
       const norm = pointerToNormalized(e, svgRef.current, pageImage.w, pageImage.h);
       if (!norm) return;
-      const newWp: LDARObservationPathWaypoint = { id: shortId('w'), x: norm.x, y: norm.y };
+      // Figure out which inter-stop segment the click is on, so the new
+      // waypoint ends up shaping the right part of the route instead of
+      // getting dumped into the default (between stops 1 and 2).
+      const afterStop = inferAfterStop(norm, pathData.stops, pathData.waypoints);
+      const newWp: LDARObservationPathWaypoint = {
+        id: shortId('w'),
+        x: norm.x,
+        y: norm.y,
+        afterStop,
+      };
       commitChange({
         ...pathData,
         waypoints: [...pathData.waypoints, newWp],

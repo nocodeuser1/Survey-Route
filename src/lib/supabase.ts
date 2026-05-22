@@ -42,6 +42,13 @@ export interface LDARObservationPathWaypoint {
   id: string;
   x: number;
   y: number;
+  /** Which inter-stop segment this waypoint shapes. Specifically: the
+   *  waypoint sits on the segment between the stop whose `number === afterStop`
+   *  and the next stop in number-sorted order. Optional for backward
+   *  compatibility with paths saved before per-segment waypoints; legacy
+   *  data is rendered as if all waypoints had `afterStop = first stop's
+   *  number` (i.e. all between stops 1 and 2), matching old behavior. */
+  afterStop?: number;
 }
 
 export interface LDARObservationPathLegend {

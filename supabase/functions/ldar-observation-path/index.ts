@@ -135,8 +135,24 @@ A top-down aerial photo of a wellsite/tank battery, with yellow callout boxes th
 # Coordinate system
 - All x and y values are NORMALIZED 0..1 to the source image.
 - (0, 0) is the top-left corner of the image. (1, 1) is the bottom-right corner.
-- Place each stop's (x, y) at the CENTROID of the equipment in the underlying aerial photo — NOT on the yellow label callout box. The labels just point at the equipment; the equipment itself is visible in the photo.
-- Provide 4–10 path waypoints to make the curve flow smoothly through the facility. Waypoints sit BETWEEN consecutive stops along the natural walking line. They bend gently around obstacles (tanks, fences) and never cut through equipment.
+
+# Stop placement (CRITICAL — this is a common failure mode)
+- Each stop is drawn as a ~3%-of-image-height red circle with a white number inside. Its (x, y) is the circle's CENTER.
+- Place each circle in **empty ground space ADJACENT to the equipment**, NOT directly on top of the equipment, and NEVER overlapping the yellow label callout boxes.
+- Preferred placement order, in order of preference:
+    1. SLIGHTLY ABOVE the equipment, in empty ground area, close enough that it's visually associated with the equipment but offset by roughly 4–8% of image height so the circle does not touch the equipment.
+    2. To one side (left or right) in empty ground, if there's no clear space above.
+    3. Below the equipment.
+    4. Only as a last resort, on the equipment itself — and only on a part of it that isn't critical to read.
+- Never overlap two circles with each other.
+- Never overlap the yellow label callout boxes. The labels are how a reader identifies the equipment; covering one is worse than covering the equipment.
+- The wellhead stop (stop 1) is typically placed in the empty wellpad area ABOVE the wellheads, not on top of the wellhead frames themselves.
+
+# Walking path waypoints (per-segment)
+- Each waypoint MUST include an integer \`afterStop\` field. \`afterStop: 3\` means this waypoint shapes the path between stop 3 and stop 4.
+- Waypoints with \`afterStop: N\` MUST lie geographically BETWEEN stop N and stop N+1. Do NOT put a waypoint near the bottom-left when its afterStop is 1→2 in the upper-right — that would make the path wrap around.
+- Provide 0–3 waypoints per segment, only where the path actually needs to bend around tanks / fences / equipment. Short straight segments need none.
+- The smoothed curve will pass through: stop1 → (afterStop=1 waypoints in array order) → stop2 → (afterStop=2 waypoints) → stop3 → ... → stopN.
 
 # Legend
 - The legend is the small box that lists each numbered stop. Place its bounds in EMPTY GROUND area in the lower half of the image (typical: bottom-left quadrant) where nothing else is drawn.
@@ -152,9 +168,10 @@ Return EXACTLY this shape:
     // ... one entry per stop, ending with the combustor
   ],
   "waypoints": [
-    { "x": 0.40, "y": 0.55 },
-    { "x": 0.10, "y": 0.30 }
-    // ... shape-only points along the walk between stops
+    { "afterStop": 1, "x": 0.40, "y": 0.55 },  // shapes the segment between stops 1 and 2
+    { "afterStop": 1, "x": 0.20, "y": 0.40 },  // also between stops 1 and 2
+    { "afterStop": 3, "x": 0.55, "y": 0.62 }   // shapes the segment between stops 3 and 4
+    // ... 0..3 per segment, only where the path needs to bend
   ],
   "legend": {
     "x": 0.04, "y": 0.85, "w": 0.46, "h": 0.13,
@@ -164,7 +181,7 @@ Return EXACTLY this shape:
 
 interface ValidatedPath {
   stops: Array<{ number: number; x: number; y: number; label: string }>;
-  waypoints: Array<{ x: number; y: number }>;
+  waypoints: Array<{ x: number; y: number; afterStop: number }>;
   legend: { x: number; y: number; w: number; h: number; title?: string };
 }
 
@@ -201,8 +218,23 @@ function validatePath(raw: unknown): ValidatedPath {
     throw new Error(`Model returned only ${stops.length} stops; expected at least 2 (start + combustor).`);
   }
 
+  // Default afterStop = first stop's number — matches the legacy "all
+  // waypoints between stops 1 and 2" rendering if the model somehow
+  // omits the field. Validate it's actually an existing stop number, else
+  // fall back to the first stop so a stray value can't create an
+  // orphaned segment.
+  const firstStopNumber = stops[0].number;
+  const validStopNumbers = new Set(stops.map((s) => s.number));
   const waypoints = (wpsIn as Array<Record<string, unknown>>)
-    .map((w) => ({ x: clamp01(w.x, 0.5), y: clamp01(w.y, 0.5) }));
+    .map((w) => {
+      const rawAfter = typeof w.afterStop === 'number' ? Math.round(w.afterStop) : firstStopNumber;
+      const afterStop = validStopNumbers.has(rawAfter) ? rawAfter : firstStopNumber;
+      return {
+        x: clamp01(w.x, 0.5),
+        y: clamp01(w.y, 0.5),
+        afterStop,
+      };
+    });
 
   const legend = {
     x: clamp01(legIn.x, 0.04),
@@ -331,11 +363,12 @@ Deno.serve(async (req) => {
                 items: {
                   type: 'object',
                   properties: {
+                    afterStop: { type: 'integer' },
                     x: { type: 'number' },
                     y: { type: 'number' },
                   },
-                  required: ['x', 'y'],
-                  propertyOrdering: ['x', 'y'],
+                  required: ['afterStop', 'x', 'y'],
+                  propertyOrdering: ['afterStop', 'x', 'y'],
                 },
               },
               legend: {
