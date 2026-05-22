@@ -2254,6 +2254,43 @@ function App() {
   //   2. Re-run route generation so the route plan actually contains the
   //      new facility and gets auto-saved — otherwise reloading the app
   //      would pull the original route without the newly-added facility.
+  /**
+   * Bulk version of handleAddFacilityToRoute, called from the facilities
+   * multi-select action bar. Unions the selected facility IDs with whatever
+   * the current route already covers and rebuilds via
+   * handleCreateRouteFromSelection. Forces "show only route facilities" mode
+   * on after the add so the additions are visible immediately and the user
+   * isn't surprised by a sudden route widening.
+   */
+  const handleAddFacilitiesToCurrentRoute = async (facilityIds: string[]) => {
+    if (facilityIds.length === 0) return;
+    if (!optimizationResult || !homeBase) {
+      setError('No current route to add to — generate a route first.');
+      return;
+    }
+
+    // Where the existing route's facility IDs live: routeFacilityIds when
+    // we're in subset mode, otherwise derive from optimizationResult by
+    // name-matching back to the facilities list.
+    let baseIds: string[];
+    if (routeFacilityIds && routeFacilityIds.length > 0) {
+      baseIds = routeFacilityIds;
+    } else {
+      const namesInRoute = new Set<string>();
+      for (const route of optimizationResult.routes ?? []) {
+        for (const rf of (route as any).facilities ?? []) {
+          if (rf?.name) namesInRoute.add(rf.name);
+        }
+      }
+      baseIds = facilities.filter((f) => namesInRoute.has(f.name)).map((f) => f.id);
+    }
+
+    const merged = Array.from(new Set([...baseIds, ...facilityIds]));
+    setRouteFacilityIds(merged);
+    setShowOnlyRouteFacilities(true);
+    await handleCreateRouteFromSelection(merged, surveyType);
+  };
+
   const handleAddFacilityToRoute = async (facilityId: string, _day: number) => {
     try {
       const settings = lastUsedSettings;
@@ -3480,6 +3517,11 @@ function App() {
               // Don't clear targetCoords - let the map handle it naturally
             }}
             onCreateRoute={handleCreateRouteFromSelection}
+            // Only available when a route is already loaded — adds the selected
+            // facilities to that route instead of replacing it with a new one.
+            onAddToCurrentRoute={
+              optimizationResult ? handleAddFacilitiesToCurrentRoute : undefined
+            }
             surveyTypes={dbSurveyTypes}
             activeSurveyTypeId={activeSurveyTypeId}
             onSurveyTypeSelect={setActiveSurveyTypeId}

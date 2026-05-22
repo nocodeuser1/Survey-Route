@@ -53,6 +53,10 @@ interface FacilitiesManagerProps {
   // surveyType is now 'all' | 'spcc_inspection' | 'spcc_plan' | <survey_types.id UUID>
   // (widened 2026-05-20 to support custom survey types as first-class route modes)
   onCreateRoute?: (facilityIds: string[], surveyType: string) => void;
+  /** Available only when a route is already loaded. Adds the selected
+   *  facilities to that existing route (vs onCreateRoute which makes a new
+   *  route from scratch). When omitted the bulk-action button is hidden. */
+  onAddToCurrentRoute?: (facilityIds: string[]) => void;
   // Survey type filtering
   surveyTypes?: SurveyType[];
   activeSurveyTypeId?: string | null;
@@ -227,7 +231,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
 
   // Brand-aware label for the external facility-id field. Camino-specific
@@ -4245,7 +4249,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       </button>
                     )}
 
-                    {/* Create Route */}
+                    {/* Create Route — replaces any current route with one
+                        built from JUST the selected facilities. */}
                     {onCreateRoute && (
                       <button
                         onClick={() => {
@@ -4255,10 +4260,28 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           setSelectedFacilityIds(new Set());
                         }}
                         className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 dark:hover:bg-indigo-400/20 active:scale-95 transition-all text-xs font-medium"
-                        title="Create route from selected facilities"
+                        title="Create a new route from the selected facilities (replaces any current route)"
                       >
                         <Route className="w-4 h-4 md:w-3.5 md:h-3.5" />
                         <span className="hidden md:inline">Route</span>
+                      </button>
+                    )}
+
+                    {/* Add to Current Route — only visible when a route is
+                        already loaded (parent passes the handler conditionally).
+                        Unions the selection with whatever the current route
+                        already covers and re-optimizes. */}
+                    {onAddToCurrentRoute && (
+                      <button
+                        onClick={() => {
+                          onAddToCurrentRoute(Array.from(selectedFacilityIds));
+                          setSelectedFacilityIds(new Set());
+                        }}
+                        className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-teal-500/10 dark:bg-teal-400/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 dark:hover:bg-teal-400/20 active:scale-95 transition-all text-xs font-medium"
+                        title="Add the selected facilities to the current route"
+                      >
+                        <Plus className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <span className="hidden md:inline">Add to Route</span>
                       </button>
                     )}
 
