@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigation, CheckCircle } from 'lucide-react';
+import { Navigation, CheckCircle, Trash2 } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import LDARObservationPathEditor from './LDARObservationPathEditor';
 import LDARSourceSelector from './LDARSourceSelector';
@@ -44,6 +44,7 @@ export default function LDARObservationPathSection({
   // when the editor closes so a subsequent re-open doesn't re-fire.
   const [editorAutoGenerate, setEditorAutoGenerate] = useState(false);
   const [togglingCompleted, setTogglingCompleted] = useState(false);
+  const [deletingPath, setDeletingPath] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasLdarPdf = !!facility.ldar_site_plan_url;
@@ -68,6 +69,37 @@ export default function LDARObservationPathSection({
     setEditorAutoGenerate(!hasExistingPath);
     if (hasLdarPdf) setShowEditor(true);
     else if (hasSpccPdf) setShowSourceSelector(true);
+  };
+
+  const handleDeletePath = async () => {
+    if (!hasExistingPath) return;
+    const ok = window.confirm(
+      `Delete the saved walking path for ${facility.name || 'this facility'}? ` +
+        `This clears the ${stopCount} stop${stopCount === 1 ? '' : 's'}, the path shape, and the legend. ` +
+        `Generating again will start from scratch. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setDeletingPath(true);
+    setError(null);
+    try {
+      // NULL the JSONB. We deliberately leave ldar_observation_path_completed
+      // alone — a user may have explicitly marked the path completed
+      // (handled outside the system) and that flag is independent of
+      // whether an in-app drawing exists.
+      const patch = { ldar_observation_path_data: null };
+      const { error: updateError } = await supabase
+        .from('facilities')
+        .update(patch)
+        .eq('id', facility.id);
+      if (updateError) throw updateError;
+      Object.assign(facility, patch);
+      onChange();
+    } catch (err) {
+      console.error('Failed to delete observation path:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete.');
+    } finally {
+      setDeletingPath(false);
+    }
   };
 
   const handleToggleCompleted = async () => {
@@ -225,6 +257,35 @@ export default function LDARObservationPathSection({
               <>Mark as Completed (no path needed)</>
             )}
           </button>
+
+          {/* Destructive action — only surfaced when there's something to
+              delete. Subtle text-link styling keeps it from competing with
+              the primary actions. */}
+          {hasExistingPath && (
+            <button
+              type="button"
+              onClick={handleDeletePath}
+              disabled={deletingPath}
+              className={`w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors ${
+                darkMode
+                  ? 'text-red-400/80 hover:text-red-300 hover:bg-red-900/20'
+                  : 'text-red-600/80 hover:text-red-700 hover:bg-red-50'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title="Delete the saved walking path entirely (stops, shape, legend). Cannot be undone."
+            >
+              {deletingPath ? (
+                <>
+                  <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete saved path
+                </>
+              )}
+            </button>
+          )}
 
           {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
         </div>
