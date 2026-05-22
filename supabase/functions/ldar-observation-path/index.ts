@@ -163,11 +163,26 @@ Constraints, in priority order:
 
 If you cannot satisfy all of these, prioritize NOT-covering-labels > NOT-overlapping-other-circles > NOT-covering-equipment.
 
-# Walking path waypoints (per-segment)
-- Each waypoint MUST include an integer \`afterStop\` field. \`afterStop: 3\` means this waypoint shapes the path between stop 3 and stop 4.
-- Waypoints with \`afterStop: N\` MUST lie geographically BETWEEN stop N and stop N+1. Do NOT put a waypoint near the bottom-left when its afterStop is 1→2 in the upper-right — that would make the path wrap around.
-- Provide 0–3 waypoints per segment, only where the path actually needs to bend around tanks / fences / equipment. Short straight segments need none.
-- The smoothed curve will pass through: stop1 → (afterStop=1 waypoints in array order) → stop2 → (afterStop=2 waypoints) → stop3 → ... → stopN.
+# Walking path waypoints (per-segment) — these shape the route between stops
+
+The smoothed yellow walking-path curve is drawn through: stop1 → (afterStop=1 waypoints in array order) → stop2 → (afterStop=2 waypoints) → stop3 → ... → stopN.
+
+**Each waypoint MUST include an integer \`afterStop\` field.** \`afterStop: 3\` means this waypoint shapes the path between stop 3 and stop 4. A waypoint with \`afterStop: N\` MUST lie geographically BETWEEN stop N and stop N+1 — never put a waypoint on the opposite side of the image from where its segment runs, or the path will wrap around.
+
+**The path must stay in the same empty ground band where the stops sit, and it must NEVER cross over a yellow label callout.** Use waypoints liberally to route AROUND callouts and equipment. A path that cuts straight through a "Heater Treaters" callout box is wrong — add a waypoint above or below the callout to bend the curve around it.
+
+How to think about it: pretend you're drawing the walking line with a marker on the photo. Your marker should never touch a yellow label box or the leader lines from a label. When the straight line between two consecutive stops would cross a label, place ONE OR TWO waypoints just below/above/beside the label so the curve sweeps around it.
+
+Waypoint count per segment:
+- **Long segments** (e.g. from the wellhead stop down to stop 2 across most of the image): use 1–2 waypoints to keep the path in empty ground while crossing.
+- **Adjacent stops in the same empty-ground band**: 0–1 waypoint, usually 1 to give the curve a gentle bend that dodges any in-line callouts.
+- **Stops separated by tanks or equipment clusters**: 1–2 waypoints to weave between the obstacles.
+- **Hard cap**: 3 waypoints per segment. More than that turns the curve wavy.
+
+Waypoint placement priority:
+1. NEVER on or crossing a yellow label callout box.
+2. NEVER on top of equipment when empty ground is nearby.
+3. PREFER the same empty-ground band as the stops (typically the bottom strip for Layout A from the stop-placement section).
 
 # Legend placement (CRITICAL — survey this corner of the image before placing)
 The legend is the small box that lists each numbered stop. It goes in EMPTY GROUND in a BOTTOM CORNER of the image.
