@@ -2642,7 +2642,7 @@ export default function FacilityDetailModal({
                   )}
                   <span className="inline-flex items-center gap-1.5">
                     <LocateFixed className="w-4 h-4" />
-                    {wells.length} components
+                    {wells.length} {wells.length === 1 ? 'well' : 'wells'}
                   </span>
                 </div>
               </div>
