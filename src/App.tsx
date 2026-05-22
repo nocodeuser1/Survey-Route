@@ -22,6 +22,7 @@ import SecuritySettings from './components/SecuritySettings';
 import ProfileModal from './components/ProfileModal';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
 import ManagementSignatureSettings from './components/ManagementSignatureSettings';
+import FacilityDetailModal from './components/FacilityDetailModal';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
 import SPCCExtractionSettings from './components/SPCCExtractionSettings';
 import SurveyTypesSettings from './components/SurveyTypesSettings';
@@ -158,6 +159,11 @@ const filterFacilitiesByTeam = (
 function App() {
   const { user, signOut } = useAuth();
   const { currentAccount, accounts, accountRole, loading: accountLoading, selectAccount } = useAccount();
+
+  // Facility opened from the AI assistant bubble's linkified bold mentions.
+  // Rendered as a top-level FacilityDetailModal so it works regardless of
+  // which view the user is on when they click the AI's facility link.
+  const [aiOpenedFacility, setAiOpenedFacility] = useState<Facility | null>(null);
   const { darkMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const { logTabView, logActivity } = useActivityLogger();
@@ -4362,7 +4368,28 @@ function App() {
           Function which loads a snapshot + calls Claude with an
           SPCC-aware system prompt. Hidden on fullscreen map to keep the
           map view uncluttered. */}
-      {!isFullScreenMap && <AIAssistantBubble />}
+      {!isFullScreenMap && (
+        <AIAssistantBubble
+          facilities={facilities}
+          onOpenFacility={setAiOpenedFacility}
+        />
+      )}
+
+      {/* Top-level FacilityDetailModal triggered by the AI bubble's linkified
+          facility mentions. Lives at App level so the modal works from any
+          view (route planning, survey mode, settings, etc.) without each
+          view needing its own click handler. */}
+      {aiOpenedFacility && currentAccount && user && (
+        <FacilityDetailModal
+          facility={aiOpenedFacility}
+          userId={user.id}
+          teamNumber={1}
+          accountId={currentAccount.id}
+          facilities={facilities}
+          allInspections={inspections}
+          onClose={() => setAiOpenedFacility(null)}
+        />
+      )}
     </div>
   );
 }

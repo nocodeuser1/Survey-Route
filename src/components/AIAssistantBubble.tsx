@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2 } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
-import { supabase } from '../lib/supabase';
+import { supabase, Facility } from '../lib/supabase';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 /**
  * Model picker — must match the server-side ALLOWED_MODELS allowlist in
@@ -58,8 +60,33 @@ const SUGGESTED_PROMPTS = [
   'Show me facilities due for 5-year recertification in the next 90 days.',
 ];
 
-export default function AIAssistantBubble() {
+interface AIAssistantBubbleProps {
+  /** Account's facilities — used to linkify bold mentions in AI replies. */
+  facilities?: Facility[];
+  /** Called when the user clicks a linkified facility mention. */
+  onOpenFacility?: (facility: Facility) => void;
+}
+
+export default function AIAssistantBubble({
+  facilities = [],
+  onOpenFacility,
+}: AIAssistantBubbleProps = {}) {
   const { currentAccount } = useAccount();
+
+  // Lower-cased name → facility lookup for fast linkification of bold mentions
+  // in assistant messages. Covers facility.name plus matched_facility_name
+  // (the alias used by some legacy / Camino-imported rows).
+  const facilityByName = useMemo(() => {
+    const map = new Map<string, Facility>();
+    for (const f of facilities) {
+      if (f.name) map.set(f.name.trim().toLowerCase(), f);
+      if (f.matched_facility_name) {
+        const alias = f.matched_facility_name.trim().toLowerCase();
+        if (alias && !map.has(alias)) map.set(alias, f);
+      }
+    }
+    return map;
+  }, [facilities]);
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -423,13 +450,23 @@ export default function AIAssistantBubble() {
                     </button>
                   )}
                   <div
-                    className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                    className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words ${
                       msg.role === 'user'
-                        ? 'bg-blue-600 text-white rounded-br-md'
+                        ? 'bg-blue-600 text-white rounded-br-md whitespace-pre-wrap'
                         : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-md'
                     }`}
                   >
-                    {msg.content || (
+                    {msg.content ? (
+                      msg.role === 'assistant' ? (
+                        <AIMarkdown
+                          source={msg.content}
+                          facilityByName={facilityByName}
+                          onOpenFacility={onOpenFacility}
+                        />
+                      ) : (
+                        msg.content
+                      )
+                    ) : (
                       <span className="inline-flex items-center gap-1.5 text-gray-400">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         Thinking…
@@ -478,5 +515,147 @@ export default function AIAssistantBubble() {
         </div>
       )}
     </>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Markdown renderer for assistant replies.
+ *
+ * Renders GFM-flavored markdown with Tailwind classes tuned to the chat
+ * bubble's typography (compact spacing, readable line height, theme-aware
+ * colors). The `strong` component is overridden: if the bolded text matches
+ * one of the user's facilities by name (case-insensitive), it's rendered
+ * as a clickable pill that opens the facility detail modal via the
+ * parent-provided onOpenFacility callback. Bold text that doesn't match a
+ * known facility renders as plain emphasized text.
+ * ──────────────────────────────────────────────────────────────────────── */
+interface AIMarkdownProps {
+  source: string;
+  facilityByName: Map<string, Facility>;
+  onOpenFacility?: (facility: Facility) => void;
+}
+
+function AIMarkdown({ source, facilityByName, onOpenFacility }: AIMarkdownProps) {
+  // Flatten React children to a plain string so we can do a case-insensitive
+  // lookup against the facility name map.
+  const childrenToString = (children: unknown): string => {
+    if (typeof children === 'string') return children;
+    if (typeof children === 'number') return String(children);
+    if (Array.isArray(children)) return children.map(childrenToString).join('');
+    if (children && typeof children === 'object' && 'props' in (children as any)) {
+      return childrenToString((children as any).props.children);
+    }
+    return '';
+  };
+
+  return (
+    <div className="ai-markdown space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Paragraphs — keep them tight inside the bubble
+          p: ({ children }) => <p className="leading-relaxed">{children}</p>,
+
+          // Bold — linkify to facility detail when text matches a facility name
+          strong: ({ children }) => {
+            const text = childrenToString(children).trim();
+            const match = facilityByName.get(text.toLowerCase());
+            if (match && onOpenFacility) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => onOpenFacility(match)}
+                  className="inline-flex items-baseline gap-0.5 font-semibold text-blue-600 dark:text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300 hover:decoration-blue-500 transition-colors cursor-pointer"
+                  title={`Open ${match.name}`}
+                >
+                  {children}
+                </button>
+              );
+            }
+            return <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>;
+          },
+
+          // Italic
+          em: ({ children }) => <em className="italic">{children}</em>,
+
+          // Lists — themed bullets/numbers, tighter spacing than the default
+          ul: ({ children }) => (
+            <ul className="list-disc list-outside pl-5 space-y-1 marker:text-gray-400 dark:marker:text-gray-500">
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal list-outside pl-5 space-y-1 marker:text-gray-400 dark:marker:text-gray-500">
+              {children}
+            </ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+
+          // Headings — keep them small inside the bubble so they don't dwarf the body
+          h1: ({ children }) => <h3 className="text-base font-bold text-gray-900 dark:text-white mt-3 mb-1">{children}</h3>,
+          h2: ({ children }) => <h4 className="text-sm font-bold text-gray-900 dark:text-white mt-3 mb-1">{children}</h4>,
+          h3: ({ children }) => <h5 className="text-sm font-semibold text-gray-900 dark:text-white mt-2 mb-1">{children}</h5>,
+          h4: ({ children }) => <h6 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mt-2 mb-1">{children}</h6>,
+
+          // Inline + block code
+          code: ({ inline, children, ...rest }: any) =>
+            inline ? (
+              <code
+                {...rest}
+                className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-[0.8em] font-mono"
+              >
+                {children}
+              </code>
+            ) : (
+              <code {...rest} className="block text-xs font-mono whitespace-pre">
+                {children}
+              </code>
+            ),
+          pre: ({ children }) => (
+            <pre className="overflow-x-auto rounded-lg bg-gray-100 dark:bg-gray-900 p-3 text-xs leading-snug border border-gray-200 dark:border-gray-700">
+              {children}
+            </pre>
+          ),
+
+          // Blockquote
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-blue-300 dark:border-blue-600 pl-3 italic text-gray-600 dark:text-gray-300">
+              {children}
+            </blockquote>
+          ),
+
+          // Links — open in new tab, themed underline
+          a: ({ children, href }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 underline decoration-blue-400/40 hover:decoration-blue-500"
+            >
+              {children}
+            </a>
+          ),
+
+          // Tables — basic styling so anything Claude formats as a table reads cleanly
+          table: ({ children }) => (
+            <div className="overflow-x-auto -mx-1">
+              <table className="min-w-full text-xs border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">{children}</thead>
+          ),
+          th: ({ children }) => <th className="px-2 py-1.5 text-left font-semibold border-b border-gray-200 dark:border-gray-700">{children}</th>,
+          td: ({ children }) => <td className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700/50">{children}</td>,
+
+          // Horizontal rule
+          hr: () => <hr className="border-gray-200 dark:border-gray-700 my-2" />,
+        }}
+      >
+        {source}
+      </ReactMarkdown>
+    </div>
   );
 }
