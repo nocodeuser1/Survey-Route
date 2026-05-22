@@ -1406,6 +1406,38 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                           </button>
                         `;
             }).join('')}
+                      ${(() => {
+              // "+ Day N+1" tile: lets the user spin up a brand-new day
+              // and reassign this facility to it in one click. Mirrors
+              // the bulk-reassign panel pattern so users see the same
+              // affordance everywhere day reassignment exists.
+              const newDayNumber = result.routes.length + 1;
+              const newDayColor = COLORS[(newDayNumber - 1) % COLORS.length];
+              return `
+                        <button
+                          class="day-option-btn"
+                          data-day="${newDayNumber}"
+                          style="
+                            padding: 4px 6px;
+                            background-color: white;
+                            color: ${newDayColor};
+                            border: 2px dashed ${newDayColor};
+                            border-radius: 3px;
+                            cursor: pointer;
+                            font-size: 10px;
+                            font-weight: 600;
+                            text-align: center;
+                            transition: transform 0.1s, box-shadow 0.1s;
+                            white-space: nowrap;
+                          "
+                          title="Create a new day for this facility"
+                          onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.2)'"
+                          onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                        >
+                          + D${newDayNumber}
+                        </button>
+                      `;
+            })()}
                     </div>
                   </div>
                 ` : ''}
@@ -1519,21 +1551,34 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 });
               }
 
+              // Day-reassign UI: handlers attach directly to elements
+              // within popupContent (not via document.getElementById).
+              // The prior approach raced popup-open vs. DOM insertion on
+              // first open, which is why the first click sometimes did
+              // nothing — getElementById returned null, no listener was
+              // attached, and the user had to close + reopen to get a
+              // working dropdown. querySelector on the popupContent
+              // root sidesteps that entirely because the element is
+              // already in the popupContent tree we own.
               if (onReassignFacility && result) {
-                const changeDayBtn = document.getElementById(`change-day-btn-${facility.index}`);
-                const dayOptions = document.getElementById(`day-options-${facility.index}`);
-                const dayButtons = document.querySelectorAll(`#day-options-${facility.index} .day-option-btn`);
+                const changeDayBtn = popupContent.querySelector<HTMLButtonElement>(`#change-day-btn-${facility.index}`);
+                const dayOptions = popupContent.querySelector<HTMLDivElement>(`#day-options-${facility.index}`);
+                const dayButtons = popupContent.querySelectorAll<HTMLButtonElement>(`#day-options-${facility.index} .day-option-btn`);
 
-                if (changeDayBtn && dayOptions) {
-                  const toggleHandler = () => {
+                if (changeDayBtn && dayOptions && !changeDayBtn.dataset.wired) {
+                  changeDayBtn.dataset.wired = '1';
+                  changeDayBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     const isVisible = dayOptions.style.display !== 'none';
                     dayOptions.style.display = isVisible ? 'none' : 'grid';
-                  };
-                  changeDayBtn.addEventListener('click', toggleHandler);
+                  });
                 }
 
                 dayButtons.forEach(btn => {
-                  const clickHandler = (e: Event) => {
+                  if (btn.dataset.wired) return;
+                  btn.dataset.wired = '1';
+                  btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     const target = e.currentTarget as HTMLElement;
                     const newDay = parseInt(target.getAttribute('data-day') || '0');
                     if (newDay && newDay !== route.day) {
@@ -1541,8 +1586,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       onReassignFacility(facility.index, route.day, newDay);
                       marker.closePopup();
                     }
-                  };
-                  btn.addEventListener('click', clickHandler);
+                  });
                 });
               }
 

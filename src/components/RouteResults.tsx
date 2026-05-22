@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2 } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
@@ -664,7 +664,57 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return facility ? inspections.get(facility.id) : undefined;
   };
 
-  const handleFacilityClick = (facilityName: string) => {
+  // Day-actions popover state — surfaces the same "move to day X / + Day N+1"
+  // affordance the map popup uses, but anchored to the clicked row in the
+  // day list. Mirrors the user's mental model: clicking a facility is a
+  // route-planning action by default; the heavier facility-details modal
+  // is one click deeper via the "View details" button inside the popover.
+  // {facility, x, y} → render at (x,y) clamped to the viewport.
+  const [dayActionsPopover, setDayActionsPopover] = useState<
+    { facility: Facility; x: number; y: number } | null
+  >(null);
+
+  const openDayActionsPopover = (facilityName: string, e: React.MouseEvent) => {
+    const facility = getFacilityForStop(facilityName);
+    if (!facility) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDayActionsPopover({ facility, x: e.clientX, y: e.clientY });
+  };
+
+  const reassignFacilityToDay = async (facility: Facility, targetDay: number) => {
+    if (!accountId) return;
+    if (facility.day_assignment === targetDay) {
+      setDayActionsPopover(null);
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ day_assignment: targetDay })
+        .eq('id', facility.id);
+      if (error) throw error;
+      setDayActionsPopover(null);
+      if (onFacilitiesUpdated) await onFacilitiesUpdated();
+      // Same re-optimize trigger the drag-and-drop path uses so the day's
+      // stop order/timing reflects the new membership.
+      setPendingReoptimize(true);
+    } catch (err) {
+      console.error('Error reassigning facility:', err);
+      alert('Failed to reassign facility');
+    }
+  };
+
+  const handleFacilityClick = (facilityName: string, e?: React.MouseEvent) => {
+    // Default click on a list-view facility row opens the day-actions
+    // popover (the user's primary intent on the route-planning tab is
+    // managing day assignments, not editing facility metadata). The
+    // popover's "View details" button still opens the heavier modal.
+    if (e) {
+      openDayActionsPopover(facilityName, e);
+      return;
+    }
+    // Fallback for callsites that don't pass the event (legacy paths).
     const facility = getFacilityForStop(facilityName);
     if (facility) {
       if (surveyType === 'spcc_plan') {
@@ -2217,7 +2267,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     <p
                                       className={`font-medium ${segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
                                         }`}
-                                      onClick={() => segment.to !== 'Home Base' && handleFacilityClick(segment.to)}
+                                      onClick={(e) => segment.to !== 'Home Base' && handleFacilityClick(segment.to, e)}
+                                      onContextMenu={(e) => segment.to !== 'Home Base' && openDayActionsPopover(segment.to, e)}
+                                      title={segment.to !== 'Home Base' ? 'Click to reassign or view details' : undefined}
                                     >
                                       {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
                                     </p>
@@ -2444,6 +2496,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
       </div>
+
+      {dayActionsPopover && (
+        <DayActionsPopover
+          facility={dayActionsPopover.facility}
+          x={dayActionsPopover.x}
+          y={dayActionsPopover.y}
+          routes={result.routes}
+          onReassign={(targetDay) => reassignFacilityToDay(dayActionsPopover.facility, targetDay)}
+          onViewDetails={() => {
+            const f = dayActionsPopover.facility;
+            setDayActionsPopover(null);
+            if (surveyType === 'spcc_plan') {
+              setSpccPlanDetailFacility(f);
+            } else {
+              setSelectedFacility(f);
+            }
+          }}
+          onClose={() => setDayActionsPopover(null)}
+        />
+      )}
 
       {selectedFacility && (
         <FacilityDetailModal
@@ -3020,6 +3092,175 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DayActionsPopover
+// ---------------------------------------------------------------------------
+//
+// Floating popover anchored to (x, y) from the click event. Shows the
+// reassign-to-day buttons that mirror the map popup, plus a quick "View
+// details" escape hatch into FacilityDetailModal. Closes on Escape,
+// outside-click, or after a successful reassign.
+//
+// Positioning: clamps to the viewport so we never render off-screen.
+// Renders into the document body via a fixed wrapper so parent overflow
+// containers can't clip us.
+
+interface DayActionsPopoverProps {
+  facility: Facility;
+  x: number;
+  y: number;
+  routes: { day: number; facilities: { name: string }[] }[];
+  onReassign: (targetDay: number) => void;
+  onViewDetails: () => void;
+  onClose: () => void;
+}
+
+// Mirror the day-color palette used by the route lists / map markers so
+// the popover buttons line up visually with everything else.
+const DAY_COLORS = [
+  '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
+  '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
+];
+
+function DayActionsPopover({ facility, x, y, routes, onReassign, onViewDetails, onClose }: DayActionsPopoverProps) {
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // Final coords after viewport clamping. Calculated post-render so we
+  // can measure the popover's own size and shift it back inside the
+  // viewport edge when the click was near the right or bottom.
+  const [coords, setCoords] = useState<{ left: number; top: number }>({ left: x, top: y });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    const onDocClick = (e: MouseEvent) => {
+      if (!popoverRef.current) return;
+      if (popoverRef.current.contains(e.target as Node)) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    // Defer outside-click registration by one tick so the click that
+    // opened the popover doesn't immediately close it.
+    const t = window.setTimeout(() => window.addEventListener('click', onDocClick), 0);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', onDocClick);
+      window.clearTimeout(t);
+    };
+  }, [onClose]);
+
+  // After first paint, measure and clamp so the popover never escapes
+  // the viewport. Cheap one-shot.
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 12;
+    const maxLeft = window.innerWidth - rect.width - margin;
+    const maxTop = window.innerHeight - rect.height - margin;
+    const left = Math.max(margin, Math.min(maxLeft, x));
+    const top = Math.max(margin, Math.min(maxTop, y));
+    if (left !== coords.left || top !== coords.top) {
+      setCoords({ left, top });
+    }
+    // Run once on mount; deps would re-clamp on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const currentDay = facility.day_assignment ?? null;
+  const newDayNumber = routes.length + 1;
+
+  return (
+    <div
+      ref={popoverRef}
+      role="dialog"
+      aria-label={`Day actions for ${facility.name}`}
+      className="fixed z-[9999] w-72 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"
+      style={{ left: coords.left, top: coords.top }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate" title={facility.name}>
+            {facility.name}
+          </p>
+          {currentDay && currentDay > 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Currently on Day {currentDay}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex-shrink-0 p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+        >
+          <XIcon className="w-4 h-4" />
+        </button>
+      </div>
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+        Move to day
+      </p>
+      <div className="grid grid-cols-3 gap-1.5 mb-3">
+        {routes.map((r) => {
+          const color = DAY_COLORS[(r.day - 1) % DAY_COLORS.length];
+          const isCurrent = r.day === currentDay;
+          return (
+            <button
+              key={r.day}
+              type="button"
+              onClick={() => onReassign(r.day)}
+              disabled={isCurrent}
+              title={isCurrent ? 'Already on this day' : `Move to Day ${r.day} (${r.facilities.length} stops)`}
+              className={`px-2 py-1.5 rounded-md text-xs font-semibold text-white transition-transform ${isCurrent ? 'cursor-default opacity-60' : 'hover:scale-105'}`}
+              style={{
+                backgroundColor: color,
+                textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                border: isCurrent ? '2px solid #1F2937' : '2px solid transparent',
+              }}
+            >
+              D{r.day} ({r.facilities.length})
+            </button>
+          );
+        })}
+        {(() => {
+          const color = DAY_COLORS[(newDayNumber - 1) % DAY_COLORS.length];
+          return (
+            <button
+              key="new-day"
+              type="button"
+              onClick={() => onReassign(newDayNumber)}
+              title="Create a new day for this facility"
+              className="px-2 py-1.5 rounded-md text-xs font-semibold transition-transform hover:scale-105"
+              style={{
+                backgroundColor: 'white',
+                color,
+                border: `2px dashed ${color}`,
+              }}
+            >
+              + D{newDayNumber}
+            </button>
+          );
+        })()}
+      </div>
+
+      <button
+        type="button"
+        onClick={onViewDetails}
+        className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-md transition-colors"
+      >
+        <FileText className="w-3.5 h-3.5" />
+        View facility details
+      </button>
     </div>
   );
 }
