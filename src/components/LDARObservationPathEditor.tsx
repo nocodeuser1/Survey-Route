@@ -1163,17 +1163,54 @@ function Legend({
   const x = legend.x * imgW;
   const y = legend.y * imgH;
   const w = legend.w * imgW;
-  const h = legend.h * imgH;
-  // Title line: ~22% of the legend height (or min 28px). Items fill the rest.
-  const titleHeight = Math.max(28, h * 0.22);
-  const itemAreaY = y + titleHeight;
-  const itemAreaH = h - titleHeight;
-  // Font sizes auto-scale to the legend height. Roomy for ~10 entries.
-  const titleFontSize = Math.max(14, titleHeight * 0.55);
-  const itemFontSize = items.length > 0
-    ? Math.max(11, Math.min(20, (itemAreaH / items.length) * 0.6))
-    : 14;
-  const itemSpacing = items.length > 0 ? itemAreaH / items.length : 0;
+  // User-set height is a MINIMUM. The rendered height grows to fit
+  // wrapped items so labels never get clipped at the right edge.
+  const minH = legend.h * imgH;
+
+  // Font sizes are capped — without caps, a tall legend produced 60+ vbox-unit
+  // title text that looked enormous on screen. Caps keep output sensible at
+  // any legend size; user can scale up by zooming the page render scale.
+  const titleFontSize = Math.min(28, Math.max(16, w * 0.05));
+  const itemFontSize = Math.min(16, Math.max(11, w * 0.028));
+  const titleHeight = Math.max(32, titleFontSize * 1.8);
+
+  // Per-item geometry. The numbered circle is a fixed visual size relative
+  // to the item font; gap between circle and label is constant.
+  const circleR = Math.max(9, itemFontSize * 0.85);
+  const itemPadX = 10;
+  const itemGap = 8;
+  const labelLeft = x + itemPadX + circleR * 2 + itemGap;
+  const labelMaxWidth = Math.max(40, x + w - labelLeft - itemPadX);
+
+  // Approximate width per character for system-ui sans-serif. Slightly
+  // generous so we don't under-allocate height for wrapped lines.
+  const approxCharWidth = itemFontSize * 0.58;
+  const charsPerLine = Math.max(6, Math.floor(labelMaxWidth / approxCharWidth));
+  const estimateLines = (text: string) => {
+    if (!text) return 1;
+    // Approximate wrap: total chars / chars-per-line, rounded up. Slightly
+    // generous so labels with long unbreakable tokens still get enough
+    // vertical room.
+    return Math.max(1, Math.ceil((text.length + 1) / charsPerLine));
+  };
+  const itemHeight = (text: string) => {
+    const textHeight = estimateLines(text) * itemFontSize * 1.3;
+    return Math.max(circleR * 2 + 8, textHeight + 8);
+  };
+
+  // Sum item heights to compute the effective legend height.
+  const totalItemsHeight = items.reduce((sum, it) => sum + itemHeight(it.label), 0);
+  const contentH = titleHeight + totalItemsHeight + 8; // titleHeight + items + bottom pad
+  const h = Math.max(minH, contentH);
+
+  // Stream items into y positions using their per-item heights.
+  let cursor = y + titleHeight + 4;
+  const itemLayout = items.map((it) => {
+    const ih = itemHeight(it.label);
+    const top = cursor;
+    cursor += ih;
+    return { item: it, top, height: ih };
+  });
 
   return (
     <g
@@ -1183,7 +1220,7 @@ function Legend({
       }}
       style={{ cursor: isEditMode ? 'move' : 'default' }}
     >
-      {/* Background box */}
+      {/* Background box — sized to effective height (≥ user-set min). */}
       <rect
         x={x}
         y={y}
@@ -1251,11 +1288,14 @@ function Legend({
         pointerEvents="none"
       />
 
-      {/* Items — numbered red circle + label text, one per line */}
-      {items.map((item, i) => {
-        const cy = itemAreaY + itemSpacing * (i + 0.5);
-        const circleR = Math.min(itemSpacing * 0.4, itemFontSize * 0.7);
-        const cx = x + 12 + circleR;
+      {/* Items — numbered red circle in SVG + wrapping label via
+          foreignObject + HTML. The circle stays SVG because it's
+          a precise geometric element; the label uses HTML so the
+          browser does word-wrap natively when text exceeds
+          labelMaxWidth. */}
+      {itemLayout.map(({ item, top, height: ih }) => {
+        const cy = top + ih / 2;
+        const cx = x + itemPadX + circleR;
         return (
           <g key={item.id} pointerEvents="none">
             <circle
@@ -1276,21 +1316,39 @@ function Legend({
             >
               {item.number}
             </text>
-            <text
-              x={cx + circleR + 8}
-              y={cy}
-              dominantBaseline="central"
-              fill="#111827"
-              fontSize={itemFontSize}
-              fontFamily="system-ui, -apple-system, sans-serif"
+            <foreignObject
+              x={labelLeft}
+              y={top}
+              width={labelMaxWidth}
+              height={ih}
             >
-              {item.label}
-            </text>
+              <div
+                xmlns="http://www.w3.org/1999/xhtml"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: itemFontSize,
+                  lineHeight: 1.25,
+                  color: '#111827',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  // Long technical labels can include parenthetical
+                  // equipment specs — overflowWrap handles in-word
+                  // breaks when even one word exceeds the column.
+                  wordBreak: 'normal',
+                  overflowWrap: 'break-word',
+                }}
+              >
+                <span>{item.label}</span>
+              </div>
+            </foreignObject>
           </g>
         );
       })}
 
-      {/* Resize handle (bottom-right) */}
+      {/* Resize handle (bottom-right) — anchored to the EFFECTIVE
+          height so it stays at the visible bottom corner. */}
       {isEditMode && (
         <rect
           x={x + w - 14}

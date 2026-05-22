@@ -154,10 +154,24 @@ A top-down aerial photo of a wellsite/tank battery, with yellow callout boxes th
 - Provide 0–3 waypoints per segment, only where the path actually needs to bend around tanks / fences / equipment. Short straight segments need none.
 - The smoothed curve will pass through: stop1 → (afterStop=1 waypoints in array order) → stop2 → (afterStop=2 waypoints) → stop3 → ... → stopN.
 
-# Legend
-- The legend is the small box that lists each numbered stop. Place its bounds in EMPTY GROUND area in the lower half of the image (typical: bottom-left quadrant) where nothing else is drawn.
-- Width 0.30–0.50. Height enough to hold all stops (~0.025 per item plus a title line).
-- DO NOT overlap the equipment or callouts.
+# Legend placement (CRITICAL — survey this corner of the image before placing)
+The legend is the small box that lists each numbered stop. It goes in EMPTY GROUND in a BOTTOM CORNER of the image.
+
+Before choosing a corner, look at BOTH bottom corners and identify which one has more empty space. The legend MUST NOT cover ANY of these:
+  - The NORTH ARROW / compass rose (the small "↑N" or "N↑" symbol — often a square cartouche in a corner). Very common in bottom-LEFT.
+  - The TITLE BLOCK (the bordered box at the bottom of the figure with "FACILITY SITE PLAN", "DATE:", "FIGURE NO.:", etc.). Often spans the full bottom edge.
+  - The FLOW DIRECTION arrow (a red arrow with "Flow Direction" text, often in the upper half — usually fine, but check).
+  - Any equipment or yellow callout label.
+
+Rules for picking which corner:
+  - If the north arrow is at bottom-LEFT → place the legend at bottom-RIGHT.
+  - If the north arrow is at bottom-RIGHT → place the legend at bottom-LEFT.
+  - If both bottom corners have artifacts, place the legend in the upper corner that has the most empty space (still avoiding equipment).
+
+Sizing (the renderer auto-grows height to fit wrapped text, so err small):
+  - Width 0.28–0.42. Tight to content.
+  - Height 0.12–0.20 — provide an honest estimate; the renderer will grow taller if items wrap, so DO NOT over-size by guessing huge.
+  - The renderer will also cap the font sizes regardless of width, so don't try to compensate for a too-large legend by giving wide bounds.
 
 # Output (STRICT JSON, no markdown, no commentary, no surrounding prose)
 Return EXACTLY this shape:
