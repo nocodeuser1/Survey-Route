@@ -79,13 +79,24 @@ export default function LDARObservationPathSection({
     if (!hasExistingPath) return;
     const ok = window.confirm(
       `Delete the saved walking path for ${facility.name || 'this facility'}? ` +
-        `This clears the ${stopCount} stop${stopCount === 1 ? '' : 's'}, the path shape, and the legend. ` +
+        `This clears the ${stopCount} stop${stopCount === 1 ? '' : 's'}, the path shape, the legend, ` +
+        `and the flattened PDF in the LDAR Site Plan section above (source PDF is kept). ` +
         `Generating again will start from scratch. This cannot be undone.`,
     );
     if (!ok) return;
     setDeletingPath(true);
     setError(null);
     try {
+      // Also delete the baked / flattened PDF from storage so the LDAR
+      // Site Plan section falls back to the source PDF (un-annotated).
+      // Best-effort — a missing file or storage error isn't fatal to
+      // clearing the JSON, but log it so we can debug.
+      if (facility.ldar_observation_path_data?.annotated_pdf_url) {
+        const { error: rmErr } = await supabase.storage
+          .from('ldar-site-plans')
+          .remove([`${facility.id}/site-plan-annotated.pdf`]);
+        if (rmErr) console.warn('Could not remove annotated PDF from storage:', rmErr);
+      }
       // NULL the JSONB. We deliberately leave ldar_observation_path_completed
       // alone — a user may have explicitly marked the path completed
       // (handled outside the system) and that flag is independent of

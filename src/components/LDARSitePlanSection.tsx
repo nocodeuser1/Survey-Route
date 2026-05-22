@@ -186,26 +186,43 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                 <FileText className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <a
-                  // Append uploaded_at as a cache-buster — the storage path
-                  // is deterministic (always {facility_id}/site-plan.pdf)
-                  // so when the LDAR editor overwrites the PDF on save,
-                  // the browser would otherwise serve a cached old copy
-                  // and the user would see the un-annotated version.
-                  href={
-                    facility.ldar_site_plan_uploaded_at
-                      ? `${facility.ldar_site_plan_url}?t=${encodeURIComponent(facility.ldar_site_plan_uploaded_at)}`
-                      : facility.ldar_site_plan_url!
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`text-sm font-medium hover:underline inline-flex items-center gap-1 truncate ${
-                    darkMode ? 'text-blue-300' : 'text-blue-700'
-                  }`}
-                >
-                  <span className="truncate">{facility.ldar_site_plan_filename || 'Site Plan.pdf'}</span>
-                  <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                </a>
+                {(() => {
+                  // Prefer the FLATTENED / annotated PDF (baked when the
+                  // agency owner saves a walking path) if one exists, so
+                  // the user gets the version with the overlay rendered
+                  // into it. Falls back to the raw source PDF when no
+                  // path has been saved. Cache-bust with the matching
+                  // uploaded_at timestamp so saves bypass browser cache
+                  // immediately.
+                  const annotatedUrl = facility.ldar_observation_path_data?.annotated_pdf_url ?? null;
+                  const annotatedTs = facility.ldar_observation_path_data?.annotated_pdf_uploaded_at ?? null;
+                  const sourceUrl = facility.ldar_site_plan_url!;
+                  const sourceTs = facility.ldar_site_plan_uploaded_at ?? null;
+                  const baseUrl = annotatedUrl ?? sourceUrl;
+                  const ts = annotatedUrl ? annotatedTs : sourceTs;
+                  const href = ts ? `${baseUrl}?t=${encodeURIComponent(ts)}` : baseUrl;
+                  const displayFilename = annotatedUrl
+                    ? `${facility.name || 'Facility'} — LDAR Observation Plan.pdf`
+                    : facility.ldar_site_plan_filename || 'Site Plan.pdf';
+                  return (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`text-sm font-medium hover:underline inline-flex items-center gap-1 truncate ${
+                        darkMode ? 'text-blue-300' : 'text-blue-700'
+                      }`}
+                      title={
+                        annotatedUrl
+                          ? 'Flattened LDAR Observation Plan (walking path baked in)'
+                          : 'Source site plan PDF'
+                      }
+                    >
+                      <span className="truncate">{displayFilename}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                  );
+                })()}
                 {facility.ldar_site_plan_uploaded_at && (
                   <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                     Uploaded {formatDate(facility.ldar_site_plan_uploaded_at)}

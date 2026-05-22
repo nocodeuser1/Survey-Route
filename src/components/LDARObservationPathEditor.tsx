@@ -571,33 +571,50 @@ export default function LDARObservationPathEditor({
       if (error) throw error;
       Object.assign(facility, { ldar_observation_path_data: toSave });
 
-      // 2. PDF — render the editor SVG (which already includes the
-      //    background page image + walking-path overlay + title-block
-      //    text substitution) to a flat single-page PDF and overwrite
-      //    the storage file. Wrapped in its own try so a PDF failure
-      //    doesn't undo a successful JSON save.
+      // 2. PDF — render the editor SVG (background + walking-path
+      //    overlay + title-block text substitutions) to a flat
+      //    single-page PDF and upload to a SEPARATE storage path
+      //    ({facility_id}/site-plan-annotated.pdf) so the source PDF
+      //    at {facility_id}/site-plan.pdf stays untouched. The editor
+      //    keeps loading the source PDF on re-open — so re-editing
+      //    later doesn't bake annotations into already-annotated text.
+      //    The annotated URL is stored on observation_path_data so the
+      //    LDAR Site Plan section can link the user to the rendered
+      //    version. Wrapped in its own try so a PDF failure doesn't
+      //    undo a successful JSON save.
       if (svgRef.current && pageImage) {
         setSaveStage('pdf');
         try {
           const pdfBlob = await svgToPdfBlob(svgRef.current, pageImage.w, pageImage.h);
-          const storagePath = `${facility.id}/site-plan.pdf`;
+          const annotatedPath = `${facility.id}/site-plan-annotated.pdf`;
           const { error: uploadError } = await supabase.storage
             .from('ldar-site-plans')
-            .upload(storagePath, pdfBlob, {
+            .upload(annotatedPath, pdfBlob, {
               contentType: 'application/pdf',
               upsert: true,
               cacheControl: '60',
             });
           if (uploadError) throw uploadError;
-          // Bump uploaded_at so the LDAR Site Plan section can use it as
-          // a cache-buster on the public URL.
+          const {
+            data: { publicUrl: annotatedUrl },
+          } = supabase.storage.from('ldar-site-plans').getPublicUrl(annotatedPath);
+
+          // Record the annotated URL + upload time on the path data so
+          // the section can link to it and cache-bust per save. Source
+          // PDF (ldar_site_plan_url + ldar_site_plan_uploaded_at) is
+          // intentionally NOT touched.
           const nowIso = new Date().toISOString();
+          const withAnnotated: LDARObservationPathData = {
+            ...toSave,
+            annotated_pdf_url: annotatedUrl,
+            annotated_pdf_uploaded_at: nowIso,
+          };
           const { error: tsErr } = await supabase
             .from('facilities')
-            .update({ ldar_site_plan_uploaded_at: nowIso })
+            .update({ ldar_observation_path_data: withAnnotated })
             .eq('id', facility.id);
           if (tsErr) throw tsErr;
-          Object.assign(facility, { ldar_site_plan_uploaded_at: nowIso });
+          Object.assign(facility, { ldar_observation_path_data: withAnnotated });
         } catch (pdfErr) {
           console.warn('Annotated PDF generation failed (JSON was saved):', pdfErr);
           setSaveError(

@@ -96,6 +96,16 @@ export interface LDARObservationPathData {
   generated_at?: string;
   /** Bumped on every save so we can detect concurrent edits if we ever need to. */
   edited_at?: string;
+  /** Public URL of the most recent FLATTENED / annotated PDF the editor
+   *  baked on Save. Lives at a separate storage path from the source
+   *  PDF (see ldar_site_plan_url) so the source stays clean for
+   *  re-editing while the LDAR Site Plan section can link the user to
+   *  the rendered version with the walking-path overlay. Null when no
+   *  annotated export has been baked yet. */
+  annotated_pdf_url?: string | null;
+  /** Last upload timestamp for the annotated PDF — used as a
+   *  cache-buster on the public URL when rendering the link. */
+  annotated_pdf_uploaded_at?: string | null;
 }
 
 export interface Facility {
