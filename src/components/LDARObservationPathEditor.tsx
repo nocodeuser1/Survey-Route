@@ -828,20 +828,58 @@ export default function LDARObservationPathEditor({
   }, [editingNumberOf, numberInputValue, pathData, commitChange]);
 
   // -----------------------------------------------------------
-  // Add a new stop at the center of the canvas, with the next number.
+  // Add a new stop ("Area").
+  //   - If a stop is currently selected → INSERT after it: shift every
+  //     stop whose number > selected.number up by 1, then give the new
+  //     stop number = selected.number + 1. The legend reorders by
+  //     number, so this slots the new stop into the correct sequence
+  //     position automatically.
+  //   - Otherwise → append at the end with the next-highest number.
+  // The new stop is also auto-selected so the user can reposition it
+  // immediately. Position defaults to a small offset from the source
+  // stop so it doesn't sit exactly on top.
   // -----------------------------------------------------------
   const addStop = useCallback(() => {
-    const nextNumber = pathData.stops.length === 0
-      ? 1
-      : Math.max(...pathData.stops.map((s) => s.number)) + 1;
-    commitChange({
-      ...pathData,
-      stops: [
-        ...pathData.stops,
-        { id: shortId('s'), number: nextNumber, x: 0.5, y: 0.5, label: `Stop ${nextNumber}` },
-      ],
-    });
-  }, [pathData, commitChange]);
+    const selectedStop = selection?.kind === 'stop'
+      ? pathData.stops.find((s) => s.id === selection.id) ?? null
+      : null;
+
+    const newId = shortId('s');
+
+    if (selectedStop) {
+      const insertAfter = selectedStop.number;
+      const newNumber = insertAfter + 1;
+      // Place slightly down-right of the source stop so they don't
+      // overlap; clamp so the new one stays on-canvas.
+      const nx = Math.max(0.02, Math.min(0.98, selectedStop.x + 0.03));
+      const ny = Math.max(0.02, Math.min(0.98, selectedStop.y + 0.03));
+      const shifted = pathData.stops.map((s) =>
+        s.number > insertAfter ? { ...s, number: s.number + 1 } : s,
+      );
+      commitChange({
+        ...pathData,
+        stops: [
+          ...shifted,
+          { id: newId, number: newNumber, x: nx, y: ny, label: `Area ${newNumber}` },
+        ],
+      });
+    } else {
+      const nextNumber = pathData.stops.length === 0
+        ? 1
+        : Math.max(...pathData.stops.map((s) => s.number)) + 1;
+      commitChange({
+        ...pathData,
+        stops: [
+          ...pathData.stops,
+          { id: newId, number: nextNumber, x: 0.5, y: 0.5, label: `Area ${nextNumber}` },
+        ],
+      });
+    }
+
+    // Select the new one so the user can drag it / edit its label right
+    // away.
+    setSelection({ kind: 'stop', id: newId });
+  }, [pathData, commitChange, selection]);
 
   // -----------------------------------------------------------
   // Delete the currently selected element.
@@ -982,10 +1020,14 @@ export default function LDARObservationPathEditor({
                 className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${
                   darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-300'
                 }`}
-                title="Add a new numbered stop at the center"
+                title={
+                  selection?.kind === 'stop'
+                    ? 'Insert a new Area after the selected one; following Area numbers shift up'
+                    : 'Add a new Area at the end'
+                }
               >
                 <Plus className="w-3.5 h-3.5" />
-                Stop
+                Area
               </button>
 
               <button
@@ -1405,7 +1447,9 @@ function TitleBlockOverlay({
         textAnchor="middle"
         dominantBaseline="central"
         fill="#111827"
-        fontSize={th * 0.72}
+        // Bumped 0.72 → 0.85 per Israel — the previous multiplier ran
+        // visibly smaller than the surrounding title-block text.
+        fontSize={th * 0.85}
         fontWeight={600}
         fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
         pointerEvents="none"
