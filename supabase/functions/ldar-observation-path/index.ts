@@ -136,17 +136,32 @@ A top-down aerial photo of a wellsite/tank battery, with yellow callout boxes th
 - All x and y values are NORMALIZED 0..1 to the source image.
 - (0, 0) is the top-left corner of the image. (1, 1) is the bottom-right corner.
 
-# Stop placement (CRITICAL — this is a common failure mode)
-- Each stop is drawn as a ~3%-of-image-height red circle with a white number inside. Its (x, y) is the circle's CENTER.
-- Place each circle in **empty ground space ADJACENT to the equipment**, NOT directly on top of the equipment, and NEVER overlapping the yellow label callout boxes.
-- Preferred placement order, in order of preference:
-    1. SLIGHTLY ABOVE the equipment, in empty ground area, close enough that it's visually associated with the equipment but offset by roughly 4–8% of image height so the circle does not touch the equipment.
-    2. To one side (left or right) in empty ground, if there's no clear space above.
-    3. Below the equipment.
-    4. Only as a last resort, on the equipment itself — and only on a part of it that isn't critical to read.
-- Never overlap two circles with each other.
-- Never overlap the yellow label callout boxes. The labels are how a reader identifies the equipment; covering one is worse than covering the equipment.
-- The wellhead stop (stop 1) is typically placed in the empty wellpad area ABOVE the wellheads, not on top of the wellhead frames themselves.
+# Stop placement (CRITICAL — this is the most common failure mode)
+Each stop is drawn as a small (~3% of image height) red circle with a white number inside. Its (x, y) is the circle's CENTER.
+
+**The rule: place each circle in the LARGEST EMPTY GROUND AREA adjacent to the equipment it labels. Never on top of equipment. Never on top of yellow label callouts.**
+
+To find that empty area, mentally divide the photo into regions and identify which side of the equipment has bare ground (dirt, gravel, concrete, dry pad) with nothing drawn on it. **Empty ground is empty pixels** — no equipment, no callouts, no arrows, no text.
+
+Recognize these very common layouts:
+
+**Layout A — Equipment in a horizontal band along the bottom with labels above (most common):**
+The yellow callout labels sit ABOVE the equipment, pointing down with red leader lines. There is NO empty space above the equipment — it's filled with labels. The largest empty area is the bare ground BELOW the equipment band (between the equipment and the bottom edge of the image). **Place stops 2..N-1 in that bottom empty band — typically around y = 0.72-0.85**, just below the equipment they label. DO NOT put them on the labels.
+
+**Layout B — Wellhead at the top with empty pad around it:**
+Stop 1 typically sits in the empty wellpad area near the wellheads — usually slightly above or to the side, in the bare ground of the pad. Not on the wellhead frames themselves.
+
+**Layout C — Combustor/flare at one end with empty ground around it:**
+The last stop sits in the empty ground next to the flare/combustor, not on top of it.
+
+Constraints, in priority order:
+1. NEVER cover a yellow label callout box. The labels are how a reader identifies what equipment they're looking at — covering one is the worst failure.
+2. NEVER let two red circles overlap each other.
+3. NEVER cover the legend.
+4. Avoid covering equipment (the photographed structures) when empty ground is available within ~10% of image dimension.
+5. The circle should be CLOSE ENOUGH to the equipment that the visual association is obvious — typically within 5-10% of image dimension from the equipment centroid.
+
+If you cannot satisfy all of these, prioritize NOT-covering-labels > NOT-overlapping-other-circles > NOT-covering-equipment.
 
 # Walking path waypoints (per-segment)
 - Each waypoint MUST include an integer \`afterStop\` field. \`afterStop: 3\` means this waypoint shapes the path between stop 3 and stop 4.
