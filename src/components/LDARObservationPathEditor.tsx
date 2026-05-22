@@ -22,7 +22,11 @@ import {
   type LDARObservationPathWaypoint,
 } from '../lib/supabase';
 import { renderPdfPageToImage } from '../utils/renderPdfPageToImage';
-import { findTextInPdfPage, type TextBoundingBox } from '../utils/findTextInPdfPage';
+import {
+  findTextInPdfPage,
+  findDateInPdfPage,
+  type TextBoundingBox,
+} from '../utils/findTextInPdfPage';
 import { svgToPdfBlob } from '../utils/svgToPdfBlob';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -240,6 +244,27 @@ function inferAfterStop(
   return bestAfterStop;
 }
 
+/** Format today's date matching the year-digit style of an original
+ *  date string from the source PDF. Falls back to MM/D/YY when no
+ *  original exists. Used for the date-cell substitution in the title
+ *  block. */
+function formatDateLikeOriginal(originalDate: string | null): string {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  const fullYear = now.getFullYear();
+  const twoYear = String(fullYear % 100).padStart(2, '0');
+  if (originalDate) {
+    const match = originalDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (match) {
+      const yearDigits = match[3].length;
+      const y = yearDigits === 2 ? twoYear : String(fullYear);
+      return `${m}/${d}/${y}`;
+    }
+  }
+  return `${m}/${d}/${twoYear}`;
+}
+
 /** Default empty path data. */
 function emptyPathData(): LDARObservationPathData {
   return { stops: [], waypoints: [], legend: { x: 0.04, y: 0.82, w: 0.42, h: 0.14, title: 'LDAR OBSERVATION PATH' } };
@@ -281,6 +306,8 @@ type DragKind =
   | { kind: 'waypoint'; id: string }
   | { kind: 'legend-move' }
   | { kind: 'legend-resize' }
+  | { kind: 'titlebox-move' }
+  | { kind: 'datebox-move' }
   | null;
 
 type SelectionKind =
@@ -302,12 +329,16 @@ export default function LDARObservationPathEditor({
   const [pageImage, setPageImage] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoadingPage, setIsLoadingPage] = useState(true);
-  // Bounding box (normalized 0..1) of "FACILITY SITE PLAN" text in the
-  // source PDF's title block. Used to render a white-rect cover + an
-  // "LDAR OBSERVATION PLAN" replacement in the editor SVG (which then
-  // bakes into the exported annotated PDF on save). Null if the text
-  // isn't found in the PDF.
+  // Auto-detected bounding boxes (normalized 0..1) of the two title-block
+  // text substitutions. Null when the source PDF doesn't have either.
+  // Users can ALSO drag the overlays to override the position per-facility
+  // — those overrides live in pathData.titleBoxOverride / dateBoxOverride
+  // and take precedence over these auto-detected values.
   const [siteplanTitlePos, setSiteplanTitlePos] = useState<TextBoundingBox | null>(null);
+  const [datePos, setDatePos] = useState<TextBoundingBox | null>(null);
+  /** Original date string from the PDF (e.g. "10/25/21") — used to
+   *  determine whether to format today's date with 2- or 4-digit year. */
+  const [originalDateStr, setOriginalDateStr] = useState<string | null>(null);
 
   // The editable path. Sanitized at construction so every stop / waypoint
   // has a stable id (the AI returns them id-less). Subsequent mutations
@@ -368,16 +399,22 @@ export default function LDARObservationPathEditor({
         if (cancelled) return;
         setPageImage({ dataUrl: rendered.dataUrl, w: rendered.width, h: rendered.height });
 
-        // Also extract "FACILITY SITE PLAN" text position from the source
-        // PDF so the export can substitute "LDAR OBSERVATION PLAN" in the
-        // title block. Best-effort — if the text isn't found we just skip
-        // the overlay.
+        // Also extract title-block text positions from the source PDF so
+        // the export can substitute "LDAR OBSERVATION PLAN" in place of
+        // "FACILITY SITE PLAN" and overwrite the date cell with today.
+        // Best-effort — if anything fails we just skip the overlay.
         try {
           const arrayBuffer = await (await fetch(facility.ldar_site_plan_url!)).arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           const page = await pdf.getPage(1);
-          const pos = await findTextInPdfPage(page, 'FACILITY SITE PLAN');
-          if (!cancelled) setSiteplanTitlePos(pos);
+          const [titlePos, foundDate] = await Promise.all([
+            findTextInPdfPage(page, 'FACILITY SITE PLAN'),
+            findDateInPdfPage(page),
+          ]);
+          if (cancelled) return;
+          setSiteplanTitlePos(titlePos);
+          setDatePos(foundDate);
+          setOriginalDateStr(foundDate ? foundDate.matchedText.trim() : null);
         } catch (err) {
           // Non-fatal: title-block substitution is a nice-to-have.
           console.warn('LDAR editor: title-block text lookup failed', err);
@@ -620,9 +657,48 @@ export default function LDARObservationPathEditor({
           },
         }));
         setHasUnsavedChanges(true);
+      } else if (drag.kind === 'titlebox-move') {
+        // Center the override box on the cursor. The starting w/h come from
+        // whichever source is current (existing override or the auto-
+        // detected position from the PDF).
+        setPathData((prev) => {
+          const fallback = siteplanTitlePos;
+          const current = prev.titleBoxOverride ?? (fallback
+            ? { x: fallback.x, y: fallback.y, w: fallback.w, h: fallback.h }
+            : null);
+          if (!current) return prev;
+          return {
+            ...prev,
+            titleBoxOverride: {
+              w: current.w,
+              h: current.h,
+              x: Math.max(0, Math.min(1 - current.w, cx - current.w / 2)),
+              y: Math.max(0, Math.min(1 - current.h, cy - current.h / 2)),
+            },
+          };
+        });
+        setHasUnsavedChanges(true);
+      } else if (drag.kind === 'datebox-move') {
+        setPathData((prev) => {
+          const fallback = datePos;
+          const current = prev.dateBoxOverride ?? (fallback
+            ? { x: fallback.x, y: fallback.y, w: fallback.w, h: fallback.h }
+            : null);
+          if (!current) return prev;
+          return {
+            ...prev,
+            dateBoxOverride: {
+              w: current.w,
+              h: current.h,
+              x: Math.max(0, Math.min(1 - current.w, cx - current.w / 2)),
+              y: Math.max(0, Math.min(1 - current.h, cy - current.h / 2)),
+            },
+          };
+        });
+        setHasUnsavedChanges(true);
       }
     },
-    [pageImage],
+    [pageImage, siteplanTitlePos, datePos],
   );
 
   const onSvgPointerUp = useCallback(() => {
@@ -673,6 +749,28 @@ export default function LDARObservationPathEditor({
       dragRef.current = { kind: 'legend-resize' };
       (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
       setSelection({ kind: 'legend' });
+    },
+    [isEditMode, pushUndo],
+  );
+
+  const startTitleboxDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isEditMode) return;
+      e.stopPropagation();
+      pushUndo();
+      dragRef.current = { kind: 'titlebox-move' };
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    },
+    [isEditMode, pushUndo],
+  );
+
+  const startDateboxDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isEditMode) return;
+      e.stopPropagation();
+      pushUndo();
+      dragRef.current = { kind: 'datebox-move' };
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     },
     [isEditMode, pushUndo],
   );
@@ -1033,42 +1131,40 @@ export default function LDARObservationPathEditor({
               {/* Background — the rendered PDF page */}
               <image href={pageImage.dataUrl} x={0} y={0} width={W} height={H} />
 
-              {/* Title-block text substitution — when we found "FACILITY
-                  SITE PLAN" in the source PDF, cover it with a white
-                  rect and write "LDAR OBSERVATION PLAN" in its place.
-                  This bakes into the exported PDF so the saved file
-                  reads correctly for an LDAR audit. */}
-              {siteplanTitlePos && (() => {
-                const tx = siteplanTitlePos.x * W;
-                const ty = siteplanTitlePos.y * H;
-                const tw = siteplanTitlePos.w * W;
-                const th = siteplanTitlePos.h * H;
-                // Pad the cover slightly so antialiasing / descenders
-                // don't leak around the edges of the old text.
-                const padX = th * 0.3;
-                const padY = th * 0.2;
+              {/* Title-block text substitutions — two draggable overlays.
+                  Each starts at the auto-detected position from
+                  findTextInPdfPage; once the user drags one its position
+                  override gets stored in pathData and takes precedence on
+                  future renders. Both are visible in edit AND view modes
+                  so the user sees what the exported PDF will look like. */}
+              {(() => {
+                // Resolve effective positions (override > auto-detect).
+                const titleBox = pathData.titleBoxOverride ?? siteplanTitlePos;
+                const dateBox = pathData.dateBoxOverride ?? datePos;
+                const todayText = formatDateLikeOriginal(originalDateStr);
                 return (
-                  <g pointerEvents="none">
-                    <rect
-                      x={tx - padX}
-                      y={ty - padY}
-                      width={tw + padX * 2}
-                      height={th + padY * 2}
-                      fill="#ffffff"
-                    />
-                    <text
-                      x={tx + tw / 2}
-                      y={ty + th / 2}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fill="#111827"
-                      fontSize={th * 0.78}
-                      fontWeight={600}
-                      fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
-                    >
-                      LDAR OBSERVATION PLAN
-                    </text>
-                  </g>
+                  <>
+                    {titleBox && (
+                      <TitleBlockOverlay
+                        box={titleBox}
+                        text="LDAR OBSERVATION PLAN"
+                        imgW={W}
+                        imgH={H}
+                        isEditMode={isEditMode}
+                        onDragStart={startTitleboxDrag}
+                      />
+                    )}
+                    {dateBox && (
+                      <TitleBlockOverlay
+                        box={dateBox}
+                        text={todayText}
+                        imgW={W}
+                        imgH={H}
+                        isEditMode={isEditMode}
+                        onDragStart={startDateboxDrag}
+                      />
+                    )}
+                  </>
                 );
               })()}
 
@@ -1232,6 +1328,74 @@ export default function LDARObservationPathEditor({
       </div>
     </div>,
     document.body,
+  );
+}
+
+// ============================================================
+// TitleBlockOverlay — draggable white-rect cover + replacement text.
+// Used for the "FACILITY SITE PLAN → LDAR OBSERVATION PLAN" substitution
+// and the date-cell substitution. Same shape for both because the
+// behavior is identical; the caller picks the text content + position
+// source.
+// ============================================================
+interface TitleBlockOverlayProps {
+  box: { x: number; y: number; w: number; h: number };
+  text: string;
+  imgW: number;
+  imgH: number;
+  isEditMode: boolean;
+  /** Pointer-down handler that starts a move drag. */
+  onDragStart: (e: React.PointerEvent) => void;
+}
+
+function TitleBlockOverlay({
+  box,
+  text,
+  imgW,
+  imgH,
+  isEditMode,
+  onDragStart,
+}: TitleBlockOverlayProps) {
+  const tx = box.x * imgW;
+  const ty = box.y * imgH;
+  const tw = box.w * imgW;
+  const th = box.h * imgH;
+  // Small horizontal pad only — vertical extent is already accurately
+  // captured by findTextInPdfPage (after the fix to use top-of-cap as the
+  // box top). Avoid extra Y pad to keep the cover from leaking into the
+  // line below.
+  const padX = th * 0.2;
+  return (
+    <g
+      style={{ cursor: isEditMode ? 'move' : 'default' }}
+      onPointerDown={isEditMode ? onDragStart : undefined}
+    >
+      <rect
+        x={tx - padX}
+        y={ty}
+        width={tw + padX * 2}
+        height={th}
+        fill="#ffffff"
+        // Outline shown only in edit mode — gives the user a visible
+        // drag handle and a hint that it's interactive.
+        stroke={isEditMode ? '#3b82f6' : 'none'}
+        strokeWidth={isEditMode ? 1.5 : 0}
+        strokeDasharray={isEditMode ? '6 4' : undefined}
+      />
+      <text
+        x={tx + tw / 2}
+        y={ty + th * 0.55}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="#111827"
+        fontSize={th * 0.72}
+        fontWeight={600}
+        fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
+        pointerEvents="none"
+      >
+        {text}
+      </text>
+    </g>
   );
 }
 

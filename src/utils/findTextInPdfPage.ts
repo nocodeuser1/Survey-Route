@@ -44,30 +44,94 @@ export async function findTextInPdfPage(
     const transform = raw.transform as number[] | undefined;
     if (!str || !transform || transform.length < 6) continue;
     if (!str.toLowerCase().includes(target)) continue;
-
-    // pdfjs text-item transform = [scaleX, skewY, skewX, scaleY, tx, ty]
-    // tx/ty are in PDF coords (origin bottom-left, y up). Item height comes
-    // from |scaleY| since pdfjs stores the typographic height there.
-    const scaleY = Math.abs(transform[3]) || 12;
-    const tx = transform[4];
-    const ty = transform[5];
-    const itemHeight =
-      typeof raw.height === 'number' && raw.height > 0 ? raw.height : scaleY;
-    const itemWidth =
-      typeof raw.width === 'number' && raw.width > 0
-        ? raw.width
-        : str.length * itemHeight * 0.55;
-    // Convert PDF (y-up from bottom) to image (y-down from top) and
-    // normalize to 0..1 against the page viewport.
-    const imgYTop = viewport.height - ty - itemHeight * 0.15; // small lift so the rect overlay covers descenders cleanly
-    return {
-      x: tx / viewport.width,
-      y: imgYTop / viewport.height,
-      w: itemWidth / viewport.width,
-      h: (itemHeight * 1.2) / viewport.height,
-      matchedText: str,
-    };
+    return textItemToBoundingBox(raw, transform, str, viewport);
   }
 
   return null;
+}
+
+/**
+ * Find a date value in the bottom portion of the page, matching common
+ * formats (`M/D/YY`, `MM/DD/YYYY`, etc). Used to locate the "DATE:" value
+ * cell of the title block so the export can substitute today's date.
+ *
+ * Restricted to the bottom 30% of the page by default — most facility
+ * site plans have date cells in the title block at the very bottom, and
+ * limiting the search prevents false positives from other dates that
+ * might appear elsewhere on the page.
+ */
+export async function findDateInPdfPage(
+  pdfPage: pdfjsLib.PDFPageProxy,
+  options: { minNormalizedY?: number } = {},
+): Promise<TextBoundingBox | null> {
+  const minY = options.minNormalizedY ?? 0.7;
+  const viewport = pdfPage.getViewport({ scale: 1 });
+  const textContent = await pdfPage.getTextContent();
+  // Match the entire item — anchor at start/end so we don't accidentally
+  // catch a date embedded inside other text. Trim whitespace tolerantly.
+  const datePattern = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/;
+
+  for (const raw of textContent.items as Array<Record<string, unknown>>) {
+    const str = typeof raw.str === 'string' ? raw.str : '';
+    const transform = raw.transform as number[] | undefined;
+    if (!str || !transform || transform.length < 6) continue;
+    if (!datePattern.test(str)) continue;
+    // Only accept matches in the bottom band — title-block dates only.
+    const ty = transform[5];
+    const normalizedBaseline = (viewport.height - ty) / viewport.height;
+    if (normalizedBaseline < minY) continue;
+    return textItemToBoundingBox(raw, transform, str, viewport);
+  }
+  return null;
+}
+
+/**
+ * Shared helper: convert a pdfjs text item into a normalized 0..1
+ * bounding box with origin at the page's top-left.
+ *
+ * The Y math is the tricky bit. pdfjs reports `transform[5]` (ty) as the
+ * BASELINE position in PDF coords (origin bottom-left, Y axis up).
+ * `item.height` (or |scaleY|) is the typographic height of the glyphs.
+ * To convert to image coords (origin top-left, Y axis down):
+ *   imageY_baseline = viewport.height - ty
+ *   imageY_top_of_text = imageY_baseline - itemHeight
+ *
+ * Earlier this function used `viewport.height - ty - itemHeight * 0.15`
+ * which placed the rect's TOP near the BASELINE — then the height
+ * (1.2 * itemHeight) extended downward and covered the line below.
+ * The fix is conceptually trivial: subtract the full itemHeight to
+ * land at the actual top of the text, with a small bleed for ascenders.
+ */
+function textItemToBoundingBox(
+  raw: Record<string, unknown>,
+  transform: number[],
+  str: string,
+  viewport: { width: number; height: number },
+): TextBoundingBox {
+  const scaleY = Math.abs(transform[3]) || 12;
+  const tx = transform[4];
+  const ty = transform[5];
+  const itemHeight =
+    typeof raw.height === 'number' && raw.height > 0 ? raw.height : scaleY;
+  const itemWidth =
+    typeof raw.width === 'number' && raw.width > 0
+      ? raw.width
+      : str.length * itemHeight * 0.55;
+
+  // Top of the actual text (top of the cap), with a tiny upward bleed
+  // (~5% of itemHeight) so antialiased ascenders are fully covered.
+  const baselineImgY = viewport.height - ty;
+  const topImgY = baselineImgY - itemHeight - itemHeight * 0.05;
+  // Total cover height = ascender bleed (top) + cap (itemHeight) + small
+  // descender pad (bottom). 1.15 * itemHeight is enough for the
+  // descender of letters like 'p', 'y' without bleeding into the next line.
+  const coverH = itemHeight * 1.15;
+
+  return {
+    x: tx / viewport.width,
+    y: topImgY / viewport.height,
+    w: itemWidth / viewport.width,
+    h: coverH / viewport.height,
+    matchedText: str,
+  };
 }

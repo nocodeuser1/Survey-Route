@@ -61,6 +61,18 @@ export interface LDARObservationPathLegend {
   title?: string;
 }
 
+/** Position override (normalized 0..1) for one of the title-block text
+ *  substitutions the editor bakes into the exported PDF. When set, the
+ *  override takes precedence over the auto-detected position from
+ *  findTextInPdfPage — so users can drag the overlay into place on
+ *  facilities where the auto-detect is off by a few pixels. */
+export interface LDARTitleBlockOverride {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface LDARObservationPathData {
   stops: LDARObservationPathStop[];
   /** Shape-only points along the curve between the first and last stop.
@@ -69,6 +81,12 @@ export interface LDARObservationPathData {
    *  by following stop.number ascending). */
   waypoints: LDARObservationPathWaypoint[];
   legend: LDARObservationPathLegend;
+  /** Override for the "FACILITY SITE PLAN → LDAR OBSERVATION PLAN" title
+   *  cover. Null/missing = use auto-detected position. */
+  titleBoxOverride?: LDARTitleBlockOverride | null;
+  /** Override for the date-cell cover (where the original PDF's date
+   *  gets replaced with today's date on export). */
+  dateBoxOverride?: LDARTitleBlockOverride | null;
   /** Pixel size of the source page render that produced these coords.
    *  Used for diagnostics only — the overlay re-renders at the current
    *  display size using normalized coords. */
