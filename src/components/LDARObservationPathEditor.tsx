@@ -360,6 +360,10 @@ export default function LDARObservationPathEditor({
   const [editingNumberOf, setEditingNumberOf] = useState<string | null>(null);
   const [numberInputValue, setNumberInputValue] = useState('');
   const [editingLegendTitle, setEditingLegendTitle] = useState(false);
+  // Stop id whose label is being edited in-place from inside the legend.
+  // Null when nothing is being edited. Driven by double-click on the legend
+  // item's text; commits on blur or Enter.
+  const [editingLegendItemId, setEditingLegendItemId] = useState<string | null>(null);
 
   // Drag state. Lives in a ref because the drag handlers fire on every
   // pointer move and we don't want each move to trigger a re-render just
@@ -1320,6 +1324,19 @@ export default function LDARObservationPathEditor({
                     setHasUnsavedChanges(true);
                   }}
                   onTitleBlur={() => setEditingLegendTitle(false)}
+                  editingItemId={editingLegendItemId}
+                  onItemDoubleClick={(id) => {
+                    if (!isEditMode) return;
+                    setEditingLegendItemId(id);
+                  }}
+                  onItemLabelChange={(id, label) => {
+                    setPathData((prev) => ({
+                      ...prev,
+                      stops: prev.stops.map((s) => (s.id === id ? { ...s, label } : s)),
+                    }));
+                    setHasUnsavedChanges(true);
+                  }}
+                  onItemEditDone={() => setEditingLegendItemId(null)}
                 />
               )}
             </svg>
@@ -1416,6 +1433,18 @@ interface LegendProps {
   editingTitle: boolean;
   onTitleChange: (v: string) => void;
   onTitleBlur: () => void;
+  /** Stop id whose label is currently being edited in-place from inside
+   *  the legend. Null = nothing being edited. */
+  editingItemId: string | null;
+  /** Called when the user double-clicks a legend item's text in edit
+   *  mode. Parent decides whether to enter edit mode (only in edit
+   *  mode). */
+  onItemDoubleClick: (id: string) => void;
+  /** Called on every keystroke while the textarea is open. */
+  onItemLabelChange: (id: string, label: string) => void;
+  /** Called when the textarea blurs / Enter is pressed — parent clears
+   *  the editingItemId. */
+  onItemEditDone: () => void;
 }
 
 function Legend({
@@ -1432,6 +1461,10 @@ function Legend({
   editingTitle,
   onTitleChange,
   onTitleBlur,
+  editingItemId,
+  onItemDoubleClick,
+  onItemLabelChange,
+  onItemEditDone,
 }: LegendProps) {
   const x = legend.x * imgW;
   const y = legend.y * imgH;
@@ -1574,31 +1607,41 @@ function Legend({
       {itemLayout.map(({ item, top, height: ih }) => {
         const cy = top + ih / 2;
         const cx = x + itemPadX + circleR;
+        const isEditingThis = editingItemId === item.id;
+        // The circle is always pointer-events-none; the label foreignObject
+        // becomes interactive in edit mode so double-click can trigger
+        // inline text editing. Outside edit mode, the whole group stays
+        // inert so it doesn't fight the legend's move/select handlers.
         return (
-          <g key={item.id} pointerEvents="none">
-            <circle
-              cx={cx}
-              cy={cy}
-              r={circleR}
-              fill={VISUAL.legendNumberFill}
-            />
-            <text
-              x={cx}
-              y={cy}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fill="#ffffff"
-              fontSize={circleR * 1.05}
-              fontWeight={700}
-              fontFamily="system-ui, -apple-system, sans-serif"
-            >
-              {item.number}
-            </text>
+          <g key={item.id}>
+            <g pointerEvents="none">
+              <circle
+                cx={cx}
+                cy={cy}
+                r={circleR}
+                fill={VISUAL.legendNumberFill}
+              />
+              <text
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#ffffff"
+                fontSize={circleR * 1.05}
+                fontWeight={700}
+                fontFamily="system-ui, -apple-system, sans-serif"
+              >
+                {item.number}
+              </text>
+            </g>
             <foreignObject
               x={labelLeft}
               y={top}
               width={labelMaxWidth}
               height={ih}
+              // Only the LABEL area is interactive — circle stays inert
+              // so it can't accidentally start an edit by misclick.
+              pointerEvents={isEditMode ? 'auto' : 'none'}
             >
               <div
                 xmlns="http://www.w3.org/1999/xhtml"
@@ -1608,21 +1651,72 @@ function Legend({
                   display: 'flex',
                   alignItems: 'center',
                   fontSize: itemFontSize,
-                  // Semi-bold (600) for closer visual weight to the
-                  // bold red title; full bold (700) competed with the
-                  // title in user testing.
                   fontWeight: 600,
                   lineHeight: 1.25,
                   color: '#111827',
                   fontFamily: 'system-ui, -apple-system, sans-serif',
-                  // Long technical labels can include parenthetical
-                  // equipment specs — overflowWrap handles in-word
-                  // breaks when even one word exceeds the column.
                   wordBreak: 'normal',
                   overflowWrap: 'break-word',
                 }}
               >
-                <span>{item.label}</span>
+                {isEditingThis ? (
+                  <textarea
+                    autoFocus
+                    value={item.label}
+                    onChange={(e) => onItemLabelChange(item.id, e.target.value)}
+                    onBlur={onItemEditDone}
+                    onKeyDown={(e) => {
+                      // Enter (without shift) commits; Escape also commits
+                      // — the user can undo from the toolbar if they
+                      // didn't mean it.
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        onItemEditDone();
+                      } else if (e.key === 'Escape') {
+                        onItemEditDone();
+                      }
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      width: '100%',
+                      minHeight: itemFontSize * 1.4,
+                      padding: '2px 4px',
+                      border: '1px solid #3b82f6',
+                      borderRadius: 3,
+                      fontSize: itemFontSize,
+                      fontWeight: 600,
+                      lineHeight: 1.25,
+                      color: '#111827',
+                      fontFamily: 'system-ui, -apple-system, sans-serif',
+                      resize: 'vertical',
+                      // Wrap mode so the textarea matches the wrapped span
+                      // visually instead of producing a single long line.
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  />
+                ) : (
+                  <span
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      onItemDoubleClick(item.id);
+                    }}
+                    style={{
+                      width: '100%',
+                      cursor: isEditMode ? 'text' : 'inherit',
+                      // Subtle hover hint in edit mode that the text is editable.
+                      ...(isEditMode
+                        ? {
+                            borderBottom: '1px dashed transparent',
+                            transition: 'border-bottom-color 120ms',
+                          }
+                        : {}),
+                    }}
+                    title={isEditMode ? 'Double-click to edit this label' : undefined}
+                  >
+                    {item.label}
+                  </span>
+                )}
               </div>
             </foreignObject>
           </g>
