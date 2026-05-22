@@ -170,21 +170,28 @@ export default function InlineLDRSitePlanUpload({
       const { data: userData } = await supabase.auth.getUser();
       const completedBy = userData?.user?.id ?? null;
 
+      const patch = {
+        ldr_site_plan_url: publicUrl,
+        ldr_site_plan_filename: staged.name,
+        ldr_site_plan_uploaded_at: nowIso,
+        // Auto-complete on upload — but don't clobber an existing completion
+        // timestamp / completed_by if the user already marked it complete
+        // before uploading.
+        ldr_site_plan_completed: true,
+        ldr_site_plan_completed_at: facility.ldr_site_plan_completed_at ?? nowIso,
+        ldr_site_plan_completed_by: facility.ldr_site_plan_completed_by ?? completedBy,
+      };
+
       const { error: updateError } = await supabase
         .from('facilities')
-        .update({
-          ldr_site_plan_url: publicUrl,
-          ldr_site_plan_filename: staged.name,
-          ldr_site_plan_uploaded_at: nowIso,
-          // Auto-complete on upload — but don't clobber an existing completion
-          // timestamp / completed_by if the user already marked it complete
-          // before uploading.
-          ldr_site_plan_completed: true,
-          ldr_site_plan_completed_at: facility.ldr_site_plan_completed_at ?? nowIso,
-          ldr_site_plan_completed_by: facility.ldr_site_plan_completed_by ?? completedBy,
-        })
+        .update(patch)
         .eq('id', facility.id);
       if (updateError) throw updateError;
+
+      // Mutate the prop in place so the parent's next render reflects the new
+      // URL/filename without waiting for a refetch. Mirrors the
+      // updateFacilityField pattern in FacilityDetailModal.
+      Object.assign(facility, patch);
 
       onUploaded();
     } catch (err: any) {

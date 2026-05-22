@@ -49,25 +49,32 @@ export default function LDRSitePlanSection({ facility, darkMode, onChange }: LDR
 
       if (isCompleted) {
         // Un-complete. Keep the file URL intact (user may re-complete soon).
+        const patch = {
+          ldr_site_plan_completed: false,
+          ldr_site_plan_completed_at: null,
+          ldr_site_plan_completed_by: null,
+        };
         const { error: updateError } = await supabase
           .from('facilities')
-          .update({
-            ldr_site_plan_completed: false,
-            ldr_site_plan_completed_at: null,
-            ldr_site_plan_completed_by: null,
-          })
+          .update(patch)
           .eq('id', facility.id);
         if (updateError) throw updateError;
+        // Mutate the prop in place so the parent's re-render reflects the new
+        // state immediately. Mirrors the updateFacilityField pattern used in
+        // FacilityDetailModal.
+        Object.assign(facility, patch);
       } else {
+        const patch = {
+          ldr_site_plan_completed: true,
+          ldr_site_plan_completed_at: nowIso,
+          ldr_site_plan_completed_by: completedBy,
+        };
         const { error: updateError } = await supabase
           .from('facilities')
-          .update({
-            ldr_site_plan_completed: true,
-            ldr_site_plan_completed_at: nowIso,
-            ldr_site_plan_completed_by: completedBy,
-          })
+          .update(patch)
           .eq('id', facility.id);
         if (updateError) throw updateError;
+        Object.assign(facility, patch);
       }
       onChange();
     } catch (err: any) {
