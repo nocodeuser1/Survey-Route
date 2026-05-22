@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle } from 'lucide-react';
 import JSZip from 'jszip';
-import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
+import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
 // merged into the All/Plans/Inspections + custom-type pill toggle in the
 // Facilities header (see setSpccMode / setCustomSurveyType below). The
@@ -607,6 +607,51 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       return incoming;
     });
   }, [facPrefs.column_widths]);
+
+  // Facility comments — count + bodies, keyed by facility_id. Used to
+  // surface a small chat icon next to the facility name when ≥1 comment
+  // exists, and to drive the quick-peek popover that opens on click.
+  // Pre-loaded for the account so the indicator can render without a
+  // round-trip per row; refetched whenever the facility set or account
+  // changes (account-switch already remounts via key={accountId}).
+  const [commentsByFacility, setCommentsByFacility] = useState<Map<string, FacilityComment[]>>(new Map());
+  // Popover state — anchored at click coords like DayActionsPopover.
+  const [commentsPopover, setCommentsPopover] = useState<
+    { facility: Facility; x: number; y: number } | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!accountId) return;
+      const facilityIds = facilities.map(f => f.id);
+      if (facilityIds.length === 0) {
+        if (!cancelled) setCommentsByFacility(new Map());
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('facility_comments')
+          .select('*')
+          .in('facility_id', facilityIds)
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        if (cancelled) return;
+        const grouped = new Map<string, FacilityComment[]>();
+        for (const c of (data || []) as FacilityComment[]) {
+          const arr = grouped.get(c.facility_id) ?? [];
+          arr.push(c);
+          grouped.set(c.facility_id, arr);
+        }
+        setCommentsByFacility(grouped);
+      } catch (err) {
+        console.error('[FacilitiesManager] Failed to load comments:', err);
+        if (!cancelled) setCommentsByFacility(new Map());
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [accountId, facilities]);
 
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
@@ -2870,10 +2915,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const surveyCompletion = activeSurveyTypeId && activeType && !activeType.is_system && getCompletionStatus
           ? getCompletionStatus(facility.id, activeSurveyTypeId)
           : null;
+        const facilityComments = commentsByFacility.get(facility.id) ?? [];
+        const commentCount = facilityComments.length;
         return (
           <div className="flex items-center gap-2 flex-wrap">
             <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
             <span className="break-words">{facility.name}</span>
+            {/* Comment indicator. Renders only when at least one
+                comment exists for this facility. Clicking it opens
+                the quick-peek popover (read-only) without launching
+                the full FacilityDetailModal — the user can scan
+                comments inline. stopPropagation so the row's own
+                click handler doesn't fire underneath. */}
+            {commentCount > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCommentsPopover({ facility, x: e.clientX, y: e.clientY });
+                }}
+                title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
+                aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors flex-shrink-0"
+              >
+                <MessageCircle className="w-3 h-3" />
+                {commentCount}
+              </button>
+            )}
             {surveyCompletion && surveyCompletion.total > 0 && (
               <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
                 surveyCompletion.percent === 100
@@ -5312,6 +5380,26 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           }}
         />
       )}
+      {/* Facility-comments quick-peek popover. Read-only list of all
+          comments on a facility, anchored at the click point so the
+          user can scan without leaving the table. "Open full editor"
+          jumps them into the FacilityDetailModal if they want to
+          reply / edit. */}
+      {commentsPopover && (
+        <FacilityCommentsPopover
+          facility={commentsPopover.facility}
+          comments={commentsByFacility.get(commentsPopover.facility.id) ?? []}
+          x={commentsPopover.x}
+          y={commentsPopover.y}
+          onClose={() => setCommentsPopover(null)}
+          onOpenFullEditor={() => {
+            const f = commentsPopover.facility;
+            setCommentsPopover(null);
+            setSelectedFacility(f);
+          }}
+        />
+      )}
+
       {/* Column Visibility Modal */}
       {showColumnSelector && (() => {
         const searchLower = columnSearch.toLowerCase();
@@ -5646,5 +5734,158 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         </div>
       )}
     </div >
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FacilityCommentsPopover
+// ---------------------------------------------------------------------------
+//
+// Floating, viewport-clamped read-only viewer for a facility's comments.
+// Same positioning model as DayActionsPopover in RouteResults — anchored
+// at (x, y) from the click event so it pops up right next to the indicator
+// the user clicked. Escape / outside-click / X dismiss. "Open full editor"
+// hands off to FacilityDetailModal for the user that wants to add or edit
+// a comment.
+
+interface FacilityCommentsPopoverProps {
+  facility: Facility;
+  comments: FacilityComment[];
+  x: number;
+  y: number;
+  onClose: () => void;
+  onOpenFullEditor: () => void;
+}
+
+function FacilityCommentsPopover({
+  facility,
+  comments,
+  x,
+  y,
+  onClose,
+  onOpenFullEditor,
+}: FacilityCommentsPopoverProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [coords, setCoords] = useState<{ left: number; top: number }>({ left: x, top: y });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current) return;
+      if (ref.current.contains(e.target as Node)) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    // Defer outside-click by one tick so the click that opened this
+    // popover doesn't immediately close it.
+    const t = window.setTimeout(() => window.addEventListener('click', onDocClick), 0);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', onDocClick);
+      window.clearTimeout(t);
+    };
+  }, [onClose]);
+
+  // Clamp to the viewport once we know our own rendered size.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 12;
+    const maxLeft = window.innerWidth - rect.width - margin;
+    const maxTop = window.innerHeight - rect.height - margin;
+    const left = Math.max(margin, Math.min(maxLeft, x));
+    const top = Math.max(margin, Math.min(maxTop, y));
+    if (left !== coords.left || top !== coords.top) setCoords({ left, top });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const formatTime = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      const today = new Date();
+      const sameDay =
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate();
+      return sameDay
+        ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={`Comments for ${facility.name}`}
+      className="fixed z-[9999] w-80 max-h-[60vh] flex flex-col rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+      style={{ left: coords.left, top: coords.top }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate" title={facility.name}>
+            {facility.name}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {comments.length} comment{comments.length === 1 ? '' : 's'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex-shrink-0 p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2.5">
+        {comments.length === 0 ? (
+          <p className="text-xs italic text-gray-500 dark:text-gray-400 py-3 text-center">
+            No comments yet.
+          </p>
+        ) : (
+          comments.map((c) => (
+            <div
+              key={c.id}
+              className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2"
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">
+                  {c.author_name || 'Unknown'}
+                </span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                  {formatTime(c.created_at)}
+                </span>
+              </div>
+              <p className="text-xs text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words">
+                {c.body}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={onOpenFullEditor}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-md transition-colors"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Open full editor
+        </button>
+      </div>
+    </div>
   );
 }
