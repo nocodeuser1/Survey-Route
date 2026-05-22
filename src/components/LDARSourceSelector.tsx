@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Sparkles } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -263,8 +264,10 @@ export default function LDARSourceSelector({
   // =========================================================
   // RENDER
   // =========================================================
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+  // createPortal + a z-index above FacilityDetailModal's 999999 so this
+  // dialog always sits on top of the parent modal it was opened from.
+  return createPortal(
+    <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" style={{ zIndex: 1000001 }}>
       <div
         className={`w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden ${
           darkMode ? 'bg-gray-900' : 'bg-white'
@@ -502,6 +505,7 @@ export default function LDARSourceSelector({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

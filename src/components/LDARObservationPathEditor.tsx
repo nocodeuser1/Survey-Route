@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Sparkles,
@@ -644,8 +645,12 @@ export default function LDARObservationPathEditor({
   const W = pageImage?.w ?? 1700;
   const H = pageImage?.h ?? 1200;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-black/80 backdrop-blur-sm">
+  // Render via createPortal at the document.body level so the editor sits
+  // above any parent modal (FacilityDetailModal renders at zIndex 999999;
+  // we use 1000001 to outrank it). Without the portal, this would be
+  // trapped inside the parent's stacking context.
+  return createPortal(
+    <div className="fixed inset-0 flex flex-col bg-black/80 backdrop-blur-sm" style={{ zIndex: 1000001 }}>
       {/* Toolbar */}
       <div
         className={`flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b ${
@@ -1029,7 +1034,8 @@ export default function LDARObservationPathEditor({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
