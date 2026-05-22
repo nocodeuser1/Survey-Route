@@ -25,7 +25,7 @@ import { buildPlanStoragePath, getBermShortLabel } from '../utils/spccPlans';
  *     have been created yet; it creates the berm-1 row on first upload)
  */
 
-const INLINE_MAX_FILE_SIZE_MB = 2;
+const INLINE_MAX_FILE_SIZE_MB = 4;
 const INLINE_MAX_FILE_SIZE_BYTES = INLINE_MAX_FILE_SIZE_MB * 1024 * 1024;
 const INLINE_MAX_INPUT_MB = 15;
 const INLINE_MAX_INPUT_BYTES = INLINE_MAX_INPUT_MB * 1024 * 1024;
