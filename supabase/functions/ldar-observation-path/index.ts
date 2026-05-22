@@ -293,8 +293,62 @@ Deno.serve(async (req) => {
           // Low temperature: the rules are deterministic; we don't want
           // creativity, just adherence to the spec.
           temperature: 0.15,
-          maxOutputTokens: 2048,
+          // Bumped from 2048 → 4096. Pro at thinkingLevel 'high' can burn
+          // a chunk of tokens on internal reasoning; cutting it off
+          // mid-JSON produces malformed output that fails JSON.parse with
+          // "Model returned non-JSON output. Try again." Field reports
+          // show plenty of room here without paying real money.
+          maxOutputTokens: 4096,
           responseMimeType: 'application/json',
+          // Strict schema — Gemini's structured-output mode constrains
+          // the model to emit JSON matching this exact shape. Without a
+          // schema, even with responseMimeType set, Pro sometimes wraps
+          // output in markdown fences or prepends reasoning prose.
+          responseSchema: {
+            type: 'object',
+            properties: {
+              stops: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    number: { type: 'integer' },
+                    x: { type: 'number' },
+                    y: { type: 'number' },
+                    label: { type: 'string' },
+                  },
+                  required: ['number', 'x', 'y', 'label'],
+                  propertyOrdering: ['number', 'x', 'y', 'label'],
+                },
+              },
+              waypoints: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    x: { type: 'number' },
+                    y: { type: 'number' },
+                  },
+                  required: ['x', 'y'],
+                  propertyOrdering: ['x', 'y'],
+                },
+              },
+              legend: {
+                type: 'object',
+                properties: {
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  w: { type: 'number' },
+                  h: { type: 'number' },
+                  title: { type: 'string' },
+                },
+                required: ['x', 'y', 'w', 'h'],
+                propertyOrdering: ['x', 'y', 'w', 'h', 'title'],
+              },
+            },
+            required: ['stops', 'waypoints', 'legend'],
+            propertyOrdering: ['stops', 'waypoints', 'legend'],
+          },
           thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         },
         safetySettings: [
@@ -326,19 +380,34 @@ Deno.serve(async (req) => {
     if (!fullText) {
       const detail = promptFeedback?.blockReason
         ? `Blocked by safety filter: ${promptFeedback.blockReason}`
-        : finishReason && finishReason !== 'STOP'
-          ? `Stopped: ${finishReason}`
-          : `Empty response from ${UPSTREAM_MODEL}`;
+        : finishReason === 'MAX_TOKENS'
+          ? `Model ran out of output tokens before finishing the path. Try again (maxOutputTokens may need a bump).`
+          : finishReason && finishReason !== 'STOP'
+            ? `Stopped: ${finishReason}`
+            : `Empty response from ${UPSTREAM_MODEL}`;
       console.error('[ldar-observation-path] empty response:', detail);
       return jsonResponse({ error: detail }, 502);
     }
 
+    // Defensive parse: even with responseSchema + responseMimeType set,
+    // Pro occasionally still emits markdown code fences around the JSON
+    // when thinkingLevel is 'high'. Strip them before parsing.
+    const cleaned = fullText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+
     let parsed: unknown;
     try {
-      parsed = JSON.parse(fullText);
+      parsed = JSON.parse(cleaned);
     } catch (err) {
-      console.error('[ldar-observation-path] JSON parse failed:', err, fullText.slice(0, 300));
-      return jsonResponse({ error: 'Model returned non-JSON output. Try again.' }, 502);
+      console.error('[ldar-observation-path] JSON parse failed:', err, cleaned.slice(0, 300));
+      // Surface a short prefix of what the model actually returned so the
+      // user (or me, debugging) can see what went wrong without digging
+      // through edge-function logs.
+      return jsonResponse({
+        error: `Model returned non-JSON output (finishReason: ${finishReason ?? 'unknown'}). First 200 chars: ${cleaned.slice(0, 200)}`,
+      }, 502);
     }
 
     let validated: ValidatedPath;
@@ -346,7 +415,7 @@ Deno.serve(async (req) => {
       validated = validatePath(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'validation failed';
-      console.error('[ldar-observation-path] validation failed:', msg, fullText.slice(0, 300));
+      console.error('[ldar-observation-path] validation failed:', msg, cleaned.slice(0, 300));
       return jsonResponse({ error: msg }, 502);
     }
 
