@@ -1419,15 +1419,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               no_ip_date: 8,
             };
             const group = statusOrder[result.status] ?? 9;
+            // Timeline-bearing statuses keep their days-based intra-
+            // group order (e.g. within "Overdue" the user expects to
+            // see the longest-overdue first). Statuses without a
+            // user-meaningful timeline collapse to days=0 so the
+            // global secondary-by-name sort below takes over and
+            // shows them alphabetically. Per the user spec:
+            //   timeline:    initial_overdue, expired, expiring,
+            //                renewal_due, initial_due, no_plan
+            //   no-timeline: awaiting_pe_stamp, valid, recertified,
+            //                no_ip_date
+            const TIMELINE_BEARING = new Set([
+              'initial_overdue', 'expired', 'expiring',
+              'renewal_due', 'initial_due', 'no_plan',
+            ]);
             // Encode group in the high bits, days in the low bits.
-            // Previously this used MAX_SAFE_INTEGER (9e15) as the
-            // null-days sentinel, which OVERFLOWED the 1e10 group
-            // multiplier — pushing awaiting_pe_stamp (always
-            // daysUntilDue=null) past every other group instead of
-            // keeping it in rank 1 right after Overdue. Clamp to a
-            // sane ±1e6 window (covers ~2,700 years) so the group
-            // bucket always dominates.
-            const rawDays = result.daysUntilDue ?? 0;
+            // Clamp to ±1e6 (about 2,700 years) so the group bucket
+            // always dominates regardless of a runaway date.
+            const rawDays = TIMELINE_BEARING.has(result.status) ? (result.daysUntilDue ?? 0) : 0;
             const days = Math.max(-1e6, Math.min(1e6, rawDays));
             return group * 1e7 + days;
           }
@@ -1579,6 +1588,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         comparison = valA.localeCompare(valB);
       } else if (typeof valA === 'number' && typeof valB === 'number') {
         comparison = valA - valB;
+      }
+
+      // Secondary sort: when the primary column is tied (e.g. all
+      // facilities sitting in "SPCC Valid"), break the tie by
+      // facility name alphabetically. Applies to every column except
+      // name itself — sorting by name doesn't need a name tiebreaker.
+      // Name secondary always ascends regardless of the primary's
+      // direction so descending SPCC Plan Status still groups names
+      // A→Z within each status bucket (matches Finder, Excel, etc.).
+      if (comparison === 0 && sortColumn !== 'name') {
+        const nameA = a.name || '';
+        const nameB = b.name || '';
+        const nameCmp = nameA.localeCompare(nameB);
+        return nameCmp;
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
