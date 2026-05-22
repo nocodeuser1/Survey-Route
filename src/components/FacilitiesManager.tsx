@@ -4270,18 +4270,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     {/* Add to Current Route — only visible when a route is
                         already loaded (parent passes the handler conditionally).
                         Unions the selection with whatever the current route
-                        already covers and re-optimizes. */}
+                        already covers and re-optimizes. whitespace-nowrap +
+                        flex-shrink-0 keep 'Add to Route' on one line even
+                        when the bar gets crowded. */}
                     {onAddToCurrentRoute && (
                       <button
                         onClick={() => {
                           onAddToCurrentRoute(Array.from(selectedFacilityIds));
                           setSelectedFacilityIds(new Set());
                         }}
-                        className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-teal-500/10 dark:bg-teal-400/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 dark:hover:bg-teal-400/20 active:scale-95 transition-all text-xs font-medium"
+                        className="flex items-center justify-center gap-1.5 whitespace-nowrap flex-shrink-0 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-teal-500/10 dark:bg-teal-400/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 dark:hover:bg-teal-400/20 active:scale-95 transition-all text-xs font-medium"
                         title="Add the selected facilities to the current route"
                       >
                         <Plus className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                        <span className="hidden md:inline">Add to Route</span>
+                        <span className="hidden md:inline whitespace-nowrap">Add to Route</span>
                       </button>
                     )}
 
