@@ -57,6 +57,10 @@ interface FacilitiesManagerProps {
    *  facilities to that existing route (vs onCreateRoute which makes a new
    *  route from scratch). When omitted the bulk-action button is hidden. */
   onAddToCurrentRoute?: (facilityIds: string[]) => void;
+  /** Facility IDs currently in the loaded route, used to context-hide the
+   *  "Add to Route" bulk button when every selected facility is already on
+   *  the route. Pass undefined / empty Set when no route is loaded. */
+  currentRouteFacilityIds?: Set<string>;
   // Survey type filtering
   surveyTypes?: SurveyType[];
   activeSurveyTypeId?: string | null;
@@ -231,7 +235,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
 
   // Brand-aware label for the external facility-id field. Camino-specific
@@ -4209,7 +4213,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               className="fixed bottom-0 left-0 right-0 z-[9999] animate-[slideUp_0.25s_ease-out]"
               style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
             >
-              <div className="mx-2 mb-2 md:mx-auto md:max-w-2xl rounded-2xl border border-white/10 dark:border-white/[0.08] bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl shadow-[0_-4px_30px_rgba(0,0,0,0.15)] dark:shadow-[0_-4px_30px_rgba(0,0,0,0.5)]">
+              {/* max-w-4xl gives the now-six-button row enough headroom that
+                  Delete doesn't overflow the white pill. Combined with the
+                  lg: breakpoint on the labels (icons-only until 1024px), the
+                  bar fits cleanly on tablets and small desktops too. */}
+              <div className="mx-2 mb-2 md:mx-auto md:max-w-4xl rounded-2xl border border-white/10 dark:border-white/[0.08] bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl shadow-[0_-4px_30px_rgba(0,0,0,0.15)] dark:shadow-[0_-4px_30px_rgba(0,0,0,0.5)]">
                 <div className="flex items-center justify-between gap-2 px-3 py-2.5 md:px-4 md:py-3">
                   {/* Selection count */}
                   <div className="flex items-center gap-2 shrink-0">
@@ -4218,7 +4226,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     </div>
                     <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                       {selectedFacilityIds.size}
-                      <span className="hidden md:inline ml-1 font-normal text-gray-500 dark:text-gray-400">selected</span>
+                      <span className="hidden lg:inline ml-1 font-normal text-gray-500 dark:text-gray-400">selected</span>
                     </span>
                   </div>
 
@@ -4234,7 +4242,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       title="Mark as SPCC completed"
                     >
                       <CheckCircle className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                      <span className="hidden md:inline">Complete</span>
+                      <span className="hidden lg:inline">Complete</span>
                     </button>
 
                     {/* Mark Sold */}
@@ -4245,7 +4253,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         title="Mark as Sold"
                       >
                         <DollarSign className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                        <span className="hidden md:inline">Sold</span>
+                        <span className="hidden lg:inline">Sold</span>
                       </button>
                     )}
 
@@ -4263,17 +4271,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         title="Create a new route from the selected facilities (replaces any current route)"
                       >
                         <Route className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                        <span className="hidden md:inline">Route</span>
+                        <span className="hidden lg:inline">Route</span>
                       </button>
                     )}
 
                     {/* Add to Current Route — only visible when a route is
-                        already loaded (parent passes the handler conditionally).
-                        Unions the selection with whatever the current route
-                        already covers and re-optimizes. whitespace-nowrap +
-                        flex-shrink-0 keep 'Add to Route' on one line even
-                        when the bar gets crowded. */}
-                    {onAddToCurrentRoute && (
+                        already loaded (parent passes the handler conditionally)
+                        AND at least one selected facility isn't already in
+                        that route. If every selection is already on the
+                        route the button hides — no-op action. */}
+                    {onAddToCurrentRoute && (() => {
+                      const routeIds = currentRouteFacilityIds;
+                      const someNotInRoute = Array.from(selectedFacilityIds).some(
+                        (id) => !routeIds || !routeIds.has(id),
+                      );
+                      return someNotInRoute;
+                    })() && (
                       <button
                         onClick={() => {
                           onAddToCurrentRoute(Array.from(selectedFacilityIds));
@@ -4283,7 +4296,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         title="Add the selected facilities to the current route"
                       >
                         <Plus className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                        <span className="hidden md:inline whitespace-nowrap">Add to Route</span>
+                        <span className="hidden lg:inline whitespace-nowrap">Add to Route</span>
                       </button>
                     )}
 
@@ -4305,7 +4318,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       ) : (
                         <Copy className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
                       )}
-                      <span className="hidden md:inline whitespace-nowrap">
+                      <span className="hidden lg:inline whitespace-nowrap">
                         {namesCopied ? 'Copied' : 'Copy Names'}
                       </span>
                     </button>
@@ -4317,7 +4330,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       title="Delete Selected"
                     >
                       <Trash2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                      <span className="hidden md:inline">Delete</span>
+                      <span className="hidden lg:inline">Delete</span>
                     </button>
                   </div>
                 </div>

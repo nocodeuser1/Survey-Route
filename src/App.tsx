@@ -2259,6 +2259,33 @@ function App() {
   //      new facility and gets auto-saved — otherwise reloading the app
   //      would pull the original route without the newly-added facility.
   /**
+   * Set of facility IDs currently in the loaded route. Used both by the
+   * bulk-add handler (to compute the union with the selection) and by
+   * FacilitiesManager's selection bar (to context-hide the "Add to Route"
+   * button when every selected facility is already on the route).
+   *
+   * In subset mode (showOnlyRouteFacilities + routeFacilityIds populated)
+   * the IDs are right there. In full-route mode we have to derive them
+   * from optimizationResult.routes by name-matching back to the facilities
+   * list — the route's per-facility payload only carries names, not IDs.
+   */
+  const currentRouteFacilityIds = useMemo<Set<string>>(() => {
+    if (!optimizationResult) return new Set();
+    if (routeFacilityIds && routeFacilityIds.length > 0) {
+      return new Set(routeFacilityIds);
+    }
+    const namesInRoute = new Set<string>();
+    for (const route of optimizationResult.routes ?? []) {
+      for (const rf of (route as any).facilities ?? []) {
+        if (rf?.name) namesInRoute.add(rf.name);
+      }
+    }
+    return new Set(
+      facilities.filter((f) => namesInRoute.has(f.name)).map((f) => f.id),
+    );
+  }, [optimizationResult, routeFacilityIds, facilities]);
+
+  /**
    * Bulk version of handleAddFacilityToRoute, called from the facilities
    * multi-select action bar. Unions the selected facility IDs with whatever
    * the current route already covers and rebuilds via
@@ -3526,6 +3553,7 @@ function App() {
             onAddToCurrentRoute={
               optimizationResult ? handleAddFacilitiesToCurrentRoute : undefined
             }
+            currentRouteFacilityIds={currentRouteFacilityIds}
             surveyTypes={dbSurveyTypes}
             activeSurveyTypeId={activeSurveyTypeId}
             onSurveyTypeSelect={setActiveSurveyTypeId}
