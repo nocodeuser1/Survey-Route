@@ -315,10 +315,14 @@ function App() {
       return 0;
     }
 
-    // When custom selection is active AND viewing 'all' mode, count all facilities in routes
-    // (they are already pre-filtered to selected facilities). But when a survey type filter
-    // is active, we still need to apply that filter below.
-    if (showOnlyRouteFacilities && routeFacilityIds && surveyType === 'all') {
+    // Custom-route mode: total = whatever the route actually covers, full
+    // stop. The survey-type tabs (e.g. "SPCC Plan 4") below the stats card
+    // already report how many of the route need that kind of work — the
+    // headline "Total Facilities" count should match the "Custom Route:
+    // N facilities selected" banner above it, not the survey-filtered
+    // subset, so the user sees the route's actual size regardless of which
+    // survey tab they're currently looking at.
+    if (showOnlyRouteFacilities && routeFacilityIds) {
       let count = 0;
       optimizationResult.routes.forEach(route => {
         count += route.facilities.length;
