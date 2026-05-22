@@ -3,7 +3,10 @@ import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
-import SurveyTypeSelector from './SurveyTypeSelector';
+// SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
+// merged into the All/Plans/Inspections + custom-type pill toggle in the
+// Facilities header (see setSpccMode / setCustomSurveyType below). The
+// component still exists in the codebase if another view ever needs it.
 import FacilitySurveyView from './FacilitySurveyView';
 import * as XLSX from 'xlsx';
 import FacilityDetailModal from './FacilityDetailModal';
@@ -386,7 +389,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   }, [selectedFacility?.id, spccPlanDetailFacility?.id, viewingInspection?.id, forcedTab, spccMode]);
 
-  // Wrapper: when local mode changes, notify parent
+  // Wrapper: when local mode changes, notify parent + sync the activeSurveyTypeId
+  // so the (now-removed) SurveyTypeSelector's downstream behavior — opening
+  // FacilitySurveyView for custom types, driving completion-data columns,
+  // opening the SPCC plan detail modal on row click in plan mode — keeps
+  // working from this single toggle. See the rationale in the header where
+  // we render the toggle.
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
     setSpccModeInternal(mode);
     userChangedMode.current = true;
@@ -394,12 +402,52 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
     setSelectedReportType(mapped as any);
     // Reset status filter when switching modes (different modes have different statuses)
-    setStatusFilter('all');
+    setStatusFilters([]);
     setSpccPlanFilter('all');
     if (onGlobalSurveyTypeChange) {
       onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
     }
+    // Bridge to the survey-types system: look up the corresponding SPCC system
+    // row's UUID so custom-type-aware code (FacilitySurveyView etc.) sees the
+    // mode change too.
+    if (onSurveyTypeSelect) {
+      if (mode === 'all') {
+        onSurveyTypeSelect(null);
+      } else {
+        const targetKind = mode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
+        const row = surveyTypes.find(t => t.system_kind === targetKind);
+        onSurveyTypeSelect(row?.id ?? null);
+      }
+    }
   };
+
+  // Click handler for the custom-type buttons (any survey_types row that isn't
+  // SPCC). Sets activeSurveyTypeId directly and resets spccMode to 'all' since
+  // custom types aren't part of the legacy plan/inspection axis.
+  const setCustomSurveyType = (typeId: string) => {
+    setSpccModeInternal('all');
+    setSelectedReportType('all' as any);
+    setStatusFilters([]);
+    setSpccPlanFilter('all');
+    if (onGlobalSurveyTypeChange) onGlobalSurveyTypeChange('all');
+    onSurveyTypeSelect?.(typeId);
+  };
+
+  // Derived: which button is currently active. activeSurveyTypeId wins if set
+  // and recognized (so external changes to it via App.tsx state are reflected
+  // in the toggle); otherwise we fall back to spccMode.
+  const activeToggleKey: 'all' | 'plan' | 'inspection' | string = (() => {
+    if (activeSurveyTypeId) {
+      const row = surveyTypes.find(t => t.id === activeSurveyTypeId);
+      if (row && !row.is_system) return activeSurveyTypeId; // custom row UUID
+      if (row?.system_kind === 'spcc_plan') return 'plan';
+      if (row?.system_kind === 'spcc_inspection') return 'inspection';
+    }
+    return spccMode;
+  })();
+
+  // Custom (non-system) types eligible for rendering as additional toggle buttons.
+  const customSurveyTypes = surveyTypes.filter(t => !t.is_system && t.enabled !== false);
 
   // Load column order and visibility per report type + spccMode combination
   const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`;
@@ -3648,16 +3696,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         </div>
       )}
 
-      {/* Survey Type Selector */}
-      {surveyTypes.length > 0 && (
-        <SurveyTypeSelector
-          surveyTypes={surveyTypes}
-          activeSurveyTypeId={activeSurveyTypeId}
-          onSelect={(id) => onSurveyTypeSelect?.(id)}
-          loading={surveyTypesLoading}
-          className="mb-4"
-        />
-      )}
+      {/* The standalone SurveyTypeSelector that used to live here was removed
+          2026-05-21. Its functionality (setting activeSurveyTypeId) is now
+          driven by the All/Plans/Inspections + custom-type pill toggle in
+          the Facilities header below — one control instead of two. */}
 
       {/* FacilitySurveyView Modal */}
       {surveyViewFacility && activeSurveyTypeId && (() => {
@@ -3754,11 +3796,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 );
               })()}
             </div>
-            {/* SPCC Mode Toggle */}
+            {/* Survey-type toggle. This is the single source of truth for
+                "what mode is the Facilities tab in" — it sets local spccMode
+                (drives columns / filters / default modal tab), notifies the
+                parent's globalSurveyType (route mode), AND sets
+                activeSurveyTypeId (drives FacilitySurveyView for custom types,
+                completion-data columns, etc.). The standalone SurveyTypeSelector
+                that used to sit above this header was removed 2026-05-21 in
+                favor of this consolidated control. */}
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 flex-shrink-0">
               <button
                 onClick={() => { setSpccMode('all'); setSpccPlanFilter('all'); }}
-                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'all'
+                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'all'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                   }`}
@@ -3767,7 +3816,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </button>
               <button
                 onClick={() => { setSpccMode('plan'); }}
-                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'plan'
+                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'plan'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                   }`}
@@ -3776,13 +3825,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </button>
               <button
                 onClick={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
-                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${spccMode === 'inspection'
+                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'inspection'
                   ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                   }`}
               >
                 Inspections
               </button>
+              {/* Custom (non-system) survey types render in the same pill so
+                  they don't reintroduce the two-control problem. Only rendered
+                  if any exist — keeps the compact 3-button look when no custom
+                  types have been created yet. */}
+              {customSurveyTypes.map(type => (
+                <button
+                  key={type.id}
+                  onClick={() => setCustomSurveyType(type.id)}
+                  title={type.description || type.name}
+                  className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === type.id
+                    ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
+                    }`}
+                >
+                  {type.name}
+                </button>
+              ))}
             </div>
           </div>
 
