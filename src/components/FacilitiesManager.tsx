@@ -407,18 +407,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (onGlobalSurveyTypeChange) {
       onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
     }
-    // Bridge to the survey-types system: look up the corresponding SPCC system
-    // row's UUID so custom-type-aware code (FacilitySurveyView etc.) sees the
-    // mode change too.
-    if (onSurveyTypeSelect) {
-      if (mode === 'all') {
-        onSurveyTypeSelect(null);
-      } else {
-        const targetKind = mode === 'plan' ? 'spcc_plan' : 'spcc_inspection';
-        const row = surveyTypes.find(t => t.system_kind === targetKind);
-        onSurveyTypeSelect(row?.id ?? null);
-      }
-    }
+    // Clear activeSurveyTypeId when switching to a built-in mode (All / Plans
+    // / Inspections). We deliberately do NOT route SPCC modes through the
+    // survey-types system here: doing so would trigger the per-facility
+    // "{completed}/{total}" completion badge next to every facility name —
+    // and Israel called out that those numbers should only appear when a
+    // custom type is selected (the original purpose of the badge). The SPCC
+    // modes get all the behavior they need from spccMode +
+    // onGlobalSurveyTypeChange above; setting activeSurveyTypeId would just
+    // duplicate that, plus introduce the unwanted badges.
+    onSurveyTypeSelect?.(null);
   };
 
   // Click handler for the custom-type buttons (any survey_types row that isn't
@@ -2830,7 +2828,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
     switch (columnId) {
       case 'name': {
-        const surveyCompletion = activeSurveyTypeId && getCompletionStatus
+        // Only show the {completed}/{total} completion badge for CUSTOM
+        // (non-system) survey types. SPCC system types have their own status
+        // surfaces (SPCC plan badge, inspection status); the badge is for the
+        // per-facility data-capture flow that custom types drive — that's
+        // what Israel wanted it for originally.
+        const activeType = activeSurveyTypeId
+          ? surveyTypes.find(t => t.id === activeSurveyTypeId)
+          : null;
+        const surveyCompletion = activeSurveyTypeId && activeType && !activeType.is_system && getCompletionStatus
           ? getCompletionStatus(facility.id, activeSurveyTypeId)
           : null;
         return (
