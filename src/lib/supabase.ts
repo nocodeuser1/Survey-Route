@@ -140,6 +140,14 @@ export interface Facility {
   // 20260521020000_ldar_observation_path.sql for the JSON shape and
   // src/components/LDARObservationPathEditor.tsx for the editor.
   ldar_observation_path_data?: LDARObservationPathData | null;
+  // Parallel completion-status surface for the observation path. Set
+  // implicitly when a walking path is drawn + saved, OR explicitly via the
+  // "Mark Completed (no path needed)" toggle when the client has the
+  // document on their end and there's no need to redraw it in-app. See
+  // migration 20260522010000_ldar_observation_path_completion.sql.
+  ldar_observation_path_completed?: boolean;
+  ldar_observation_path_completed_at?: string | null;
+  ldar_observation_path_completed_by?: string | null;
   // Detail fields
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;
