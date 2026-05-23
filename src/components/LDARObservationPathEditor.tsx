@@ -13,6 +13,9 @@ import {
   Loader2,
   AlertCircle,
   RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
 } from 'lucide-react';
 import {
   supabase,
@@ -430,6 +433,168 @@ export default function LDARObservationPathEditor({
   const [pathData, setPathData] = useState<LDARObservationPathData>(initialData);
   const stops = pathData.stops;
   const waypoints = pathData.waypoints;
+
+  // ─── Zoom + pan helpers ────────────────────────────────────────────────
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 6;
+  const ZOOM_STEP = 1.2;
+
+  const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  const clampOffset = (ox: number, oy: number, z: number) => {
+    const visibleW = W / z;
+    const visibleH = H / z;
+    return {
+      x: Math.max(0, Math.min(W - visibleW, ox)),
+      y: Math.max(0, Math.min(H - visibleH, oy)),
+    };
+  };
+
+  // Apply a zoom factor with an anchor point in the page's native
+  // 0..W / 0..H coordinate space, so the page point under the user's
+  // cursor (or pinch midpoint) stays put as the zoom changes.
+  const zoomAround = (newZoom: number, anchorPageX: number, anchorPageY: number) => {
+    const next = clampZoom(newZoom);
+    setZoom((prev) => {
+      const visibleW = W / next;
+      const visibleH = H / next;
+      // Compute the new top-left of the viewBox so anchor lands at the
+      // same fractional position within the visible region as before.
+      const fracX = (anchorPageX - viewBoxOffset.x) / (W / prev);
+      const fracY = (anchorPageY - viewBoxOffset.y) / (H / prev);
+      const nextOx = anchorPageX - fracX * visibleW;
+      const nextOy = anchorPageY - fracY * visibleH;
+      setViewBoxOffset(clampOffset(nextOx, nextOy, next));
+      return next;
+    });
+  };
+
+  // Convert a clientX/Y to the page-coordinate the cursor is over given
+  // the current viewBox + the rendered SVG rect.
+  const clientToPageCoord = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const visibleW = W / zoom;
+    const visibleH = H / zoom;
+    return {
+      x: viewBoxOffset.x + ((clientX - rect.left) / rect.width) * visibleW,
+      y: viewBoxOffset.y + ((clientY - rect.top) / rect.height) * visibleH,
+    };
+  };
+
+  const zoomIn = () => {
+    // Anchor on center of current viewBox so button-driven zooms feel stable.
+    const cx = viewBoxOffset.x + W / zoom / 2;
+    const cy = viewBoxOffset.y + H / zoom / 2;
+    zoomAround(zoom * ZOOM_STEP, cx, cy);
+  };
+  const zoomOut = () => {
+    const cx = viewBoxOffset.x + W / zoom / 2;
+    const cy = viewBoxOffset.y + H / zoom / 2;
+    zoomAround(zoom / ZOOM_STEP, cx, cy);
+  };
+  const resetZoom = () => {
+    setZoom(1);
+    setViewBoxOffset({ x: 0, y: 0 });
+  };
+
+  // Wheel → zoom on Ctrl/Cmd (Mac trackpad pinch sends Ctrl+wheel), or
+  // pan otherwise (vertical wheel = pan Y, shift+wheel = pan X).
+  const onSvgWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      const factor = 1 + Math.min(0.3, Math.abs(e.deltaY) / 200) * dir;
+      const anchor = clientToPageCoord(e.clientX, e.clientY);
+      if (anchor) zoomAround(zoom * factor, anchor.x, anchor.y);
+      return;
+    }
+    if (zoom <= 1) return; // no panning needed at native zoom
+    e.preventDefault();
+    const visibleW = W / zoom;
+    const visibleH = H / zoom;
+    // Convert pixel deltas to page-coordinate deltas. shift+wheel pans X.
+    const svg = svgRef.current;
+    const rect = svg?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return;
+    const pageDxPerPx = visibleW / rect.width;
+    const pageDyPerPx = visibleH / rect.height;
+    const dx = (e.shiftKey ? e.deltaY : e.deltaX) * pageDxPerPx;
+    const dy = e.shiftKey ? 0 : e.deltaY * pageDyPerPx;
+    setViewBoxOffset((prev) => clampOffset(prev.x + dx, prev.y + dy, zoom));
+  };
+
+  // Touch: two-finger pinch zoom + two-finger pan. One-finger touches
+  // are NOT handled here so the existing pointer-event drag for
+  // individual overlay elements (stops, waypoints, legend) keeps working.
+  const onSvgTouchStart = (e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length !== 2) {
+      touchStateRef.current = null;
+      return;
+    }
+    const [t1, t2] = [e.touches[0], e.touches[1]];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    touchStateRef.current = {
+      distance: Math.hypot(dx, dy),
+      midX: (t1.clientX + t2.clientX) / 2,
+      midY: (t1.clientY + t2.clientY) / 2,
+    };
+  };
+  const onSvgTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length !== 2 || !touchStateRef.current) return;
+    e.preventDefault();
+    const [t1, t2] = [e.touches[0], e.touches[1]];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    const newDistance = Math.hypot(dx, dy);
+    const newMidX = (t1.clientX + t2.clientX) / 2;
+    const newMidY = (t1.clientY + t2.clientY) / 2;
+    const prev = touchStateRef.current;
+
+    // Pinch zoom centered on the midpoint between the two fingers.
+    const factor = newDistance / Math.max(1, prev.distance);
+    const anchor = clientToPageCoord(newMidX, newMidY);
+    if (anchor && Math.abs(factor - 1) > 0.01) {
+      zoomAround(zoom * factor, anchor.x, anchor.y);
+    }
+
+    // Two-finger pan: shift the viewBox by the midpoint delta in page units.
+    const svg = svgRef.current;
+    const rect = svg?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) {
+      const visibleW = W / zoom;
+      const visibleH = H / zoom;
+      const dxPage = ((prev.midX - newMidX) / rect.width) * visibleW;
+      const dyPage = ((prev.midY - newMidY) / rect.height) * visibleH;
+      if (Math.abs(dxPage) > 0.1 || Math.abs(dyPage) > 0.1) {
+        setViewBoxOffset((p) => clampOffset(p.x + dxPage, p.y + dyPage, zoom));
+      }
+    }
+
+    touchStateRef.current = { distance: newDistance, midX: newMidX, midY: newMidY };
+  };
+  const onSvgTouchEnd = (e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length < 2) {
+      touchStateRef.current = null;
+    }
+  };
+
+  // Zoom + pan, expressed by manipulating the SVG viewBox so the existing
+  // pointer-to-svg coordinate math (getScreenCTM in pointerToNormalized)
+  // keeps working unchanged. zoom=1 means viewBox spans the whole page;
+  // viewBoxOffset shifts which part of the page is currently centered.
+  const [zoom, setZoom] = useState(1);
+  const [viewBoxOffset, setViewBoxOffset] = useState({ x: 0, y: 0 });
+  // Multi-touch state for pinch zoom + two-finger pan. Tracks the prior
+  // pointer pair so each move applies a delta. one-finger touches fall
+  // through to the existing element-drag pointer handlers untouched.
+  const touchStateRef = useRef<{
+    distance: number;
+    midX: number;
+    midY: number;
+  } | null>(null);
 
   // View / edit mode + selection.
   const [isEditMode, setIsEditMode] = useState(false);
@@ -1105,6 +1270,57 @@ export default function LDARObservationPathEditor({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Zoom controls — buttons + visible % stay synced with the
+              wheel/pinch handlers on the SVG. Hidden while the page
+              hasn't loaded yet to avoid a flash of useless controls. */}
+          {pageImage && (
+            <div
+              className={`inline-flex items-center rounded-lg border ${
+                darkMode
+                  ? 'border-gray-700 bg-gray-800/40 text-gray-200'
+                  : 'border-gray-200 bg-gray-50 text-gray-700'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={zoom <= ZOOM_MIN + 0.001}
+                title="Zoom out (Ctrl/⌘ + scroll, or pinch)"
+                className="p-1.5 rounded-l-lg hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={resetZoom}
+                title="Reset zoom"
+                className={`px-2 text-xs font-medium tabular-nums border-x ${
+                  darkMode ? 'border-gray-700' : 'border-gray-200'
+                } hover:bg-black/5 dark:hover:bg-white/10`}
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={zoom >= ZOOM_MAX - 0.001}
+                title="Zoom in (Ctrl/⌘ + scroll, or pinch)"
+                className="p-1.5 hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+              {zoom > 1 && (
+                <button
+                  type="button"
+                  onClick={resetZoom}
+                  title="Fit to view"
+                  className="p-1.5 rounded-r-lg hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={handleGenerate}
@@ -1292,12 +1508,17 @@ export default function LDARObservationPathEditor({
           >
             <svg
               ref={svgRef}
-              viewBox={`0 0 ${W} ${H}`}
+              viewBox={`${viewBoxOffset.x} ${viewBoxOffset.y} ${W / zoom} ${H / zoom}`}
               preserveAspectRatio="xMidYMid meet"
               className="w-full h-auto select-none touch-none"
               onPointerMove={onSvgPointerMove}
               onPointerUp={onSvgPointerUp}
               onPointerCancel={onSvgPointerUp}
+              onWheel={onSvgWheel}
+              onTouchStart={onSvgTouchStart}
+              onTouchMove={onSvgTouchMove}
+              onTouchEnd={onSvgTouchEnd}
+              onTouchCancel={onSvgTouchEnd}
               onClick={(e) => {
                 // Click on empty SVG background → deselect.
                 if (e.target === svgRef.current) setSelection(null);
