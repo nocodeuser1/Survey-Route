@@ -5904,21 +5904,16 @@ function FacilityCommentsPopover({
         onClose();
       }
     };
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current) return;
-      if (ref.current.contains(e.target as Node)) return;
-      onClose();
-    };
     window.addEventListener('keydown', onKey);
-    // Defer outside-click by one tick so the click that opened this
-    // popover doesn't immediately close it.
-    const t = window.setTimeout(() => window.addEventListener('click', onDocClick), 0);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('click', onDocClick);
-      window.clearTimeout(t);
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Outside-click is now handled by the transparent scrim rendered below
+  // (z-[9998], beneath the popover's z-[9999]). The previous
+  // window.addEventListener('click', ...) approach fired AFTER React's
+  // synthetic click on the underlying row had already bubbled — clicking
+  // anywhere on a row to dismiss the popover ALSO opened that row's
+  // FacilityDetailModal. The scrim intercepts the click at the earliest
+  // hit-test, so dismissing the popover stays a single isolated action.
 
   // Clamp to the viewport once we know our own rendered size.
   useEffect(() => {
@@ -5951,14 +5946,31 @@ function FacilityCommentsPopover({
   };
 
   return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label={`Comments for ${facility.name}`}
-      className="fixed z-[9999] w-80 max-h-[60vh] flex flex-col rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-      style={{ left: coords.left, top: coords.top }}
-      onClick={(e) => e.stopPropagation()}
-    >
+    <>
+      {/* Transparent scrim. Any click anywhere outside the popover lands
+          on this element first (higher z-index than the table, lower than
+          the popover panel) and closes the popover without the click
+          bubbling on to the row underneath. mousedown stop too so the
+          underlying row doesn't even start its own click sequence. */}
+      <div
+        className="fixed inset-0 z-[9998]"
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+      />
+      <div
+        ref={ref}
+        role="dialog"
+        aria-label={`Comments for ${facility.name}`}
+        className="fixed z-[9999] w-80 max-h-[60vh] flex flex-col rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+        style={{ left: coords.left, top: coords.top }}
+        onClick={(e) => e.stopPropagation()}
+      >
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-gray-900 dark:text-white truncate" title={facility.name}>
@@ -6015,6 +6027,7 @@ function FacilityCommentsPopover({
           Open full editor
         </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
