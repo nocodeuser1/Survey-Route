@@ -733,6 +733,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesValue, setNotesValue] = useState('');
+  // Inline status-cell edit. 'active' | 'sold' is a binary flag with no
+  // automation backing it — purely a manual override — so the inline
+  // affordance is a tiny dropdown that saves immediately on change.
+  const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
   const [notesOverrides, setNotesOverrides] = useState<Record<string, string | null>>({});
   const [showNotesSymbols, setShowNotesSymbols] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -2854,6 +2858,85 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   // Get effective notes value (with optimistic overrides applied)
+  /**
+   * Returns the Tailwind text-color class to use on the FileText icon
+   * preceding a facility name in the table, picked by the active
+   * spccMode so the icon color matches whichever status column the
+   * user is focused on:
+   *
+   *   plan mode       → SPCC plan status color
+   *   inspection mode → SPCC inspection status color
+   *   all mode        → Active vs Sold (matches the Status column)
+   *
+   * Gray = nothing on file yet / status not derivable.
+   */
+  const getNameIconColorClass = (facility: Facility): string => {
+    if (spccMode === 'plan') {
+      const status = getSPCCPlanStatus(facility).status;
+      switch (status) {
+        case 'valid':
+        case 'recertified':
+          return 'text-green-600 dark:text-green-400';
+        case 'expiring':
+        case 'renewal_due':
+        case 'initial_due':
+          return 'text-amber-600 dark:text-amber-400';
+        case 'expired':
+        case 'initial_overdue':
+          return 'text-red-600 dark:text-red-400';
+        case 'awaiting_pe_stamp':
+          return 'text-blue-600 dark:text-blue-400';
+        case 'no_plan':
+        case 'no_ip_date':
+        default:
+          return 'text-gray-400 dark:text-gray-500';
+      }
+    }
+    if (spccMode === 'inspection') {
+      const insp = inspections.get(facility.id);
+      const expiry = getFacilityInspectionExpiry(facility, insp);
+      switch (expiry.status) {
+        case 'valid':
+          return 'text-green-600 dark:text-green-400';
+        case 'expiring':
+        case 'initial_due':
+          return 'text-amber-600 dark:text-amber-400';
+        case 'expired':
+        case 'initial_overdue':
+          return 'text-red-600 dark:text-red-400';
+        case 'initial_upcoming':
+          return 'text-blue-600 dark:text-blue-400';
+        case 'no_ip_date':
+        default:
+          return 'text-gray-400 dark:text-gray-500';
+      }
+    }
+    // 'all' mode — mirror the Status column: Active = green, Sold = orange.
+    return facility.status === 'sold'
+      ? 'text-orange-600 dark:text-orange-400'
+      : 'text-green-600 dark:text-green-400';
+  };
+
+  const handleStatusSave = async (facilityId: string, newStatus: 'active' | 'sold') => {
+    setEditingStatusId(null);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({
+          status: newStatus,
+          // sold_at mirrors the toggle — set today when flipping to sold,
+          // clear when reverting to active.
+          sold_at: newStatus === 'sold' ? new Date().toISOString().slice(0, 10) : null,
+        })
+        .eq('id', facilityId);
+      if (error) throw error;
+      onFacilitiesChange();
+    } catch (err: any) {
+      console.error('[FacilitiesManager] handleStatusSave failed:', err);
+      setError(err?.message || 'Failed to update status');
+    }
+  };
+
   const getEffectiveNotes = (facility: Facility): string | null => {
     if (facility.id in notesOverrides) return notesOverrides[facility.id];
     return facility.notes || null;
@@ -2918,9 +3001,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const facilityComments = commentsByFacility.get(facility.id) ?? [];
         const commentCount = facilityComments.length;
         return (
-          <div className="flex items-center gap-2 flex-wrap">
-            <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
-            <span className="break-words">{facility.name}</span>
+          // Outer flex: icon stays on the same line as the name no matter how
+          // narrow the column gets (flex-wrap removed; the icon's flex-shrink-0
+          // + items-start keeps it pinned to the first text line). The inner
+          // flex wraps the name + comment/survey badges as a unit so badges can
+          // still spill onto a second line without dragging the icon with them.
+          <div className="flex items-start gap-2 min-w-0">
+            <FileText
+              className={`w-4 h-4 mt-0.5 flex-shrink-0 ${getNameIconColorClass(facility)}`}
+            />
+            <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+              <span className="break-words">{facility.name}</span>
             {/* Comment indicator. Renders only when at least one
                 comment exists for this facility. Clicking it opens
                 the quick-peek popover (read-only) without launching
@@ -2954,6 +3045,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 {surveyCompletion.completed}/{surveyCompletion.total}
               </span>
             )}
+            </div>
           </div>
         );
       }
@@ -3118,10 +3210,45 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.day_assignment != null ? `Day ${facility.day_assignment}` : '-';
       case 'team_assignment':
         return facility.team_assignment != null ? `Team ${facility.team_assignment}` : '-';
-      case 'status':
-        return facility.status === 'sold'
-          ? <span className="text-orange-600 dark:text-orange-400 font-medium">Sold</span>
-          : <span className="text-green-600 dark:text-green-400 font-medium">Active</span>;
+      case 'status': {
+        if (editingStatusId === facility.id) {
+          return (
+            <select
+              autoFocus
+              value={facility.status || 'active'}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) =>
+                handleStatusSave(facility.id, e.target.value as 'active' | 'sold')
+              }
+              onBlur={() => setEditingStatusId(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditingStatusId(null);
+              }}
+              className="text-sm border rounded px-2 py-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="active">Active</option>
+              <option value="sold">Sold</option>
+            </select>
+          );
+        }
+        const isSold = facility.status === 'sold';
+        return (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingStatusId(facility.id);
+            }}
+            title="Click to change status"
+            className={`cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-1.5 py-0.5 rounded font-medium ${
+              isSold
+                ? 'text-orange-600 dark:text-orange-400'
+                : 'text-green-600 dark:text-green-400'
+            }`}
+          >
+            {isSold ? 'Sold' : 'Active'}
+          </span>
+        );
+      }
       case 'created_at':
         return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '-';
       case 'notes': {
