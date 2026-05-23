@@ -1726,135 +1726,88 @@ export default function FacilityDetailModal({
             </div>
           </div>
 
+          {/* Facility Comments — simplified feed.
+              The previous layout had a "Latest comment" preview that
+              toggled the full thread, plus a header description, plus
+              "Stamped with your name + date" helper text — all of which
+              duplicated information when there was only one comment.
+              This version is a single compact feed: header → add box →
+              chronological list (newest first). No preview, no toggle,
+              no duplicate "latest" card. */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-            {/* Compact header — count baked into the title as a small chip
-                so we don't need a top-right "View thread" button that
-                kept overflowing. The latest-comment preview below toggles
-                the full thread instead. */}
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
-                <MessageSquare className="w-4 h-4 text-gray-600 dark:text-gray-300" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-base font-semibold text-gray-900 dark:text-white">Facility Comments</h3>
-                  {commentCount > 0 && (
-                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap">
-                      {commentCount}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  Team notes with author + timestamp.
-                </p>
-              </div>
+            <div className="flex items-center gap-2 mb-3">
+              <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Comments</h3>
+              {commentCount > 0 && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  · {commentCount}
+                </span>
+              )}
             </div>
 
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-3">
+            {/* Compose box — tight, no helper-text fluff. The Add button is
+                disabled until there's content; on submit the field clears
+                and the new comment appears at the top of the list. */}
+            <div className="flex flex-col gap-2">
               <textarea
                 value={newComment}
                 onChange={(event) => setNewComment(event.target.value)}
                 placeholder="Leave a comment for your team…"
-                rows={3}
+                rows={2}
                 className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
               />
-              {/* Helper + button on one row when there's room, stacked on
-                  narrow widths so the button never gets clipped. The button
-                  drops to icon + "Add" so it stays narrow regardless. */}
-              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mr-auto">
-                  Stamped with your name + date.
-                </p>
+              <div className="flex items-center justify-end">
                 <button
                   type="button"
                   onClick={handleAddComment}
                   disabled={!newComment.trim() || submittingComment}
-                  className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {submittingComment ? 'Saving…' : 'Add'}
+                  {submittingComment ? 'Posting…' : 'Comment'}
                 </button>
               </div>
               {commentError && (
-                <p className="mt-2 text-xs text-red-600 dark:text-red-400 break-words">
+                <p className="text-xs text-red-600 dark:text-red-400 break-words">
                   {commentError}
                 </p>
               )}
             </div>
 
-            {/* Latest-comment preview is now the single toggle for the
-                full thread. Click → expand; click again → collapse.
-                Hidden entirely when there are no comments yet. */}
-            {commentCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setCommentsExpanded((prev) => !prev)}
-                className="mt-3 w-full rounded-lg border border-transparent bg-gray-50 dark:bg-gray-700/40 p-3 text-left hover:border-gray-200 dark:hover:border-gray-600 transition-colors"
-              >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    <span className="font-semibold uppercase tracking-wide">Latest comment</span>
-                    <span>•</span>
-                    <span>{commentCount} total</span>
-                  </div>
-                  {latestComment && (
-                    <>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                        {latestComment.author_name}
-                      </p>
-                      <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">
-                        {latestComment.body}
-                      </p>
-                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {formatCommentTimestamp(latestComment.created_at)}
-                        {latestComment.updated_at !== latestComment.created_at ? ' (edited)' : ''}
-                      </p>
-                    </>
-                  )}
-                </div>
-                {commentsExpanded ? (
-                  <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                )}
-              </div>
-            </button>
-            )}
-
-            {commentsExpanded && (
-              <div className="mt-4 space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                {commentsLoading ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                    Loading comments...
-                  </div>
-                ) : facilityComments.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                    No comments yet for this facility.
-                  </div>
-                ) : (
-                  facilityComments.map((comment) => {
+            {/* Chronological list — newest first, no expand/collapse.
+                Empty state is just italic placeholder text (no big
+                dashed box). Each comment is a borderless row separated
+                by a hairline divider so the list reads as a feed. */}
+            <div className="mt-4">
+              {commentsLoading ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  Loading comments…
+                </p>
+              ) : facilityComments.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                  No comments yet. Be the first to leave a note.
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {facilityComments.map((comment) => {
                     const isEditing = editingCommentId === comment.id;
                     const isOwner = comment.user_id === userId;
-
                     return (
-                      <div
-                        key={comment.id}
-                        className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"
-                      >
-                        <div className="flex items-start justify-between gap-4">
+                      <li key={comment.id} className="py-3 first:pt-0 last:pb-0">
+                        <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-white">{comment.author_name}</p>
-                              <span className="text-xs text-gray-400">•</span>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <div className="flex items-baseline gap-2 text-xs">
+                              <span className="font-semibold text-gray-900 dark:text-white">
+                                {comment.author_name}
+                              </span>
+                              <span className="text-gray-400 dark:text-gray-500">
                                 {formatCommentTimestamp(comment.created_at)}
                                 {comment.updated_at !== comment.created_at ? ' (edited)' : ''}
-                              </p>
+                              </span>
                             </div>
 
                             {isEditing ? (
-                              <div className="mt-3 space-y-3">
+                              <div className="mt-2 space-y-2">
                                 <textarea
                                   value={editingCommentBody}
                                   onChange={(event) => setEditingCommentBody(event.target.value)}
@@ -1866,9 +1819,9 @@ export default function FacilityDetailModal({
                                     type="button"
                                     onClick={() => handleSaveCommentEdit(comment.id)}
                                     disabled={!editingCommentBody.trim() || submittingComment}
-                                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                   >
-                                    <Check className="w-4 h-4" />
+                                    <Check className="w-3.5 h-3.5" />
                                     Save
                                   </button>
                                   <button
@@ -1877,50 +1830,53 @@ export default function FacilityDetailModal({
                                       setEditingCommentId(null);
                                       setEditingCommentBody('');
                                     }}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 dark:border-gray-600 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                                   >
-                                    <X className="w-4 h-4" />
+                                    <X className="w-3.5 h-3.5" />
                                     Cancel
                                   </button>
                                 </div>
                               </div>
                             ) : (
-                              <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
                                 {comment.body}
                               </p>
                             )}
                           </div>
 
                           {isOwner && !isEditing && (
-                            <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+                                 style={{ opacity: 1 }}>
                               <button
                                 type="button"
                                 onClick={() => {
                                   setEditingCommentId(comment.id);
                                   setEditingCommentBody(comment.body);
                                 }}
-                                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                                className="rounded p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 title="Edit comment"
+                                aria-label="Edit comment"
                               >
-                                <Edit2 className="w-4 h-4" />
+                                <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteComment(comment.id)}
-                                className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                className="rounded p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                 title="Delete comment"
+                                aria-label="Delete comment"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           )}
                         </div>
-                      </div>
+                      </li>
                     );
-                  })
-                )}
-              </div>
-            )}
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
 
           {/* LDAR Site Plan lives in its own top-level tab now — see the

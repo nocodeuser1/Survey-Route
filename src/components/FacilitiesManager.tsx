@@ -3001,14 +3001,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const facilityComments = commentsByFacility.get(facility.id) ?? [];
         const commentCount = facilityComments.length;
         return (
-          // Outer flex: icon stays on the same line as the name no matter how
-          // narrow the column gets (flex-wrap removed; the icon's flex-shrink-0
-          // + items-start keeps it pinned to the first text line). The inner
-          // flex wraps the name + comment/survey badges as a unit so badges can
-          // still spill onto a second line without dragging the icon with them.
-          <div className="flex items-start gap-2 min-w-0">
+          // Outer flex: icon stays vertically centered (centered-left in the
+          // cell) regardless of how tall the row becomes, name + badges sit
+          // beside it. The inner flex wraps the name + comment/survey badges
+          // so they can spill onto a second line without dragging the icon.
+          <div className="flex items-center gap-2 min-w-0">
             <FileText
-              className={`w-4 h-4 mt-0.5 flex-shrink-0 ${getNameIconColorClass(facility)}`}
+              className={`w-4 h-4 flex-shrink-0 ${getNameIconColorClass(facility)}`}
             />
             <div className="flex items-baseline gap-2 flex-wrap min-w-0">
               <span className="break-words">{facility.name}</span>
@@ -3019,6 +3018,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 comments inline. stopPropagation so the row's own
                 click handler doesn't fire underneath. */}
             {commentCount > 0 && (
+              // Plain text + icon — no background pill / padding so the row
+              // height never inflates when a comment exists. Hover darkens
+              // the color slightly to signal it's clickable.
               <button
                 type="button"
                 onClick={(e) => {
@@ -3027,7 +3029,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 }}
                 title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
                 aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors flex-shrink-0"
+                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors flex-shrink-0"
               >
                 <MessageCircle className="w-3 h-3" />
                 {commentCount}
