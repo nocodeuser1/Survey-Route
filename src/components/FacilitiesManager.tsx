@@ -3029,7 +3029,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 }}
                 title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
                 aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors flex-shrink-0"
+                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors flex-shrink-0 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500 rounded-sm"
               >
                 <MessageCircle className="w-3 h-3" />
                 {commentCount}
