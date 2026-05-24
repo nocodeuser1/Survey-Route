@@ -54,9 +54,19 @@ interface RouteMapProps {
   locationTracking?: boolean;
   onLocationTrackingChange?: (enabled: boolean) => void;
   // Widened 2026-05-20: 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID for custom>.
-  // Internal string-equality checks against the SPCC enum members continue to work
-  // for legacy values; UUID values simply don't match those branches.
   surveyType?: string;
+  /**
+   * Normalized survey-type discriminator added 2026-05-23. When supplied, all
+   * internal branching uses this instead of string-comparing surveyType to the
+   * legacy enum members — necessary because after the survey-types-as-route-
+   * modes refactor, surveyType is often a system row's UUID, not the literal
+   * 'spcc_plan' / 'spcc_inspection' string. Without this prop the SPCC Plan
+   * tab's UUID would fall through inspection-completion checks and incorrectly
+   * tag plan-mode facilities as "complete" based on their inspection history.
+   * Falls back to literal string equality when omitted, for callers that
+   * haven't been updated yet.
+   */
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
   showOnlyRouteFacilities?: boolean;
 }
 
@@ -87,7 +97,17 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', showOnlyRouteFacilities = false }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false }: RouteMapProps) {
+  // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
+  // prefers the prop when given (canonical post-refactor path) and falls back
+  // to the legacy enum-string equality check so older callers keep working.
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+    surveyTypeKind ??
+    (surveyType === 'spcc_plan'
+      ? 'spcc_plan'
+      : surveyType === 'spcc_inspection'
+        ? 'spcc_inspection'
+        : 'all');
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapWrapperRef = useRef<HTMLDivElement>(null);
@@ -756,7 +776,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           if (isExcluded || isSold) {
             // Excluded (day_assignment=-1) or sold facilities are always hidden
             shouldBeHidden = true;
-          } else if (surveyType === 'spcc_plan') {
+          } else if (effectiveKind === 'spcc_plan') {
             // In SPCC plan mode, respect the Plan Visibility filter (completedFacilityNames)
             if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) {
               shouldBeHidden = true;
@@ -846,7 +866,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           }
 
           // Use appropriate completion status based on surveyType
-          const hasAnyValidCompletion = surveyType === 'spcc_plan' ? hasValidSPCCPlan : hasAnyValidInspectionCompletion;
+          const hasAnyValidCompletion = effectiveKind === 'spcc_plan' ? hasValidSPCCPlan : hasAnyValidInspectionCompletion;
 
           // Debug logging for specific facilities the user mentioned
           if (facility.name.includes('11-2') || facility.name.includes('11-21')) {
@@ -975,7 +995,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerFinalOpacity = isManuallyRemoved ? '0.6' : markerOpacity;
 
           // Add camera badge when photos are taken in SPCC plan mode
-          const showPhotoBadge = surveyType === 'spcc_plan' && latestFacilityData?.photos_taken;
+          const showPhotoBadge = effectiveKind === 'spcc_plan' && latestFacilityData?.photos_taken;
           const photoBadgeHtml = showPhotoBadge
             ? `<div style="position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: #059669; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -988,7 +1008,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // that actually need attention (skip valid/recertified — the
           // checkmark variant of the marker already covers those).
           const showStatusPip =
-            surveyType === 'spcc_plan' &&
+            effectiveKind === 'spcc_plan' &&
             !hasAnyValidCompletion &&
             !isManuallyRemoved &&
             spccPlanStatus !== 'missing'; // missing = no IP date; not actionable here
@@ -1038,7 +1058,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             let surveyBtnLabel = facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey';
             let surveyBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
 
-            if (surveyType === 'spcc_plan') {
+            if (effectiveKind === 'spcc_plan') {
               // SPCC Plans mode - show plan status badge
               const planStatus = fullFacility ? getSPCCPlanStatus(fullFacility) : null;
               if (planStatus) {
@@ -1086,7 +1106,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               }
               surveyBtnLabel = 'Plan Details';
               surveyBtnTitle = 'View SPCC plan details';
-            } else if (surveyType === 'spcc_inspection') {
+            } else if (effectiveKind === 'spcc_inspection') {
               // SPCC Inspections mode - show inspection completion badge
               const spccCompletedDate = fullFacility?.spcc_inspection_date;
               if (spccCompletedDate) {
@@ -1103,7 +1123,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Build SPCC plan details section for Plans mode
             let planInfoHtml = '';
-            if (surveyType === 'spcc_plan' && fullFacility) {
+            if (effectiveKind === 'spcc_plan' && fullFacility) {
               const planStatus = getSPCCPlanStatus(fullFacility);
               const peDate = planStatus.peStampDate
                 ? planStatus.peStampDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -1200,7 +1220,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Build field visit quick-actions for Plans mode
             let fieldVisitHtml = '';
-            if (surveyType === 'spcc_plan' && fullFacility) {
+            if (effectiveKind === 'spcc_plan' && fullFacility) {
               const photosTaken = fullFacility.photos_taken || false;
               const visitDate = fullFacility.field_visit_date || '';
 
@@ -1730,7 +1750,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // showOnlyRouteFacilities=true (the default after generating a route) would
       // skip this entire block and the search would have nothing to filter.
       const fullscreenSearchActive = isFullScreen && (searchQuery.trim().length > 0 || recentlyAssignedIds.size > 0);
-      if ((!hideCompletedFacilities || surveyType === 'spcc_plan' || fullscreenSearchActive) && (!showOnlyRouteFacilities || fullscreenSearchActive)) {
+      if ((!hideCompletedFacilities || effectiveKind === 'spcc_plan' || fullscreenSearchActive) && (!showOnlyRouteFacilities || fullscreenSearchActive)) {
         // Get facility names already shown in routes
         const facilitiesInRoutes = new Set<string>();
         routesToShow.forEach(route => {
@@ -1772,12 +1792,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // In SPCC plan mode, completion is based on plan status, not inspection status
           let hasValidSPCCPlanForNonRoute = false;
-          if (surveyType === 'spcc_plan') {
+          if (effectiveKind === 'spcc_plan') {
             const planResult = getSPCCPlanStatus(facility);
             hasValidSPCCPlanForNonRoute = planResult.status === 'valid' || planResult.status === 'recertified';
           }
 
-          const hasAnyValidCompletion = surveyType === 'spcc_plan'
+          const hasAnyValidCompletion = effectiveKind === 'spcc_plan'
             ? hasValidSPCCPlanForNonRoute
             : hasAnyValidInspectionCompletion;
           const isManuallyRemoved = facility.day_assignment === -2;
@@ -1800,7 +1820,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Determine border colors
           let completionBorderColor = '#3B82F6';
-          if (surveyType === 'spcc_plan') {
+          if (effectiveKind === 'spcc_plan') {
             // In plan mode, border color reflects plan status
             completionBorderColor = hasValidSPCCPlanForNonRoute ? '#22C55E' : '#3B82F6';
           } else if (isExternalCompletion) {
@@ -1818,7 +1838,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Background color: use day color for assigned facilities, plan status color in SPCC plan mode, gray otherwise
           let markerBgColor = isManuallyRemoved ? '#9CA3AF' : hasPositiveDayAssignment ? COLORS[(facility.day_assignment! - 1) % COLORS.length] : '#6B7280';
-          if (surveyType === 'spcc_plan' && !isManuallyRemoved) {
+          if (effectiveKind === 'spcc_plan' && !isManuallyRemoved) {
             const planResult = getSPCCPlanStatus(facility);
             if (hasValidSPCCPlanForNonRoute) {
               markerBgColor = '#22C55E'; // Green for valid plans
@@ -1858,7 +1878,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           let nonRouteBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
           let nonRoutePlanInfoHtml = '';
 
-          if (surveyType === 'spcc_plan') {
+          if (effectiveKind === 'spcc_plan') {
             const planStatus = getSPCCPlanStatus(facility);
             const statusColors: Record<string, { bg: string; text: string }> = {
               valid: { bg: '#D1FAE5', text: '#065F46' },
@@ -1931,7 +1951,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 </div>
               </div>
             `;
-          } else if (surveyType === 'spcc_inspection') {
+          } else if (effectiveKind === 'spcc_inspection') {
             if (hasAnyValidCompletion) {
               nonRouteStatusHtml = `<span style="display: inline-block; padding: 2px 8px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 11px; font-weight: 600;">Completed</span>`;
             } else {
@@ -1944,7 +1964,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Build field visit quick-actions for non-route facilities in Plans mode
           let nonRouteFieldVisitHtml = '';
-          if (surveyType === 'spcc_plan' && !isManuallyRemoved) {
+          if (effectiveKind === 'spcc_plan' && !isManuallyRemoved) {
             const photosTaken = facility.photos_taken || false;
             const visitDate = facility.field_visit_date || '';
 
@@ -4102,7 +4122,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
-          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : surveyType === 'spcc_plan' ? 'spcc' : 'general')}
+          initialTab={forcedTab || (effectiveKind === 'spcc_inspection' ? 'inspections' : effectiveKind === 'spcc_plan' ? 'spcc' : 'general')}
           onClose={() => {
             setSurveyFacility(null);
             setForcedTab(null);

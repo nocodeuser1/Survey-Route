@@ -55,13 +55,21 @@ interface RouteResultsProps {
   // so custom survey types can be selected as route modes.
   surveyType?: string;
   onSurveyTypeChange?: (type: string) => void;
+  /**
+   * Normalized survey-type discriminator added 2026-05-23. Use this for
+   * branching instead of string-comparing surveyType to the legacy enum
+   * members — after the UUID-based refactor, the literal strings rarely
+   * match. Falls back to enum-string equality when omitted, for backward
+   * compat with callers that haven't been updated.
+   */
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
 }
 
 // Survey type for route planning filtering.
 // String to allow either the legacy SPCC enum members OR a survey_types.id UUID.
 type SurveyType = string;
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
@@ -76,6 +84,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       setInternalSurveyType(type);
     }
   };
+  // See the surveyTypeKind prop docs above. Prefer the parent-supplied kind
+  // (it knows about UUIDs via the dbSurveyTypes lookup); otherwise fall back
+  // to the legacy enum-string check.
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+    externalSurveyTypeKind ??
+    (surveyType === 'spcc_plan'
+      ? 'spcc_plan'
+      : surveyType === 'spcc_inspection'
+        ? 'spcc_inspection'
+        : 'all');
 
   const showRefreshOptions = externalShowRefreshOptions !== undefined ? externalShowRefreshOptions : internalShowRefreshOptions;
   const setShowRefreshOptions = onShowRefreshOptions || setInternalShowRefreshOptions;
@@ -379,9 +397,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               let departureTime = arrivalTime;
               if (segment.to !== 'Home Base') {
                 const facility = facilities.find(f => f.name === segment.to);
-                const visitDuration = surveyType === 'spcc_inspection'
+                const visitDuration = effectiveKind === 'spcc_inspection'
                   ? (tempSettings.inspection_visit_duration_minutes ?? settings?.inspection_visit_duration_minutes ?? 30)
-                  : surveyType === 'spcc_plan'
+                  : effectiveKind === 'spcc_plan'
                     ? (tempSettings.plan_visit_duration_minutes ?? settings?.plan_visit_duration_minutes ?? 60)
                     : (facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes);
                 departureTime = addMinutesToTime(arrivalTime, visitDuration);
@@ -642,7 +660,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return facilities.filter(f => {
       if (f.status === 'sold') return false;
 
-      if (surveyType === 'spcc_plan') {
+      if (effectiveKind === 'spcc_plan') {
         // In SPCC Plan mode, "completed" means the facility has a valid plan
         // (doesn't need plan attention) - inspection status is irrelevant
         return !facilityNeedsSPCCPlan(f);
@@ -654,7 +672,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       // When in SPCC inspection mode, don't show facilities that need inspection
       // in the completed section - they belong in the day routes
-      if (surveyType === 'spcc_inspection' && facilityNeedsSPCCInspection(f)) {
+      if (effectiveKind === 'spcc_inspection' && facilityNeedsSPCCInspection(f)) {
         return false;
       }
 
@@ -720,7 +738,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     // Fallback for callsites that don't pass the event (legacy paths).
     const facility = getFacilityForStop(facilityName);
     if (facility) {
-      if (surveyType === 'spcc_plan') {
+      if (effectiveKind === 'spcc_plan') {
         setSpccPlanDetailFacility(facility);
       } else {
         setSelectedFacility(facility);
@@ -744,11 +762,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const facility = getFacilityForStop(facilityName);
     if (!facility) return true;
 
-    if (surveyType === 'spcc_plan') {
+    if (effectiveKind === 'spcc_plan') {
       return facilityNeedsSPCCPlan(facility);
     }
 
-    if (surveyType === 'spcc_inspection') {
+    if (effectiveKind === 'spcc_inspection') {
       return facilityNeedsSPCCInspection(facility);
     }
 
@@ -1848,7 +1866,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     <div className="relative group/inspection">
                       <button
                         onClick={() => setSurveyType('spcc_inspection')}
-                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_inspection'
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${effectiveKind === 'spcc_inspection'
                           ? 'bg-blue-600 text-white'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
@@ -1856,7 +1874,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <FileText className="w-4 h-4" />
                         SPCC Inspections
                         {counts.inspectionInRouteCount > 0 && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${effectiveKind === 'spcc_inspection' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                             {counts.inspectionInRouteCount}
                           </span>
                         )}
@@ -1888,7 +1906,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     <div className="relative group/plan">
                       <button
                         onClick={() => setSurveyType('spcc_plan')}
-                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${surveyType === 'spcc_plan'
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${effectiveKind === 'spcc_plan'
                           ? 'bg-blue-600 text-white'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
@@ -1896,7 +1914,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         <FileCheck className="w-4 h-4" />
                         SPCC Plans
                         {counts.planInRouteCount > 0 && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${surveyType === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs whitespace-nowrap ${effectiveKind === 'spcc_plan' ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
                             {counts.planInRouteCount}
                           </span>
                         )}
@@ -1934,7 +1952,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             const c = getSurveyTypeCounts();
             return (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                {surveyType === 'spcc_inspection'
+                {effectiveKind === 'spcc_inspection'
                   ? `Showing ${c.inspectionInRouteCount} of ${c.inspectionCount} facilities needing yearly SPCC inspection (${c.inspectionPastDueInRouteCount} overdue in route, ${c.inspectionPastDueCount} overdue total).`
                   : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
               </p>
@@ -2228,13 +2246,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
                                     </p>
                                     {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
-                                    {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
+                                    {effectiveKind === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
                                       const facility = getFacilityForStop(segment.to);
                                       if (!facility) return null;
                                       return <SPCCStatusBadge facility={facility} showMessage />;
                                     })()}
                                     {/* Photos taken indicator - show in plans mode */}
-                                    {surveyType === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
+                                    {effectiveKind === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
                                       const facility = getFacilityForStop(segment.to);
                                       if (!facility) return null;
                                       return (
@@ -2461,7 +2479,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           onViewDetails={() => {
             const f = dayActionsPopover.facility;
             setDayActionsPopover(null);
-            if (surveyType === 'spcc_plan') {
+            if (effectiveKind === 'spcc_plan') {
               setSpccPlanDetailFacility(f);
             } else {
               setSelectedFacility(f);
@@ -2477,7 +2495,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           userId={userId}
           teamNumber={teamNumber}
           accountId={accountId}
-          initialTab={forcedTab || (surveyType === 'spcc_inspection' ? 'inspections' : surveyType === 'spcc_plan' ? 'spcc' : 'general')}
+          initialTab={forcedTab || (effectiveKind === 'spcc_inspection' ? 'inspections' : effectiveKind === 'spcc_plan' ? 'spcc' : 'general')}
           onClose={() => {
             setSelectedFacility(null);
             setForcedTab(null);

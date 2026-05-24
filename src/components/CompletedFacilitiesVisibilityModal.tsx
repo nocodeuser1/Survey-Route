@@ -15,6 +15,13 @@ interface CompletedFacilitiesVisibilityModalProps {
   visibility: CompletedVisibility;
   // Widened 2026-05-20 to accept survey_types.id UUIDs as well as the legacy enum.
   surveyType: string;
+  /**
+   * Normalized discriminator added 2026-05-23. When supplied, all branching
+   * uses this instead of string-comparing surveyType to the legacy enum
+   * members — necessary because after the UUID-based refactor the literal
+   * strings rarely match. Falls back to enum-string equality when omitted.
+   */
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
   onClose: () => void;
   onApply: (visibility: CompletedVisibility) => void;
   onApplyAndRefreshRoute?: (visibility: CompletedVisibility) => void;
@@ -23,10 +30,20 @@ interface CompletedFacilitiesVisibilityModalProps {
 export default function CompletedFacilitiesVisibilityModal({
   visibility,
   surveyType,
+  surveyTypeKind,
   onClose,
   onApply,
   onApplyAndRefreshRoute,
 }: CompletedFacilitiesVisibilityModalProps) {
+  // Prefer the parent-supplied kind (knows about UUIDs); fall back to the
+  // legacy enum-string check for callers that haven't been updated.
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+    surveyTypeKind ??
+    (surveyType === 'spcc_plan'
+      ? 'spcc_plan'
+      : surveyType === 'spcc_inspection'
+        ? 'spcc_inspection'
+        : 'all');
   const [localVisibility, setLocalVisibility] = useState(visibility);
 
   const handleApply = () => {
@@ -60,16 +77,16 @@ export default function CompletedFacilitiesVisibilityModal({
     localVisibility.hideExpiringPlans;
 
   const title =
-    surveyType === 'spcc_inspection'
+    effectiveKind === 'spcc_inspection'
       ? 'Inspection Visibility'
-      : surveyType === 'spcc_plan'
+      : effectiveKind === 'spcc_plan'
         ? 'Plan Visibility'
         : 'Map Visibility';
 
   const description =
-    surveyType === 'spcc_inspection'
+    effectiveKind === 'spcc_inspection'
       ? 'Hide completed inspections from the map so you can focus on remaining work.'
-      : surveyType === 'spcc_plan'
+      : effectiveKind === 'spcc_plan'
         ? 'Hide facilities with current SPCC plans from the map so you can focus on those needing attention.'
         : 'Choose which completed facilities to hide from the map view.';
 
@@ -97,9 +114,9 @@ export default function CompletedFacilitiesVisibilityModal({
           </p>
 
           {/* Inspections section - show in All and Inspections modes */}
-          {(surveyType === 'all' || surveyType === 'spcc_inspection') && (
+          {(effectiveKind === 'all' || effectiveKind === 'spcc_inspection') && (
             <div>
-              {surveyType === 'all' && (
+              {effectiveKind === 'all' && (
                 <div className="flex items-center gap-2 mb-2">
                   <ClipboardList className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
@@ -108,7 +125,7 @@ export default function CompletedFacilitiesVisibilityModal({
                 </div>
               )}
 
-              {surveyType === 'spcc_inspection' && (
+              {effectiveKind === 'spcc_inspection' && (
                 <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <input
                     type="checkbox"
@@ -135,7 +152,7 @@ export default function CompletedFacilitiesVisibilityModal({
                 </label>
               )}
 
-              {surveyType === 'spcc_inspection' && (
+              {effectiveKind === 'spcc_inspection' && (
                 <div className="border-t border-gray-100 dark:border-gray-700/50 mt-2 pt-2">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 px-3">
                     Or choose specific types:
@@ -143,7 +160,7 @@ export default function CompletedFacilitiesVisibilityModal({
                 </div>
               )}
 
-              <div className={surveyType === 'spcc_inspection' ? 'pl-2' : ''}>
+              <div className={effectiveKind === 'spcc_inspection' ? 'pl-2' : ''}>
                 <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <input
                     type="checkbox"
@@ -194,14 +211,14 @@ export default function CompletedFacilitiesVisibilityModal({
           )}
 
           {/* Divider between sections in All mode */}
-          {surveyType === 'all' && (
+          {effectiveKind === 'all' && (
             <div className="border-t border-gray-200 dark:border-gray-700" />
           )}
 
           {/* Plans section - show in All and Plans modes */}
-          {(surveyType === 'all' || surveyType === 'spcc_plan') && (
+          {(effectiveKind === 'all' || effectiveKind === 'spcc_plan') && (
             <div>
-              {surveyType === 'all' && (
+              {effectiveKind === 'all' && (
                 <div className="flex items-center gap-2 mb-2">
                   <FileCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
                   <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">

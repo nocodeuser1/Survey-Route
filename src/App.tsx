@@ -4013,6 +4013,7 @@ function App() {
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
                         surveyType={surveyType}
+                        surveyTypeKind={surveyTypeKind}
                         onToggleHideCompleted={() => setShowVisibilityModal(true)}
                         showOnlyRouteFacilities={showOnlyRouteFacilities}
                       />
@@ -4085,6 +4086,7 @@ function App() {
                       }}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                       surveyType={surveyType}
+                      surveyTypeKind={surveyTypeKind}
                       onSurveyTypeChange={(newType) => {
                         setSurveyType(newType);
                         // Clear selected facility list when survey type changes
@@ -4177,6 +4179,7 @@ function App() {
                             triggerFitBounds={triggerFitBounds}
                             onEditFacility={handleEditFacility}
                             surveyType={surveyType}
+                            surveyTypeKind={surveyTypeKind}
                             showOnlyRouteFacilities={showOnlyRouteFacilities}
                           />
                         </div>
@@ -4534,6 +4537,7 @@ function App() {
         <CompletedFacilitiesVisibilityModal
           visibility={completedVisibility}
           surveyType={surveyType}
+          surveyTypeKind={surveyTypeKind}
           onClose={() => setShowVisibilityModal(false)}
           onApply={(newVisibility) => {
             setCompletedVisibility(newVisibility);
