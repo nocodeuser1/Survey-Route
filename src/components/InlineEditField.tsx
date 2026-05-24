@@ -188,8 +188,12 @@ export default function InlineEditField({
           ? `${value}${suffix ? ` ${suffix}` : ''}`
           : emptyPlaceholder;
 
+    // Vertically center the pencil button with single-line values; top-align
+    // for multi-line textareas so the pencil doesn't drift halfway down a
+    // tall block of text.
+    const alignClass = type === 'textarea' ? 'items-start' : 'items-center';
     return (
-      <div className="flex items-start gap-2">
+      <div className={`flex ${alignClass} gap-1.5`}>
         <p
           className={
             displayClassName ??
@@ -204,7 +208,7 @@ export default function InlineEditField({
           <button
             type="button"
             onClick={enterEdit}
-            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 transition-colors"
             title={ariaLabel ? `Edit ${ariaLabel}` : 'Edit'}
             aria-label={ariaLabel ? `Edit ${ariaLabel}` : 'Edit'}
           >

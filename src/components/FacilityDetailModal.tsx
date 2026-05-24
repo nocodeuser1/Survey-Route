@@ -182,6 +182,13 @@ export default function FacilityDetailModal({
   const [editingVisitDate, setEditingVisitDate] = useState(false);
   const [visitDateValue, setVisitDateValue] = useState(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
   const [savingDate, setSavingDate] = useState(false);
+  // Coordinates inline editor on the General tab. Kept local because there
+  // are two fields (lat, lng) so InlineEditField (single-input) doesn't fit.
+  const [editingCoords, setEditingCoords] = useState(false);
+  const [coordsLatDraft, setCoordsLatDraft] = useState('');
+  const [coordsLngDraft, setCoordsLngDraft] = useState('');
+  const [savingCoords, setSavingCoords] = useState(false);
+  const [coordsError, setCoordsError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -793,6 +800,83 @@ export default function FacilityDetailModal({
     }
   };
 
+  /**
+   * Save handler used by the General-tab InlineEditField for first_prod_date.
+   * Mirrors the SPCC-due-date auto-calc from handleSaveIpDate so editing from
+   * either surface (General tab or SPCC Plan tab) produces identical writes:
+   *   - When setting an IP date, derive spcc_due_date = IP + 6 months IFF
+   *     spcc_due_date is currently empty (don't clobber a manual override).
+   *   - When clearing the IP date, also clear the auto-calc'd due date.
+   * Accepts the ISO date directly so it can plug into InlineEditField's
+   * onSave signature. Throws on failure so InlineEditField surfaces the
+   * error without dismissing edit mode.
+   */
+  const saveFirstProdDate = async (isoDate: string | null) => {
+    let spccDueDate: string | null | undefined = undefined;
+    if (isoDate && !facility.spcc_due_date) {
+      const d = parseLocalDate(isoDate);
+      d.setMonth(d.getMonth() + 6);
+      spccDueDate = d.toISOString().split('T')[0];
+    } else if (!isoDate) {
+      spccDueDate = null;
+    }
+    const updateData: Record<string, unknown> = { first_prod_date: isoDate };
+    if (spccDueDate !== undefined) updateData.spcc_due_date = spccDueDate;
+    const { error } = await supabase
+      .from('facilities')
+      .update(updateData)
+      .eq('id', facility.id);
+    if (error) throw error;
+    (facility as any).first_prod_date = isoDate;
+    if (spccDueDate !== undefined) {
+      (facility as any).spcc_due_date = spccDueDate;
+    }
+    bumpFacilityRender();
+  };
+
+  // Coordinates inline-edit save. Validates ranges, writes both columns in
+  // one update, and mutates the prop in place (same convention as
+  // updateFacilityField) so the modal reflects the new value immediately.
+  const saveCoordinates = async () => {
+    const latStr = coordsLatDraft.trim();
+    const lngStr = coordsLngDraft.trim();
+    const lat = parseFloat(latStr);
+    const lng = parseFloat(lngStr);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      setCoordsError('Latitude must be a number between -90 and 90.');
+      return;
+    }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      setCoordsError('Longitude must be a number between -180 and 180.');
+      return;
+    }
+    setSavingCoords(true);
+    setCoordsError(null);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ latitude: lat, longitude: lng })
+        .eq('id', facility.id);
+      if (error) throw error;
+      (facility as any).latitude = lat;
+      (facility as any).longitude = lng;
+      bumpFacilityRender();
+      setEditingCoords(false);
+    } catch (err: any) {
+      console.error('[FacilityDetailModal] Error saving coordinates:', err);
+      setCoordsError(err?.message || 'Could not save coordinates.');
+    } finally {
+      setSavingCoords(false);
+    }
+  };
+
+  const enterCoordsEdit = () => {
+    setCoordsLatDraft(String(facility.latitude));
+    setCoordsLngDraft(String(facility.longitude));
+    setCoordsError(null);
+    setEditingCoords(true);
+  };
+
   const handleSavePeDate = async () => {
     const isoDate = peDateValue ? parseDateInput(peDateValue) : null;
     if (peDateValue && !isoDate) return;
@@ -1356,10 +1440,83 @@ export default function FacilityDetailModal({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Coordinates</p>
-                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                  {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
-                </p>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Coordinates</p>
+                {editingCoords ? (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                        <span>Lat</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={coordsLatDraft}
+                          onChange={(e) => setCoordsLatDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); saveCoordinates(); }
+                            else if (e.key === 'Escape') { e.preventDefault(); setEditingCoords(false); }
+                          }}
+                          disabled={savingCoords}
+                          placeholder="35.306529"
+                          className={`text-sm px-2 py-1 rounded border w-32 bg-white dark:bg-gray-600 dark:border-gray-500 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none ${coordsError ? 'border-red-400' : 'border-gray-300'}`}
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                        <span>Lng</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={coordsLngDraft}
+                          onChange={(e) => setCoordsLngDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); saveCoordinates(); }
+                            else if (e.key === 'Escape') { e.preventDefault(); setEditingCoords(false); }
+                          }}
+                          disabled={savingCoords}
+                          placeholder="-97.925779"
+                          className={`text-sm px-2 py-1 rounded border w-32 bg-white dark:bg-gray-600 dark:border-gray-500 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none ${coordsError ? 'border-red-400' : 'border-gray-300'}`}
+                        />
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={saveCoordinates}
+                          disabled={savingCoords}
+                          className="px-2 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1"
+                        >
+                          <Check className="w-3 h-3" />
+                          {savingCoords ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingCoords(false); setCoordsError(null); }}
+                          disabled={savingCoords}
+                          className="px-2 py-1 text-xs rounded text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 inline-flex items-center gap-1"
+                        >
+                          <X className="w-3 h-3" />
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    {coordsError && (
+                      <p className="text-xs text-red-600 dark:text-red-400">{coordsError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={enterCoordsEdit}
+                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 transition-colors"
+                      title="Edit coordinates"
+                      aria-label="Edit coordinates"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Region / County</p>
@@ -1399,12 +1556,18 @@ export default function FacilityDetailModal({
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Startup / First Production Date</p>
-                {/* Editing IP date here would skip the auto-calc of spcc_due_date
-                    that handleSaveIpDate does. Stays read-only on the General tab —
-                    the SPCC Plan tab is the place to edit it. */}
-                <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {facility.first_prod_date ? formatDate(facility.first_prod_date) : 'Not available'}
-                </p>
+                {/* Editing here used to be disabled because it skipped the
+                    spcc_due_date auto-calc that handleSaveIpDate runs. Now
+                    the onSave hooks into saveFirstProdDate, which is the
+                    same logic factored out — both surfaces stay in sync. */}
+                <InlineEditField
+                  value={facility.first_prod_date ?? null}
+                  type="date"
+                  emptyPlaceholder="Not available"
+                  ariaLabel="first production date"
+                  displayClassName="text-sm font-medium text-gray-900 dark:text-white"
+                  onSave={(next) => saveFirstProdDate(typeof next === 'string' && next ? next : null)}
+                />
               </div>
               <div className="rounded-lg bg-gray-50 dark:bg-gray-700/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Permitted Oil</p>
