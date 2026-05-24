@@ -45,6 +45,7 @@ export default function ManagementSignaturePagePickerModal({
   onConfirm,
 }: ManagementSignaturePagePickerModalProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
 
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -55,6 +56,10 @@ export default function ManagementSignaturePagePickerModal({
   const [loadingPdf, setLoadingPdf] = useState(true);
   const [renderingPage, setRenderingPage] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Container width drives canvas scale so the PDF fits on narrow viewports
+  // (phones). Defaults to 720 so desktop matches the prior fixed-width look;
+  // on mobile, ResizeObserver shrinks this to the actual flex column width.
+  const [containerWidth, setContainerWidth] = useState<number>(720);
 
   // ---- Load PDF on mount -----------------------------------------------
   useEffect(() => {
@@ -91,6 +96,19 @@ export default function ManagementSignaturePagePickerModal({
     };
   }, [plan.plan_url]);
 
+  // ---- Track container width so the canvas can shrink on narrow viewports
+  useEffect(() => {
+    if (!canvasContainerRef.current || typeof ResizeObserver === 'undefined') return;
+    const el = canvasContainerRef.current;
+    const ro = new ResizeObserver(() => {
+      // Subtract a little padding so the canvas doesn't kiss the modal edge.
+      const w = Math.max(220, el.clientWidth - 8);
+      setContainerWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ---- Render the current page whenever it changes ---------------------
   useEffect(() => {
     if (!pdfDoc || !canvasRef.current) return;
@@ -108,7 +126,10 @@ export default function ManagementSignaturePagePickerModal({
         const page = await pdfDoc.getPage(currentPage + 1);
         if (cancelled) return;
         const dpr = window.devicePixelRatio || 1;
-        const baseWidth = 720;
+        // Cap at 720 (the desktop quality target) but shrink to the actual
+        // container on smaller screens so the canvas never overflows the
+        // modal on mobile.
+        const baseWidth = Math.min(720, containerWidth);
         const unscaledViewport = page.getViewport({ scale: 1 });
         const fitScale = baseWidth / unscaledViewport.width;
         const viewport = page.getViewport({ scale: fitScale * dpr });
@@ -138,7 +159,7 @@ export default function ManagementSignaturePagePickerModal({
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, currentPage]);
+  }, [pdfDoc, currentPage, containerWidth]);
 
   const goPrev = () => setCurrentPage((p) => Math.max(0, p - 1));
   const goNext = () => setCurrentPage((p) => Math.min(pageCount - 1, p + 1));
@@ -162,17 +183,17 @@ export default function ManagementSignaturePagePickerModal({
     // an inline style (not a Tailwind utility) so we don't have to extend the
     // Tailwind z-index scale just for this case.
     <div
-      className="fixed inset-0 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm"
       style={{ zIndex: 9999999 }}
     >
       <div
-        className={`relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl shadow-2xl border ${
+        className={`relative w-full max-w-4xl max-h-[95vh] sm:max-h-[92vh] flex flex-col rounded-2xl shadow-2xl border ${
           darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
         }`}
       >
         {/* Header */}
         <div
-          className={`flex items-start justify-between px-5 py-4 border-b ${
+          className={`flex items-start justify-between px-4 sm:px-5 py-3 sm:py-4 border-b ${
             darkMode ? 'border-gray-700' : 'border-gray-200'
           }`}
         >
@@ -199,7 +220,7 @@ export default function ManagementSignaturePagePickerModal({
         </div>
 
         {/* Assignment summary chips */}
-        <div className={`px-5 py-3 border-b flex flex-wrap items-center gap-2 ${
+        <div className={`px-4 sm:px-5 py-2 sm:py-3 border-b flex flex-wrap items-center gap-2 ${
           darkMode ? 'border-gray-700 bg-gray-900/40' : 'border-gray-200 bg-gray-50'
         }`}>
           <AssignmentChip
@@ -217,7 +238,7 @@ export default function ManagementSignaturePagePickerModal({
         </div>
 
         {/* Body: viewer or loading/error */}
-        <div className="flex-1 overflow-auto p-5">
+        <div ref={canvasContainerRef} className="flex-1 overflow-auto p-3 sm:p-5">
           {loadingPdf ? (
             <div className={`flex items-center gap-2 justify-center py-12 ${
               darkMode ? 'text-gray-400' : 'text-gray-500'
@@ -312,13 +333,14 @@ export default function ManagementSignaturePagePickerModal({
                 </button>
               </div>
 
-              {/* Canvas */}
+              {/* Canvas — max-w-full ensures the bitmap shrinks via CSS on
+                  narrow viewports even before ResizeObserver kicks in. */}
               <div
-                className={`rounded-lg overflow-hidden shadow ${
+                className={`rounded-lg overflow-hidden shadow max-w-full ${
                   darkMode ? 'bg-gray-800' : 'bg-white'
                 }`}
               >
-                <canvas ref={canvasRef} className="block" />
+                <canvas ref={canvasRef} className="block max-w-full h-auto" />
               </div>
             </div>
           )}
@@ -326,7 +348,7 @@ export default function ManagementSignaturePagePickerModal({
 
         {/* Footer */}
         <div
-          className={`flex items-center justify-end gap-2 px-5 py-3 border-t ${
+          className={`flex items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t ${
             darkMode ? 'border-gray-700' : 'border-gray-200'
           }`}
         >

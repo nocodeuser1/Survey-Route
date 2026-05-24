@@ -108,6 +108,14 @@ function TouchTooltipButton({
         ref={btnRef}
         className={className}
         title={tooltip}
+        // data-touch-tooltip-button is read by the parent's dismiss handler so
+        // tapping the same button a second time doesn't trigger the outside-
+        // touch dismissal before onTouchEnd can run with isActive=true. Without
+        // this attribute the second tap would dismiss the tooltip via the
+        // window touchstart listener, React would flush that state update before
+        // touchend, and isActive would read false again — looking to the user
+        // like the button was never clickable.
+        data-touch-tooltip-button="true"
         onTouchEnd={(e) => {
           if (!isActive) {
             // First tap → show tooltip, prevent action
@@ -120,7 +128,7 @@ function TouchTooltipButton({
             e.preventDefault();
           }
         }}
-        onClick={(e) => {
+        onClick={() => {
           // Desktop click — always fire
           // On touch devices the onTouchEnd already handled it,
           // but we guard against double-firing by checking if touch initiated
@@ -765,18 +773,34 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss mobile tooltip on scroll or outside touch
+  // Dismiss mobile tooltip on scroll or outside touch.
+  //
+  // Important: a touchstart on ANOTHER TouchTooltipButton is NOT an "outside"
+  // touch in the sense we care about. The button's own onTouchEnd handles
+  // switching tooltips / firing the action, so dismissing here would race
+  // with that — React would flush the null-state from this handler before
+  // the button's touchend runs, the button would see isActive=false, and
+  // the second tap would re-show its tooltip instead of activating. The
+  // `data-touch-tooltip-button` attribute on each button lets us recognize
+  // and skip those events; everything else still dismisses normally.
   useEffect(() => {
     if (!mobileTooltipId) return;
-    const dismiss = () => setMobileTooltipId(null);
-    window.addEventListener('scroll', dismiss, true);
+    const dismissOnScroll = () => setMobileTooltipId(null);
+    const dismissOnTouch = (e: TouchEvent) => {
+      const target = e.target as Element | null;
+      if (target && target.closest && target.closest('[data-touch-tooltip-button]')) {
+        return;
+      }
+      setMobileTooltipId(null);
+    };
+    window.addEventListener('scroll', dismissOnScroll, true);
     // Delay adding touchstart listener so the current tap doesn't immediately dismiss
     const timer = setTimeout(() => {
-      window.addEventListener('touchstart', dismiss, true);
+      window.addEventListener('touchstart', dismissOnTouch, true);
     }, 50);
     return () => {
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('touchstart', dismiss, true);
+      window.removeEventListener('scroll', dismissOnScroll, true);
+      window.removeEventListener('touchstart', dismissOnTouch, true);
       clearTimeout(timer);
     };
   }, [mobileTooltipId]);
