@@ -2217,43 +2217,131 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // "Copied!" checkmark replacing the icon for 1.5s so the user gets
   // visible feedback that the names landed on the clipboard.
   const [namesCopied, setNamesCopied] = useState(false);
+  // Popover that lets the user pick additional columns to include in the
+  // clipboard payload. Name is always included; everything else is opt-in,
+  // and only currently-visible columns appear as options (the user shouldn't
+  // be able to copy data they can't see). Reset to {} each time the popover
+  // opens so the surface state matches a freshly-clicked button.
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  const [copyExtraColumns, setCopyExtraColumns] = useState<Set<ColumnId>>(new Set());
+  const copyMenuRef = useRef<HTMLDivElement | null>(null);
+  const copyMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const handleCopySelectedNames = async () => {
-    if (selectedFacilityIds.size === 0) return;
-    // Always copy alphabetically regardless of how the table is sorted —
-    // the user uses the clipboard contents in external tools (sheets,
-    // emails) where alphabetical is the expected default. localeCompare
-    // with sensitivity:'base' sorts case-insensitively and handles
-    // unicode/digit ordering correctly (so "10" follows "9", not "1").
-    const names = filteredFacilities
+  // Click-outside / Escape dismiss for the copy popover.
+  useEffect(() => {
+    if (!copyMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (copyMenuRef.current?.contains(target)) return;
+      if (copyMenuTriggerRef.current?.contains(target)) return;
+      setCopyMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCopyMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [copyMenuOpen]);
+
+  /**
+   * Build the clipboard payload for the selected rows.
+   *
+   * - extraColumns empty → newline-separated names (legacy behavior, kept so
+   *   the common "paste a list into an email" workflow stays one column wide)
+   * - extraColumns non-empty → tab-separated values with a header row, columns
+   *   in visibleColumns order with Name first. TSV is the format Excel /
+   *   Sheets parse out of the clipboard with cells landing in adjacent
+   *   columns automatically (no Paste Special needed). Any tab/newline in a
+   *   cell value gets replaced with a single space so it can't break the
+   *   grid alignment.
+   *
+   * Rows are alphabetized regardless of the current table sort — the user
+   * uses the clipboard contents in external tools where alphabetical is the
+   * expected default.
+   */
+  const buildCopyPayload = (extraColumns: ColumnId[]): string => {
+    const sortedFacilities = filteredFacilities
       .filter((f) => selectedFacilityIds.has(f.id))
-      .map((f) => f.name)
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
-      .join('\n');
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }),
+      );
+
+    if (extraColumns.length === 0) {
+      return sortedFacilities.map((f) => f.name).join('\n');
+    }
+
+    // Final column order: Name first, then extras in visibleColumns order so
+    // the clipboard matches what the user sees on screen.
+    const cols: ColumnId[] = [
+      'name',
+      ...visibleColumns.filter((c) => c !== 'name' && extraColumns.includes(c)),
+    ];
+    const sanitize = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
+    const header = cols.map((c) => sanitize(columnLabels[c] ?? c)).join('\t');
+    const dataRows = sortedFacilities.map((f) =>
+      cols.map((c) => sanitize(getColumnExportText(f, c))).join('\t'),
+    );
+    return [header, ...dataRows].join('\n');
+  };
+
+  /** Async clipboard write with the same execCommand fallback the old single-
+   *  column path used, so http://localhost / non-secure contexts still work. */
+  const writeClipboardSafe = async (text: string): Promise<boolean> => {
     try {
-      await navigator.clipboard.writeText(names);
-      setNamesCopied(true);
-      setTimeout(() => setNamesCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch (err) {
-      console.error('Failed to copy facility names:', err);
-      // Fallback: legacy execCommand path for browsers blocking the async
-      // Clipboard API in non-secure contexts (rare on the deployed site,
-      // common on http://localhost without HTTPS).
+      console.error('Failed to write clipboard:', err);
       try {
         const ta = document.createElement('textarea');
-        ta.value = names;
+        ta.value = text;
         ta.style.position = 'fixed';
         ta.style.opacity = '0';
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        setNamesCopied(true);
-        setTimeout(() => setNamesCopied(false), 1500);
+        return true;
       } catch (fallbackErr) {
         console.error('Fallback copy failed:', fallbackErr);
-        alert('Could not copy facility names — clipboard access blocked.');
+        return false;
       }
+    }
+  };
+
+  /** Open the popover. Always starts with no extra columns selected so the
+   *  default action mirrors the prior one-click "just names" behavior. */
+  const openCopyMenu = () => {
+    if (selectedFacilityIds.size === 0) return;
+    setCopyExtraColumns(new Set());
+    setCopyMenuOpen(true);
+  };
+
+  /** Toggle a column in the extras set (immutable, since it's React state). */
+  const toggleCopyColumn = (col: ColumnId) => {
+    setCopyExtraColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(col)) next.delete(col);
+      else next.add(col);
+      return next;
+    });
+  };
+
+  const handleCopyFromMenu = async () => {
+    if (selectedFacilityIds.size === 0) return;
+    const text = buildCopyPayload(Array.from(copyExtraColumns));
+    const ok = await writeClipboardSafe(text);
+    if (ok) {
+      setNamesCopied(true);
+      setCopyMenuOpen(false);
+      setTimeout(() => setNamesCopied(false), 1500);
+    } else {
+      alert('Could not copy — clipboard access blocked.');
     }
   };
 
@@ -4521,28 +4609,144 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       </button>
                     )}
 
-                    {/* Copy Names — newline-separated. Pulses a check on
-                        success so the user knows the clipboard updated.
-                        whitespace-nowrap so "Copy Names" stays on one line
-                        even when the action bar gets crowded. */}
-                    <button
-                      onClick={handleCopySelectedNames}
-                      className={`flex items-center justify-center gap-1.5 whitespace-nowrap w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg active:scale-95 transition-all text-xs font-medium ${
-                        namesCopied
-                          ? 'bg-emerald-500/15 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-violet-500/10 dark:bg-violet-400/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 dark:hover:bg-violet-400/20'
-                      }`}
-                      title="Copy selected facility names (one per line)"
-                    >
-                      {namesCopied ? (
-                        <Check className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
-                      ) : (
-                        <Copy className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
-                      )}
-                      <span className="hidden lg:inline whitespace-nowrap">
-                        {namesCopied ? 'Copied' : 'Copy Names'}
-                      </span>
-                    </button>
+                    {/* Copy popover — clicking opens a small menu where the
+                        user can opt in to additional visible columns. With
+                        zero extras (the default) the clipboard payload is
+                        newline-separated names — preserves the prior quick
+                        "paste into an email" workflow. With extras, the
+                        payload is TSV with a header row so it lands in
+                        adjacent Excel/Sheets cells. */}
+                    <div className="relative">
+                      <button
+                        ref={copyMenuTriggerRef}
+                        onClick={() => (copyMenuOpen ? setCopyMenuOpen(false) : openCopyMenu())}
+                        className={`flex items-center justify-center gap-1.5 whitespace-nowrap w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg active:scale-95 transition-all text-xs font-medium ${
+                          namesCopied
+                            ? 'bg-emerald-500/15 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400'
+                            : copyMenuOpen
+                              ? 'bg-violet-500/25 dark:bg-violet-400/25 text-violet-700 dark:text-violet-300'
+                              : 'bg-violet-500/10 dark:bg-violet-400/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 dark:hover:bg-violet-400/20'
+                        }`}
+                        title="Copy selected facilities (pick which columns to include)"
+                      >
+                        {namesCopied ? (
+                          <Check className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
+                        ) : (
+                          <Copy className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
+                        )}
+                        <span className="hidden lg:inline whitespace-nowrap">
+                          {namesCopied ? 'Copied' : 'Copy Names'}
+                        </span>
+                      </button>
+
+                      {copyMenuOpen && (() => {
+                        // Only currently-visible columns appear as options
+                        // (per Israel: "Only display visible columns as
+                        // options to be added to the copy"). Name is always
+                        // included; we pull it out so it shows as a fixed
+                        // header chip and not a togglable row.
+                        const extraOptions = visibleColumns.filter((c) => c !== 'name');
+                        const allChecked =
+                          extraOptions.length > 0 &&
+                          extraOptions.every((c) => copyExtraColumns.has(c));
+                        const noneChecked = copyExtraColumns.size === 0;
+                        const includeHeaders = !noneChecked; // matches buildCopyPayload's TSV branch
+
+                        return (
+                          <div
+                            ref={copyMenuRef}
+                            className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
+                            role="dialog"
+                            aria-label="Copy options"
+                          >
+                            <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                Copy {selectedFacilityIds.size} facilit{selectedFacilityIds.size === 1 ? 'y' : 'ies'}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCopyMenuOpen(false)}
+                                className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"
+                                aria-label="Close"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Name pinned as always-included */}
+                            <div className="px-3 pt-2.5 pb-1.5">
+                              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">
+                                Included
+                              </div>
+                              <div className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200">
+                                <Check className="w-3 h-3 text-emerald-500" />
+                                <span>Facility Name</span>
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500">(always)</span>
+                              </div>
+                            </div>
+
+                            {extraOptions.length > 0 && (
+                              <div className="px-3 pt-2.5 pb-2">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                                    Add columns
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCopyExtraColumns(
+                                        allChecked ? new Set() : new Set(extraOptions),
+                                      );
+                                    }}
+                                    className="text-[10px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                                  >
+                                    {allChecked ? 'Clear all' : 'Select all'}
+                                  </button>
+                                </div>
+                                <div className="max-h-56 overflow-y-auto -mx-1 px-1 space-y-0.5">
+                                  {extraOptions.map((col) => {
+                                    const checked = copyExtraColumns.has(col);
+                                    return (
+                                      <label
+                                        key={col}
+                                        className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => toggleCopyColumn(col)}
+                                          className="w-3.5 h-3.5 text-violet-600 rounded"
+                                        />
+                                        <span className="text-xs text-gray-700 dark:text-gray-200 truncate">
+                                          {columnLabels[col] ?? col}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Format note + Copy action */}
+                            <div className="px-3 pt-2 pb-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">
+                                {includeHeaders
+                                  ? 'Tab-separated with a header row — paste into Excel/Sheets and cells land in adjacent columns.'
+                                  : 'One name per line — pastes into a single column.'}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleCopyFromMenu}
+                                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
 
                     {/* Delete */}
                     <button
