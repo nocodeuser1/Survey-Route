@@ -3119,52 +3119,46 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const facilityComments = commentsByFacility.get(facility.id) ?? [];
         const commentCount = facilityComments.length;
         return (
-          // Outer flex: icon stays vertically centered (centered-left in the
-          // cell) regardless of how tall the row becomes, name + badges sit
-          // beside it. The inner flex wraps the name + comment/survey badges
-          // so they can spill onto a second line without dragging the icon.
-          <div className="flex items-center gap-2 min-w-0">
-            <FileText
-              className={`w-4 h-4 flex-shrink-0 ${getNameIconColorClass(facility)}`}
-            />
-            <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+          // Outer flex: icon aligns to top so it sits beside the first line
+          // of the name even when the name wraps to multiple lines.
+          <div className="flex items-start gap-2 min-w-0">
+            {/* File icon — doubles as the comment-count click target when
+                comments exist. The count badge is overlaid on the icon corner
+                so it never pushes into the name column and never forces an
+                extra line, no matter how narrow the column is. */}
+            <div className="relative flex-shrink-0 mt-0.5">
+              <FileText
+                className={`w-4 h-4 ${getNameIconColorClass(facility)}`}
+              />
+              {commentCount > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCommentsPopover({ facility, x: e.clientX, y: e.clientY });
+                  }}
+                  title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
+                  aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+                  className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-0.5 flex items-center justify-center rounded-full text-[9px] font-bold bg-amber-500 text-white leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                >
+                  {commentCount}
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col min-w-0 gap-0.5">
               <span className="break-words">{facility.name}</span>
-            {/* Comment indicator. Renders only when at least one
-                comment exists for this facility. Clicking it opens
-                the quick-peek popover (read-only) without launching
-                the full FacilityDetailModal — the user can scan
-                comments inline. stopPropagation so the row's own
-                click handler doesn't fire underneath. */}
-            {commentCount > 0 && (
-              // Plain text + icon — no background pill / padding so the row
-              // height never inflates when a comment exists. Hover darkens
-              // the color slightly to signal it's clickable.
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCommentsPopover({ facility, x: e.clientX, y: e.clientY });
-                }}
-                title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
-                aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors flex-shrink-0 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500 rounded-sm"
-              >
-                <MessageCircle className="w-3 h-3" />
-                {commentCount}
-              </button>
-            )}
-            {surveyCompletion && surveyCompletion.total > 0 && (
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
-                surveyCompletion.percent === 100
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                  : surveyCompletion.percent > 0
-                    ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-              }`}>
-                {surveyCompletion.percent === 100 && <CheckCircle className="w-2.5 h-2.5" />}
-                {surveyCompletion.completed}/{surveyCompletion.total}
-              </span>
-            )}
+              {surveyCompletion && surveyCompletion.total > 0 && (
+                <span className={`inline-flex self-start items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
+                  surveyCompletion.percent === 100
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : surveyCompletion.percent > 0
+                      ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                }`}>
+                  {surveyCompletion.percent === 100 && <CheckCircle className="w-2.5 h-2.5" />}
+                  {surveyCompletion.completed}/{surveyCompletion.total}
+                </span>
+              )}
             </div>
           </div>
         );
