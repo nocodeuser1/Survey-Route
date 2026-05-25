@@ -4228,9 +4228,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <span className="hidden sm:inline">Filters</span>
                     {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </TouchTooltipButton>
-                  {/* Active filter indicator dot */}
+                  {/* Active filter indicator — blue dot at rest, red ✕ on hover
+                      to clear all active filters in one click. */}
                   {hasActiveFilter && !showFilters && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-700 pointer-events-none" />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusFilters([]);
+                        setSelectedReportType('all');
+                        setShowSoldFacilities(false);
+                        setSpccPlanFilter('all');
+                        setCustomFilterRules([]);
+                      }}
+                      title="Clear all filters"
+                      aria-label="Clear all filters"
+                      className="group absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                    >
+                      {/* Default: blue dot */}
+                      <span className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-700 group-hover:opacity-0 transition-opacity duration-150" />
+                      {/* Hover: red circle with X */}
+                      <span className="absolute w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                        <X className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                      </span>
+                    </button>
                   )}
                   {showFilters && (
                     <>
