@@ -1497,8 +1497,12 @@ export default function LDARObservationPathEditor({
         </div>
       )}
 
-      {/* Canvas area */}
-      <div className="flex-1 overflow-auto p-3 flex items-start justify-center">
+      {/* Canvas area. Grid + place-items-center gives both a defined
+          container area for the page wrapper AND centers it. Switched
+          from a flex container with items-start so the wrapper's
+          aspect-ratio + max-h-full can actually resolve against a
+          defined parent height. */}
+      <div className="flex-1 overflow-hidden p-3 grid place-items-center">
         {isLoadingPage ? (
           <div className="flex flex-col items-center gap-3 text-white py-20">
             <Loader2 className="w-8 h-8 animate-spin" />
@@ -1513,21 +1517,25 @@ export default function LDARObservationPathEditor({
           </div>
         ) : (
           <div
-            className={`relative shadow-2xl flex items-center justify-center max-w-full max-h-full ${
+            className={`relative shadow-2xl ${
               darkMode ? 'bg-gray-950' : 'bg-white'
             } ${isEditMode ? 'cursor-crosshair' : 'cursor-default'}`}
+            // aspectRatio lets the browser compute width AND height from
+            // the viewBox ratio while max-w/h-full caps both dimensions to
+            // the parent grid cell. Net effect: the wrapper is the
+            // largest box matching the page aspect that fits the canvas
+            // area. SVG inside fills it 100%. 1x zoom = fits screen.
+            style={{
+              aspectRatio: `${W} / ${H}`,
+              maxWidth: '100%',
+              maxHeight: '100%',
+            }}
           >
             <svg
               ref={svgRef}
               viewBox={`${viewBoxOffset.x} ${viewBoxOffset.y} ${W / zoom} ${H / zoom}`}
               preserveAspectRatio="xMidYMid meet"
-              // max-w-full + max-h-full + aspect ratio from viewBox => the
-              // SVG fits the available viewport area in BOTH dimensions
-              // instead of locking to full width and overflowing tall PDFs.
-              // 1x zoom = fits screen. Zoom in to inspect, zoom out for
-              // breathing room.
-              style={{ aspectRatio: `${W} / ${H}` }}
-              className="block max-w-full max-h-full select-none touch-none"
+              className="block w-full h-full select-none touch-none"
               onPointerMove={onSvgPointerMove}
               onPointerUp={onSvgPointerUp}
               onPointerCancel={onSvgPointerUp}
