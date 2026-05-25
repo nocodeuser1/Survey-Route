@@ -4655,7 +4655,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         return (
                           <div
                             ref={copyMenuRef}
-                            className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
+                            // The bulk-actions bar sits at the bottom of the
+                            // viewport, so a top-anchored popover gets clipped.
+                            // Open upward (bottom-full mb-2) so the popover
+                            // sits ABOVE the trigger button instead.
+                            className="absolute right-0 bottom-full mb-2 z-50 w-72 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
                             role="dialog"
                             aria-label="Copy options"
                           >
