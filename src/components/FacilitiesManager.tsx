@@ -34,7 +34,7 @@ import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
-import { getSPCCPlanStatus, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
@@ -2445,22 +2445,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
    */
   const getColumnExportText = (facility: Facility, columnId: ColumnId): string => {
     if (columnId === 'spcc_status') {
-      if (facility.spcc_inspection_date) return 'Completed';
-      if (facility.spcc_external_completion) return 'External';
-      const effectiveDueDate = facility.spcc_due_date || (facility.first_prod_date ? (() => {
-        const d = parseLocalDate(facility.first_prod_date!);
-        d.setMonth(d.getMonth() + 6);
-        return d.toISOString().split('T')[0];
-      })() : null);
-      if (effectiveDueDate) {
-        const dueDate = parseLocalDate(effectiveDueDate);
-        const today = new Date();
-        const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysDiff < 0) return 'Overdue';
-        if (daysDiff <= 30) return 'Due Soon';
-        return 'Current';
-      }
-      return 'No Date';
+      // Use the canonical SPCC Plan status label that SPCCStatusBadge / the
+      // route filters / the SPCCPlanDetailModal all share — going through
+      // getSPCCPlanStatus + getSPCCPlanStatusText. This is the SPCC PLAN
+      // status (driven by plan upload + PE stamp date + recertification
+      // window + IP-date-derived due date), NOT the SPCC inspection status,
+      // which has its own column / its own derivation.
+      //
+      // Replaced 2026-05-23. The previous implementation here returned
+      // 'Completed' whenever facility.spcc_inspection_date was set —
+      // confusing INSPECTION completion with PLAN status — and reported
+      // 'Completed' even for facilities whose plan was Overdue or
+      // Awaiting PE Stamp (user report). The new path uses the same
+      // source of truth as the visible status badge.
+      return getSPCCPlanStatusText(facility);
     }
     if (columnId === 'inspection_status') {
       const inspection = inspections.get(facility.id);
