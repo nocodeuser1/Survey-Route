@@ -435,7 +435,11 @@ export default function LDARObservationPathEditor({
   const waypoints = pathData.waypoints;
 
   // ─── Zoom + pan helpers ────────────────────────────────────────────────
-  const ZOOM_MIN = 1;
+  // 0.25 lets the user pull WAY back when the page is taller than the
+  // viewport (the SVG is sized with max-h-full so 1x already fits the
+  // visible area — going below 1x just gives more breathing room).
+  // 6x is plenty for label-level inspection.
+  const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 6;
   const ZOOM_STEP = 1.2;
 
@@ -443,6 +447,16 @@ export default function LDARObservationPathEditor({
   const clampOffset = (ox: number, oy: number, z: number) => {
     const visibleW = W / z;
     const visibleH = H / z;
+    // When zoomed OUT (visibleW > W), the page is smaller than the
+    // viewBox — center it so the user sees empty space on all sides
+    // rather than a half-cropped page pinned to the top-left.
+    if (visibleW >= W && visibleH >= H) {
+      return {
+        x: -(visibleW - W) / 2,
+        y: -(visibleH - H) / 2,
+      };
+    }
+    // Zoomed in or 1:1 — clamp so panning never reveals past the edges.
     return {
       x: Math.max(0, Math.min(W - visibleW, ox)),
       y: Math.max(0, Math.min(H - visibleH, oy)),
@@ -1309,16 +1323,14 @@ export default function LDARObservationPathEditor({
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
-              {zoom > 1 && (
-                <button
-                  type="button"
-                  onClick={resetZoom}
-                  title="Fit to view"
-                  className="p-1.5 rounded-r-lg hover:bg-black/5 dark:hover:bg-white/10"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={resetZoom}
+                title="Fit to view (reset zoom to 100%)"
+                className="p-1.5 rounded-r-lg hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
             </div>
           )}
           <button
@@ -1501,16 +1513,21 @@ export default function LDARObservationPathEditor({
           </div>
         ) : (
           <div
-            className={`relative shadow-2xl ${darkMode ? 'bg-gray-950' : 'bg-white'} ${
-              isEditMode ? 'cursor-crosshair' : 'cursor-default'
-            }`}
-            style={{ maxWidth: '100%', width: '100%' }}
+            className={`relative shadow-2xl flex items-center justify-center max-w-full max-h-full ${
+              darkMode ? 'bg-gray-950' : 'bg-white'
+            } ${isEditMode ? 'cursor-crosshair' : 'cursor-default'}`}
           >
             <svg
               ref={svgRef}
               viewBox={`${viewBoxOffset.x} ${viewBoxOffset.y} ${W / zoom} ${H / zoom}`}
               preserveAspectRatio="xMidYMid meet"
-              className="w-full h-auto select-none touch-none"
+              // max-w-full + max-h-full + aspect ratio from viewBox => the
+              // SVG fits the available viewport area in BOTH dimensions
+              // instead of locking to full width and overflowing tall PDFs.
+              // 1x zoom = fits screen. Zoom in to inspect, zoom out for
+              // breathing room.
+              style={{ aspectRatio: `${W} / ${H}` }}
+              className="block max-w-full max-h-full select-none touch-none"
               onPointerMove={onSvgPointerMove}
               onPointerUp={onSvgPointerUp}
               onPointerCancel={onSvgPointerUp}

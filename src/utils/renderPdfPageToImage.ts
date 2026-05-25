@@ -61,14 +61,42 @@ export async function renderPdfPageToImage(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not get 2d canvas context for PDF rendering');
 
+  // Pre-fill with white. Defensive: some PDFs (notably aerial-photo site
+  // plans with raster XObjects) silently fail to paint the background
+  // image, leaving the canvas transparent — the user then sees only the
+  // vector overlays (labels, boxes, arrows) on what looks like a blank
+  // page. A white pre-fill gives us a deterministic background regardless
+  // of how the page paints, AND matches what pdf.js' built-in default is
+  // supposed to provide but doesn't always honor on every PDF.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   // pdfjs 5.x uses `canvasContext` as the property name; older 4.x used
   // `canvas`. We're on 5.4 per package.json so this is stable, but the
   // shipped .d.ts under 5.4 still types `RenderParameters` as requiring
   // a `canvas` field instead of `canvasContext`, so we cast.
-  await page.render({
-    canvasContext: ctx,
-    viewport,
-  } as Parameters<typeof page.render>[0]).promise;
+  //
+  // `background: 'white'` is the documented way to ask pdf.js to use a
+  // white page background instead of transparent — belt + braces with
+  // the pre-fill above.
+  //
+  // `intent: 'print'` swaps a few defaults that tend to render more
+  // images faithfully on tricky PDFs (e.g. annotations, soft masks)
+  // without changing how normal vector content paints.
+  try {
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      background: '#ffffff',
+      intent: 'print',
+    } as Parameters<typeof page.render>[0]).promise;
+  } catch (err: any) {
+    // Surface the underlying pdf.js error rather than silently returning
+    // a blank/partial canvas. The caller can decide what to do (retry at
+    // a lower scale, show an error UI, etc.).
+    console.error('[renderPdfPageToImage] pdf.js render failed:', err);
+    throw new Error(`PDF render failed: ${err?.message || String(err)}`);
+  }
 
   const dataUrl = canvas.toDataURL('image/png');
 
