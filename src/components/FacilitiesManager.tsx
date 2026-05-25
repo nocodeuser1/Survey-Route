@@ -163,7 +163,7 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'day_assignment' | 'team_assignment' | 'status' | 'created_at' |
   'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' | 'well_name_7' | 'well_name_8' | 'well_name_9' | 'well_name_10' |
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
-  'lat_well_sheet' | 'long_well_sheet';
+  'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status';
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'recertification_status', 'notes'];
 
@@ -182,6 +182,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'well_name_7', 'well_api_7', 'well_name_8', 'well_api_8', 'well_name_9', 'well_api_9',
   'well_name_10', 'well_api_10',
   'lat_well_sheet', 'long_well_sheet',
+  'ldar_site_plan_status',
   'created_at',
 ];
 
@@ -241,6 +242,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   api_numbers_combined: 'Combined API',
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
+  ldar_site_plan_status: 'LDAR Site Plan',
   created_at: 'Date Added',
 };
 
@@ -3119,36 +3121,35 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const facilityComments = commentsByFacility.get(facility.id) ?? [];
         const commentCount = facilityComments.length;
         return (
-          // Outer flex: icon aligns to top so it sits beside the first line
-          // of the name even when the name wraps to multiple lines.
-          <div className="flex items-start gap-2 min-w-0">
-            {/* File icon — doubles as the comment-count click target when
-                comments exist. The count badge is overlaid on the icon corner
-                so it never pushes into the name column and never forces an
-                extra line, no matter how narrow the column is. */}
-            <div className="relative flex-shrink-0 mt-0.5">
-              <FileText
-                className={`w-4 h-4 ${getNameIconColorClass(facility)}`}
-              />
-              {commentCount > 0 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCommentsPopover({ facility, x: e.clientX, y: e.clientY });
-                  }}
-                  title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
-                  aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-                  className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-0.5 flex items-center justify-center rounded-full text-[9px] font-bold bg-amber-500 text-white leading-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                >
-                  {commentCount}
-                </button>
-              )}
-            </div>
-            <div className="flex flex-col min-w-0 gap-0.5">
-              <span className="break-words">{facility.name}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <FileText
+              className={`w-4 h-4 flex-shrink-0 ${getNameIconColorClass(facility)}`}
+            />
+            <div className="min-w-0">
+              {/* Comment indicator is rendered as true inline content inside
+                  the name span so it always sits at the end of the last line
+                  of text — it can never wrap to a new line on its own and
+                  never inflates row height. */}
+              <span className="break-words">
+                {facility.name}
+                {commentCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCommentsPopover({ facility, x: e.clientX, y: e.clientY });
+                    }}
+                    title={`${commentCount} comment${commentCount === 1 ? '' : 's'} — click to view`}
+                    aria-label={`Show ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+                    className="inline-flex items-center gap-0.5 ml-1.5 align-middle text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500 rounded-sm"
+                  >
+                    <MessageCircle className="w-3 h-3" />
+                    {commentCount}
+                  </button>
+                )}
+              </span>
               {surveyCompletion && surveyCompletion.total > 0 && (
-                <span className={`inline-flex self-start items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
+                <span className={`mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${
                   surveyCompletion.percent === 100
                     ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
                     : surveyCompletion.percent > 0
@@ -3192,6 +3193,29 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 <FileText className="w-3 h-3" />
                 Not uploaded
               </>
+            )}
+          </span>
+        );
+      }
+      case 'ldar_site_plan_status': {
+        const completed = !!facility.ldar_site_plan_completed;
+        const hasUrl = !!facility.ldar_site_plan_url;
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
+              completed
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                : hasUrl
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+            }`}
+          >
+            {completed ? (
+              <><CheckCircle className="w-3 h-3" />Completed</>
+            ) : hasUrl ? (
+              <><FileText className="w-3 h-3" />Uploaded</>
+            ) : (
+              <><FileText className="w-3 h-3" />Not completed</>
             )}
           </span>
         );
