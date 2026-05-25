@@ -4,37 +4,17 @@ import { Facility } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { getSPCCPlanStatus, formatDayCount, type SPCCPlanStatus } from '../utils/spccStatus';
-import { downloadPlanWithCanonicalFilename } from '../utils/spccPlans';
 import { formatDate } from '../utils/dateUtils';
 
 /**
  * Shared handler for the modal's two "View" affordances (list-row icon
- * button + detail-view primary button). Fetches the plan PDF and
- * triggers a browser download using the canonical filename — the same
- * naming the bulk-download zip produces. Falls back to opening the raw
- * URL in a new tab if the fetch fails (CORS, network) so the user is
- * never left without a way to reach the document.
+ * button + detail-view primary button). Opens the plan PDF in a new tab
+ * so the user can preview it in the browser and optionally download from
+ * the browser's native PDF viewer.
  */
-async function viewPlanWithCanonicalFilename(facility: Facility) {
+function viewPlanWithCanonicalFilename(facility: Facility) {
   if (!facility.spcc_plan_url) return;
-  // The modal works off the facilities table directly (no per-berm
-  // spcc_plans rows here) so we infer renewal vs initial from the
-  // recertified_date mirror, and use the most informative date we have.
-  const isRenewal = !!facility.recertified_date;
-  const date =
-    (isRenewal ? facility.recertified_date : facility.spcc_pe_stamp_date) ||
-    new Date().toISOString().slice(0, 10);
-  try {
-    await downloadPlanWithCanonicalFilename({
-      url: facility.spcc_plan_url,
-      facility,
-      isRenewal,
-      date,
-    });
-  } catch (err) {
-    console.error('Plan download failed, opening raw URL:', err);
-    window.open(facility.spcc_plan_url, '_blank', 'noopener,noreferrer');
-  }
+  window.open(facility.spcc_plan_url, '_blank', 'noopener,noreferrer');
 }
 
 interface SPCCPlansOverviewModalProps {

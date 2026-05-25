@@ -19,7 +19,7 @@ import {
 import { supabase, type Facility, type SPCCPlan, type UserSignature } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
 import { formatDate } from '../utils/dateUtils';
-import { getBermDisplayLabel, getBermShortLabel, getFacilityWells, downloadPlanWithCanonicalFilename } from '../utils/spccPlans';
+import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
 import { isPlanRecertificationActive, isRecertificationActive } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
 import RecertificationPagePickerModal from './RecertificationPagePickerModal';
@@ -706,37 +706,14 @@ export default function BermPlanCard({
               <button
                 type="button"
                 disabled={!plan.plan_url}
-                onClick={async () => {
+                onClick={() => {
                   if (!plan.plan_url) return;
-                  // Cache-bust on plan.updated_at so we always fetch the
+                  // Cache-bust on plan.updated_at so we always open the
                   // latest PDF after a Replace or Add Mgmt Signature
-                  // without a page refresh. updated_at advances on any
-                  // row mutation; the Supabase Storage URL path stays
-                  // stable, so ?v= bypasses the browser's 60s cache.
+                  // without a page refresh.
                   const sep = plan.plan_url.includes('?') ? '&' : '?';
                   const url = `${plan.plan_url}${sep}v=${encodeURIComponent(plan.updated_at)}`;
-                  const isRenewal = !!plan.recertified_date;
-                  const date =
-                    (isRenewal ? plan.recertified_date : plan.pe_stamp_date) ||
-                    new Date().toISOString().slice(0, 10);
-                  try {
-                    await downloadPlanWithCanonicalFilename({
-                      url,
-                      facility,
-                      isRenewal,
-                      date,
-                      bermIndex: plan.berm_index,
-                      multipleBerm: !isOnlyBerm,
-                    });
-                  } catch (err) {
-                    // Fall back to opening the raw URL in a new tab so
-                    // the user still sees the plan if the download
-                    // pipeline fails (CORS, network, etc.). Filename
-                    // won't be canonical in that path but the content
-                    // is still reachable.
-                    console.error('Plan download failed, opening raw URL:', err);
-                    window.open(url, '_blank', 'noopener,noreferrer');
-                  }
+                  window.open(url, '_blank', 'noopener,noreferrer');
                 }}
                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   darkMode
