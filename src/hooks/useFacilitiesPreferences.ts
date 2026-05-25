@@ -55,7 +55,29 @@ function writeCache(accountId: string, prefs: FacilitiesPreferences) {
   }
 }
 
-export function useFacilitiesPreferences(accountId: string, userId: string) {
+/**
+ * Per-account facilities-table preferences.
+ *
+ * Storage model: one shared row per account in `user_settings`
+ * (`account_id` carries the unique constraint, see migration
+ * 20251112164811_fix_user_settings_unique_constraint.sql). That row holds
+ * the canonical view — visible columns per mode, column order, column
+ * widths, sort, saved filters, etc.
+ *
+ * `isAgencyOwner` gates writes to the shared row (added 2026-05-23 per
+ * Israel: "make the agency owner's view the default for all users").
+ * Behavior:
+ *   - Agency owner: tweaks save to localStorage AND to Supabase, so the
+ *     view they curate becomes the team-wide default.
+ *   - Anyone else: tweaks save to localStorage only. Their current session
+ *     stays responsive (filters, column drags, etc. all work), but the
+ *     shared DB row is left alone — so a fresh load on another device, or
+ *     after the cache is cleared, falls back to the agency owner's view.
+ *
+ * Default this to false so a caller that hasn't been updated yet won't
+ * accidentally start writing as if it were an owner.
+ */
+export function useFacilitiesPreferences(accountId: string, userId: string, isAgencyOwner: boolean = false) {
   const [preferences, setPreferences] = useState<FacilitiesPreferences>(() => {
     return readCache(accountId) || DEFAULT_PREFS;
   });
@@ -133,8 +155,12 @@ export function useFacilitiesPreferences(accountId: string, userId: string) {
     return () => { cancelled = true; };
   }, [accountId]);
 
-  // Debounced save to Supabase
+  // Debounced save to Supabase. Gated on isAgencyOwner so a non-owner's
+  // session-local tweaks (filter, sort, hidden cols, etc.) never overwrite
+  // the curated team-wide row. Non-owners still get the writeCache call
+  // upstream so their view stays consistent until the next page load.
   const saveToSupabase = useCallback((prefs: FacilitiesPreferences) => {
+    if (!isAgencyOwner) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     saveTimerRef.current = setTimeout(async () => {
@@ -152,7 +178,7 @@ export function useFacilitiesPreferences(accountId: string, userId: string) {
         console.error('[useFacilitiesPreferences] Failed to save:', err);
       }
     }, 1000);
-  }, [accountId, userId]);
+  }, [accountId, userId, isAgencyOwner]);
 
   // Cleanup timer on unmount
   useEffect(() => {

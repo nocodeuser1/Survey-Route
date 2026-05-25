@@ -39,6 +39,7 @@ import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans'
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
+import { useAuth } from '../contexts/AuthContext';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -244,7 +245,14 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 };
 
 export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
-  const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId);
+  // Only the agency owner's tweaks propagate to the shared per-account row
+  // (visible columns per mode, column widths, sort, saved filters). Other
+  // users still get a responsive local-only UI for their session, but the
+  // team-wide default they see on a fresh load is whatever the owner
+  // curated. See the docstring on useFacilitiesPreferences for details.
+  const { user } = useAuth();
+  const isAgencyOwner = !!user?.isAgencyOwner;
+  const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId, isAgencyOwner);
 
   // Brand-aware label for the external facility-id field. Camino-specific
   // for the Camino account; "Validus Facility ID" for Validus; generic
