@@ -35,6 +35,7 @@ import { detectSitePlanInLoadedPdf } from '../utils/spccSitePlanDetector';
 import { extractPageAsPdf } from '../utils/extractPdfPage';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from '../utils/pdfjsDocumentDefaults';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 /**
@@ -303,7 +304,7 @@ async function refreshSourceFromSPCC(
   const resp = await fetch(facility.spcc_plan_url);
   if (!resp.ok) throw new Error(`Could not fetch SPCC plan (${resp.status})`);
   const buf = await resp.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+  const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: buf.slice(0) }).promise;
 
   // Re-run page detection each time. Cheap (text-content extraction
   // only, no AI), and avoids stale page numbers if the SPCC plan was
@@ -665,7 +666,7 @@ export default function LDARObservationPathEditor({
         // Best-effort — if anything fails we just skip the overlay.
         try {
           const arrayBuffer = await (await fetch(facility.ldar_site_plan_url!)).arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: arrayBuffer }).promise;
           const page = await pdf.getPage(1);
           const [titlePos, foundDate] = await Promise.all([
             findTextInPdfPage(page, 'FACILITY SITE PLAN'),

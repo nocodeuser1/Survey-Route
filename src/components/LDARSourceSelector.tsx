@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Sparkles } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from '../utils/pdfjsDocumentDefaults';
 import { supabase, type Facility } from '../lib/supabase';
 import {
   detectSitePlanInLoadedPdf,
@@ -142,7 +143,7 @@ export default function LDARSourceSelector({
 
         // Load via pdfjs for text detection + thumbnail rendering. pdf-lib
         // is used later, at extract time, on the same bytes.
-        const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+        const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: buf.slice(0) }).promise;
         if (cancelled) return;
         pdfRef.current = pdf;
 

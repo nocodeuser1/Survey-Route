@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from './pdfjsDocumentDefaults';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -44,7 +45,7 @@ export async function renderPdfPageToImage(
   }
   const arrayBuffer = await resp.arrayBuffer();
 
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: arrayBuffer }).promise;
   if (pageNum < 1 || pageNum > pdf.numPages) {
     throw new Error(`Page ${pageNum} out of range (PDF has ${pdf.numPages} pages)`);
   }

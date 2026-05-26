@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from '../utils/pdfjsDocumentDefaults';
 import type { SPCCPlan } from '../lib/supabase';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -77,7 +78,7 @@ export default function ManagementSignaturePagePickerModal({
         const bytes = await res.arrayBuffer();
         if (cancelled) return;
 
-        const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        const doc = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: bytes.slice(0) }).promise;
         if (cancelled) return;
         setPdfDoc(doc);
         setPageCount(doc.numPages);

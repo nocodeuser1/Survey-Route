@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from '../utils/pdfjsDocumentDefaults';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -123,7 +124,7 @@ export default function SPCCExtractionSettings({ accountId, authUserId }: SPCCEx
   // Load PDF document
   const loadPdf = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
-    const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const doc = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: arrayBuffer }).promise;
     setPdfDoc(doc);
     setPageCount(doc.numPages);
     setCurrentPage(1);

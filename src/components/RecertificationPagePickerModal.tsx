@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from '../utils/pdfjsDocumentDefaults';
 import type { Facility, SPCCPlan } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -110,7 +111,7 @@ export default function RecertificationPagePickerModal({
         if (cancelled) return;
         sourceBytesRef.current = bytes;
 
-        const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        const doc = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: bytes.slice(0) }).promise;
         if (cancelled) return;
         setPdfDoc(doc);
         setPageCount(doc.numPages);

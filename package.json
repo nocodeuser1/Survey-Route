@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "sync-pdfjs-wasm": "rm -rf public/pdfjs-wasm && cp -R node_modules/pdfjs-dist/wasm public/pdfjs-wasm",
+    "postinstall": "npm run sync-pdfjs-wasm"
   },
   "dependencies": {
     "@capacitor/android": "^8.1.0",

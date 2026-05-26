@@ -25,6 +25,7 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from './pdfjsDocumentDefaults';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -39,7 +40,7 @@ export async function findSignaturePagesInPDF(pdfBytes: ArrayBuffer): Promise<{
   managementApprovalIndex: number | null;
   substantialHarmIndex: number | null;
 }> {
-  const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: pdfBytes.slice(0) }).promise;
   let mgmt: number | null = null;
   let harm: number | null = null;
 
@@ -234,7 +235,7 @@ export async function stampManagementSignature(opts: {
   }
 
   // Two doc handles: pdfjs for text-position scanning, pdf-lib for stamping.
-  const pdfjsDoc = await pdfjsLib.getDocument({ data: sourcePdfBytes.slice(0) }).promise;
+  const pdfjsDoc = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: sourcePdfBytes.slice(0) }).promise;
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
   const sigImage = await pdfDoc.embedPng(dataUrlToPngBytes(signatureDataUrl));
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);

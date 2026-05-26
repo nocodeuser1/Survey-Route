@@ -25,6 +25,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { pdfjsDocumentDefaults } from './pdfjsDocumentDefaults';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -75,7 +76,7 @@ export async function fetchTemplate(): Promise<ArrayBuffer> {
 export async function findTemplateFieldPositions(
   templateBytes: ArrayBuffer
 ): Promise<TemplateFieldPositions> {
-  const pdf = await pdfjsLib.getDocument({ data: templateBytes.slice(0) }).promise;
+  const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: templateBytes.slice(0) }).promise;
   const page = await pdf.getPage(1);
   const content = await page.getTextContent();
 
@@ -216,7 +217,7 @@ export async function replacePageInPDF(
 export async function findApprovalByManagementPageIndex(
   pdfBytes: ArrayBuffer
 ): Promise<number | null> {
-  const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: pdfBytes.slice(0) }).promise;
   const target = /approval by management/i;
 
   for (let i = 1; i <= pdf.numPages; i++) {
