@@ -4271,7 +4271,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       }}
                       title="Clear all filters"
                       aria-label="Clear all filters"
-                      style={{ width: '10px', height: '10px', top: '-2px', right: '-2px' }}
+                      style={{
+                        width: '10px',
+                        height: '10px',
+                        // index.css forces a 44px min-width/height on all
+                        // <button> for mobile touch-target accessibility.
+                        // Override here so the indicator stays a small dot.
+                        minWidth: '10px',
+                        minHeight: '10px',
+                        top: '-2px',
+                        right: '-2px',
+                      }}
                       className="group absolute rounded-full bg-blue-500 hover:bg-red-500 hover:scale-[1.6] border-2 border-white dark:border-gray-700 hover:border-transparent transition-all duration-150 z-10 cursor-pointer p-0 flex items-center justify-center focus:outline-none"
                     >
                       <X
