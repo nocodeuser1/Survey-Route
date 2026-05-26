@@ -1054,10 +1054,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   }, [initialFacilityToEdit]);
 
+  // The "natural" report type for the current SPCC mode — what setSpccMode
+  // auto-sets selectedReportType to when you switch modes. Used so the active-
+  // filter indicator only lights up when the user has *deviated* from the
+  // mode's default report type (e.g. picking Internal/External while in
+  // Inspection mode), not just because they're in Plan or Inspection mode.
+  const defaultReportTypeForMode: typeof selectedReportType =
+    spccMode === 'plan' ? 'spcc_plan' : spccMode === 'inspection' ? 'spcc_inspection' : 'all';
+
   // Determine if any filter is active (for indicator badge)
   const hasActiveFilter =
     statusFilters.length > 0 ||
-    selectedReportType !== 'all' ||
+    selectedReportType !== defaultReportTypeForMode ||
     showSoldFacilities ||
     spccPlanFilter !== 'all' ||
     customFilterRules.length > 0;
@@ -4264,7 +4272,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         e.preventDefault();
                         e.stopPropagation();
                         setStatusFilters([]);
-                        setSelectedReportType('all');
+                        // Reset to the current mode's default report type, not
+                        // hard-coded 'all' — otherwise clicking the X in plan
+                        // or inspection mode would flip the report type away
+                        // from the mode's natural value.
+                        setSelectedReportType(defaultReportTypeForMode);
                         setShowSoldFacilities(false);
                         setSpccPlanFilter('all');
                         setCustomFilterRules([]);
