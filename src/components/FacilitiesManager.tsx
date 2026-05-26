@@ -4252,10 +4252,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <span className="hidden sm:inline">Filters</span>
                     {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </TouchTooltipButton>
-                  {/* Active filter indicator — blue dot at rest, red ✕ on hover
-                      to clear all active filters in one click. Single button
-                      with the icon inline (no nested absolute spans) so the
-                      hit area and the visible mark always line up. */}
+                  {/* Active filter indicator — small blue dot at rest, turns
+                      red with an ✕ on hover and clears all filters when
+                      clicked. Sized to match the original passive dot so it
+                      doesn't visually dominate the toolbar. */}
                   {hasActiveFilter && !showFilters && (
                     <button
                       type="button"
@@ -4270,7 +4270,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       }}
                       title="Clear all filters"
                       aria-label="Clear all filters"
-                      className="group absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center rounded-full bg-blue-500 border-2 border-white dark:border-gray-700 hover:bg-red-500 hover:border-transparent transition-all duration-150 z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      className="group absolute -top-0.5 -right-0.5 w-2.5 h-2.5 hover:w-4 hover:h-4 hover:-top-1.5 hover:-right-1.5 rounded-full bg-blue-500 hover:bg-red-500 border-2 border-white dark:border-gray-700 hover:border-transparent flex items-center justify-center transition-all duration-150 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                     >
                       <X
                         className="w-2.5 h-2.5 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150"
