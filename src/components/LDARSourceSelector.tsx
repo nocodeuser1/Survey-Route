@@ -81,6 +81,12 @@ export default function LDARSourceSelector({
 
   // -----------------------------------------------------------
   // Render a single page to a PNG data URL at the given scale.
+  // Mirrors the defenses in src/utils/renderPdfPageToImage.ts —
+  // pre-fill with white + background:white + intent:'print' + try/
+  // catch — so PDFs with picky raster XObjects (aerial photos in
+  // some Camino site plans, etc.) don't silently return a canvas
+  // with only the vector overlays and an empty / transparent
+  // background image.
   // -----------------------------------------------------------
   const renderPageThumb = useCallback(
     async (page: number, scale: number): Promise<PageThumb> => {
@@ -91,10 +97,21 @@ export default function LDARSourceSelector({
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       const ctx = canvas.getContext('2d')!;
-      await pdfPage.render({
-        canvasContext: ctx,
-        viewport,
-      } as Parameters<typeof pdfPage.render>[0]).promise;
+      // Defensive white pre-fill — a transparent paint composites onto
+      // white instead of disappearing.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      try {
+        await pdfPage.render({
+          canvasContext: ctx,
+          viewport,
+          background: '#ffffff',
+          intent: 'print',
+        } as Parameters<typeof pdfPage.render>[0]).promise;
+      } catch (err: any) {
+        console.error(`[LDARSourceSelector] page ${page} render failed:`, err);
+        throw new Error(`PDF render failed on page ${page}: ${err?.message || String(err)}`);
+      }
       return {
         page,
         dataUrl: canvas.toDataURL('image/png'),
