@@ -738,6 +738,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [showSoldFacilities, setShowSoldFacilities] = useState(facPrefs.show_sold_facilities);
+  // "In Route" filter — when active, only show facilities currently in the
+  // loaded route. Not persisted: it only makes sense while a route is loaded.
+  const [inRouteFilter, setInRouteFilter] = useState(false);
+  const hasLoadedRoute = !!currentRouteFacilityIds && currentRouteFacilityIds.size > 0;
+  // Auto-clear the filter if the route gets unloaded so the list doesn't
+  // silently show 0/N with no visible reason.
+  useEffect(() => {
+    if (!hasLoadedRoute && inRouteFilter) setInRouteFilter(false);
+  }, [hasLoadedRoute, inRouteFilter]);
   const [showSoldModal, setShowSoldModal] = useState(false);
   const [isMarkingSold, setIsMarkingSold] = useState(false);
   const [showInspectionOverview, setShowInspectionOverview] = useState(false);
@@ -1068,6 +1077,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     selectedReportType !== defaultReportTypeForMode ||
     showSoldFacilities ||
     spccPlanFilter !== 'all' ||
+    inRouteFilter ||
     customFilterRules.length > 0;
 
   const toggleStatusFilter = (value: string) => {
@@ -1478,6 +1488,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       // evaluator. Any rule with an incomplete value is treated as
       // pass-through there, so partially-built rules don't accidentally
       // hide every row while the user is editing.
+      // "In Route" filter — only show facilities currently in the loaded route.
+      if (inRouteFilter && currentRouteFacilityIds && !currentRouteFacilityIds.has(facility.id)) {
+        return false;
+      }
+
       if (customFilterRules.length > 0) {
         if (!evaluateAllRules(facility, customFilterRules)) return false;
       }
@@ -3130,8 +3145,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         // comments ([SYSTEM] ...) shouldn't surface a chat bubble on the row.
         const facilityComments = (commentsByFacility.get(facility.id) ?? []).filter(isUserComment);
         const commentCount = facilityComments.length;
+        const isInRoute = !!currentRouteFacilityIds && currentRouteFacilityIds.has(facility.id);
         return (
           <div className="flex items-center gap-2 min-w-0">
+            {/* "In current route" indicator — small blue dot to the left of the
+                facility name. Reserves a 6px column either way so names stay
+                aligned whether or not the dot is showing. */}
+            <span
+              className="flex-shrink-0 flex items-center justify-center"
+              style={{ width: 6, height: 6 }}
+              aria-hidden={!isInRoute}
+            >
+              {isInRoute && (
+                <span
+                  title="Currently in the loaded route"
+                  className="block w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 ring-2 ring-blue-500/20 dark:ring-blue-400/20"
+                />
+              )}
+            </span>
             <FileText
               className={`w-4 h-4 flex-shrink-0 ${getNameIconColorClass(facility)}`}
             />
@@ -4423,6 +4454,32 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           >
                             <div
                               className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${showSoldFacilities ? 'translate-x-4' : 'translate-x-0'}`}
+                            />
+                          </div>
+                        </button>
+                        {/* In Route toggle — only enabled when a route is
+                            currently loaded on the Route Planning tab. */}
+                        <button
+                          onClick={() => hasLoadedRoute && setInRouteFilter(!inRouteFilter)}
+                          disabled={!hasLoadedRoute}
+                          title={hasLoadedRoute ? 'Show only facilities currently in the loaded route' : 'Load a route on the Route Planning tab to use this filter'}
+                          className={`flex min-h-[56px] w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                            !hasLoadedRoute
+                              ? 'bg-gray-50 dark:bg-gray-800/60 text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-60'
+                              : inRouteFilter
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                : 'bg-gray-50 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5 text-left">
+                            <Route className="h-4 w-4 flex-shrink-0" />
+                            <span className="leading-none">In Route{hasLoadedRoute && currentRouteFacilityIds ? ` (${currentRouteFacilityIds.size})` : ''}</span>
+                          </span>
+                          <div
+                            className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${inRouteFilter && hasLoadedRoute ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          >
+                            <div
+                              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${inRouteFilter && hasLoadedRoute ? 'translate-x-4' : 'translate-x-0'}`}
                             />
                           </div>
                         </button>
