@@ -284,13 +284,14 @@ export default function RecertificationPagePickerModal({
             recertification_decision_notes: null,
             recertification_decision_at: null,
             recertification_pdf_generated_at: generatedAt,
-            // Advance the workflow now that a stamped recertification page
-            // is baked into an uploaded PDF. Without this the manual
-            // "Awaiting PE Stamp" state stuck around even after the user
-            // finished the whole recert flow (user-reported regression).
-            // Clearing the override lets the auto-derivation take over for
-            // future state transitions.
-            workflow_status: 'completed_uploaded',
+            // Advance the workflow off "Awaiting PE Stamp" now that a stamped
+            // recertification page is baked in (the original regression this
+            // fixed). Capped at 'pe_stamped' — NOT completed_uploaded — because
+            // completed_uploaded means "uploaded to the client's OneDrive",
+            // which is a manual milestone the user toggles after they actually
+            // do that upload. Clearing the override lets auto-derivation drive
+            // future transitions.
+            workflow_status: 'pe_stamped',
             workflow_status_overridden: false,
           })
           .eq('id', plan.id);

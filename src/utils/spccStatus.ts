@@ -90,17 +90,22 @@ export function isPlanRecertificationActive(plan: {
 /**
  * Derives the workflow status that the system would automatically assign
  * based on facility field values. Priority (highest wins):
- *   1. completed_uploaded  — plan URL is present
- *   2. pe_stamped          — PE stamp date is set
- *   3. site_visited        — visit date OR photos_taken flag is set
- *   4. null                — nothing qualifying is set
- * `awaiting_pe_stamp` is never auto-assigned; it is always a manual selection.
+ *   1. pe_stamped          — PE stamp date is set OR a plan PDF is on file
+ *   2. site_visited        — visit date OR photos_taken flag is set
+ *   3. null                — nothing qualifying is set
+ *
+ * `completed_uploaded` is NEVER auto-derived. Per Israel, it means the plan
+ * has been uploaded to the CLIENT'S OneDrive — a manual milestone the user
+ * toggles explicitly from the workflow-status dropdown. Auto-derivation
+ * therefore caps at `pe_stamped`; reaching completed_uploaded always shows
+ * as a manual override above the auto value.
+ *
+ * `awaiting_pe_stamp` is likewise never auto-assigned; always manual.
  */
 export function getAutoWorkflowStatus(
   facility: Pick<SPCCStatusFacility, 'spcc_plan_url' | 'spcc_pe_stamp_date' | 'field_visit_date' | 'photos_taken'>
 ): SPCCWorkflowStatus | null {
-  if (facility.spcc_plan_url) return 'completed_uploaded';
-  if (facility.spcc_pe_stamp_date) return 'pe_stamped';
+  if (facility.spcc_plan_url || facility.spcc_pe_stamp_date) return 'pe_stamped';
   if (facility.field_visit_date || facility.photos_taken) return 'site_visited';
   return null;
 }

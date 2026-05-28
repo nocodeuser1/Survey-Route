@@ -310,21 +310,18 @@ export default function BermPlanCard({
         });
       if (uploadErr) throw uploadErr;
 
-      // 6. Mark the berm as signed + flip workflow_status to completed_uploaded.
-      //    The existing sync_facility_from_spcc_plans trigger uses worst-case
-      //    rollup, so:
-      //      - Single-berm facility → facility.spcc_workflow_status flips to
-      //        'completed_uploaded' immediately.
-      //      - Multi-berm facility → facility flips to 'completed_uploaded'
-      //        only once EVERY berm hits 'completed_uploaded'; otherwise the
-      //        unsigned berms keep the facility at the lower (worst-case)
-      //        status.
+      // 6. Record WHEN the management signature was applied (drives the
+      //    "Mgmt Signature Applied" badge). Intentionally does NOT touch
+      //    workflow_status — completed_uploaded is a manual-only milestone
+      //    (it means "uploaded to the client's OneDrive", a human step),
+      //    so applying the signature leaves the workflow where it is
+      //    (typically pe_stamped). The user advances to completed_uploaded
+      //    themselves via the workflow-status dropdown.
       const signedAt = new Date().toISOString();
       const { error: planUpdateErr } = await supabase
         .from('spcc_plans')
         .update({
           management_signature_applied_at: signedAt,
-          workflow_status: 'completed_uploaded',
         })
         .eq('id', plan.id);
       if (planUpdateErr) {
