@@ -308,11 +308,38 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('all');
-  const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection'>(() => {
-    if (globalSurveyType === 'spcc_plan') return 'plan';
-    if (globalSurveyType === 'spcc_inspection') return 'inspection';
+  // Resolve the persisted global survey type into the local plan/inspection/
+  // all mode. globalSurveyType can be a legacy enum string ('spcc_plan' /
+  // 'spcc_inspection') OR — after the one-shot migration in App.tsx — the
+  // system survey-type's UUID. The old code only matched the legacy strings,
+  // so on refresh (where the stored value is now a UUID) the mode silently
+  // reset to 'all'. Map the UUID back via the surveyTypes list's system_kind.
+  const resolveSpccMode = (
+    gst: string | undefined,
+    types: SurveyType[],
+  ): 'all' | 'plan' | 'inspection' => {
+    if (gst === 'spcc_plan') return 'plan';
+    if (gst === 'spcc_inspection') return 'inspection';
+    const t = types.find((st) => st.id === gst);
+    if (t?.system_kind === 'spcc_plan') return 'plan';
+    if (t?.system_kind === 'spcc_inspection') return 'inspection';
     return 'all';
-  });
+  };
+
+  const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection'>(
+    () => resolveSpccMode(globalSurveyType, surveyTypes),
+  );
+
+  // surveyTypes loads from the DB after mount, so the UUID→mode lookup above
+  // can miss on the very first render (empty list). Re-derive once the types
+  // arrive or the global type changes. Only writes the INTERNAL state (never
+  // calls onGlobalSurveyTypeChange) so it can't fight a user's manual tab
+  // click — after a click globalSurveyType already matches and this no-ops.
+  useEffect(() => {
+    const resolved = resolveSpccMode(globalSurveyType, surveyTypes);
+    setSpccModeInternal((prev) => (prev === resolved ? prev : resolved));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalSurveyType, surveyTypes]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
 
@@ -3080,37 +3107,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   };
 
-  // Bulk "Mark as Sold" from the multi-select bar. The Sold button opens the
-  // confirmation modal (showSoldModal); this commits it for every selected
-  // facility at the chosen soldDate. Previously the modal was never rendered
-  // so clicking Sold set the flag and silently did nothing.
-  const confirmMarkSold = async () => {
-    const ids = Array.from(selectedFacilityIds);
-    if (ids.length === 0) {
-      setShowSoldModal(false);
-      return;
-    }
-    setIsMarkingSold(true);
-    try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({
-          status: 'sold',
-          sold_at: soldDate || new Date().toISOString().slice(0, 10),
-        })
-        .in('id', ids);
-      if (error) throw error;
-      setShowSoldModal(false);
-      setSelectedFacilityIds(new Set());
-      onFacilitiesChange();
-    } catch (err: any) {
-      console.error('[FacilitiesManager] confirmMarkSold failed:', err);
-      setError(err?.message || 'Failed to mark facilities as sold');
-    } finally {
-      setIsMarkingSold(false);
-    }
-  };
-
   const getEffectiveNotes = (facility: Facility): string | null => {
     if (facility.id in notesOverrides) return notesOverrides[facility.id];
     return facility.notes || null;
@@ -5735,6 +5731,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onSelectInternal={() => handleBulkMarkComplete('internal')}
             onSelectExternal={() => handleBulkMarkComplete('external')}
             onClose={() => setShowCompletionModal(false)}
+          />
+        )
+      }
+
+      {/* Mark-as-Sold confirmation. The bulk bar's Sold button opens this;
+          the modal owns the sold-date picker and hands it back via
+          onConfirm → handleMarkAsSold, which updates every selected
+          facility. Previously the button set showSoldModal but the modal
+          was never rendered, so clicking Sold appeared to do nothing. */}
+      {
+        showSoldModal && (
+          <SoldFacilitiesModal
+            count={selectedFacilityIds.size}
+            isSubmitting={isMarkingSold}
+            onClose={() => setShowSoldModal(false)}
+            onConfirm={(soldDate) => handleMarkAsSold(soldDate)}
           />
         )
       }
