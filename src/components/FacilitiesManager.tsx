@@ -3080,6 +3080,37 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
   };
 
+  // Bulk "Mark as Sold" from the multi-select bar. The Sold button opens the
+  // confirmation modal (showSoldModal); this commits it for every selected
+  // facility at the chosen soldDate. Previously the modal was never rendered
+  // so clicking Sold set the flag and silently did nothing.
+  const confirmMarkSold = async () => {
+    const ids = Array.from(selectedFacilityIds);
+    if (ids.length === 0) {
+      setShowSoldModal(false);
+      return;
+    }
+    setIsMarkingSold(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({
+          status: 'sold',
+          sold_at: soldDate || new Date().toISOString().slice(0, 10),
+        })
+        .in('id', ids);
+      if (error) throw error;
+      setShowSoldModal(false);
+      setSelectedFacilityIds(new Set());
+      onFacilitiesChange();
+    } catch (err: any) {
+      console.error('[FacilitiesManager] confirmMarkSold failed:', err);
+      setError(err?.message || 'Failed to mark facilities as sold');
+    } finally {
+      setIsMarkingSold(false);
+    }
+  };
+
   const getEffectiveNotes = (facility: Facility): string | null => {
     if (facility.id in notesOverrides) return notesOverrides[facility.id];
     return facility.notes || null;
