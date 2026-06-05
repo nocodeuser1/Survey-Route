@@ -935,6 +935,40 @@ export default function LDARObservationPathEditor({
     }
   }, [pathData, facility, onSaved, onClose, pageImage]);
 
+  // Close the editor, confirming first if there are unsaved edits so the user
+  // can't lose work by mis-clicking the X or hitting Escape.
+  const attemptClose = useCallback(() => {
+    if (hasUnsavedChanges) {
+      const ok = window.confirm(
+        'You have unsaved changes to the observation path. Discard them and close the editor?',
+      );
+      if (!ok) return;
+    }
+    onClose();
+  }, [hasUnsavedChanges, onClose]);
+
+  // Escape closes ONLY this editor, never the facility modal beneath it. We
+  // listen in the capture phase on window and stopImmediatePropagation so the
+  // modal's own document-level Escape handler never sees the event. If an
+  // inline field (label / number) is focused, Escape just blurs it (which
+  // commits the edit) instead of closing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) {
+        target?.blur();
+        return;
+      }
+      attemptClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [attemptClose]);
+
   // -----------------------------------------------------------
   // Pointer handlers — drag for stops, waypoints, legend move/resize.
   // -----------------------------------------------------------
@@ -1302,7 +1336,7 @@ export default function LDARObservationPathEditor({
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
-            onClick={onClose}
+            onClick={attemptClose}
             className={`p-2 rounded-lg ${
               darkMode ? 'hover:bg-gray-800 text-gray-300' : 'hover:bg-gray-100 text-gray-700'
             }`}
