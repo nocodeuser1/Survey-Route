@@ -16,6 +16,7 @@
 import type { Facility } from '../lib/supabase';
 import { getSPCCPlanStatus } from './spccStatus';
 import { getFacilityPhotosState } from './spccPlans';
+import { getLdarSitePlanState, LDAR_CUTOFF_LABEL } from './ldar';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,7 +49,7 @@ export interface CustomFilterField {
   id: string;
   label: string;
   /** Used to group fields under headers in the dropdown. */
-  group: 'photos' | 'spcc' | 'dates' | 'identity' | 'misc';
+  group: 'photos' | 'spcc' | 'ldar' | 'dates' | 'identity' | 'misc';
   operators: CustomFilterOperator[];
   /** Reads the value from a facility — only used by date/text/numeric
    *  comparisons. Photos and SPCC status fields evaluate via custom
@@ -158,6 +159,26 @@ export const FILTER_FIELDS: CustomFilterField[] = [
     ],
     getValue: (f) => f.spcc_workflow_status ?? null,
   },
+  // -- LDAR -------------------------------------------------------------------
+  {
+    id: 'ldar_site_plan',
+    label: 'LDAR Site Plan',
+    group: 'ldar',
+    operators: [
+      {
+        id: 'is',
+        label: 'is',
+        needsValue: true,
+        valueInputType: 'select',
+        valueChoices: [
+          { value: 'needed', label: `Needed (IP after ${LDAR_CUTOFF_LABEL}, no plan)` },
+          { value: 'completed', label: 'Completed' },
+          { value: 'uploaded', label: 'Uploaded (not marked complete)' },
+          { value: 'not_required', label: `Not required (IP on/before ${LDAR_CUTOFF_LABEL})` },
+        ],
+      },
+    ],
+  },
   // -- Dates ------------------------------------------------------------------
   {
     id: 'first_prod_date',
@@ -232,6 +253,7 @@ export const FILTER_FIELDS: CustomFilterField[] = [
 export const FIELD_GROUP_LABELS: Record<CustomFilterField['group'], string> = {
   photos: 'Photos',
   spcc: 'SPCC',
+  ldar: 'LDAR',
   dates: 'Dates',
   identity: 'Facility Info',
   misc: 'Other',
@@ -303,6 +325,10 @@ export function evaluateRule(facility: Facility, rule: CustomRule): boolean {
   if (field.id === 'spcc_plan_status' && op.id === 'is') {
     const result = getSPCCPlanStatus(facility);
     return result.status === rule.value;
+  }
+
+  if (field.id === 'ldar_site_plan' && op.id === 'is') {
+    return getLdarSitePlanState(facility) === rule.value;
   }
 
   // -- Generic getValue-driven predicates.

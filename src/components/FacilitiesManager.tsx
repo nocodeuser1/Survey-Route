@@ -36,6 +36,7 @@ import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
+import { getLdarSitePlanState, LDAR_PROXY_NOTE } from '../utils/ldar';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
@@ -989,6 +990,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
+  // Quick filter: show only facilities that need an LDAR Site Plan (IP date
+  // after the cutoff, no plan on file). Session-local, not persisted.
+  const [ldarFilter, setLdarFilter] = useState<'all' | 'needed'>('all');
   // Per-mode invoice filter chip. 'all' = no filter, 'awaiting' = not-yet-
   // invoiced, 'unpaid' = invoiced but not paid, 'paid' = fully collected.
   // Independent state per mode so toggling in plan mode doesn't carry over
@@ -1304,6 +1308,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     selectedReportType !== defaultReportTypeForMode ||
     showSoldFacilities ||
     spccPlanFilter !== 'all' ||
+    ((spccMode === 'all' || spccMode === 'plan') && !invoiceView && ldarFilter !== 'all') ||
     inRouteFilter ||
     customFilterRules.length > 0 ||
     (spccMode === 'plan' && planInvoiceFilter !== 'all') ||
@@ -1736,6 +1741,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (spccPlanFilter !== 'all' && spccMode === 'plan') {
         const planStatus = getFacilityPlanStatus(facility);
         if (planStatus !== spccPlanFilter) return false;
+      }
+
+      // "Needs LDAR Site Plan" quick filter (chip). Gated to the contexts
+      // where the chip is actually shown (standard All/Plans views) so the
+      // filter can never silently apply where there's no chip to clear it.
+      if (
+        ldarFilter === 'needed' &&
+        (spccMode === 'all' || spccMode === 'plan') &&
+        !invoiceView &&
+        getLdarSitePlanState(facility) !== 'needed'
+      ) {
+        return false;
       }
 
       // Invoice-status chip filter — only applies in the matching mode.
@@ -3525,24 +3542,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         );
       }
       case 'ldar_site_plan_status': {
-        const completed = !!facility.ldar_site_plan_completed;
-        const hasUrl = !!facility.ldar_site_plan_url;
+        // 'needed' is derived: IP date after the cutoff (proxy for
+        // "commenced construction") and no plan on file. See utils/ldar.ts.
+        const state = getLdarSitePlanState(facility);
+        const cls =
+          state === 'completed'
+            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+            : state === 'uploaded'
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+              : state === 'needed'
+                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500';
         return (
           <span
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
-              completed
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                : hasUrl
-                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                  : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-            }`}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}
+            title={state === 'needed' || state === 'not_required' ? LDAR_PROXY_NOTE : undefined}
           >
-            {completed ? (
+            {state === 'completed' ? (
               <><CheckCircle className="w-3 h-3" />Completed</>
-            ) : hasUrl ? (
+            ) : state === 'uploaded' ? (
               <><FileText className="w-3 h-3" />Uploaded</>
+            ) : state === 'needed' ? (
+              <><AlertCircle className="w-3 h-3" />Needed</>
             ) : (
-              <><FileText className="w-3 h-3" />Not completed</>
+              <>N/A</>
             )}
           </span>
         );
@@ -4534,6 +4557,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   </div>
                 );
               })()}
+              {/* "Needs LDAR Site Plan" quick filter — shown in the standard
+                  All/Plans views (not inspection or invoice view). Counts
+                  facilities whose IP date is after the cutoff with no plan on
+                  file (see utils/ldar.ts). Hidden when nothing's outstanding
+                  unless the filter is currently active. */}
+              {(spccMode === 'all' || spccMode === 'plan') && !invoiceView && !isLoading && (() => {
+                const needed = facilities.filter(
+                  f => f.status !== 'sold' && getLdarSitePlanState(f) === 'needed',
+                ).length;
+                if (needed === 0 && ldarFilter !== 'needed') return null;
+                return (
+                  <div className="hidden sm:flex items-center gap-1.5 ml-1">
+                    <button
+                      onClick={() => setLdarFilter(ldarFilter === 'needed' ? 'all' : 'needed')}
+                      title={LDAR_PROXY_NOTE}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${ldarFilter === 'needed'
+                        ? 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 ring-2 ring-orange-400 dark:ring-orange-500'
+                        : 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:ring-1 hover:ring-orange-300 dark:hover:ring-orange-600'
+                        }`}
+                    >
+                      <AlertCircle className="w-3 h-3" />
+                      {needed} need LDAR
+                      {ldarFilter === 'needed' && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                  </div>
+                );
+              })()}
               {/* Invoice chips — plan invoice view only (filter facilities by
                   plan invoice status). Three chips cycle through the lifecycle:
                   awaiting invoice → unpaid → paid. Clicking the active chip
@@ -4718,6 +4768,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         setSelectedReportType(defaultReportTypeForMode);
                         setShowSoldFacilities(false);
                         setSpccPlanFilter('all');
+                        setLdarFilter('all');
                         setCustomFilterRules([]);
                         setPlanInvoiceFilter('all');
                         setInspectionInvoiceFilter('all');
