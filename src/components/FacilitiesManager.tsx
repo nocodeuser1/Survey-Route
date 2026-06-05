@@ -1927,6 +1927,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           }
           case 'created_at':
             return facility.created_at ? new Date(facility.created_at).getTime() : 0;
+          // Invoice columns sort by the invoiced date (the day the invoice was
+          // raised). Not-yet-invoiced rows collapse to 0 so they group at the
+          // start of an ascending sort and the by-name tiebreaker orders them.
+          case 'plan_invoice_status':
+            return facility.plan_invoiced_at ? new Date(facility.plan_invoiced_at).getTime() : 0;
+          case 'inspection_invoice_status':
+            return facility.inspection_invoiced_at ? new Date(facility.inspection_invoiced_at).getTime() : 0;
           case 'address':
             return facility.address || '';
           case 'county':
@@ -4823,6 +4830,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             {spccMode !== 'inspection' && <option value="spcc_status">SPCC Status</option>}
                             {spccMode !== 'plan' && <option value="spcc_inspection_date">SPCC Inspection Date</option>}
                             {spccMode !== 'plan' && <option value="inspection_status">Inspection Status</option>}
+                            {invoiceView && spccMode === 'plan' && <option value="plan_invoice_status">Invoiced Date</option>}
+                            {invoiceView && spccMode === 'inspection' && <option value="inspection_invoice_status">Invoiced Date</option>}
                           </select>
                         </div>
                         {/* Sold toggle */}
