@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -445,99 +445,66 @@ export default function LDARObservationPathEditor({
   const ZOOM_STEP = 1.2;
 
   const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
-  const clampOffset = (ox: number, oy: number, z: number) => {
-    const visibleW = W / z;
-    const visibleH = H / z;
-    // When zoomed OUT (visibleW > W), the page is smaller than the
-    // viewBox — center it so the user sees empty space on all sides
-    // rather than a half-cropped page pinned to the top-left.
-    if (visibleW >= W && visibleH >= H) {
-      return {
-        x: -(visibleW - W) / 2,
-        y: -(visibleH - H) / 2,
-      };
-    }
-    // Zoomed in or 1:1 — clamp so panning never reveals past the edges.
-    return {
-      x: Math.max(0, Math.min(W - visibleW, ox)),
-      y: Math.max(0, Math.min(H - visibleH, oy)),
-    };
-  };
 
-  // Apply a zoom factor with an anchor point in the page's native
-  // 0..W / 0..H coordinate space, so the page point under the user's
-  // cursor (or pinch midpoint) stays put as the zoom changes.
-  const zoomAround = (newZoom: number, anchorPageX: number, anchorPageY: number) => {
-    const next = clampZoom(newZoom);
-    setZoom((prev) => {
-      const visibleW = W / next;
-      const visibleH = H / next;
-      // Compute the new top-left of the viewBox so anchor lands at the
-      // same fractional position within the visible region as before.
-      const fracX = (anchorPageX - viewBoxOffset.x) / (W / prev);
-      const fracY = (anchorPageY - viewBoxOffset.y) / (H / prev);
-      const nextOx = anchorPageX - fracX * visibleW;
-      const nextOy = anchorPageY - fracY * visibleH;
-      setViewBoxOffset(clampOffset(nextOx, nextOy, next));
-      return next;
-    });
-  };
-
-  // Convert a clientX/Y to the page-coordinate the cursor is over given
-  // the current viewBox + the rendered SVG rect.
+  // The SVG viewBox is fixed at the full page (0 0 W H); zoom physically
+  // resizes the page wrapper instead (see pageW/pageH below). So mapping a
+  // screen point to page coordinates is a straight rect-relative ratio.
   const clientToPageCoord = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const svg = svgRef.current;
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
-    const visibleW = W / zoom;
-    const visibleH = H / zoom;
     return {
-      x: viewBoxOffset.x + ((clientX - rect.left) / rect.width) * visibleW,
-      y: viewBoxOffset.y + ((clientY - rect.top) / rect.height) * visibleH,
+      x: ((clientX - rect.left) / rect.width) * W,
+      y: ((clientY - rect.top) / rect.height) * H,
     };
   };
 
-  const zoomIn = () => {
-    // Anchor on center of current viewBox so button-driven zooms feel stable.
-    const cx = viewBoxOffset.x + W / zoom / 2;
-    const cy = viewBoxOffset.y + H / zoom / 2;
-    zoomAround(zoom * ZOOM_STEP, cx, cy);
-  };
-  const zoomOut = () => {
-    const cx = viewBoxOffset.x + W / zoom / 2;
-    const cy = viewBoxOffset.y + H / zoom / 2;
-    zoomAround(zoom / ZOOM_STEP, cx, cy);
-  };
-  const resetZoom = () => {
-    setZoom(1);
-    setViewBoxOffset({ x: 0, y: 0 });
+  // Zoom about an anchor (defaults to the viewport centre). Capture the page
+  // point under the anchor, change zoom (which resizes the page wrapper), and
+  // then — in the layout effect below — nudge the scroll position so that
+  // same page point stays under the anchor. Net effect: zoom-to-cursor with
+  // the viewing area growing/scrolling as you zoom in.
+  const applyZoom = (
+    nextRaw: number,
+    anchorClientX?: number,
+    anchorClientY?: number,
+  ) => {
+    const next = clampZoom(nextRaw);
+    const el = scrollRef.current;
+    let ax = anchorClientX;
+    let ay = anchorClientY;
+    if ((ax == null || ay == null) && el) {
+      const r = el.getBoundingClientRect();
+      ax = r.left + r.width / 2;
+      ay = r.top + r.height / 2;
+    }
+    const page = ax != null && ay != null ? clientToPageCoord(ax, ay) : null;
+    pendingZoomAnchorRef.current =
+      page && ax != null && ay != null
+        ? { pageX: page.x, pageY: page.y, clientX: ax, clientY: ay }
+        : null;
+    setZoom(next);
   };
 
-  // Wheel → zoom on Ctrl/Cmd (Mac trackpad pinch sends Ctrl+wheel), or
-  // pan otherwise (vertical wheel = pan Y, shift+wheel = pan X).
+  const zoomIn = () => applyZoom(zoom * ZOOM_STEP);
+  const zoomOut = () => applyZoom(zoom / ZOOM_STEP);
+  const resetZoom = () => {
+    pendingZoomAnchorRef.current = null;
+    setZoom(1);
+  };
+
+  // Wheel: Ctrl/Cmd (Mac trackpad pinch sends Ctrl+wheel) zooms about the
+  // cursor. A plain wheel is left untouched so the scroll container pans
+  // natively when the page is zoomed past the viewport.
   const onSvgWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const dir = e.deltaY < 0 ? 1 : -1;
       const factor = 1 + Math.min(0.3, Math.abs(e.deltaY) / 200) * dir;
-      const anchor = clientToPageCoord(e.clientX, e.clientY);
-      if (anchor) zoomAround(zoom * factor, anchor.x, anchor.y);
-      return;
+      applyZoom(zoom * factor, e.clientX, e.clientY);
     }
-    if (zoom <= 1) return; // no panning needed at native zoom
-    e.preventDefault();
-    const visibleW = W / zoom;
-    const visibleH = H / zoom;
-    // Convert pixel deltas to page-coordinate deltas. shift+wheel pans X.
-    const svg = svgRef.current;
-    const rect = svg?.getBoundingClientRect();
-    if (!rect || rect.width === 0 || rect.height === 0) return;
-    const pageDxPerPx = visibleW / rect.width;
-    const pageDyPerPx = visibleH / rect.height;
-    const dx = (e.shiftKey ? e.deltaY : e.deltaX) * pageDxPerPx;
-    const dy = e.shiftKey ? 0 : e.deltaY * pageDyPerPx;
-    setViewBoxOffset((prev) => clampOffset(prev.x + dx, prev.y + dy, zoom));
+    // else: let the browser scroll the container.
   };
 
   // Touch: two-finger pinch zoom + two-finger pan. One-finger touches
@@ -568,24 +535,17 @@ export default function LDARObservationPathEditor({
     const newMidY = (t1.clientY + t2.clientY) / 2;
     const prev = touchStateRef.current;
 
-    // Pinch zoom centered on the midpoint between the two fingers.
-    const factor = newDistance / Math.max(1, prev.distance);
-    const anchor = clientToPageCoord(newMidX, newMidY);
-    if (anchor && Math.abs(factor - 1) > 0.01) {
-      zoomAround(zoom * factor, anchor.x, anchor.y);
+    // Two-finger pan → scroll the container by the midpoint delta.
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollLeft += prev.midX - newMidX;
+      el.scrollTop += prev.midY - newMidY;
     }
 
-    // Two-finger pan: shift the viewBox by the midpoint delta in page units.
-    const svg = svgRef.current;
-    const rect = svg?.getBoundingClientRect();
-    if (rect && rect.width > 0 && rect.height > 0) {
-      const visibleW = W / zoom;
-      const visibleH = H / zoom;
-      const dxPage = ((prev.midX - newMidX) / rect.width) * visibleW;
-      const dyPage = ((prev.midY - newMidY) / rect.height) * visibleH;
-      if (Math.abs(dxPage) > 0.1 || Math.abs(dyPage) > 0.1) {
-        setViewBoxOffset((p) => clampOffset(p.x + dxPage, p.y + dyPage, zoom));
-      }
+    // Pinch zoom about the finger midpoint.
+    const factor = newDistance / Math.max(1, prev.distance);
+    if (Math.abs(factor - 1) > 0.01) {
+      applyZoom(zoom * factor, newMidX, newMidY);
     }
 
     touchStateRef.current = { distance: newDistance, midX: newMidX, midY: newMidY };
@@ -596,12 +556,49 @@ export default function LDARObservationPathEditor({
     }
   };
 
-  // Zoom + pan, expressed by manipulating the SVG viewBox so the existing
-  // pointer-to-svg coordinate math (getScreenCTM in pointerToNormalized)
-  // keeps working unchanged. zoom=1 means viewBox spans the whole page;
-  // viewBoxOffset shifts which part of the page is currently centered.
+  // Zoom model: the SVG viewBox is fixed at the full page (0 0 W H) and the
+  // page wrapper is physically resized by `zoom` inside a scrollable
+  // container — so zooming in grows the viewing area and the container
+  // scrolls/pans, instead of cropping a fixed-size box. getScreenCTM in
+  // pointerToNormalized keeps the drawing coordinates correct at any scale.
   const [zoom, setZoom] = useState(1);
-  const [viewBoxOffset, setViewBoxOffset] = useState({ x: 0, y: 0 });
+  // Scroll container + its measured inner size, used to size the page so it
+  // fits at zoom=1 then scales up from there.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  // Pending zoom anchor: the page point + screen target to re-align scroll to
+  // after a zoom changes the wrapper size (applied in the layout effect).
+  const pendingZoomAnchorRef = useRef<
+    { pageX: number; pageY: number; clientX: number; clientY: number } | null
+  >(null);
+
+  // Track the scroll container's size so the fit-to-view math reacts to
+  // window/modal resizes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setViewport({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // After a zoom change resizes the page wrapper, nudge the scroll position so
+  // the anchored page point stays under the cursor / viewport centre.
+  useLayoutEffect(() => {
+    const pending = pendingZoomAnchorRef.current;
+    const el = scrollRef.current;
+    const svg = svgRef.current;
+    if (!pending || !el || !svg) return;
+    pendingZoomAnchorRef.current = null;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const pointScreenX = rect.left + (pending.pageX / W) * rect.width;
+    const pointScreenY = rect.top + (pending.pageY / H) * rect.height;
+    el.scrollLeft += pointScreenX - pending.clientX;
+    el.scrollTop += pointScreenY - pending.clientY;
+  }, [zoom]);
   // Multi-touch state for pinch zoom + two-finger pan. Tracks the prior
   // pointer pair so each move applies a delta. one-finger touches fall
   // through to the existing element-drag pointer handlers untouched.
@@ -1251,6 +1248,19 @@ export default function LDARObservationPathEditor({
   const W = pageImage?.w ?? 1700;
   const H = pageImage?.h ?? 1200;
 
+  // Largest page size that fits the measured viewport at zoom=1 (with a small
+  // margin), then scaled by `zoom`. When zoom>1 the page exceeds the scroll
+  // container, so it scrolls — the viewing area grows with the zoom.
+  const PAGE_PAD = 24; // matches the p-3 around the canvas
+  const fitScale = (() => {
+    const availW = viewport.w - PAGE_PAD;
+    const availH = viewport.h - PAGE_PAD;
+    if (availW <= 0 || availH <= 0) return 0;
+    return Math.min(availW / W, availH / H);
+  })();
+  const pageW = fitScale > 0 ? W * fitScale * zoom : 0;
+  const pageH = fitScale > 0 ? H * fitScale * zoom : 0;
+
   // Render via createPortal at the document.body level so the editor sits
   // above any parent modal (FacilityDetailModal renders at zIndex 999999;
   // we use 1000001 to outrank it). Without the portal, this would be
@@ -1503,14 +1513,17 @@ export default function LDARObservationPathEditor({
           from a flex container with items-start so the wrapper's
           aspect-ratio + max-h-full can actually resolve against a
           defined parent height. */}
-      <div className="flex-1 overflow-hidden p-3 grid place-items-center">
+      {/* Scrollable canvas. The page wrapper is centred via m-auto when it
+          fits and pins to the top-left (scrollable) once zoom makes it larger
+          than this container — so the viewing area genuinely grows with zoom. */}
+      <div ref={scrollRef} className="flex-1 overflow-auto p-3 flex">
         {isLoadingPage ? (
-          <div className="flex flex-col items-center gap-3 text-white py-20">
+          <div className="m-auto flex flex-col items-center gap-3 text-white py-20">
             <Loader2 className="w-8 h-8 animate-spin" />
             <p className="text-sm">Loading LDAR site plan…</p>
           </div>
         ) : !pageImage ? (
-          <div className="text-white py-20 text-center max-w-md">
+          <div className="m-auto text-white py-20 text-center max-w-md">
             <AlertCircle className="w-8 h-8 mx-auto mb-2 text-yellow-400" />
             <p className="text-sm">
               {loadError || 'Upload an LDAR site plan PDF to start drawing a walking path.'}
@@ -1518,23 +1531,19 @@ export default function LDARObservationPathEditor({
           </div>
         ) : (
           <div
-            className={`relative shadow-2xl ${
+            className={`relative shadow-2xl m-auto flex-shrink-0 ${
               darkMode ? 'bg-gray-950' : 'bg-white'
             } ${isEditMode ? 'cursor-crosshair' : 'cursor-default'}`}
-            // aspectRatio lets the browser compute width AND height from
-            // the viewBox ratio while max-w/h-full caps both dimensions to
-            // the parent grid cell. Net effect: the wrapper is the
-            // largest box matching the page aspect that fits the canvas
-            // area. SVG inside fills it 100%. 1x zoom = fits screen.
+            // Physical pixel size = "fit at zoom 1" × zoom. The fixed viewBox
+            // (0 0 W H) means the SVG content always scales to fill this box.
             style={{
-              aspectRatio: `${W} / ${H}`,
-              maxWidth: '100%',
-              maxHeight: '100%',
+              width: pageW || undefined,
+              height: pageH || undefined,
             }}
           >
             <svg
               ref={svgRef}
-              viewBox={`${viewBoxOffset.x} ${viewBoxOffset.y} ${W / zoom} ${H / zoom}`}
+              viewBox={`0 0 ${W} ${H}`}
               preserveAspectRatio="xMidYMid meet"
               className="block w-full h-full select-none touch-none"
               onPointerMove={onSvgPointerMove}
