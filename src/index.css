@@ -93,6 +93,23 @@ canvas {
   user-select: none;
 }
 
+/* Transient helper toggled on the facilities table while measuring each
+   column's natural content width for the auto-fit-to-display pass. Forces
+   content-driven sizing so getBoundingClientRect reports true widths, then
+   the class is removed and the computed pixel widths are applied. */
+table.sr-measuring {
+  width: max-content !important;
+  table-layout: auto !important;
+}
+
+table.sr-measuring th,
+table.sr-measuring td {
+  white-space: nowrap !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
+
 /* Ensure Leaflet map doesn't overlap modals */
 .leaflet-pane,
 .leaflet-top,

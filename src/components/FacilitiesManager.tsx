@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
@@ -166,13 +166,19 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status' |
   'plan_invoice_status' | 'inspection_invoice_status';
 
-const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'recertification_status', 'notes'];
+// spcc_status sits immediately after name so the SPCC plan status is the
+// first thing the user sees in every mode that shows it (Israel's request
+// for the plan/invoice views — keeps status next to the facility name).
+const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'spcc_status', 'latitude', 'longitude', 'inspection_status', 'recertification_status', 'notes'];
 
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
-  'name', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
+  // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
+  // freshly-toggled column re-inserts into an order that keeps SPCC status
+  // pinned right beside the facility name.
+  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
   'status', 'day_assignment', 'team_assignment',
-  'spcc_status', 'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
+  'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
   'photos_taken', 'field_visit_date', 'estimated_oil_per_day',
   'berm_depth_inches', 'berm_length', 'berm_width',
@@ -507,6 +513,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // Load column order and visibility per report type + spccMode combination
   const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`;
   const getColumnsKey = () => `${selectedReportType}_${spccMode}`;
+  // Column widths live in localStorage (per computer) rather than the shared
+  // per-account prefs row, so each machine's display gets its own fitted
+  // layout. Keyed per mode so plan/inspection/all each remember their own
+  // widths. See the auto-fit-to-display logic below.
+  const getWidthsStorageKey = () => `facilities_colw_${selectedReportType}_${spccMode}_${accountId}`;
 
   // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
   const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
@@ -544,19 +555,40 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (saved) return JSON.parse(saved);
     return getDefaultVisibleColumns(spccMode);
   });
-  // Per-column pixel widths from drag-resize + double-click auto-fit.
-  // Persisted to user_settings via facPrefs.column_widths so the layout
-  // sticks per-account (last-writer-wins, same as visibility/order).
+  // Per-column pixel widths from auto-fit-to-display + drag-resize +
+  // double-click auto-fit. Stored in localStorage (per computer, per mode)
+  // so each machine keeps its own fitted layout — see getWidthsStorageKey
+  // and the fit-to-display logic below.
   const MIN_COL_WIDTH = 60;
   const MAX_COL_WIDTH = 800;
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
-    () => (facPrefs.column_widths && typeof facPrefs.column_widths === 'object' ? facPrefs.column_widths : {})
-  );
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem(
+        `facilities_colw_${selectedReportType}_${spccMode}_${accountId}`,
+      );
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      /* ignore malformed/blocked storage */
+    }
+    return {};
+  });
   const resizingRef = useRef<{ columnId: ColumnId; startX: number; startWidth: number } | null>(null);
+  // Tracks which mode keys have had their one-time auto-fit-to-display pass
+  // so we don't re-fit (and clobber the user's manual tweaks) on every
+  // render. A mode auto-fits the first time it's shown with no saved widths.
+  const fittedModesRef = useRef<Set<string>>(new Set());
 
   const persistColumnWidths = useCallback((next: Record<string, number>) => {
-    updateFacPrefs({ column_widths: next });
-  }, [updateFacPrefs]);
+    try {
+      localStorage.setItem(getWidthsStorageKey(), JSON.stringify(next));
+    } catch {
+      /* storage may be full or blocked — widths just won't persist */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReportType, spccMode, accountId]);
 
   // Begin a drag-resize from the right-edge handle on a <th>. We attach
   // mousemove/mouseup to `document` (not the handle) so the drag keeps
@@ -603,39 +635,99 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     document.addEventListener('mouseup', onUp);
   };
 
-  // Double-click on the resize handle: shrink/grow the column so the
-  // widest visible cell (header or any rendered td) fits without
-  // wrapping or truncation. Measures via scrollWidth after forcing
-  // nowrap on the cells so cells that currently wrap report their
-  // natural width.
-  const autoFitColumn = (columnId: ColumnId) => {
+  // Measure each visible column's natural content width by toggling a CSS
+  // helper class that forces content-driven sizing (nowrap, no width caps)
+  // on the whole table, reading the header-cell widths, then removing it.
+  // Returns a { columnId: px } map. Header cells size to the widest cell in
+  // their column, so reading the <th> width captures the longest body cell
+  // too.
+  const measureNaturalWidths = useCallback((): Record<string, number> => {
     const container = tableContainerRef.current;
-    if (!container) return;
-    const cells = container.querySelectorAll<HTMLElement>(`[data-col="${columnId}"]`);
-    if (cells.length === 0) return;
-    const restorers: Array<() => void> = [];
-    cells.forEach(cell => {
-      const prevWhitespace = cell.style.whiteSpace;
-      const prevMaxWidth = cell.style.maxWidth;
-      cell.style.whiteSpace = 'nowrap';
-      cell.style.maxWidth = 'none';
-      restorers.push(() => {
-        cell.style.whiteSpace = prevWhitespace;
-        cell.style.maxWidth = prevMaxWidth;
+    const table = container?.querySelector('table') as HTMLElement | null;
+    if (!container || !table) return {};
+    const ths = Array.from(table.querySelectorAll<HTMLElement>('thead th[data-col]'));
+    if (ths.length === 0) return {};
+    table.classList.add('sr-measuring');
+    const natural: Record<string, number> = {};
+    ths.forEach(th => {
+      const col = th.getAttribute('data-col');
+      if (col) natural[col] = Math.ceil(th.getBoundingClientRect().width) + 4;
+    });
+    table.classList.remove('sr-measuring');
+    return natural;
+  }, []);
+
+  // Auto-fit-to-display: size every visible column to its natural content
+  // width, then if the columns don't already fill the table area, scale them
+  // up proportionally so they span the full display (no dead space on the
+  // right). If the natural widths already overflow the display, use the
+  // natural widths and let the container scroll horizontally. Persists the
+  // result so it sticks on this computer for this mode.
+  const fitColumnsToDisplay = useCallback(() => {
+    const container = tableContainerRef.current;
+    const table = container?.querySelector('table') as HTMLElement | null;
+    if (!container || !table) return;
+    const natural = measureNaturalWidths();
+    const cols = visibleColumns.filter(c => natural[c] != null);
+    if (cols.length === 0) return;
+
+    // Reserve room for the leading checkbox cell + trailing (sticky) actions
+    // cell, neither of which carries a data-col attribute.
+    const headRow = table.querySelector('thead tr');
+    const headCells = headRow ? (Array.from(headRow.children) as HTMLElement[]) : [];
+    const checkboxW = headCells[0] && !headCells[0].hasAttribute('data-col')
+      ? headCells[0].getBoundingClientRect().width
+      : 0;
+    const tail = headCells[headCells.length - 1];
+    const actionsW = tail && !tail.hasAttribute('data-col')
+      ? tail.getBoundingClientRect().width
+      : 0;
+
+    const available = container.clientWidth - checkboxW - actionsW - 2;
+    const totalNatural = cols.reduce((sum, c) => sum + natural[c], 0);
+
+    const next: Record<string, number> = { ...columnWidths };
+    if (totalNatural > 0 && totalNatural < available) {
+      // Distribute the slack proportionally so the row fills the display.
+      const scale = available / totalNatural;
+      cols.forEach(c => {
+        next[c] = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.floor(natural[c] * scale)));
       });
+    } else {
+      cols.forEach(c => {
+        next[c] = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, natural[c]));
+      });
+    }
+    setColumnWidths(next);
+    persistColumnWidths(next);
+  }, [visibleColumns, columnWidths, measureNaturalWidths, persistColumnWidths]);
+
+  // Fill a width for any visible column that doesn't have one yet (e.g. a
+  // column the user just toggled on), without touching columns that already
+  // have a fitted/manual width. Keeps the rest of the layout stable.
+  const fitMissingColumns = useCallback(() => {
+    const natural = measureNaturalWidths();
+    setColumnWidths(prev => {
+      let changed = false;
+      const next = { ...prev };
+      visibleColumns.forEach(c => {
+        if (next[c] == null && natural[c] != null) {
+          next[c] = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, natural[c]));
+          changed = true;
+        }
+      });
+      if (changed) persistColumnWidths(next);
+      return changed ? next : prev;
     });
-    let maxWidth = 0;
-    cells.forEach(cell => {
-      // scrollWidth reflects the un-clipped natural content width once
-      // we've forced nowrap above. Plus a touch of padding so text
-      // doesn't crowd the border.
-      maxWidth = Math.max(maxWidth, cell.scrollWidth);
-    });
-    restorers.forEach(r => r());
-    const finalWidth = Math.max(
-      MIN_COL_WIDTH,
-      Math.min(MAX_COL_WIDTH, Math.ceil(maxWidth) + 8),
-    );
+  }, [visibleColumns, measureNaturalWidths, persistColumnWidths]);
+
+  // Double-click on the resize handle: fit just this one column to its
+  // widest cell (header or any rendered body cell), no display-fill scaling.
+  const autoFitColumn = (columnId: ColumnId) => {
+    const natural = measureNaturalWidths();
+    const w = natural[columnId];
+    if (w == null) return;
+    const finalWidth = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, w + 4));
     setColumnWidths(prev => {
       const next = { ...prev, [columnId]: finalWidth };
       persistColumnWidths(next);
@@ -643,19 +735,58 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     });
   };
 
-  // Sync column widths from prefs when the async load completes / when
-  // another device updates the row (same trigger model used by
-  // visibleColumns / columnOrder above).
+  // Load saved widths when the mode changes. If this computer has no saved
+  // widths for the mode yet, clear them and let the auto-fit effect below
+  // fill the display once the rows render.
   useEffect(() => {
-    if (!facPrefs.column_widths || typeof facPrefs.column_widths !== 'object') return;
-    setColumnWidths(prev => {
-      const incoming = facPrefs.column_widths;
-      // Cheap shallow compare to avoid render loops.
-      const sameKeys = Object.keys(incoming).length === Object.keys(prev).length;
-      if (sameKeys && Object.entries(incoming).every(([k, v]) => prev[k] === v)) return prev;
-      return incoming;
+    const key = getWidthsStorageKey();
+    let saved: Record<string, number> | null = null;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') saved = parsed;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (saved && Object.keys(saved).length > 0) {
+      setColumnWidths(saved);
+      fittedModesRef.current.add(key); // treat saved layout as "already fitted"
+    } else {
+      setColumnWidths({});
+      fittedModesRef.current.delete(key); // needs a fresh auto-fit pass
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReportType, spccMode, accountId]);
+
+  // One-time auto-fit-to-display per mode (per computer). Runs after the
+  // rows have rendered so measurement is accurate. Skips modes that already
+  // have a fitted/saved layout so it never clobbers manual tweaks.
+  useEffect(() => {
+    const key = getWidthsStorageKey();
+    if (fittedModesRef.current.has(key)) return;
+    if (isLoading || facilities.length === 0) return;
+    const id = requestAnimationFrame(() => {
+      fitColumnsToDisplay();
+      fittedModesRef.current.add(key);
     });
-  }, [facPrefs.column_widths]);
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReportType, spccMode, accountId, isLoading, facilities.length, visibleColumns]);
+
+  // After the initial fit, when the user toggles columns on/off, give any
+  // newly-shown column a width without re-fitting (and clobbering) the
+  // columns they've already sized. The one-time effect above owns the very
+  // first fit; this only runs once that's done.
+  useEffect(() => {
+    const key = getWidthsStorageKey();
+    if (!fittedModesRef.current.has(key)) return;
+    if (isLoading || facilities.length === 0) return;
+    const id = requestAnimationFrame(() => fitMissingColumns());
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleColumns]);
 
   // Facility comments — count + bodies, keyed by facility_id. Used to
   // surface a small chat icon next to the facility name when ≥1 comment
@@ -4646,6 +4777,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <Columns className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Columns</span>
                 </TouchTooltipButton>
+
+                {/* Fit columns to the current display width. Auto-runs once
+                    per mode, but the user can re-fit on demand here (e.g.
+                    after resizing the window or moving to another monitor). */}
+                <TouchTooltipButton
+                  id="tb-fit"
+                  tooltip="Fit columns to screen"
+                  activeTooltipId={mobileTooltipId}
+                  onTooltipShow={setMobileTooltipId}
+                  onClick={() => fitColumnsToDisplay()}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  <MoveHorizontal className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Fit</span>
+                </TouchTooltipButton>
               </div>
 
               <div className="h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
@@ -6644,6 +6790,9 @@ function InvoiceChip({
       onClick={onClick}
       className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${tones[tone]} ${active ? ringActive[tone] : ringHover[tone]}`}
     >
+      {/* $ glyph marks these as billing chips so they read distinctly from
+          the red/green plan-status chips (which share the green tone). */}
+      <DollarSign className="w-3 h-3" />
       {label}
       {active && <X className="w-3 h-3 ml-0.5" />}
     </button>
@@ -6659,9 +6808,10 @@ function InvoiceChip({
  * `inspection_*` counterparts).
  *
  * Click handlers all stopPropagation so the parent row's onClick (which opens
- * a modal) doesn't fire underneath. State updates are optimistic — the UI
- * flips immediately and `onChange` triggers a parent refetch; on DB error
- * we revert and log.
+ * a modal) doesn't fire underneath. While a write is in flight the buttons
+ * disable (`busy`); on success `onChange` triggers the parent refetch that
+ * re-renders this cell in its new state; on error we log and leave the row
+ * untouched so the user can retry.
  */
 function InvoiceStatusCell({
   facility,
