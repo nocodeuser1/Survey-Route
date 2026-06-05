@@ -616,6 +616,9 @@ export default function LDARObservationPathEditor({
   const [selection, setSelection] = useState<SelectionKind>(null);
   const [editingNumberOf, setEditingNumberOf] = useState<string | null>(null);
   const [numberInputValue, setNumberInputValue] = useState('');
+  // Inline edit of the title-block date cell (double-click the date).
+  const [editingDate, setEditingDate] = useState(false);
+  const [dateInputValue, setDateInputValue] = useState('');
   const [editingLegendTitle, setEditingLegendTitle] = useState(false);
   // Stop id whose label is being edited in-place from inside the legend.
   // Null when nothing is being edited. Driven by double-click on the legend
@@ -1179,6 +1182,23 @@ export default function LDARObservationPathEditor({
   }, [editingNumberOf, numberInputValue, pathData, commitChange]);
 
   // -----------------------------------------------------------
+  // Inline edit of the title-block date cell.
+  // -----------------------------------------------------------
+  const beginEditDate = useCallback((currentText: string) => {
+    if (!isEditMode) return;
+    setDateInputValue(currentText);
+    setEditingDate(true);
+  }, [isEditMode]);
+
+  const commitDateEdit = useCallback(() => {
+    if (!editingDate) return;
+    const v = dateInputValue.trim();
+    // Empty → clear the override and fall back to the auto "today" value.
+    commitChange({ ...pathData, dateValueOverride: v || null });
+    setEditingDate(false);
+  }, [editingDate, dateInputValue, pathData, commitChange]);
+
+  // -----------------------------------------------------------
   // Add a new stop ("Area").
   //   - If a stop is currently selected → INSERT after it: shift every
   //     stop whose number > selected.number up by 1, then give the new
@@ -1671,7 +1691,8 @@ export default function LDARObservationPathEditor({
                 // Resolve effective positions (override > auto-detect).
                 const titleBox = pathData.titleBoxOverride ?? siteplanTitlePos;
                 const dateBox = pathData.dateBoxOverride ?? datePos;
-                const todayText = formatDateLikeOriginal(originalDateStr);
+                // Custom date wins over the auto-computed "today" value.
+                const todayText = pathData.dateValueOverride ?? formatDateLikeOriginal(originalDateStr);
                 return (
                   <>
                     {titleBox && (
@@ -1692,6 +1713,12 @@ export default function LDARObservationPathEditor({
                         imgH={H}
                         isEditMode={isEditMode}
                         onDragStart={startDateboxDrag}
+                        editable
+                        editing={editingDate}
+                        editValue={dateInputValue}
+                        onBeginEdit={() => beginEditDate(todayText)}
+                        onEditChange={setDateInputValue}
+                        onEditCommit={commitDateEdit}
                       />
                     )}
                   </>
@@ -1896,6 +1923,14 @@ interface TitleBlockOverlayProps {
   isEditMode: boolean;
   /** Pointer-down handler that starts a move drag. */
   onDragStart: (e: React.PointerEvent) => void;
+  /** When true, double-clicking the overlay (in edit mode) edits its text. */
+  editable?: boolean;
+  /** True while this overlay's text is being inline-edited. */
+  editing?: boolean;
+  editValue?: string;
+  onBeginEdit?: () => void;
+  onEditChange?: (v: string) => void;
+  onEditCommit?: () => void;
 }
 
 function TitleBlockOverlay({
@@ -1905,6 +1940,12 @@ function TitleBlockOverlay({
   imgH,
   isEditMode,
   onDragStart,
+  editable = false,
+  editing = false,
+  editValue = '',
+  onBeginEdit,
+  onEditChange,
+  onEditCommit,
 }: TitleBlockOverlayProps) {
   const tx = box.x * imgW;
   const ty = box.y * imgH;
@@ -1918,8 +1959,19 @@ function TitleBlockOverlay({
   return (
     <g
       style={{ cursor: isEditMode ? 'move' : 'default' }}
-      onPointerDown={isEditMode ? onDragStart : undefined}
+      onPointerDown={isEditMode && !editing ? onDragStart : undefined}
+      onDoubleClick={
+        isEditMode && editable && onBeginEdit
+          ? (e) => {
+              e.stopPropagation();
+              onBeginEdit();
+            }
+          : undefined
+      }
     >
+      {isEditMode && editable && !editing && (
+        <title>Drag to reposition · Double-click to edit the date</title>
+      )}
       <rect
         x={tx - padX}
         y={ty}
@@ -1932,21 +1984,56 @@ function TitleBlockOverlay({
         strokeWidth={isEditMode ? 1.5 : 0}
         strokeDasharray={isEditMode ? '6 4' : undefined}
       />
-      <text
-        x={tx + tw / 2}
-        y={ty + th * 0.55}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill="#111827"
-        // Bumped 0.72 → 0.85 per Israel — the previous multiplier ran
-        // visibly smaller than the surrounding title-block text.
-        fontSize={th * 0.85}
-        fontWeight={600}
-        fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
-        pointerEvents="none"
-      >
-        {text}
-      </text>
+      {editing ? (
+        <foreignObject x={tx - padX} y={ty} width={tw + padX * 2} height={th}>
+          <input
+            type="text"
+            autoFocus
+            value={editValue}
+            onChange={(e) => onEditChange?.(e.target.value)}
+            onBlur={onEditCommit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                onEditCommit?.();
+              }
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              height: '100%',
+              textAlign: 'center',
+              fontSize: th * 0.7,
+              fontWeight: 600,
+              color: '#111827',
+              fontFamily: 'system-ui, -apple-system, Helvetica, Arial, sans-serif',
+              border: '1px solid #3b82f6',
+              borderRadius: 3,
+              padding: 0,
+              background: '#ffffff',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </foreignObject>
+      ) : (
+        <text
+          x={tx + tw / 2}
+          y={ty + th * 0.55}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fill="#111827"
+          // Bumped 0.72 → 0.85 per Israel — the previous multiplier ran
+          // visibly smaller than the surrounding title-block text.
+          fontSize={th * 0.85}
+          fontWeight={600}
+          fontFamily="system-ui, -apple-system, Helvetica, Arial, sans-serif"
+          pointerEvents="none"
+        >
+          {text}
+        </text>
+      )}
     </g>
   );
 }

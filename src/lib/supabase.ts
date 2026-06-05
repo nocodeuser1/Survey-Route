@@ -93,6 +93,10 @@ export interface LDARObservationPathData {
   /** Override for the date-cell cover (where the original PDF's date
    *  gets replaced with today's date on export). */
   dateBoxOverride?: LDARTitleBlockOverride | null;
+  /** Custom text to stamp in the date cell. When set, overrides the
+   *  auto-computed "today's date" value (the user double-clicked the date
+   *  in the editor and typed their own). Null/undefined → use today's date. */
+  dateValueOverride?: string | null;
   /** Pixel size of the source page render that produced these coords.
    *  Used for diagnostics only — the overlay re-renders at the current
    *  display size using normalized coords. */
