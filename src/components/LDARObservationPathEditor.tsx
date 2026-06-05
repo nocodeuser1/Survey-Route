@@ -850,6 +850,9 @@ export default function LDARObservationPathEditor({
     setIsSaving(true);
     setSaveError(null);
     setSaveStage('json');
+    // Tracks whether the (non-fatal) annotated-PDF step failed — if so we
+    // keep the editor open so the error banner stays visible to re-save.
+    let pdfSoftFailed = false;
     try {
       // 1. JSON — fast write, this is the source of truth for the editor.
       const toSave: LDARObservationPathData = {
@@ -908,6 +911,7 @@ export default function LDARObservationPathEditor({
           if (tsErr) throw tsErr;
           Object.assign(facility, { ldar_observation_path_data: withAnnotated });
         } catch (pdfErr) {
+          pdfSoftFailed = true;
           console.warn('Annotated PDF generation failed (JSON was saved):', pdfErr);
           setSaveError(
             (pdfErr instanceof Error ? pdfErr.message : 'Annotated PDF generation failed') +
@@ -918,6 +922,10 @@ export default function LDARObservationPathEditor({
 
       setHasUnsavedChanges(false);
       onSaved();
+      // On a clean save, close the editor and drop the user back onto the
+      // LDAR tab (already open underneath). Keep it open if the annotated
+      // PDF soft-failed so the banner is visible and they can re-save.
+      if (!pdfSoftFailed) onClose();
     } catch (err) {
       console.error('Save failed', err);
       setSaveError(err instanceof Error ? err.message : 'Failed to save.');
@@ -925,7 +933,7 @@ export default function LDARObservationPathEditor({
       setIsSaving(false);
       setSaveStage('idle');
     }
-  }, [pathData, facility, onSaved, pageImage]);
+  }, [pathData, facility, onSaved, onClose, pageImage]);
 
   // -----------------------------------------------------------
   // Pointer handlers — drag for stops, waypoints, legend move/resize.
