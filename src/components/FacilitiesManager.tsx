@@ -164,7 +164,7 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' | 'well_name_7' | 'well_name_8' | 'well_name_9' | 'well_name_10' |
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status' |
-  'plan_invoice_status' | 'inspection_invoice_status';
+  'plan_invoice_status' | 'inspection_invoice_status' | 'invoiced_date';
 
 // spcc_status sits immediately after name so the SPCC plan status is the
 // first thing the user sees in every mode that shows it (Israel's request
@@ -176,8 +176,8 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'spcc_status', 'latitude', 
 // column. This overrides the user's normal column layout while invoice view
 // is active and is intentionally NOT persisted/editable.
 const INVOICE_VIEW_COLUMNS: Record<'plan' | 'inspection', ColumnId[]> = {
-  plan: ['name', 'spcc_status', 'plan_invoice_status'],
-  inspection: ['name', 'inspection_status', 'inspection_invoice_status'],
+  plan: ['name', 'spcc_status', 'plan_invoice_status', 'invoiced_date'],
+  inspection: ['name', 'inspection_status', 'inspection_invoice_status', 'invoiced_date'],
 };
 
 // Complete ordered list of all columns - this defines the display order
@@ -267,6 +267,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   // best above the date/status + action buttons.
   plan_invoice_status: 'Invoiced',
   inspection_invoice_status: 'Invoiced',
+  invoiced_date: 'Invoice Date',
   created_at: 'Date Added',
 };
 
@@ -839,7 +840,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const id = requestAnimationFrame(() => fitMissingColumns());
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleColumns]);
+  }, [effectiveVisibleColumns]);
 
   // Facility comments — count + bodies, keyed by facility_id. Used to
   // surface a small chat icon next to the facility name when ≥1 comment
@@ -1934,6 +1935,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.plan_invoiced_at ? new Date(facility.plan_invoiced_at).getTime() : 0;
           case 'inspection_invoice_status':
             return facility.inspection_invoiced_at ? new Date(facility.inspection_invoiced_at).getTime() : 0;
+          case 'invoiced_date': {
+            // Mode-aware sort by the invoiced date (the dedicated date column).
+            const at = spccMode !== 'inspection'
+              ? facility.plan_invoiced_at
+              : facility.inspection_invoiced_at;
+            return at ? new Date(at).getTime() : 0;
+          }
           case 'address':
             return facility.address || '';
           case 'county':
@@ -3475,30 +3483,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   {surveyCompletion.completed}/{surveyCompletion.total}
                 </span>
               )}
-              {/* Invoice status + date sits under the name in the focused
-                  invoice view, so the Invoiced column only needs the action
-                  buttons (single line → row never grows from stacking). Only
-                  rendered once invoiced/paid (when there's a date to show) so
-                  not-yet-invoiced rows stay single-line. */}
-              {invoiceView && (spccMode === 'plan' || spccMode === 'inspection') && (() => {
-                const paid = spccMode === 'plan' ? facility.plan_paid : facility.inspection_paid;
-                const invoiced = spccMode === 'plan' ? facility.plan_invoiced : facility.inspection_invoiced;
-                if (!paid && !invoiced) return null;
-                const at = paid
-                  ? (spccMode === 'plan' ? facility.plan_paid_at : facility.inspection_paid_at)
-                  : (spccMode === 'plan' ? facility.plan_invoiced_at : facility.inspection_invoiced_at);
-                const m = at ? String(at).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
-                const dateStr = m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : '';
-                const cls = paid
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                  : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
-                return (
-                  <span className={`mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${cls}`}>
-                    {paid ? <CheckCircle className="w-2.5 h-2.5" /> : <DollarSign className="w-2.5 h-2.5" />}
-                    {paid ? 'Paid' : 'Invoiced'}{dateStr && ` · ${dateStr}`}
-                  </span>
-                );
-              })()}
             </div>
           </div>
         );
@@ -3575,6 +3559,31 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onChange={onFacilitiesChange}
           />
         );
+      case 'invoiced_date': {
+        // The status + date tag in its own column (right after the action
+        // buttons). Mode-aware: reads the plan or inspection fields. Paid →
+        // green, invoiced → amber, not-yet-invoiced → a muted dash.
+        const isPlan = spccMode !== 'inspection';
+        const paid = isPlan ? facility.plan_paid : facility.inspection_paid;
+        const invoiced = isPlan ? facility.plan_invoiced : facility.inspection_invoiced;
+        if (!paid && !invoiced) {
+          return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        }
+        const at = paid
+          ? (isPlan ? facility.plan_paid_at : facility.inspection_paid_at)
+          : (isPlan ? facility.plan_invoiced_at : facility.inspection_invoiced_at);
+        const m = at ? String(at).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+        const dateStr = m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : '';
+        const cls = paid
+          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+          : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+        return (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>
+            {paid ? <CheckCircle className="w-3 h-3" /> : <DollarSign className="w-3 h-3" />}
+            {paid ? 'Paid' : 'Invoiced'}{dateStr && ` · ${dateStr}`}
+          </span>
+        );
+      }
       case 'inspection_status':
         return getVerificationIcon(facility);
       case 'recertification_status':
@@ -4830,8 +4839,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             {spccMode !== 'inspection' && <option value="spcc_status">SPCC Status</option>}
                             {spccMode !== 'plan' && <option value="spcc_inspection_date">SPCC Inspection Date</option>}
                             {spccMode !== 'plan' && <option value="inspection_status">Inspection Status</option>}
-                            {invoiceView && spccMode === 'plan' && <option value="plan_invoice_status">Invoiced Date</option>}
-                            {invoiceView && spccMode === 'inspection' && <option value="inspection_invoice_status">Invoiced Date</option>}
+                            {invoiceView && <option value="invoiced_date">Invoice Date</option>}
                           </select>
                         </div>
                         {/* Sold toggle */}
@@ -5557,7 +5565,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               // the cell area itself is clicked.
                               if (
                                 columnId === 'plan_invoice_status' ||
-                                columnId === 'inspection_invoice_status'
+                                columnId === 'inspection_invoice_status' ||
+                                columnId === 'invoiced_date'
                               ) {
                                 return;
                               }
