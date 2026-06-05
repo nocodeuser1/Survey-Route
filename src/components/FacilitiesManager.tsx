@@ -376,7 +376,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setModeMenuOpen(null);
   }, [spccMode]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
-  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | 'ldar' | 'spcc' | null>(null);
   // When opening the facility modal from the row comment popover's "View
   // comments" action, scroll straight to the Comments section on the General
   // tab. Reset on modal close.
@@ -5605,7 +5605,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             data-col={columnId}
                             style={columnWidths[columnId] ? { width: columnWidths[columnId], minWidth: columnWidths[columnId], maxWidth: columnWidths[columnId] } : undefined}
                             className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnWidths[columnId] ? 'overflow-hidden whitespace-nowrap text-ellipsis' : (columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap')
-                              } ${columnId === 'spcc_status' || columnId === 'inspection_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
+                              } ${columnId === 'spcc_status' || columnId === 'inspection_status' || columnId === 'ldar_site_plan_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
                               // Invoice columns own their own buttons +
@@ -5626,6 +5626,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               if (columnId === 'inspection_status') {
                                 e.stopPropagation();
                                 setForcedTab('inspections');
+                                setSelectedFacility(facility);
+                                return;
+                              }
+                              if (columnId === 'ldar_site_plan_status') {
+                                e.stopPropagation();
+                                setForcedTab('ldar');
                                 setSelectedFacility(facility);
                                 return;
                               }
