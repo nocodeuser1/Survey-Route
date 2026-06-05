@@ -177,15 +177,15 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
         {/* File row — uploaded file display OR upload zone */}
         {hasFile && !showReupload ? (
           <div
-            className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${
+            className={`flex items-start justify-between gap-3 p-3 rounded-lg border ${
               darkMode ? 'border-gray-700 bg-gray-900/40' : 'border-gray-200 bg-gray-50'
             }`}
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className={`p-2 rounded ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <div className={`p-2 rounded flex-shrink-0 ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
                 <FileText className="w-4 h-4" />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 {(() => {
                   // Prefer the FLATTENED / annotated PDF (baked when the
                   // agency owner saves a walking path) if one exists, so
@@ -209,7 +209,7 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                       href={href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`text-sm font-medium hover:underline inline-flex items-center gap-1 truncate ${
+                      className={`text-sm font-medium hover:underline break-words ${
                         darkMode ? 'text-blue-300' : 'text-blue-700'
                       }`}
                       title={
@@ -218,8 +218,8 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                           : 'Source site plan PDF'
                       }
                     >
-                      <span className="truncate">{displayFilename}</span>
-                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                      {displayFilename}
+                      <ExternalLink className="inline-block align-text-bottom w-3 h-3 ml-1" />
                     </a>
                   );
                 })()}
@@ -233,7 +233,7 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
             <button
               type="button"
               onClick={() => setShowReupload(true)}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                 darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
               }`}
             >
