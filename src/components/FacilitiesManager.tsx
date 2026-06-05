@@ -1621,6 +1621,31 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return '';
   };
 
+  // Invoice-view row tint by billing state: green when paid, amber when
+  // invoiced-but-unpaid, none (default striping) when not yet invoiced.
+  // Returns the row bg classes + the matching classes for the sticky cells
+  // (checkbox + actions) so the tint runs edge-to-edge. null → use striping.
+  const getInvoiceRowBg = (
+    facility: Facility,
+  ): { row: string; sticky: string } | null => {
+    if (!invoiceView || (spccMode !== 'plan' && spccMode !== 'inspection')) return null;
+    const paid = spccMode === 'plan' ? facility.plan_paid : facility.inspection_paid;
+    const invoiced = spccMode === 'plan' ? facility.plan_invoiced : facility.inspection_invoiced;
+    if (paid) {
+      return {
+        row: 'bg-emerald-50/70 dark:bg-emerald-900/15 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/25',
+        sticky: 'bg-emerald-50/70 dark:bg-emerald-900/15 group-hover:bg-emerald-100/80 dark:group-hover:bg-emerald-900/25',
+      };
+    }
+    if (invoiced) {
+      return {
+        row: 'bg-amber-50/70 dark:bg-amber-900/15 hover:bg-amber-100/80 dark:hover:bg-amber-900/25',
+        sticky: 'bg-amber-50/70 dark:bg-amber-900/15 group-hover:bg-amber-100/80 dark:group-hover:bg-amber-900/25',
+      };
+    }
+    return null;
+  };
+
   const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
     // Haversine formula for calculating distance between two points
     const R = 3959; // Earth's radius in miles
@@ -3443,6 +3468,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   {surveyCompletion.completed}/{surveyCompletion.total}
                 </span>
               )}
+              {/* Invoice status + date sits under the name in the focused
+                  invoice view, so the Invoiced column only needs the action
+                  buttons (single line → row never grows from stacking). Only
+                  rendered once invoiced/paid (when there's a date to show) so
+                  not-yet-invoiced rows stay single-line. */}
+              {invoiceView && (spccMode === 'plan' || spccMode === 'inspection') && (() => {
+                const paid = spccMode === 'plan' ? facility.plan_paid : facility.inspection_paid;
+                const invoiced = spccMode === 'plan' ? facility.plan_invoiced : facility.inspection_invoiced;
+                if (!paid && !invoiced) return null;
+                const at = paid
+                  ? (spccMode === 'plan' ? facility.plan_paid_at : facility.inspection_paid_at)
+                  : (spccMode === 'plan' ? facility.plan_invoiced_at : facility.inspection_invoiced_at);
+                const m = at ? String(at).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+                const dateStr = m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : '';
+                const cls = paid
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                  : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+                return (
+                  <span className={`mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${cls}`}>
+                    {paid ? <CheckCircle className="w-2.5 h-2.5" /> : <DollarSign className="w-2.5 h-2.5" />}
+                    {paid ? 'Paid' : 'Invoiced'}{dateStr && ` · ${dateStr}`}
+                  </span>
+                );
+              })()}
             </div>
           </div>
         );
@@ -5429,10 +5478,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
                     const highlightClass = getRowHighlightClass(facility);
                     const isBeingDeleted = deletingFacilityIds.has(facility.id);
+                    const invoiceBg = getInvoiceRowBg(facility);
+                    const stripeRowBg = `${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700`;
+                    const stripeStickyBg = `${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700`;
                     return (
                       <tr
                         key={facility.id}
-                        className={`group relative ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${highlightClass} ${isBeingDeleted ? 'opacity-50 pointer-events-none' : ''}`}
+                        className={`group relative ${invoiceBg ? invoiceBg.row : stripeRowBg} transition-colors ${highlightClass} ${isBeingDeleted ? 'opacity-50 pointer-events-none' : ''}`}
                       >
                         <td className="px-3 py-1.5 border-r border-gray-200 dark:border-gray-600 relative">
                           {isBeingDeleted && (
@@ -5527,7 +5579,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             {renderCellContent(facility, columnId, false)}
                           </td>
                         ))}
-                        <td className={`px-1 py-1 whitespace-nowrap text-xs sticky right-0 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-900'} group-hover:bg-blue-50 dark:group-hover:bg-gray-700 hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
+                        <td className={`px-1 py-1 whitespace-nowrap text-xs sticky right-0 ${invoiceBg ? invoiceBg.sticky : stripeStickyBg} hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
                           <div className="flex gap-1 items-center justify-center">
                             <button
                               onClick={(e) => {
@@ -6987,8 +7039,6 @@ function InvoiceStatusCell({
 
   const invoiced = !!(facility as any)[invoicedField];
   const paid = !!(facility as any)[paidField];
-  const invoicedAt = (facility as any)[invoicedAtField] as string | null | undefined;
-  const paidAt = (facility as any)[paidAtField] as string | null | undefined;
 
   const [busy, setBusy] = useState(false);
 
@@ -7041,33 +7091,11 @@ function InvoiceStatusCell({
     );
   };
 
-  // Short MM/DD/YY for the badge subtitle so the cell stays narrow.
-  const shortDate = (iso: string | null | undefined) => {
-    if (!iso) return '';
-    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!m) return '';
-    return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
-  };
-
+  // The status + date badge now lives under the facility name (see the 'name'
+  // cell), so this cell is just the action buttons on a single line — the row
+  // never grows from a stacked badge.
   return (
-    <div className="inline-flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-      {paid ? (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
-          <CheckCircle className="w-3 h-3" />
-          Paid {shortDate(paidAt) && <span className="font-normal opacity-75">· {shortDate(paidAt)}</span>}
-        </span>
-      ) : invoiced ? (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap">
-          <DollarSign className="w-3 h-3" />
-          Invoiced {shortDate(invoicedAt) && <span className="font-normal opacity-75">· {shortDate(invoicedAt)}</span>}
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 whitespace-nowrap">
-          <DollarSign className="w-3 h-3" />
-          Not Invoiced
-        </span>
-      )}
-
+    <div className="inline-flex items-center gap-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
       {!invoiced && (
         <button
           type="button"
