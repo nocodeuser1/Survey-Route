@@ -171,6 +171,15 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
 // for the plan/invoice views — keeps status next to the facility name).
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'spcc_status', 'latitude', 'longitude', 'inspection_status', 'recertification_status', 'notes'];
 
+// Fixed, focused column set for the Invoice sub-view — Facility Name, the
+// mode-appropriate Status column, and the Invoice (date + action buttons)
+// column. This overrides the user's normal column layout while invoice view
+// is active and is intentionally NOT persisted/editable.
+const INVOICE_VIEW_COLUMNS: Record<'plan' | 'inspection', ColumnId[]> = {
+  plan: ['name', 'spcc_status', 'plan_invoice_status'],
+  inspection: ['name', 'inspection_status', 'inspection_invoice_status'],
+};
+
 // Complete ordered list of all columns - this defines the display order
 const ALL_COLUMNS_ORDER: ColumnId[] = [
   // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
@@ -190,7 +199,9 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'well_name_10', 'well_api_10',
   'lat_well_sheet', 'long_well_sheet',
   'ldar_site_plan_status',
-  'plan_invoice_status', 'inspection_invoice_status',
+  // NOTE: plan_invoice_status / inspection_invoice_status are deliberately
+  // omitted here so they never appear in the Columns menu — they're only
+  // shown (with their action buttons) inside the dedicated Invoice view.
   'created_at',
 ];
 
@@ -251,8 +262,11 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
   ldar_site_plan_status: 'LDAR Site Plan',
-  plan_invoice_status: 'Plan Invoice Status',
-  inspection_invoice_status: 'Inspection Invoice Status',
+  // These only ever render inside the focused Invoice view (where the active
+  // tab already says Plans vs Inspections), so a short shared label reads
+  // best above the date/status + action buttons.
+  plan_invoice_status: 'Invoiced',
+  inspection_invoice_status: 'Invoiced',
   created_at: 'Date Added',
 };
 
@@ -350,8 +364,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setSpccModeInternal((prev) => (prev === resolved ? prev : resolved));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSurveyType, surveyTypes]);
+
+  // Any change to the mode drops the invoice sub-view + open dropdown. This
+  // catches mode changes that bypass setSpccMode (e.g. the global-survey-type
+  // sync above) so the focused invoice layout can't linger into a mode it
+  // doesn't belong to.
+  useEffect(() => {
+    setInvoiceView(false);
+    setModeMenuOpen(null);
+  }, [spccMode]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
+  // Invoice sub-view: a focused billing layout reachable by clicking the
+  // already-active Plans/Inspections tab and choosing "Invoice view" from
+  // the dropdown. Only meaningful in plan/inspection mode; reset whenever
+  // the mode changes. When on, the table shows just Name + Status + Invoice
+  // (with the per-row Invoice/Paid action buttons). `modeMenuOpen` tracks
+  // which tab's dropdown is currently open.
+  const [invoiceView, setInvoiceView] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState<'plan' | 'inspection' | null>(null);
 
   const isRestored = useRef(false);
 
@@ -461,6 +492,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
     setSpccModeInternal(mode);
     userChangedMode.current = true;
+    // Leaving the current mode always drops the invoice sub-view + any open
+    // tab dropdown — invoice view is entered fresh per mode.
+    setInvoiceView(false);
+    setModeMenuOpen(null);
     // Sync the report type filter to match the mode
     const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
     setSelectedReportType(mapped as any);
@@ -487,6 +522,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // custom types aren't part of the legacy plan/inspection axis.
   const setCustomSurveyType = (typeId: string) => {
     setSpccModeInternal('all');
+    setInvoiceView(false);
+    setModeMenuOpen(null);
     setSelectedReportType('all' as any);
     setStatusFilters([]);
     setSpccPlanFilter('all');
@@ -517,7 +554,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // per-account prefs row, so each machine's display gets its own fitted
   // layout. Keyed per mode so plan/inspection/all each remember their own
   // widths. See the auto-fit-to-display logic below.
-  const getWidthsStorageKey = () => `facilities_colw_${selectedReportType}_${spccMode}_${accountId}`;
+  // `_invoice` suffix keeps the focused invoice view's fitted widths separate
+  // from the mode's normal layout so the two don't overwrite each other.
+  const getWidthsStorageKey = () =>
+    `facilities_colw_${selectedReportType}_${spccMode}${invoiceView ? '_invoice' : ''}_${accountId}`;
 
   // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
   const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
@@ -555,6 +595,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (saved) return JSON.parse(saved);
     return getDefaultVisibleColumns(spccMode);
   });
+  // The columns actually rendered. In the Invoice sub-view this is the fixed
+  // focused set (Name / Status / Invoice); otherwise it's the user's normal
+  // layout, with the invoice columns defensively stripped so their action
+  // buttons can never appear outside invoice view (even if an older saved
+  // layout still lists them).
+  const effectiveVisibleColumns = useMemo<ColumnId[]>(() => {
+    if (invoiceView && (spccMode === 'plan' || spccMode === 'inspection')) {
+      return INVOICE_VIEW_COLUMNS[spccMode];
+    }
+    return visibleColumns.filter(
+      c => c !== 'plan_invoice_status' && c !== 'inspection_invoice_status',
+    );
+  }, [invoiceView, spccMode, visibleColumns]);
   // Per-column pixel widths from auto-fit-to-display + drag-resize +
   // double-click auto-fit. Stored in localStorage (per computer, per mode)
   // so each machine keeps its own fitted layout — see getWidthsStorageKey
@@ -588,7 +641,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       /* storage may be full or blocked — widths just won't persist */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReportType, spccMode, accountId]);
+  }, [selectedReportType, spccMode, accountId, invoiceView]);
 
   // Begin a drag-resize from the right-edge handle on a <th>. We attach
   // mousemove/mouseup to `document` (not the handle) so the drag keeps
@@ -668,7 +721,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const table = container?.querySelector('table') as HTMLElement | null;
     if (!container || !table) return;
     const natural = measureNaturalWidths();
-    const cols = visibleColumns.filter(c => natural[c] != null);
+    const cols = effectiveVisibleColumns.filter(c => natural[c] != null);
     if (cols.length === 0) return;
 
     // Reserve room for the leading checkbox cell + trailing (sticky) actions
@@ -700,7 +753,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
     setColumnWidths(next);
     persistColumnWidths(next);
-  }, [visibleColumns, columnWidths, measureNaturalWidths, persistColumnWidths]);
+  }, [effectiveVisibleColumns, columnWidths, measureNaturalWidths, persistColumnWidths]);
 
   // Fill a width for any visible column that doesn't have one yet (e.g. a
   // column the user just toggled on), without touching columns that already
@@ -710,7 +763,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setColumnWidths(prev => {
       let changed = false;
       const next = { ...prev };
-      visibleColumns.forEach(c => {
+      effectiveVisibleColumns.forEach(c => {
         if (next[c] == null && natural[c] != null) {
           next[c] = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, natural[c]));
           changed = true;
@@ -719,7 +772,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (changed) persistColumnWidths(next);
       return changed ? next : prev;
     });
-  }, [visibleColumns, measureNaturalWidths, persistColumnWidths]);
+  }, [effectiveVisibleColumns, measureNaturalWidths, persistColumnWidths]);
 
   // Double-click on the resize handle: fit just this one column to its
   // widest cell (header or any rendered body cell), no display-fill scaling.
@@ -758,7 +811,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       fittedModesRef.current.delete(key); // needs a fresh auto-fit pass
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReportType, spccMode, accountId]);
+  }, [selectedReportType, spccMode, accountId, invoiceView]);
 
   // One-time auto-fit-to-display per mode (per computer). Runs after the
   // rows have rendered so measurement is accurate. Skips modes that already
@@ -773,7 +826,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReportType, spccMode, accountId, isLoading, facilities.length, visibleColumns]);
+  }, [selectedReportType, spccMode, accountId, isLoading, facilities.length, visibleColumns, invoiceView]);
 
   // After the initial fit, when the user toggles columns on/off, give any
   // newly-shown column a width without re-fitting (and clobbering) the
@@ -4378,8 +4431,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   })}
                 </div>
               )}
-              {/* Inline stat badges - plan mode only */}
-              {spccMode === 'plan' && !isLoading && (() => {
+              {/* Inline stat badges - standard plan view only (hidden in the
+                  focused invoice view, which shows its own billing chips). */}
+              {spccMode === 'plan' && !invoiceView && !isLoading && (() => {
                 let oc = 0;
                 let cc = 0;
                 facilities.filter(f => f.status !== 'sold').forEach(facility => {
@@ -4411,12 +4465,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   </div>
                 );
               })()}
-              {/* Invoice chips — plan mode (filter facilities by plan invoice
-                  status). Three chips cycle through the lifecycle: awaiting
-                  invoice → unpaid → paid. Clicking the active chip clears.
-                  Counts ignore sold facilities so the numbers always match
-                  what the user sees in the table. */}
-              {spccMode === 'plan' && !isLoading && (() => {
+              {/* Invoice chips — plan invoice view only (filter facilities by
+                  plan invoice status). Three chips cycle through the lifecycle:
+                  awaiting invoice → unpaid → paid. Clicking the active chip
+                  clears. Counts ignore sold facilities so the numbers always
+                  match what the user sees in the table. */}
+              {spccMode === 'plan' && invoiceView && !isLoading && (() => {
                 let awaiting = 0;
                 let unpaid = 0;
                 let paid = 0;
@@ -4448,9 +4502,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   </div>
                 );
               })()}
-              {/* Invoice chips — inspection mode. Same UX as plan mode but
+              {/* Invoice chips — inspection invoice view. Same UX as plan but
                   reads `inspection_*` fields and toggles inspectionInvoiceFilter. */}
-              {spccMode === 'inspection' && !isLoading && (() => {
+              {spccMode === 'inspection' && invoiceView && !isLoading && (() => {
                 let awaiting = 0;
                 let unpaid = 0;
                 let paid = 0;
@@ -4501,24 +4555,31 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               >
                 All
               </button>
-              <button
-                onClick={() => { setSpccMode('plan'); }}
-                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'plan'
-                  ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
-                  }`}
-              >
-                Plans
-              </button>
-              <button
-                onClick={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
-                className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'inspection'
-                  ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
-                  }`}
-              >
-                Inspections
-              </button>
+              {/* Plans / Inspections double as a dropdown trigger: clicking the
+                  tab while it's already active opens a small menu to switch
+                  between the standard layout and the focused Invoice view. */}
+              <ModeTab
+                label="Plans"
+                active={activeToggleKey === 'plan'}
+                invoiceView={invoiceView}
+                menuOpen={modeMenuOpen === 'plan'}
+                onActivate={() => { setSpccMode('plan'); }}
+                onToggleMenu={() => setModeMenuOpen(modeMenuOpen === 'plan' ? null : 'plan')}
+                onCloseMenu={() => setModeMenuOpen(null)}
+                onPickStandard={() => { setInvoiceView(false); setModeMenuOpen(null); }}
+                onPickInvoice={() => { setInvoiceView(true); setModeMenuOpen(null); }}
+              />
+              <ModeTab
+                label="Inspections"
+                active={activeToggleKey === 'inspection'}
+                invoiceView={invoiceView}
+                menuOpen={modeMenuOpen === 'inspection'}
+                onActivate={() => { setSpccMode('inspection'); setSpccPlanFilter('all'); }}
+                onToggleMenu={() => setModeMenuOpen(modeMenuOpen === 'inspection' ? null : 'inspection')}
+                onCloseMenu={() => setModeMenuOpen(null)}
+                onPickStandard={() => { setInvoiceView(false); setModeMenuOpen(null); }}
+                onPickInvoice={() => { setInvoiceView(true); setModeMenuOpen(null); }}
+              />
               {/* Custom (non-system) survey types render in the same pill so
                   they don't reintroduce the two-control problem. Only rendered
                   if any exist — keeps the compact 3-button look when no custom
@@ -4766,17 +4827,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   )}
                 </div>
 
-                <TouchTooltipButton
-                  id="tb-columns"
-                  tooltip="Column Visibility"
-                  activeTooltipId={mobileTooltipId}
-                  onTooltipShow={setMobileTooltipId}
-                  onClick={openColumnSelector}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
-                >
-                  <Columns className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Columns</span>
-                </TouchTooltipButton>
+                {/* Column visibility is fixed in the focused invoice view, so
+                    the Columns control is hidden there. */}
+                {!invoiceView && (
+                  <TouchTooltipButton
+                    id="tb-columns"
+                    tooltip="Column Visibility"
+                    activeTooltipId={mobileTooltipId}
+                    onTooltipShow={setMobileTooltipId}
+                    onClick={openColumnSelector}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
+                  >
+                    <Columns className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Columns</span>
+                  </TouchTooltipButton>
+                )}
 
                 {/* Fit columns to the current display width. Auto-runs once
                     per mode, but the user can re-fit on demand here (e.g.
@@ -5309,7 +5374,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         />
                       )}
                     </th>
-                    {visibleColumns.map(columnId => (
+                    {effectiveVisibleColumns.map(columnId => (
                       <th
                         key={columnId}
                         data-col={columnId}
@@ -5417,7 +5482,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             />
                           </div>
                         </td>
-                        {visibleColumns.map(columnId => (
+                        {effectiveVisibleColumns.map(columnId => (
                           <td
                             key={columnId}
                             data-col={columnId}
@@ -6222,10 +6287,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       {/* Column Visibility Modal */}
       {showColumnSelector && (() => {
         const searchLower = columnSearch.toLowerCase();
+        // The invoice columns are never offered in the Columns menu — they
+        // only appear (with action buttons) inside the dedicated Invoice view.
+        const isMenuColumn = (id: ColumnId) =>
+          id !== 'plan_invoice_status' && id !== 'inspection_invoice_status';
         const filteredVisible = draftVisibleColumns.filter(id =>
-          columnLabels[id].toLowerCase().includes(searchLower)
+          isMenuColumn(id) && columnLabels[id].toLowerCase().includes(searchLower)
         );
-        const hiddenColumns = draftColumnOrder.filter(id => !draftVisibleColumns.includes(id));
+        const hiddenColumns = draftColumnOrder.filter(id => isMenuColumn(id) && !draftVisibleColumns.includes(id));
         const filteredHidden = hiddenColumns.filter(id =>
           columnLabels[id].toLowerCase().includes(searchLower)
         );
@@ -6746,6 +6815,95 @@ function FacilityCommentsPopover({
       </div>
       </div>
     </>
+  );
+}
+
+/**
+ * A Plans/Inspections tab in the mode switcher that doubles as a dropdown
+ * trigger. First click (when inactive) switches to the mode; clicking the
+ * already-active tab opens a small menu to choose between the Standard
+ * layout and the focused Invoice view. The active tab shows a chevron, and
+ * a "· Invoices" hint when the invoice view is on.
+ */
+function ModeTab({
+  label,
+  active,
+  invoiceView,
+  menuOpen,
+  onActivate,
+  onToggleMenu,
+  onCloseMenu,
+  onPickStandard,
+  onPickInvoice,
+}: {
+  label: string;
+  active: boolean;
+  invoiceView: boolean;
+  menuOpen: boolean;
+  onActivate: () => void;
+  onToggleMenu: () => void;
+  onCloseMenu: () => void;
+  onPickStandard: () => void;
+  onPickInvoice: () => void;
+}) {
+  return (
+    <div className="relative inline-flex">
+      <button
+        onClick={() => (active ? onToggleMenu() : onActivate())}
+        title={active ? `${label} — click for view options` : `Switch to ${label}`}
+        className={`flex items-center gap-1 px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${active
+          ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
+          }`}
+      >
+        {label}
+        {active && invoiceView && (
+          <span className="hidden sm:inline text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+            · Invoices
+          </span>
+        )}
+        {active && (
+          <ChevronDown className={`w-3 h-3 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+        )}
+      </button>
+      {menuOpen && (
+        <>
+          {/* Click-away backdrop, beneath the menu. */}
+          <div className="fixed inset-0 z-40" onClick={onCloseMenu} />
+          {/* Anchored to the tab's right edge — the mode switcher sits on the
+              right of the header (which clips overflow), so opening leftward
+              keeps the menu on-screen and unclipped. */}
+          <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl py-1">
+            <button
+              type="button"
+              onClick={onPickStandard}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-left transition-colors ${!invoiceView
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
+                : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+            >
+              <span className="flex items-center gap-2">
+                <FileText className="w-3.5 h-3.5" /> Standard view
+              </span>
+              {!invoiceView && <Check className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={onPickInvoice}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-left transition-colors ${invoiceView
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
+                : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+            >
+              <span className="flex items-center gap-2">
+                <DollarSign className="w-3.5 h-3.5" /> Invoice view
+              </span>
+              {invoiceView && <Check className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
