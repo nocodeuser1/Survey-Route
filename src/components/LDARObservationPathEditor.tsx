@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import {
   X,
   Sparkles,
@@ -883,7 +883,30 @@ export default function LDARObservationPathEditor({
       if (svgRef.current && pageImage) {
         setSaveStage('pdf');
         try {
-          const pdfBlob = await svgToPdfBlob(svgRef.current, pageImage.w, pageImage.h);
+          // Bake a CLEAN render: force view mode + clear any selection/inline
+          // edits so none of the edit-only chrome (dashed boxes, the legend
+          // resize handle, selection halos, off-path ghosts, inline inputs)
+          // ends up baked into the exported PDF. flushSync forces the DOM to
+          // update before we capture; we restore the editor state afterward.
+          const restoreEdit = isEditMode;
+          const restoreSel = selection;
+          flushSync(() => {
+            setIsEditMode(false);
+            setSelection(null);
+            setEditingNumberOf(null);
+            setEditingDate(false);
+            setEditingLegendTitle(false);
+            setEditingLegendItemId(null);
+          });
+          let pdfBlob: Blob;
+          try {
+            pdfBlob = await svgToPdfBlob(svgRef.current, pageImage.w, pageImage.h);
+          } finally {
+            flushSync(() => {
+              setIsEditMode(restoreEdit);
+              setSelection(restoreSel);
+            });
+          }
           const annotatedPath = `${facility.id}/site-plan-annotated.pdf`;
           const { error: uploadError } = await supabase.storage
             .from('ldar-site-plans')
@@ -936,7 +959,7 @@ export default function LDARObservationPathEditor({
       setIsSaving(false);
       setSaveStage('idle');
     }
-  }, [pathData, facility, onSaved, onClose, pageImage]);
+  }, [pathData, facility, onSaved, onClose, pageImage, isEditMode, selection]);
 
   // Close the editor, confirming first if there are unsaved edits so the user
   // can't lose work by mis-clicking the X or hitting Escape.
