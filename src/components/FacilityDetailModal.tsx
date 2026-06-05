@@ -71,6 +71,10 @@ interface FacilityDetailModalProps {
   onViewNearbyFacility?: (facility: Facility) => void;
   onViewSPCCPlan?: () => void;
   initialTab?: FacilityTab;
+  /** When true, after opening on the General tab the modal scrolls the
+   *  Comments section into view (used by the row comment popover's
+   *  "View comments" action). */
+  scrollToComments?: boolean;
 }
 
 type FacilityTab = 'general' | 'inspections' | 'documents' | 'spcc' | 'ldar';
@@ -129,7 +133,8 @@ export default function FacilityDetailModal({
   allInspections = [],
   onViewNearbyFacility,
   onViewSPCCPlan,
-  initialTab = 'general'
+  initialTab = 'general',
+  scrollToComments = false,
 }: FacilityDetailModalProps) {
   const { user } = useAuth();
   // Brand-aware facility-id label (e.g. "Camino Facility ID" /
@@ -190,10 +195,28 @@ export default function FacilityDetailModal({
   const [savingCoords, setSavingCoords] = useState(false);
   const [coordsError, setCoordsError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const commentsSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab, facility.id]);
+
+  // When opened via the row "View comments" action, land on the General tab
+  // and scroll the Comments section into view once it's rendered + loaded.
+  // Guarded so it only fires once per open (not on every comments refetch).
+  const didScrollToCommentsRef = useRef(false);
+  useEffect(() => {
+    didScrollToCommentsRef.current = false;
+  }, [facility.id]);
+  useEffect(() => {
+    if (!scrollToComments || didScrollToCommentsRef.current) return;
+    if (activeTab !== 'general' || commentsLoading) return;
+    const id = requestAnimationFrame(() => {
+      commentsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      didScrollToCommentsRef.current = true;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [scrollToComments, activeTab, commentsLoading, facility.id]);
 
   // Escape closes the modal — but only when no nested overlay is on top.
   // Sub-flows (inspection form/viewer, nav popup, nearby alert) own Escape
@@ -1897,7 +1920,7 @@ export default function FacilityDetailModal({
               This version is a single compact feed: header → add box →
               chronological list (newest first). No preview, no toggle,
               no duplicate "latest" card. */}
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+          <div ref={commentsSectionRef} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm scroll-mt-4">
             <div className="flex items-center gap-2 mb-3">
               <MessageSquare className="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
               <h3 className="text-base font-semibold text-gray-900 dark:text-white">Comments</h3>

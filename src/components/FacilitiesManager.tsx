@@ -376,6 +376,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [spccMode]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
+  // When opening the facility modal from the row comment popover's "View
+  // comments" action, scroll straight to the Comments section on the General
+  // tab. Reset on modal close.
+  const [openToComments, setOpenToComments] = useState(false);
   // Invoice sub-view: a focused billing layout reachable by clicking the
   // already-active Plans/Inspections tab and choosing "Invoice view" from
   // the dropdown. Only meaningful in plan/inspection mode; reset whenever
@@ -5879,9 +5883,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             teamNumber={1}
             accountId={accountId}
             initialTab={forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general')}
+            scrollToComments={openToComments}
             onClose={() => {
               setSelectedFacility(null);
               setForcedTab(null);
+              setOpenToComments(false);
               loadInspections();
             }}
             onShowOnMap={onShowOnMap}
@@ -6349,6 +6355,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           onOpenFullEditor={() => {
             const f = commentsPopover.facility;
             setCommentsPopover(null);
+            // Open the facility overview on the General tab and scroll to the
+            // Comments section so the user lands right on the thread.
+            setForcedTab('general');
+            setOpenToComments(true);
             setSelectedFacility(f);
           }}
         />
@@ -6879,8 +6889,8 @@ function FacilityCommentsPopover({
           onClick={onOpenFullEditor}
           className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-md transition-colors"
         >
-          <FileText className="w-3.5 h-3.5" />
-          Open full editor
+          <MessageCircle className="w-3.5 h-3.5" />
+          View comments
         </button>
       </div>
       </div>
