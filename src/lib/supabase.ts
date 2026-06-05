@@ -35,6 +35,12 @@ export interface LDARObservationPathStop {
   y: number;
   /** Short label used in the legend (e.g. "Wellheads (2x)", "Combustor System"). */
   label: string;
+  /** When true, this stop is kept in the legend but removed from the drawn
+   *  path + the numbered marker on the map (and the exported PDF). Lets the
+   *  user take a point off the route while still listing it in the legend,
+   *  then delete it from the legend separately. Defaults to false/undefined
+   *  (on the path). */
+  offPath?: boolean;
 }
 
 export interface LDARObservationPathWaypoint {

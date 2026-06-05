@@ -16,6 +16,8 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Route,
+  Scissors,
 } from 'lucide-react';
 import {
   supabase,
@@ -163,7 +165,8 @@ function tracedPointsSimple(
   stops: LDARObservationPathStop[],
   waypoints: LDARObservationPathWaypoint[],
 ): Array<{ x: number; y: number }> {
-  const sorted = sortStops(stops);
+  // Off-path stops stay in the legend but are not part of the drawn route.
+  const sorted = sortStops(stops.filter((s) => !s.offPath));
   if (sorted.length === 0) return [];
   if (sorted.length === 1) return sorted.map((s) => ({ x: s.x, y: s.y }));
 
@@ -1219,6 +1222,21 @@ export default function LDARObservationPathEditor({
   }, [selection]);
 
   // -----------------------------------------------------------
+  // Toggle the selected stop on/off the drawn path. Off-path stops stay in
+  // the legend (so the user can keep listing them, then delete them from the
+  // legend separately) but drop out of the route + exported map.
+  // -----------------------------------------------------------
+  const setSelectedStopOffPath = useCallback((off: boolean) => {
+    if (!selection || selection.kind !== 'stop') return;
+    commitChange({
+      ...pathData,
+      stops: pathData.stops.map((s) =>
+        s.id === selection.id ? { ...s, offPath: off } : s,
+      ),
+    });
+  }, [selection, pathData, commitChange]);
+
+  // -----------------------------------------------------------
   // Reset to AI-generated state (or empty if never generated).
   // -----------------------------------------------------------
   const resetToInitial = useCallback(() => {
@@ -1407,7 +1425,13 @@ export default function LDARObservationPathEditor({
                     ? 'bg-red-900/40 hover:bg-red-900/60 text-red-200 border border-red-900/60'
                     : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
-                title={selection ? 'Delete the selected stop/waypoint' : 'Select a stop or waypoint to delete'}
+                title={
+                  selection?.kind === 'stop'
+                    ? 'Delete this stop entirely — removes it from the path AND the legend'
+                    : selection
+                      ? 'Delete the selected stop/waypoint'
+                      : 'Select a stop or waypoint to delete'
+                }
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Delete
@@ -1494,8 +1518,41 @@ export default function LDARObservationPathEditor({
             }`}
             placeholder="e.g. Wellheads (2x)"
           />
-          <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-            Double-click the circle to edit its number
+          {/* Remove this point from the route while keeping its legend entry
+              (or restore it). Full deletion is the Delete button above, which
+              also removes it from the legend. */}
+          <button
+            type="button"
+            onClick={() => setSelectedStopOffPath(!selectedStop.offPath)}
+            title={
+              selectedStop.offPath
+                ? 'Put this point back on the path'
+                : 'Remove this point from the path — it stays in the legend until you delete it'
+            }
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${
+              selectedStop.offPath
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : darkMode
+                  ? 'bg-amber-900/40 text-amber-300 hover:bg-amber-900/60'
+                  : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+            }`}
+          >
+            {selectedStop.offPath ? (
+              <>
+                <Route className="w-3.5 h-3.5" />
+                Add to path
+              </>
+            ) : (
+              <>
+                <Scissors className="w-3.5 h-3.5" />
+                Remove from path
+              </>
+            )}
+          </button>
+          <span className={`hidden lg:inline text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+            {selectedStop.offPath
+              ? 'In legend only — use Delete to remove it from the legend'
+              : 'Double-click the circle to edit its number'}
           </span>
         </div>
       )}
@@ -1655,6 +1712,11 @@ export default function LDARObservationPathEditor({
               {stops.map((stop) => {
                 const isSelected = selection?.kind === 'stop' && selection.id === stop.id;
                 const isEditingNum = editingNumberOf === stop.id;
+                const off = !!stop.offPath;
+                // Off-path stops drop out of the route + export; in edit mode
+                // we still draw a faded "ghost" marker so they can be
+                // re-selected — to restore to the path or delete from legend.
+                if (off && !isEditMode) return null;
                 return (
                   <g
                     key={stop.id}
@@ -1682,19 +1744,21 @@ export default function LDARObservationPathEditor({
                     )}
                     <circle
                       r={VISUAL.stopRadius}
-                      fill={VISUAL.stopFill}
-                      stroke={VISUAL.stopBorderColor}
-                      strokeWidth={VISUAL.stopBorder}
+                      fill={off ? 'rgba(220,38,38,0.18)' : VISUAL.stopFill}
+                      stroke={off ? VISUAL.stopFill : VISUAL.stopBorderColor}
+                      strokeWidth={off ? 2 : VISUAL.stopBorder}
+                      strokeDasharray={off ? '4 3' : undefined}
                     />
                     {!isEditingNum && (
                       <text
                         textAnchor="middle"
                         dominantBaseline="central"
-                        fill={VISUAL.stopText}
+                        fill={off ? VISUAL.stopFill : VISUAL.stopText}
                         fontSize={VISUAL.stopFontSize}
                         fontWeight={700}
                         fontFamily="system-ui, -apple-system, sans-serif"
                         pointerEvents="none"
+                        opacity={off ? 0.85 : 1}
                       >
                         {stop.number}
                       </text>
