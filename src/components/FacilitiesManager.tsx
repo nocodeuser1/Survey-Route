@@ -163,7 +163,8 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'day_assignment' | 'team_assignment' | 'status' | 'created_at' |
   'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' | 'well_name_7' | 'well_name_8' | 'well_name_9' | 'well_name_10' |
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
-  'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status';
+  'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status' |
+  'plan_invoice_status' | 'inspection_invoice_status';
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'latitude', 'longitude', 'spcc_status', 'inspection_status', 'recertification_status', 'notes'];
 
@@ -183,6 +184,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'well_name_10', 'well_api_10',
   'lat_well_sheet', 'long_well_sheet',
   'ldar_site_plan_status',
+  'plan_invoice_status', 'inspection_invoice_status',
   'created_at',
 ];
 
@@ -243,6 +245,8 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
   ldar_site_plan_status: 'LDAR Site Plan',
+  plan_invoice_status: 'Plan Invoice Status',
+  inspection_invoice_status: 'Inspection Invoice Status',
   created_at: 'Date Added',
 };
 
@@ -796,6 +800,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
+  // Per-mode invoice filter chip. 'all' = no filter, 'awaiting' = not-yet-
+  // invoiced, 'unpaid' = invoiced but not paid, 'paid' = fully collected.
+  // Independent state per mode so toggling in plan mode doesn't carry over
+  // when the user switches to inspection mode.
+  type InvoiceFilter = 'all' | 'awaiting' | 'unpaid' | 'paid';
+  const [planInvoiceFilter, setPlanInvoiceFilter] = useState<InvoiceFilter>('all');
+  const [inspectionInvoiceFilter, setInspectionInvoiceFilter] = useState<InvoiceFilter>('all');
   // Custom rule-based filters from the Filters dropdown. Hydrated from
   // user preferences (JSON-serializable). See src/utils/customFilters.ts.
   const [customFilterRules, setCustomFilterRules] = useState<CustomRule[]>(
@@ -1105,7 +1116,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     showSoldFacilities ||
     spccPlanFilter !== 'all' ||
     inRouteFilter ||
-    customFilterRules.length > 0;
+    customFilterRules.length > 0 ||
+    (spccMode === 'plan' && planInvoiceFilter !== 'all') ||
+    (spccMode === 'inspection' && inspectionInvoiceFilter !== 'all');
 
   const toggleStatusFilter = (value: string) => {
     setStatusFilters(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
@@ -1509,6 +1522,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (spccPlanFilter !== 'all' && spccMode === 'plan') {
         const planStatus = getFacilityPlanStatus(facility);
         if (planStatus !== spccPlanFilter) return false;
+      }
+
+      // Invoice-status chip filter — only applies in the matching mode.
+      // 'awaiting' = work done but no invoice raised; 'unpaid' = invoiced
+      // and waiting on payment; 'paid' = fully collected.
+      if (spccMode === 'plan' && planInvoiceFilter !== 'all') {
+        const invoiced = !!facility.plan_invoiced;
+        const paid = !!facility.plan_paid;
+        if (planInvoiceFilter === 'awaiting' && invoiced) return false;
+        if (planInvoiceFilter === 'unpaid' && (!invoiced || paid)) return false;
+        if (planInvoiceFilter === 'paid' && !paid) return false;
+      }
+      if (spccMode === 'inspection' && inspectionInvoiceFilter !== 'all') {
+        const invoiced = !!facility.inspection_invoiced;
+        const paid = !!facility.inspection_paid;
+        if (inspectionInvoiceFilter === 'awaiting' && invoiced) return false;
+        if (inspectionInvoiceFilter === 'unpaid' && (!invoiced || paid)) return false;
+        if (inspectionInvoiceFilter === 'paid' && !paid) return false;
       }
 
       // Custom rules (AND-combined). Empty list short-circuits inside the
@@ -3288,6 +3319,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </span>
         );
       }
+      case 'plan_invoice_status':
+        return (
+          <InvoiceStatusCell
+            facility={facility}
+            kind="plan"
+            onChange={onFacilitiesChange}
+          />
+        );
+      case 'inspection_invoice_status':
+        return (
+          <InvoiceStatusCell
+            facility={facility}
+            kind="inspection"
+            onChange={onFacilitiesChange}
+          />
+        );
       case 'inspection_status':
         return getVerificationIcon(facility);
       case 'recertification_status':
@@ -4233,6 +4280,77 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   </div>
                 );
               })()}
+              {/* Invoice chips — plan mode (filter facilities by plan invoice
+                  status). Three chips cycle through the lifecycle: awaiting
+                  invoice → unpaid → paid. Clicking the active chip clears.
+                  Counts ignore sold facilities so the numbers always match
+                  what the user sees in the table. */}
+              {spccMode === 'plan' && !isLoading && (() => {
+                let awaiting = 0;
+                let unpaid = 0;
+                let paid = 0;
+                facilities.filter(f => f.status !== 'sold').forEach(f => {
+                  if (f.plan_paid) paid++;
+                  else if (f.plan_invoiced) unpaid++;
+                  else awaiting++;
+                });
+                return (
+                  <div className="hidden sm:flex items-center gap-1.5 ml-1">
+                    <InvoiceChip
+                      label={`${awaiting} awaiting invoice`}
+                      tone="amber"
+                      active={planInvoiceFilter === 'awaiting'}
+                      onClick={() => setPlanInvoiceFilter(planInvoiceFilter === 'awaiting' ? 'all' : 'awaiting')}
+                    />
+                    <InvoiceChip
+                      label={`${unpaid} awaiting payment`}
+                      tone="blue"
+                      active={planInvoiceFilter === 'unpaid'}
+                      onClick={() => setPlanInvoiceFilter(planInvoiceFilter === 'unpaid' ? 'all' : 'unpaid')}
+                    />
+                    <InvoiceChip
+                      label={`${paid} paid`}
+                      tone="green"
+                      active={planInvoiceFilter === 'paid'}
+                      onClick={() => setPlanInvoiceFilter(planInvoiceFilter === 'paid' ? 'all' : 'paid')}
+                    />
+                  </div>
+                );
+              })()}
+              {/* Invoice chips — inspection mode. Same UX as plan mode but
+                  reads `inspection_*` fields and toggles inspectionInvoiceFilter. */}
+              {spccMode === 'inspection' && !isLoading && (() => {
+                let awaiting = 0;
+                let unpaid = 0;
+                let paid = 0;
+                facilities.filter(f => f.status !== 'sold').forEach(f => {
+                  if (f.inspection_paid) paid++;
+                  else if (f.inspection_invoiced) unpaid++;
+                  else awaiting++;
+                });
+                return (
+                  <div className="hidden sm:flex items-center gap-1.5 ml-1">
+                    <InvoiceChip
+                      label={`${awaiting} awaiting invoice`}
+                      tone="amber"
+                      active={inspectionInvoiceFilter === 'awaiting'}
+                      onClick={() => setInspectionInvoiceFilter(inspectionInvoiceFilter === 'awaiting' ? 'all' : 'awaiting')}
+                    />
+                    <InvoiceChip
+                      label={`${unpaid} awaiting payment`}
+                      tone="blue"
+                      active={inspectionInvoiceFilter === 'unpaid'}
+                      onClick={() => setInspectionInvoiceFilter(inspectionInvoiceFilter === 'unpaid' ? 'all' : 'unpaid')}
+                    />
+                    <InvoiceChip
+                      label={`${paid} paid`}
+                      tone="green"
+                      active={inspectionInvoiceFilter === 'paid'}
+                      onClick={() => setInspectionInvoiceFilter(inspectionInvoiceFilter === 'paid' ? 'all' : 'paid')}
+                    />
+                  </div>
+                );
+              })()}
             </div>
             {/* Survey-type toggle. This is the single source of truth for
                 "what mode is the Facilities tab in" — it sets local spccMode
@@ -4340,6 +4458,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         setShowSoldFacilities(false);
                         setSpccPlanFilter('all');
                         setCustomFilterRules([]);
+                        setPlanInvoiceFilter('all');
+                        setInspectionInvoiceFilter('all');
                       }}
                       title="Clear all filters"
                       aria-label="Clear all filters"
@@ -5160,6 +5280,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               } ${columnId === 'spcc_status' || columnId === 'inspection_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
+                              // Invoice columns own their own buttons +
+                              // stopPropagation. Don't open any modal when
+                              // the cell area itself is clicked.
+                              if (
+                                columnId === 'plan_invoice_status' ||
+                                columnId === 'inspection_invoice_status'
+                              ) {
+                                return;
+                              }
                               if (columnId === 'spcc_status') {
                                 e.stopPropagation();
                                 setSpccPlanDetailFacility(facility);
@@ -5168,6 +5297,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               if (columnId === 'inspection_status') {
                                 e.stopPropagation();
                                 setForcedTab('inspections');
+                                setSelectedFacility(facility);
+                                return;
+                              }
+                              // Facility name column always opens the full
+                              // facility-overview modal (FacilityDetailModal),
+                              // overriding the mode-specific default (which
+                              // would otherwise open the SPCC plan detail in
+                              // plan mode).
+                              if (columnId === 'name') {
+                                e.stopPropagation();
                                 setSelectedFacility(facility);
                                 return;
                               }
@@ -6461,5 +6600,202 @@ function FacilityCommentsPopover({
       </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Toolbar chip for invoice-status filters. Tonal variants for the three
+ * lifecycle states (awaiting invoice = amber, awaiting payment = blue,
+ * paid = green). Shows an X glyph when active so the user can see the
+ * filter is on and click to clear.
+ */
+function InvoiceChip({
+  label,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  tone: 'amber' | 'blue' | 'green';
+  active: boolean;
+  onClick: () => void;
+}) {
+  const tones: Record<typeof tone, string> = {
+    amber:
+      'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+    blue:
+      'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    green:
+      'bg-emerald-50 dark:bg-green-900/30 text-emerald-600 dark:text-green-400',
+  } as const;
+  const ringActive: Record<typeof tone, string> = {
+    amber: 'ring-2 ring-amber-400 dark:ring-amber-500',
+    blue: 'ring-2 ring-blue-400 dark:ring-blue-500',
+    green: 'ring-2 ring-emerald-400 dark:ring-emerald-500',
+  } as const;
+  const ringHover: Record<typeof tone, string> = {
+    amber: 'hover:ring-1 hover:ring-amber-300 dark:hover:ring-amber-600',
+    blue: 'hover:ring-1 hover:ring-blue-300 dark:hover:ring-blue-600',
+    green: 'hover:ring-1 hover:ring-emerald-300 dark:hover:ring-emerald-600',
+  } as const;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${tones[tone]} ${active ? ringActive[tone] : ringHover[tone]}`}
+    >
+      {label}
+      {active && <X className="w-3 h-3 ml-0.5" />}
+    </button>
+  );
+}
+
+/**
+ * Invoice status cell — renders the current state (Not Invoiced / Invoiced /
+ * Paid) plus inline action buttons so the user can advance through the state
+ * machine without opening the facility detail modal. Used for both plan and
+ * inspection invoice columns; the `kind` prop selects which set of facility
+ * fields to read and write (`plan_invoiced` / `plan_paid` vs the
+ * `inspection_*` counterparts).
+ *
+ * Click handlers all stopPropagation so the parent row's onClick (which opens
+ * a modal) doesn't fire underneath. State updates are optimistic — the UI
+ * flips immediately and `onChange` triggers a parent refetch; on DB error
+ * we revert and log.
+ */
+function InvoiceStatusCell({
+  facility,
+  kind,
+  onChange,
+}: {
+  facility: Facility;
+  kind: 'plan' | 'inspection';
+  onChange: () => void;
+}) {
+  const invoicedField = kind === 'plan' ? 'plan_invoiced' : 'inspection_invoiced';
+  const invoicedAtField = kind === 'plan' ? 'plan_invoiced_at' : 'inspection_invoiced_at';
+  const paidField = kind === 'plan' ? 'plan_paid' : 'inspection_paid';
+  const paidAtField = kind === 'plan' ? 'plan_paid_at' : 'inspection_paid_at';
+
+  const invoiced = !!(facility as any)[invoicedField];
+  const paid = !!(facility as any)[paidField];
+  const invoicedAt = (facility as any)[invoicedAtField] as string | null | undefined;
+  const paidAt = (facility as any)[paidAtField] as string | null | undefined;
+
+  const [busy, setBusy] = useState(false);
+
+  const update = async (
+    patch: Record<string, any>,
+    e: React.MouseEvent,
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update(patch)
+        .eq('id', facility.id);
+      if (error) throw error;
+      onChange();
+    } catch (err) {
+      console.error(`Invoice ${kind} update failed:`, err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markInvoiced = (e: React.MouseEvent) =>
+    update({ [invoicedField]: true, [invoicedAtField]: new Date().toISOString() }, e);
+
+  const markPaid = (e: React.MouseEvent) =>
+    update(
+      { [paidField]: true, [paidAtField]: new Date().toISOString() },
+      e,
+    );
+
+  // Resets to the previous step: Paid → Invoiced (clear paid only),
+  // Invoiced → Not Invoiced (clear both, since DB constraint requires
+  // paid=false when invoiced is being cleared).
+  const undo = (e: React.MouseEvent) => {
+    if (paid) {
+      return update({ [paidField]: false, [paidAtField]: null }, e);
+    }
+    return update(
+      {
+        [invoicedField]: false,
+        [invoicedAtField]: null,
+        [paidField]: false,
+        [paidAtField]: null,
+      },
+      e,
+    );
+  };
+
+  // Short MM/DD/YY for the badge subtitle so the cell stays narrow.
+  const shortDate = (iso: string | null | undefined) => {
+    if (!iso) return '';
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
+  };
+
+  return (
+    <div className="inline-flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+      {paid ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 whitespace-nowrap">
+          <CheckCircle className="w-3 h-3" />
+          Paid {shortDate(paidAt) && <span className="font-normal opacity-75">· {shortDate(paidAt)}</span>}
+        </span>
+      ) : invoiced ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap">
+          <DollarSign className="w-3 h-3" />
+          Invoiced {shortDate(invoicedAt) && <span className="font-normal opacity-75">· {shortDate(invoicedAt)}</span>}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 whitespace-nowrap">
+          <DollarSign className="w-3 h-3" />
+          Not Invoiced
+        </span>
+      )}
+
+      {!invoiced && (
+        <button
+          type="button"
+          onClick={markInvoiced}
+          disabled={busy}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300 disabled:opacity-60 transition-colors"
+          title="Mark as Invoiced"
+        >
+          <DollarSign className="w-3 h-3" />
+          Invoice
+        </button>
+      )}
+      {invoiced && !paid && (
+        <button
+          type="button"
+          onClick={markPaid}
+          disabled={busy}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-green-50 hover:bg-green-100 text-green-700 dark:bg-green-900/30 dark:hover:bg-green-900/50 dark:text-green-300 disabled:opacity-60 transition-colors"
+          title="Mark as Paid"
+        >
+          <Check className="w-3 h-3" />
+          Mark Paid
+        </button>
+      )}
+      {(invoiced || paid) && (
+        <button
+          type="button"
+          onClick={undo}
+          disabled={busy}
+          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-60 transition-colors"
+          title={paid ? 'Undo Paid (revert to Invoiced)' : 'Undo Invoiced'}
+        >
+          <Undo2 className="w-3 h-3" />
+          Undo
+        </button>
+      )}
+    </div>
   );
 }

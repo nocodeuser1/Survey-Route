@@ -183,6 +183,18 @@ export interface Facility {
   ldar_observation_path_completed?: boolean;
   ldar_observation_path_completed_at?: string | null;
   ldar_observation_path_completed_by?: string | null;
+  // Invoice tracking — plans and inspections are billed separately so each
+  // has its own (invoiced, paid) state machine. UI lights up when the
+  // boolean flips; the timestamps drive "Invoiced 6/1/26" subtitles.
+  // See migration 20260605010000_facility_invoice_tracking.sql.
+  plan_invoiced?: boolean;
+  plan_invoiced_at?: string | null;
+  plan_paid?: boolean;
+  plan_paid_at?: string | null;
+  inspection_invoiced?: boolean;
+  inspection_invoiced_at?: string | null;
+  inspection_paid?: boolean;
+  inspection_paid_at?: string | null;
   // Detail fields
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;
