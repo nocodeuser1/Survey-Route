@@ -1594,13 +1594,17 @@ export default function LDARObservationPathEditor({
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || !hasUnsavedChanges}
+            disabled={isSaving}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              isSaving || !hasUnsavedChanges
+              isSaving
                 ? 'bg-emerald-500/40 text-white cursor-not-allowed'
                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
             }`}
-            title={hasUnsavedChanges ? 'Save changes + bake the annotated PDF' : 'No unsaved changes'}
+            title={
+              hasUnsavedChanges
+                ? 'Save changes + bake the annotated PDF'
+                : 'Re-save to re-bake the annotated PDF (no changes needed)'
+            }
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {saveStage === 'pdf' ? 'Baking PDF…' : saveStage === 'json' ? 'Saving…' : 'Save'}
