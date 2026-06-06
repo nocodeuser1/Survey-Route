@@ -13,6 +13,7 @@
 
 import type { Facility } from '../lib/supabase';
 import { parseLocalDate } from './dateUtils';
+import { pickFacilityFilenameName } from './spccPlans';
 
 /** Cutoff for LDAR Site Plan applicability (commenced-construction rule,
  *  proxied by IP date). Facilities with an IP date strictly after this need
@@ -61,4 +62,54 @@ export function getLdarSitePlanState(
   if (facility.ldar_site_plan_url) return 'uploaded';
   if (isLdarSitePlanRequired(facility)) return 'needed';
   return 'not_required';
+}
+
+/**
+ * Resolve the date stamped on the LDAR observation plan, formatted MM-DD-YY
+ * for the download filename. Priority:
+ *  1. The user's custom date (dateValueOverride, typed "M/D/YY" or "M/D/YYYY").
+ *  2. The date the annotated PDF was baked (annotated_pdf_uploaded_at) — that's
+ *     the "today" value auto-stamped when no override is set.
+ *  3. The source-PDF upload date as a last resort.
+ * Returns '' when nothing is resolvable.
+ */
+function resolveLdarPlanDateMMDDYY(facility: Facility): string {
+  const data = facility.ldar_observation_path_data;
+  const override = data?.dateValueOverride?.trim();
+  if (override) {
+    const m = override.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+    if (m) {
+      const mo = m[1].padStart(2, '0');
+      const d = m[2].padStart(2, '0');
+      const y = m[3].length === 4 ? m[3].slice(2) : m[3].padStart(2, '0');
+      return `${mo}-${d}-${y}`;
+    }
+    // Non-standard custom text — make it filename-safe and use as-is.
+    return override.replace(/[/\\:*?"<>|]/g, '-').trim();
+  }
+  const iso = data?.annotated_pdf_uploaded_at ?? facility.ldar_site_plan_uploaded_at ?? null;
+  const dm = iso ? String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+  return dm ? `${dm[2]}-${dm[3]}-${dm[1].slice(2)}` : '';
+}
+
+/**
+ * Canonical download filename for an LDAR site plan PDF — mirrors the SPCC
+ * plan convention but with the "LDAR Site Path" label and the plan's own
+ * stamped date:
+ *
+ *   "{Facility Name} - {Camino Facility ID} - LDAR Site Path (MM-DD-YY).pdf"
+ *
+ * Facility name + Camino ID resolved the same way as SPCC filenames
+ * (pickFacilityFilenameName; "NoID" placeholder when the ID is missing).
+ */
+export function buildLdarSitePlanFilename(facility: Facility): string {
+  const sanitize = (s: string) =>
+    s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+  const name = sanitize(pickFacilityFilenameName(facility)) || 'Unnamed Facility';
+  const id = facility.camino_facility_id
+    ? sanitize(facility.camino_facility_id) || 'NoID'
+    : 'NoID';
+  const dateStr = resolveLdarPlanDateMMDDYY(facility);
+  const datePart = dateStr ? ` (${dateStr})` : '';
+  return `${name} - ${id} - LDAR Site Path${datePart}.pdf`;
 }

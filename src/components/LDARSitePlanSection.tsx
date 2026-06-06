@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { CheckCircle2, FileText, ExternalLink, RefreshCcw, Circle, Loader2 } from 'lucide-react';
+import { CheckCircle2, FileText, ExternalLink, RefreshCcw, Circle, Loader2, Download } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import { formatDate } from '../utils/dateUtils';
+import { buildLdarSitePlanFilename } from '../utils/ldar';
 import InlineLDARSitePlanUpload from './InlineLDARSitePlanUpload';
 
 /**
@@ -35,9 +36,49 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
   const [isToggling, setIsToggling] = useState(false);
   const [showReupload, setShowReupload] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const isCompleted = !!facility.ldar_site_plan_completed;
   const hasFile = !!facility.ldar_site_plan_url;
+
+  // Resolve the on-file PDF (prefer the baked/annotated version) + a
+  // cache-busted URL. Shared by the view link and the canonical download.
+  const annotatedUrl = facility.ldar_observation_path_data?.annotated_pdf_url ?? null;
+  const annotatedTs = facility.ldar_observation_path_data?.annotated_pdf_uploaded_at ?? null;
+  const sourceUrl = facility.ldar_site_plan_url ?? null;
+  const sourceTs = facility.ldar_site_plan_uploaded_at ?? null;
+  const baseUrl = annotatedUrl ?? sourceUrl;
+  const fileTs = annotatedUrl ? annotatedTs : sourceTs;
+  const fileHref = baseUrl ? (fileTs ? `${baseUrl}?t=${encodeURIComponent(fileTs)}` : baseUrl) : null;
+  const displayFilename = annotatedUrl
+    ? `${facility.name || 'Facility'} — LDAR Observation Plan.pdf`
+    : facility.ldar_site_plan_filename || 'Site Plan.pdf';
+
+  // Download the PDF with the canonical filename (same convention as the SPCC
+  // plans: "Name - Camino ID - LDAR Site Path (MM-DD-YY).pdf"). Fetch-to-blob
+  // because the browser ignores the download attribute on cross-origin URLs.
+  const handleDownload = async () => {
+    if (!fileHref) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(fileHref);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = buildLdarSitePlanFilename(facility);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+    } catch (e) {
+      console.error('LDAR site plan download failed, opening in a tab:', e);
+      window.open(fileHref, '_blank', 'noopener,noreferrer');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const handleToggleCompleted = async () => {
     setIsToggling(true);
@@ -186,43 +227,24 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                 <FileText className="w-4 h-4" />
               </div>
               <div className="min-w-0 flex-1">
-                {(() => {
-                  // Prefer the FLATTENED / annotated PDF (baked when the
-                  // agency owner saves a walking path) if one exists, so
-                  // the user gets the version with the overlay rendered
-                  // into it. Falls back to the raw source PDF when no
-                  // path has been saved. Cache-bust with the matching
-                  // uploaded_at timestamp so saves bypass browser cache
-                  // immediately.
-                  const annotatedUrl = facility.ldar_observation_path_data?.annotated_pdf_url ?? null;
-                  const annotatedTs = facility.ldar_observation_path_data?.annotated_pdf_uploaded_at ?? null;
-                  const sourceUrl = facility.ldar_site_plan_url!;
-                  const sourceTs = facility.ldar_site_plan_uploaded_at ?? null;
-                  const baseUrl = annotatedUrl ?? sourceUrl;
-                  const ts = annotatedUrl ? annotatedTs : sourceTs;
-                  const href = ts ? `${baseUrl}?t=${encodeURIComponent(ts)}` : baseUrl;
-                  const displayFilename = annotatedUrl
-                    ? `${facility.name || 'Facility'} — LDAR Observation Plan.pdf`
-                    : facility.ldar_site_plan_filename || 'Site Plan.pdf';
-                  return (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`text-sm font-medium hover:underline break-words ${
-                        darkMode ? 'text-blue-300' : 'text-blue-700'
-                      }`}
-                      title={
-                        annotatedUrl
-                          ? 'Flattened LDAR Observation Plan (walking path baked in)'
-                          : 'Source site plan PDF'
-                      }
-                    >
-                      {displayFilename}
-                      <ExternalLink className="inline-block align-text-bottom w-3 h-3 ml-1" />
-                    </a>
-                  );
-                })()}
+                {/* View link (opens in a new tab). The annotated/baked PDF is
+                    preferred over the raw source when present. */}
+                <a
+                  href={fileHref ?? '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`text-sm font-medium hover:underline break-words ${
+                    darkMode ? 'text-blue-300' : 'text-blue-700'
+                  }`}
+                  title={
+                    annotatedUrl
+                      ? 'Flattened LDAR Observation Plan (walking path baked in)'
+                      : 'Source site plan PDF'
+                  }
+                >
+                  {displayFilename}
+                  <ExternalLink className="inline-block align-text-bottom w-3 h-3 ml-1" />
+                </a>
                 {facility.ldar_site_plan_uploaded_at && (
                   <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                     Uploaded {formatDate(facility.ldar_site_plan_uploaded_at)}
@@ -230,16 +252,30 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowReupload(true)}
-              className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
-              }`}
-            >
-              <RefreshCcw className="w-3 h-3" />
-              Replace
-            </button>
+            <div className="flex flex-shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={downloading || !fileHref}
+                title="Download with the canonical filename (Name - Camino ID - LDAR Site Path (date).pdf)"
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-60 ${
+                  darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
+                }`}
+              >
+                {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowReupload(true)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
+                }`}
+              >
+                <RefreshCcw className="w-3 h-3" />
+                Replace
+              </button>
+            </div>
           </div>
         ) : (
           <div>
