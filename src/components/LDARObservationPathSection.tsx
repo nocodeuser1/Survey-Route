@@ -51,6 +51,13 @@ export default function LDARObservationPathSection({
   const [editorAutoGenerate, setEditorAutoGenerate] = useState(false);
   const [deletingPath, setDeletingPath] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while the source-selector was opened from INSIDE the editor (the
+  // "Change page" action) — so confirming a new page clears the stale path
+  // and regenerates, while cancelling returns to the editor untouched.
+  const [changingPage, setChangingPage] = useState(false);
+  // Bumped to force the editor to fully remount onto a newly-chosen page
+  // (the source URL is a fixed path, so React wouldn't otherwise reload it).
+  const [editorRemountKey, setEditorRemountKey] = useState(0);
 
   const hasLdarPdf = !!facility.ldar_site_plan_url;
   const hasSpccPdf = !!facility.spcc_plan_url;
@@ -231,6 +238,7 @@ export default function LDARObservationPathSection({
           LDARObservationPathSection without wiring up modal state. */}
       {showEditor && (
         <LDARObservationPathEditor
+          key={editorRemountKey}
           facility={facility}
           darkMode={darkMode}
           autoGenerate={editorAutoGenerate}
@@ -239,20 +247,54 @@ export default function LDARObservationPathSection({
             setEditorAutoGenerate(false);
           }}
           onSaved={onChange}
+          // Only offer "Change page" for SPCC-sourced plans (a multi-page
+          // source to choose from). Opens the picker over the editor; the
+          // editor stays mounted underneath so cancelling loses nothing.
+          onChangePage={
+            facility.spcc_plan_url
+              ? () => {
+                  setChangingPage(true);
+                  setShowSourceSelector(true);
+                }
+              : undefined
+          }
         />
       )}
       {showSourceSelector && (
         <LDARSourceSelector
           facility={facility}
           darkMode={darkMode}
-          onClose={() => setShowSourceSelector(false)}
-          onConfirmed={() => {
+          onClose={() => {
+            // Cancel: just close the picker. If we got here via "Change page",
+            // the editor is still open underneath — leave it untouched.
             setShowSourceSelector(false);
-            onChange();
-            // Chain straight into the editor — the user already confirmed
-            // the source page, so making them click another button to
-            // open the editor would be friction.
-            setShowEditor(true);
+            setChangingPage(false);
+          }}
+          onConfirmed={async () => {
+            setShowSourceSelector(false);
+            if (changingPage) {
+              setChangingPage(false);
+              // A new page was chosen for an existing plan — the old path is
+              // for the wrong page, so clear it (auto-gen is gated on an empty
+              // path) and let the editor regenerate on the chosen page.
+              try {
+                const patch = { ldar_observation_path_data: null };
+                await supabase.from('facilities').update(patch).eq('id', facility.id);
+                Object.assign(facility, patch);
+              } catch (err) {
+                console.error('Failed to clear path on page change:', err);
+              }
+              setEditorAutoGenerate(true);
+              setEditorRemountKey((k) => k + 1); // force a fresh editor on the new page
+              setShowEditor(true);
+              onChange();
+            } else {
+              onChange();
+              // Chain straight into the editor — the user already confirmed
+              // the source page, so making them click another button to
+              // open the editor would be friction.
+              setShowEditor(true);
+            }
           }}
         />
       )}

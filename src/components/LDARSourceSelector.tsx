@@ -154,9 +154,10 @@ export default function LDARSourceSelector({
         if (cancelled) return;
         setDetection(result);
 
-        // Pre-select the detected page (or page 1 if nothing detected) and
-        // render its preview thumbnail.
-        const initialPage = result.detectedPage ?? 1;
+        // Pre-select the page already in use (when re-opening to change it),
+        // else the auto-detected page, else page 1.
+        const initialPage =
+          facility.ldar_site_plan_source_page ?? result.detectedPage ?? 1;
         setSelectedPage(initialPage);
         const thumb = await renderPageThumb(initialPage, 1.2);
         if (cancelled) return;

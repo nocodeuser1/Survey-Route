@@ -19,6 +19,7 @@ import {
   Route,
   Scissors,
   CalendarPlus,
+  Files,
 } from 'lucide-react';
 import {
   supabase,
@@ -401,6 +402,10 @@ interface LDARObservationPathEditorProps {
    *  "Generate Walking Path with AI" button live up to its promise without
    *  making the user click Generate again inside the editor. Default false. */
   autoGenerate?: boolean;
+  /** When provided, shows a "Change page" action that closes the editor and
+   *  reopens the source-page picker (for when the wrong SPCC page was picked).
+   *  Only meaningful when the source came from a multi-page SPCC plan. */
+  onChangePage?: () => void;
 }
 
 type DragKind =
@@ -427,6 +432,7 @@ export default function LDARObservationPathEditor({
   onClose,
   onSaved,
   autoGenerate = false,
+  onChangePage,
 }: LDARObservationPathEditorProps) {
   // The PDF page rendered as a PNG data URL + its native pixel dimensions.
   // We use these dimensions as the SVG viewBox, so 1px in viewBox = 1px in
@@ -683,7 +689,15 @@ export default function LDARObservationPathEditor({
       setIsLoadingPage(true);
       setLoadError(null);
       try {
-        const rendered = await renderPdfPageToImage(facility.ldar_site_plan_url, { scale: 2 });
+        // Cache-bust on the upload timestamp: the source lives at a fixed
+        // path ({id}/site-plan.pdf) that gets OVERWRITTEN when the user picks
+        // a different page, so without this the browser would serve the stale
+        // (old-page) bytes.
+        const ts = facility.ldar_site_plan_uploaded_at;
+        const srcUrl = ts
+          ? `${facility.ldar_site_plan_url}${facility.ldar_site_plan_url!.includes('?') ? '&' : '?'}t=${encodeURIComponent(ts)}`
+          : facility.ldar_site_plan_url!;
+        const rendered = await renderPdfPageToImage(srcUrl, { scale: 2 });
         if (cancelled) return;
         setPageImage({ dataUrl: rendered.dataUrl, w: rendered.width, h: rendered.height });
 
@@ -692,7 +706,11 @@ export default function LDARObservationPathEditor({
         // "FACILITY SITE PLAN" and overwrite the date cell with today.
         // Best-effort — if anything fails we just skip the overlay.
         try {
-          const arrayBuffer = await (await fetch(facility.ldar_site_plan_url!)).arrayBuffer();
+          const tsB = facility.ldar_site_plan_uploaded_at;
+          const fetchUrl = tsB
+            ? `${facility.ldar_site_plan_url}${facility.ldar_site_plan_url!.includes('?') ? '&' : '?'}t=${encodeURIComponent(tsB)}`
+            : facility.ldar_site_plan_url!;
+          const arrayBuffer = await (await fetch(fetchUrl)).arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: arrayBuffer }).promise;
           const page = await pdf.getPage(1);
           const [titlePos, foundDate] = await Promise.all([
@@ -719,7 +737,8 @@ export default function LDARObservationPathEditor({
     return () => {
       cancelled = true;
     };
-  }, [facility.ldar_site_plan_url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facility.ldar_site_plan_url, facility.ldar_site_plan_uploaded_at]);
 
   // -----------------------------------------------------------
   // State mutation helpers (with undo support).
@@ -1026,6 +1045,20 @@ export default function LDARObservationPathEditor({
     }
     onClose();
   }, [hasUnsavedChanges, onClose]);
+
+  // Reopen the source-page picker (when the wrong SPCC page was chosen). The
+  // current path is for the old page, so this discards it and regenerates on
+  // the page the user picks next — confirm before throwing work away.
+  const handleChangePage = useCallback(() => {
+    if (!onChangePage) return;
+    const ok = window.confirm(
+      hasUnsavedChanges || stops.length > 0
+        ? 'Pick a different source page? The current walking path will be discarded and regenerated on the page you choose.'
+        : 'Pick a different source page for this plan?',
+    );
+    if (!ok) return;
+    onChangePage();
+  }, [onChangePage, hasUnsavedChanges, stops.length]);
 
   // Escape closes ONLY this editor, never the facility modal beneath it. We
   // listen in the capture phase on window and stopImmediatePropagation so the
@@ -1618,6 +1651,25 @@ export default function LDARObservationPathEditor({
             {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {isGenerating ? 'Generating…' : stops.length === 0 ? 'Generate with AI' : 'Regenerate with AI'}
           </button>
+
+          {/* Change source page — only when the source came from a multi-page
+              SPCC plan and the parent wired up the picker. */}
+          {onChangePage && facility.spcc_plan_url && (
+            <button
+              type="button"
+              onClick={handleChangePage}
+              disabled={isGenerating}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                darkMode
+                  ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700'
+                  : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-300'
+              }`}
+              title="Pick a different page from the SPCC plan to draw on"
+            >
+              <Files className="w-4 h-4" />
+              Change page
+            </button>
+          )}
 
           <div className={`h-6 w-px ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`} />
 
