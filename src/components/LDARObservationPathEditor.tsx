@@ -267,11 +267,14 @@ function formatDateLikeOriginal(originalDate: string | null): string {
   const fullYear = now.getFullYear();
   const twoYear = String(fullYear % 100).padStart(2, '0');
   if (originalDate) {
-    const match = originalDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    // Accept "/" or "-" separators and preserve whichever the template uses
+    // (e.g. 6/5/26 → 6/5/26, 3-24-2023 → M-D-YYYY) plus its year-digit style.
+    const match = originalDate.match(/(\d{1,2})([/-])(\d{1,2})[/-](\d{2,4})/);
     if (match) {
-      const yearDigits = match[3].length;
+      const sep = match[2];
+      const yearDigits = match[4].length;
       const y = yearDigits === 2 ? twoYear : String(fullYear);
-      return `${m}/${d}/${y}`;
+      return `${m}${sep}${d}${sep}${y}`;
     }
   }
   return `${m}/${d}/${twoYear}`;

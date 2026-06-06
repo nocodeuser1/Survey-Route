@@ -69,7 +69,9 @@ export async function findDateInPdfPage(
   const textContent = await pdfPage.getTextContent();
   // Match the entire item — anchor at start/end so we don't accidentally
   // catch a date embedded inside other text. Trim whitespace tolerantly.
-  const datePattern = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/;
+  // Accepts "/" OR "-" separators (templates use both, e.g. 6/5/26 and
+  // 3-24-2023).
+  const datePattern = /^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\s*$/;
 
   for (const raw of textContent.items as Array<Record<string, unknown>>) {
     const str = typeof raw.str === 'string' ? raw.str : '';
