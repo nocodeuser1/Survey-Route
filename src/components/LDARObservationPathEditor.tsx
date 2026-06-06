@@ -33,6 +33,7 @@ import {
   type TextBoundingBox,
 } from '../utils/findTextInPdfPage';
 import { svgToPdfBlob } from '../utils/svgToPdfBlob';
+import { buildLdarSitePlanFilename } from '../utils/ldar';
 import { detectSitePlanInLoadedPdf } from '../utils/spccSitePlanDetector';
 import { extractPageAsPdf } from '../utils/extractPdfPage';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -907,7 +908,36 @@ export default function LDARObservationPathEditor({
               setSelection(restoreSel);
             });
           }
-          const annotatedPath = `${facility.id}/site-plan-annotated.pdf`;
+          const nowIso = new Date().toISOString();
+          // Store the baked PDF under the CANONICAL filename so the browser
+          // preview tab (and any download from it) carry the right name,
+          // matching the Download button:
+          //   "Name - Camino ID - LDAR Site Path (date).pdf"
+          // The filename's date comes from the plan (dateValueOverride or this
+          // bake's timestamp), so build it off the data we're about to save.
+          const dataForName: LDARObservationPathData = { ...toSave, annotated_pdf_uploaded_at: nowIso };
+          const annotatedPath = `${facility.id}/${buildLdarSitePlanFilename({
+            ...facility,
+            ldar_observation_path_data: dataForName,
+          })}`;
+
+          // Clean up the previous annotated object when it lived at a different
+          // path (the old fixed name, or a prior date) so storage doesn't
+          // accrete stale files. Best-effort — never blocks the save.
+          const prevUrl = facility.ldar_observation_path_data?.annotated_pdf_url;
+          if (prevUrl) {
+            try {
+              const prevPath = decodeURIComponent(
+                prevUrl.replace(/^.*\/ldar-site-plans\//, '').split('?')[0],
+              );
+              if (prevPath && prevPath !== annotatedPath) {
+                await supabase.storage.from('ldar-site-plans').remove([prevPath]);
+              }
+            } catch {
+              /* non-fatal */
+            }
+          }
+
           const { error: uploadError } = await supabase.storage
             .from('ldar-site-plans')
             .upload(annotatedPath, pdfBlob, {
@@ -924,7 +954,6 @@ export default function LDARObservationPathEditor({
           // the section can link to it and cache-bust per save. Source
           // PDF (ldar_site_plan_url + ldar_site_plan_uploaded_at) is
           // intentionally NOT touched.
-          const nowIso = new Date().toISOString();
           const withAnnotated: LDARObservationPathData = {
             ...toSave,
             annotated_pdf_url: annotatedUrl,
