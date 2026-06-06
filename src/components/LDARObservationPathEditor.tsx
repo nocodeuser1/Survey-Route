@@ -396,6 +396,7 @@ type DragKind =
   | { kind: 'titlebox-move' }
   | { kind: 'datebox-move' }
   | { kind: 'customtext-move'; id: string }
+  | { kind: 'customtext-resize'; id: string }
   | null;
 
 type SelectionKind =
@@ -1128,6 +1129,22 @@ export default function LDARObservationPathEditor({
           ),
         }));
         setHasUnsavedChanges(true);
+      } else if (drag.kind === 'customtext-resize') {
+        // Drag the bottom-right corner — width/height follow the cursor.
+        // Height drives the font size, so this is how the user shrinks it.
+        setPathData((prev) => ({
+          ...prev,
+          customTextBoxes: (prev.customTextBoxes ?? []).map((b) =>
+            b.id === drag.id
+              ? {
+                  ...b,
+                  w: Math.max(0.015, Math.min(1 - b.x, cx - b.x)),
+                  h: Math.max(0.008, Math.min(1 - b.y, cy - b.y)),
+                }
+              : b,
+          ),
+        }));
+        setHasUnsavedChanges(true);
       }
     },
     [pageImage, siteplanTitlePos, datePos],
@@ -1219,6 +1236,18 @@ export default function LDARObservationPathEditor({
     [isEditMode, pushUndo],
   );
 
+  const startCustomTextResize = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      if (!isEditMode) return;
+      e.stopPropagation();
+      pushUndo();
+      dragRef.current = { kind: 'customtext-resize', id };
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      setSelection({ kind: 'customText', id });
+    },
+    [isEditMode, pushUndo],
+  );
+
   // -----------------------------------------------------------
   // Click-on-path-segment → insert waypoint at that location.
   // -----------------------------------------------------------
@@ -1295,10 +1324,12 @@ export default function LDARObservationPathEditor({
     const id = shortId('t');
     const box: LDARCustomTextBox = {
       id,
-      x: 0.44,
+      x: 0.46,
       y: 0.5,
-      w: 0.12,
-      h: 0.025,
+      // Small by default (roughly title-block text size); the resize handle
+      // lets the user grow/shrink it from here.
+      w: 0.07,
+      h: 0.014,
       text: defaultText,
     };
     commitChange({
@@ -1883,6 +1914,7 @@ export default function LDARObservationPathEditor({
                         isEditMode={isEditMode}
                         selected={selection?.kind === 'customText' && selection.id === b.id}
                         onDragStart={(e) => startCustomTextDrag(e, b.id)}
+                        onResizeStart={(e) => startCustomTextResize(e, b.id)}
                         editable
                         editing={editingCustomTextId === b.id}
                         editValue={customTextInputValue}
@@ -2106,6 +2138,8 @@ interface TitleBlockOverlayProps {
   onEditCommit?: () => void;
   /** Highlight as the current selection (solid outline vs the dashed hint). */
   selected?: boolean;
+  /** When provided, a resize handle is shown (bottom-right) while selected. */
+  onResizeStart?: (e: React.PointerEvent) => void;
 }
 
 function TitleBlockOverlay({
@@ -2122,6 +2156,7 @@ function TitleBlockOverlay({
   onEditChange,
   onEditCommit,
   selected = false,
+  onResizeStart,
 }: TitleBlockOverlayProps) {
   const tx = box.x * imgW;
   const ty = box.y * imgH;
@@ -2211,6 +2246,25 @@ function TitleBlockOverlay({
           {text}
         </text>
       )}
+      {/* Resize handle (bottom-right) — only on the selected field in edit
+          mode. Dragging it changes the box width + height (height drives the
+          font size, so this is how you make the field smaller). */}
+      {isEditMode && selected && onResizeStart && !editing && (() => {
+        const hs = Math.max(10, th * 0.6);
+        return (
+          <rect
+            x={tx + tw + padX - hs / 2}
+            y={ty + th - hs / 2}
+            width={hs}
+            height={hs}
+            fill="#1d4ed8"
+            stroke="#ffffff"
+            strokeWidth={Math.max(1, hs * 0.12)}
+            style={{ cursor: 'nwse-resize' }}
+            onPointerDown={onResizeStart}
+          />
+        );
+      })()}
     </g>
   );
 }
