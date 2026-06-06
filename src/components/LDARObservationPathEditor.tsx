@@ -18,6 +18,7 @@ import {
   Maximize2,
   Route,
   Scissors,
+  CalendarPlus,
 } from 'lucide-react';
 import {
   supabase,
@@ -25,6 +26,7 @@ import {
   type LDARObservationPathData,
   type LDARObservationPathStop,
   type LDARObservationPathWaypoint,
+  type LDARCustomTextBox,
 } from '../lib/supabase';
 import { renderPdfPageToImage } from '../utils/renderPdfPageToImage';
 import {
@@ -393,12 +395,14 @@ type DragKind =
   | { kind: 'legend-resize' }
   | { kind: 'titlebox-move' }
   | { kind: 'datebox-move' }
+  | { kind: 'customtext-move'; id: string }
   | null;
 
 type SelectionKind =
   | { kind: 'stop'; id: string }
   | { kind: 'waypoint'; id: string }
   | { kind: 'legend' }
+  | { kind: 'customText'; id: string }
   | null;
 
 export default function LDARObservationPathEditor({
@@ -620,6 +624,9 @@ export default function LDARObservationPathEditor({
   // Inline edit of the title-block date cell (double-click the date).
   const [editingDate, setEditingDate] = useState(false);
   const [dateInputValue, setDateInputValue] = useState('');
+  // Inline edit of a user-added custom text/date field.
+  const [editingCustomTextId, setEditingCustomTextId] = useState<string | null>(null);
+  const [customTextInputValue, setCustomTextInputValue] = useState('');
   const [editingLegendTitle, setEditingLegendTitle] = useState(false);
   // Stop id whose label is being edited in-place from inside the legend.
   // Null when nothing is being edited. Driven by double-click on the legend
@@ -896,6 +903,7 @@ export default function LDARObservationPathEditor({
             setSelection(null);
             setEditingNumberOf(null);
             setEditingDate(false);
+            setEditingCustomTextId(null);
             setEditingLegendTitle(false);
             setEditingLegendItemId(null);
           });
@@ -1106,6 +1114,20 @@ export default function LDARObservationPathEditor({
           };
         });
         setHasUnsavedChanges(true);
+      } else if (drag.kind === 'customtext-move') {
+        setPathData((prev) => ({
+          ...prev,
+          customTextBoxes: (prev.customTextBoxes ?? []).map((b) =>
+            b.id === drag.id
+              ? {
+                  ...b,
+                  x: Math.max(0, Math.min(1 - b.w, cx - b.w / 2)),
+                  y: Math.max(0, Math.min(1 - b.h, cy - b.h / 2)),
+                }
+              : b,
+          ),
+        }));
+        setHasUnsavedChanges(true);
       }
     },
     [pageImage, siteplanTitlePos, datePos],
@@ -1185,6 +1207,18 @@ export default function LDARObservationPathEditor({
     [isEditMode, pushUndo],
   );
 
+  const startCustomTextDrag = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      if (!isEditMode) return;
+      e.stopPropagation();
+      pushUndo();
+      dragRef.current = { kind: 'customtext-move', id };
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      setSelection({ kind: 'customText', id });
+    },
+    [isEditMode, pushUndo],
+  );
+
   // -----------------------------------------------------------
   // Click-on-path-segment → insert waypoint at that location.
   // -----------------------------------------------------------
@@ -1249,6 +1283,48 @@ export default function LDARObservationPathEditor({
     commitChange({ ...pathData, dateValueOverride: v || null });
     setEditingDate(false);
   }, [editingDate, dateInputValue, pathData, commitChange]);
+
+  // -----------------------------------------------------------
+  // Custom user-added text/date fields ("Add Date").
+  // -----------------------------------------------------------
+  const addCustomTextBox = useCallback(() => {
+    // Default the value to the current document date so it's a usable date
+    // field out of the box; the user can double-click to change it.
+    const defaultText =
+      pathData.dateValueOverride ?? formatDateLikeOriginal(originalDateStr);
+    const id = shortId('t');
+    const box: LDARCustomTextBox = {
+      id,
+      x: 0.44,
+      y: 0.5,
+      w: 0.12,
+      h: 0.025,
+      text: defaultText,
+    };
+    commitChange({
+      ...pathData,
+      customTextBoxes: [...(pathData.customTextBoxes ?? []), box],
+    });
+    setSelection({ kind: 'customText', id });
+  }, [pathData, originalDateStr, commitChange]);
+
+  const beginEditCustomText = useCallback((id: string, currentText: string) => {
+    if (!isEditMode) return;
+    setCustomTextInputValue(currentText);
+    setEditingCustomTextId(id);
+  }, [isEditMode]);
+
+  const commitCustomTextEdit = useCallback(() => {
+    if (!editingCustomTextId) return;
+    const v = customTextInputValue.trim();
+    commitChange({
+      ...pathData,
+      customTextBoxes: (pathData.customTextBoxes ?? []).map((b) =>
+        b.id === editingCustomTextId ? { ...b, text: v } : b,
+      ),
+    });
+    setEditingCustomTextId(null);
+  }, [editingCustomTextId, customTextInputValue, pathData, commitChange]);
 
   // -----------------------------------------------------------
   // Add a new stop ("Area").
@@ -1318,6 +1394,11 @@ export default function LDARObservationPathEditor({
       commitChange({
         ...pathData,
         waypoints: pathData.waypoints.filter((w) => w.id !== selection.id),
+      });
+    } else if (selection.kind === 'customText') {
+      commitChange({
+        ...pathData,
+        customTextBoxes: (pathData.customTextBoxes ?? []).filter((b) => b.id !== selection.id),
       });
     }
     setSelection(null);
@@ -1532,6 +1613,18 @@ export default function LDARObservationPathEditor({
 
               <button
                 type="button"
+                onClick={addCustomTextBox}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${
+                  darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-300'
+                }`}
+                title="Add a date/text field — drag to place it, double-click to edit"
+              >
+                <CalendarPlus className="w-3.5 h-3.5" />
+                Date
+              </button>
+
+              <button
+                type="button"
                 onClick={deleteSelected}
                 disabled={!selection || selection.kind === 'legend'}
                 className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${
@@ -1542,9 +1635,11 @@ export default function LDARObservationPathEditor({
                 title={
                   selection?.kind === 'stop'
                     ? 'Delete this stop entirely — removes it from the path AND the legend'
-                    : selection
-                      ? 'Delete the selected stop/waypoint'
-                      : 'Select a stop or waypoint to delete'
+                    : selection?.kind === 'customText'
+                      ? 'Delete the selected date/text field'
+                      : selection
+                        ? 'Delete the selected stop/waypoint'
+                        : 'Select a stop, waypoint, or date field to delete'
                 }
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -1777,6 +1872,28 @@ export default function LDARObservationPathEditor({
                         onEditCommit={commitDateEdit}
                       />
                     )}
+                    {/* User-added custom text/date fields. */}
+                    {(pathData.customTextBoxes ?? []).map((b) => (
+                      <TitleBlockOverlay
+                        key={b.id}
+                        box={b}
+                        text={b.text}
+                        imgW={W}
+                        imgH={H}
+                        isEditMode={isEditMode}
+                        selected={selection?.kind === 'customText' && selection.id === b.id}
+                        onDragStart={(e) => startCustomTextDrag(e, b.id)}
+                        editable
+                        editing={editingCustomTextId === b.id}
+                        editValue={customTextInputValue}
+                        onBeginEdit={() => {
+                          setSelection({ kind: 'customText', id: b.id });
+                          beginEditCustomText(b.id, b.text);
+                        }}
+                        onEditChange={setCustomTextInputValue}
+                        onEditCommit={commitCustomTextEdit}
+                      />
+                    ))}
                   </>
                 );
               })()}
@@ -1987,6 +2104,8 @@ interface TitleBlockOverlayProps {
   onBeginEdit?: () => void;
   onEditChange?: (v: string) => void;
   onEditCommit?: () => void;
+  /** Highlight as the current selection (solid outline vs the dashed hint). */
+  selected?: boolean;
 }
 
 function TitleBlockOverlay({
@@ -2002,6 +2121,7 @@ function TitleBlockOverlay({
   onBeginEdit,
   onEditChange,
   onEditCommit,
+  selected = false,
 }: TitleBlockOverlayProps) {
   const tx = box.x * imgW;
   const ty = box.y * imgH;
@@ -2035,10 +2155,11 @@ function TitleBlockOverlay({
         height={th}
         fill="#ffffff"
         // Outline shown only in edit mode — gives the user a visible
-        // drag handle and a hint that it's interactive.
-        stroke={isEditMode ? '#3b82f6' : 'none'}
-        strokeWidth={isEditMode ? 1.5 : 0}
-        strokeDasharray={isEditMode ? '6 4' : undefined}
+        // drag handle and a hint that it's interactive. A selected custom
+        // box gets a solid, heavier outline.
+        stroke={isEditMode ? (selected ? '#1d4ed8' : '#3b82f6') : 'none'}
+        strokeWidth={isEditMode ? (selected ? 2.5 : 1.5) : 0}
+        strokeDasharray={isEditMode && !selected ? '6 4' : undefined}
       />
       {editing ? (
         <foreignObject x={tx - padX} y={ty} width={tw + padX * 2} height={th}>

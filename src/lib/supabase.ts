@@ -79,6 +79,18 @@ export interface LDARTitleBlockOverride {
   h: number;
 }
 
+/** A user-added free text/date field placed on the plan (e.g. an extra date
+ *  cell). Position + size are normalized 0..1; `text` is the stamped value
+ *  (defaults to the document date, editable inline). */
+export interface LDARCustomTextBox {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+}
+
 export interface LDARObservationPathData {
   stops: LDARObservationPathStop[];
   /** Shape-only points along the curve between the first and last stop.
@@ -97,6 +109,9 @@ export interface LDARObservationPathData {
    *  auto-computed "today's date" value (the user double-clicked the date
    *  in the editor and typed their own). Null/undefined → use today's date. */
   dateValueOverride?: string | null;
+  /** User-added extra text/date fields placed anywhere on the plan
+   *  ("Add Date" in the editor). Each is draggable + double-click editable. */
+  customTextBoxes?: LDARCustomTextBox[];
   /** Pixel size of the source page render that produced these coords.
    *  Used for diagnostics only — the overlay re-renders at the current
    *  display size using normalized coords. */
