@@ -539,7 +539,7 @@ export default function UserSignatureManagement() {
             </div>
 
             <div className="text-xs text-gray-500">
-              Last updated: {new Date(signature.updated_at).toLocaleDateString()}
+              Last updated: {new Date(signature.updated_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}
             </div>
           </div>
         </div>
@@ -609,7 +609,7 @@ export default function UserSignatureManagement() {
                           />
                         </div>
                         <div className="text-xs text-gray-500">
-                          Created: {new Date(sig.created_at).toLocaleDateString()}
+                          Created: {new Date(sig.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}
                         </div>
                       </div>
                     </div>

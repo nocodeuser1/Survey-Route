@@ -1296,7 +1296,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                               is shown alongside its label. */}
                           {(viewMode === 'inspections' || viewMode === 'all') && latestInspection && (
                             <span className="text-[10px] text-gray-500">
-                              Insp: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              Insp: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' })}
                             </span>
                           )}
                           {(viewMode === 'plans' || viewMode === 'all') && (() => {

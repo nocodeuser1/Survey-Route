@@ -1513,10 +1513,10 @@ export default function TeamManagement() {
                         </div>
                         <p className="text-xs text-gray-600 dark:text-gray-400">
                           {invite.role === 'account_admin' ? 'Admin' : 'User'} •
-                          {isPending && ` Expires ${new Date(invite.expires_at).toLocaleDateString()}`}
-                          {isAccepted && ` Accepted ${new Date(invite.created_at).toLocaleDateString()}`}
-                          {isExpired && ` Expired ${new Date(invite.expires_at).toLocaleDateString()}`}
-                          {isRevoked && ` Revoked ${new Date(invite.created_at).toLocaleDateString()}`}
+                          {isPending && ` Expires ${new Date(invite.expires_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
+                          {isAccepted && ` Accepted ${new Date(invite.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
+                          {isExpired && ` Expired ${new Date(invite.expires_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
+                          {isRevoked && ` Revoked ${new Date(invite.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -1668,11 +1668,11 @@ export default function TeamManagement() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                      {new Date(member.joined_at).toLocaleDateString()}
+                      {new Date(member.joined_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                       {member.last_sign_in_at
-                        ? new Date(member.last_sign_in_at).toLocaleDateString()
+                        ? new Date(member.last_sign_in_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })
                         : <span className="text-gray-400 dark:text-gray-500 italic">Never</span>}
                     </td>
                     <td className="px-6 py-4 text-right">

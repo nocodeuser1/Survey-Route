@@ -302,7 +302,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         <div class="summary-header">
           ${accountBranding.logo_url ? `<div class="logo-container"><img src="${accountBranding.logo_url}" alt="Company Logo" class="company-logo" /></div>` : ''}
           <h1>SPCC Inspection Report Summary</h1>
-          <p class="summary-date">Generated: ${new Date().toLocaleDateString()}</p>
+          <p class="summary-date">Generated: ${new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}</p>
         </div>
 
         <div class="summary-stats">
@@ -1941,7 +1941,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       return (
         facility?.name.toLowerCase().includes(searchLower) ||
         inspection.inspector_name.toLowerCase().includes(searchLower) ||
-        new Date(inspection.conducted_at).toLocaleDateString().includes(searchLower)
+        new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' }).includes(searchLower)
       );
     })
     .sort((a, b) => {
@@ -2086,7 +2086,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
               <div className="flex-1">
                 <p className="font-medium text-gray-900 dark:text-white">{facility?.name || 'Unknown Facility'}</p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {new Date(inspection.conducted_at).toLocaleDateString()} - {inspection.inspector_name}
+                  {new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })} - {inspection.inspector_name}
                 </p>
               </div>
               {inspection.flagged_items_count > 0 && (

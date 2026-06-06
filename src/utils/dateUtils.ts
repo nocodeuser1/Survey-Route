@@ -20,14 +20,59 @@ export function parseLocalDate(dateStr: string): Date {
   return new Date(dateStr + 'T00:00:00');
 }
 
-/** Format a YYYY-MM-DD or ISO date string for display (M/D/YYYY).
- *  Parses the string directly — no Date object, no timezone shift. */
+/** The timezone all instant/timestamp values are displayed in, app-wide.
+ *  The business operates in Central time, so timestamps (created/completed/
+ *  uploaded "at" columns, which are stored as UTC) are always rendered in
+ *  Central — not the viewer's local zone, and never the raw UTC date. */
+export const APP_TIME_ZONE = 'America/Chicago';
+
+/**
+ * Format a date string for display (M/D/YYYY).
+ *
+ * Two cases, handled distinctly:
+ *  - **Date-only** ("YYYY-MM-DD", a calendar date like an IP / PE-stamp date):
+ *    rendered exactly as written, with no timezone math (so it never shifts a
+ *    day).
+ *  - **Timestamp** (ISO instant with a time component, e.g. a *_at column):
+ *    converted to Central time, so an action taken at 7pm CST on the 5th
+ *    shows the 5th — not the 6th (its UTC date).
+ */
 export function formatDate(dateStr: string): string {
-  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (match) {
-    return `${parseInt(match[2])}/${parseInt(match[3])}/${match[1]}`;
+  if (!dateStr) return '';
+  // Pure calendar date → render verbatim, no timezone shift.
+  const dateOnly = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return `${parseInt(dateOnly[2])}/${parseInt(dateOnly[3])}/${dateOnly[1]}`;
   }
-  // Fallback: parse as local date then format
-  const d = parseLocalDate(dateStr);
-  return d.toLocaleDateString();
+  // Timestamp (has a time component) → an instant; show it in Central time.
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString('en-US', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    });
+  }
+  // Unparseable — best effort on the leading date part.
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${parseInt(m[2])}/${parseInt(m[3])}/${m[1]}` : dateStr;
+}
+
+/** Format an ISO timestamp as date + time in Central time
+ *  (e.g. "6/5/2026, 7:30 PM"). For date-only strings, falls back to
+ *  `formatDate`. */
+export function formatDateTime(dateStr: string): string {
+  if (!dateStr) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return formatDate(dateStr);
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return formatDate(dateStr);
+  return d.toLocaleString('en-US', {
+    timeZone: APP_TIME_ZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }

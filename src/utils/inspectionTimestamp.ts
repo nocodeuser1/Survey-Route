@@ -1,5 +1,6 @@
 import { Inspection } from '../lib/supabase';
 import { formatTimeTo12Hour } from './timeFormat';
+import { APP_TIME_ZONE } from './dateUtils';
 
 /**
  * Gets the appropriate timestamp to display for an inspection
@@ -37,13 +38,19 @@ export function formatInspectionTimestamp(
   const timestamp = getDisplayTimestamp(inspection);
   const date = new Date(timestamp);
 
-  const dateString = date.toLocaleDateString();
+  const dateString = date.toLocaleDateString('en-US', { timeZone: APP_TIME_ZONE });
 
   if (hideTime) {
     return dateString;
   }
 
-  const timeString = formatTimeTo12Hour(date.toTimeString().slice(0, 5));
+  const hhmm = date.toLocaleTimeString('en-GB', {
+    timeZone: APP_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const timeString = formatTimeTo12Hour(hhmm);
   return `${dateString} at ${timeString}`;
 }
 
@@ -56,7 +63,7 @@ export function formatInspectionTimestamp(
 export function formatInspectionDate(inspection: Inspection): string {
   const timestamp = getDisplayTimestamp(inspection);
   const date = new Date(timestamp);
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('en-US', { timeZone: APP_TIME_ZONE });
 }
 
 /**

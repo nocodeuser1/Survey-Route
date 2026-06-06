@@ -2840,7 +2840,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (columnId === 'day_assignment') return facility.day_assignment != null ? String(facility.day_assignment) : '';
     if (columnId === 'team_assignment') return facility.team_assignment != null ? String(facility.team_assignment) : '';
     if (columnId === 'status') return facility.status || 'active';
-    if (columnId === 'created_at') return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '';
+    if (columnId === 'created_at') return facility.created_at ? formatDate(facility.created_at) : '';
     const value = facility[columnId as keyof Facility];
     return value?.toString() || '';
   };
@@ -3675,7 +3675,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (!facility.spcc_inspection_date && !inspections.get(facility.id)) return '-';
         const insp = inspections.get(facility.id);
         const expiry = getFacilityInspectionExpiry(facility, insp);
-        const dateStr = facility.spcc_inspection_date || (insp ? new Date(insp.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-');
+        const dateStr = facility.spcc_inspection_date || (insp ? new Date(insp.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }) : '-');
         if (expiry.status === 'expiring' && expiry.daysUntilExpiry !== null) {
           return (
             <div className="flex flex-col gap-0.5">
@@ -3780,7 +3780,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         );
       }
       case 'created_at':
-        return facility.created_at ? new Date(facility.created_at).toLocaleDateString() : '-';
+        return facility.created_at ? formatDate(facility.created_at) : '-';
       case 'notes': {
         const effectiveNotes = getEffectiveNotes(facility);
         if (editingNotesId === facility.id) {
@@ -6848,14 +6848,14 @@ function FacilityCommentsPopover({
   const formatTime = (iso: string) => {
     try {
       const d = new Date(iso);
-      const today = new Date();
-      const sameDay =
-        d.getFullYear() === today.getFullYear() &&
-        d.getMonth() === today.getMonth() &&
-        d.getDate() === today.getDate();
+      // Compare "today" in Central so the same-day rule matches the displayed
+      // Central date rather than the viewer's local/UTC date.
+      const centralYMD = (x: Date) =>
+        x.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); // YYYY-MM-DD
+      const sameDay = centralYMD(d) === centralYMD(new Date());
       return sameDay
-        ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-        : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        ? d.toLocaleTimeString([], { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })
+        : d.toLocaleDateString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' });
     } catch {
       return iso;
     }

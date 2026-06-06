@@ -204,7 +204,7 @@ export default function NotificationSettings({ userId, accountId }: Notification
                     You previously unsubscribed from all email notifications.
                     {(preferences as any).unsubscribed_at && (
                       <span className="block mt-1">
-                        Unsubscribed on: {new Date((preferences as any).unsubscribed_at).toLocaleDateString()}
+                        Unsubscribed on: {new Date((preferences as any).unsubscribed_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}
                       </span>
                     )}
                   </div>

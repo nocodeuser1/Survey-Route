@@ -99,7 +99,7 @@ export default function ExportSurveys({
       const facility = facilities.find(f => f.id === inspection.facility_id);
       if (!facility) return;
 
-      const conductedDate = new Date(inspection.conducted_at).toLocaleDateString();
+      const conductedDate = new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
       const items = inspection.inspection_items || [];
 
       htmlContent += `
