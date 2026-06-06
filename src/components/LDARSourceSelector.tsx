@@ -75,6 +75,9 @@ export default function LDARSourceSelector({
   const [showGrid, setShowGrid] = useState(false);
   const [gridThumbs, setGridThumbs] = useState<PageThumb[]>([]);
   const [gridLoading, setGridLoading] = useState(false);
+  // Guards the one-time grid build so the incremental setGridThumbs() inside
+  // it can't re-trigger (and self-cancel) the build effect.
+  const gridBuildStartedRef = useRef(false);
 
   // Save state.
   const [isSaving, setIsSaving] = useState(false);
@@ -176,8 +179,15 @@ export default function LDARSourceSelector({
   // Render thumbnail grid lazily when user opens it.
   // -----------------------------------------------------------
   useEffect(() => {
-    if (!showGrid || gridThumbs.length > 0 || !pdfRef.current) return;
+    // Build the thumbnail grid ONCE, the first time it's opened. We guard on
+    // a ref (not gridThumbs.length) because this effect calls setGridThumbs
+    // incrementally — keying it on gridThumbs.length would make the effect
+    // re-run + cancel itself after the first thumbnail, so only one page ever
+    // rendered. (That was the "can't see/select most pages" bug.)
+    if (!showGrid || gridBuildStartedRef.current || !pdfRef.current) return;
+    gridBuildStartedRef.current = true;
     let cancelled = false;
+    let completed = false;
     async function build() {
       setGridLoading(true);
       const pdf = pdfRef.current!;
@@ -193,13 +203,20 @@ export default function LDARSourceSelector({
           console.warn(`Failed to render thumb for page ${i}`, err);
         }
       }
-      if (!cancelled) setGridLoading(false);
+      if (!cancelled) {
+        setGridLoading(false);
+        completed = true;
+      }
     }
     build();
     return () => {
       cancelled = true;
+      // If we were cancelled before finishing (e.g. the grid was closed mid
+      // render), allow a rebuild next time it's opened. A completed grid
+      // keeps its thumbs so reopening is instant.
+      if (!completed) gridBuildStartedRef.current = false;
     };
-  }, [showGrid, gridThumbs.length, renderPageThumb]);
+  }, [showGrid, renderPageThumb]);
 
   // -----------------------------------------------------------
   // Re-render the big preview when selectedPage changes.
@@ -256,6 +273,9 @@ export default function LDARSourceSelector({
         ldar_site_plan_url: publicUrl,
         ldar_site_plan_filename: filename,
         ldar_site_plan_uploaded_at: nowIso,
+        // Remember which page the user picked so re-generating the AI path
+        // doesn't re-detect and switch back to the auto page.
+        ldar_site_plan_source_page: selectedPage,
         ldar_site_plan_completed: true,
         ldar_site_plan_completed_at: facility.ldar_site_plan_completed_at ?? nowIso,
         ldar_site_plan_completed_by: facility.ldar_site_plan_completed_by ?? completedBy,

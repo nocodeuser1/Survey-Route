@@ -195,6 +195,11 @@ export interface Facility {
   ldar_site_plan_url?: string | null;
   ldar_site_plan_filename?: string | null;
   ldar_site_plan_uploaded_at?: string | null;
+  /** Which page of the multi-page SPCC plan the LDAR source was extracted
+   *  from. Set when the user picks a page in LDARSourceSelector (or by the
+   *  first auto-detection). Used so re-generating doesn't re-detect and
+   *  silently switch back to the auto page. */
+  ldar_site_plan_source_page?: number | null;
   // AI-generated + user-edited walking-path overlay drawn on top of the LDAR
   // site plan PDF. NULL = "no path yet". See migration
   // 20260521020000_ldar_observation_path.sql for the JSON shape and

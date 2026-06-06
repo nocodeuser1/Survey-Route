@@ -305,7 +305,7 @@ function emptyPathData(): LDARObservationPathData {
 async function refreshSourceFromSPCC(
   facility: Facility,
 ): Promise<
-  | { dataUrl: string; w: number; h: number; newUrl: string; newUploadedAt: string }
+  | { dataUrl: string; w: number; h: number; newUrl: string; newUploadedAt: string; pageNumber: number }
   | null
 > {
   if (!facility.spcc_plan_url) return null;
@@ -315,11 +315,17 @@ async function refreshSourceFromSPCC(
   const buf = await resp.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ ...pdfjsDocumentDefaults, data: buf.slice(0) }).promise;
 
-  // Re-run page detection each time. Cheap (text-content extraction
-  // only, no AI), and avoids stale page numbers if the SPCC plan was
-  // re-uploaded with a different layout.
-  const detection = await detectSitePlanInLoadedPdf(pdf);
-  const pageNumber = detection.detectedPage ?? 1;
+  // Honor the page the user explicitly chose (LDARSourceSelector) — only
+  // fall back to auto-detection when no page has been chosen yet. Previously
+  // this re-detected every time, silently overwriting the user's choice with
+  // the auto page.
+  let pageNumber = facility.ldar_site_plan_source_page ?? null;
+  if (pageNumber == null) {
+    const detection = await detectSitePlanInLoadedPdf(pdf);
+    pageNumber = detection.detectedPage ?? 1;
+  }
+  // Clamp to the document in case the SPCC plan was re-uploaded shorter.
+  pageNumber = Math.max(1, Math.min(pdf.numPages, pageNumber));
 
   // Extract just that page → upload to the deterministic source path.
   const pdfBlob = await extractPageAsPdf(buf, pageNumber);
@@ -339,10 +345,15 @@ async function refreshSourceFromSPCC(
   const newUploadedAt = new Date().toISOString();
 
   // Patch the facility row so the link cache-buster picks up the new
-  // version and future opens fetch the clean source.
+  // version and future opens fetch the clean source. Also persist the page
+  // we used so the choice survives (stabilizes first-time auto-detect too).
   const { error: tsErr } = await supabase
     .from('facilities')
-    .update({ ldar_site_plan_url: publicUrl, ldar_site_plan_uploaded_at: newUploadedAt })
+    .update({
+      ldar_site_plan_url: publicUrl,
+      ldar_site_plan_uploaded_at: newUploadedAt,
+      ldar_site_plan_source_page: pageNumber,
+    })
     .eq('id', facility.id);
   if (tsErr) throw tsErr;
 
@@ -357,6 +368,7 @@ async function refreshSourceFromSPCC(
     h: rendered.height,
     newUrl: publicUrl,
     newUploadedAt,
+    pageNumber,
   };
 }
 
@@ -780,6 +792,7 @@ export default function LDARObservationPathEditor({
             Object.assign(facility, {
               ldar_site_plan_url: fresh.newUrl,
               ldar_site_plan_uploaded_at: fresh.newUploadedAt,
+              ldar_site_plan_source_page: fresh.pageNumber,
             });
           }
         } catch (refreshErr) {
