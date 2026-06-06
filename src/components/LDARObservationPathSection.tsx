@@ -74,6 +74,10 @@ export default function LDARObservationPathSection({
         : 'Generate Walking Path with AI';
 
   const handleOpen = () => {
+    // Normalize the page-change flag — the primary flow is never a "change
+    // page" action, so make sure a stale flag can't alter the selector's
+    // confirm behavior (defensive; control flow already guarantees this).
+    setChangingPage(false);
     // Only auto-generate when there's no existing path — pressing "Open
     // Editor" on an already-drawn path should open it for review, not
     // silently overwrite it.
