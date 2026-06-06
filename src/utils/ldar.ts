@@ -12,7 +12,7 @@
  */
 
 import type { Facility } from '../lib/supabase';
-import { parseLocalDate } from './dateUtils';
+import { parseLocalDate, formatDate } from './dateUtils';
 import { pickFacilityFilenameName } from './spccPlans';
 
 /** Cutoff for LDAR Site Plan applicability (commenced-construction rule,
@@ -90,6 +90,34 @@ function resolveLdarPlanDateMMDDYY(facility: Facility): string {
   const iso = data?.annotated_pdf_uploaded_at ?? facility.ldar_site_plan_uploaded_at ?? null;
   const dm = iso ? String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
   return dm ? `${dm[2]}-${dm[3]}-${dm[1].slice(2)}` : '';
+}
+
+/**
+ * The "document date" stamped on the LDAR observation plan, formatted for
+ * display (M/D/YYYY). This is the date shown in the editor's title block:
+ *  1. The user's custom date (dateValueOverride, "M/D/YY" or "M/D/YYYY").
+ *  2. The date the annotated PDF was baked.
+ *  3. The source-PDF upload date as a last resort.
+ * Returns null when nothing is resolvable.
+ */
+export function getLdarPlanDocumentDate(facility: Facility): string | null {
+  const override = facility.ldar_observation_path_data?.dateValueOverride?.trim();
+  if (override) {
+    const m = override.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+    if (m) {
+      const mo = parseInt(m[1], 10);
+      const d = parseInt(m[2], 10);
+      let y = parseInt(m[3], 10);
+      if (m[3].length <= 2) y += 2000;
+      return `${mo}/${d}/${y}`;
+    }
+    return override; // non-standard custom text — show as typed
+  }
+  const iso =
+    facility.ldar_observation_path_data?.annotated_pdf_uploaded_at ??
+    facility.ldar_site_plan_uploaded_at ??
+    null;
+  return iso ? formatDate(iso) : null;
 }
 
 /**

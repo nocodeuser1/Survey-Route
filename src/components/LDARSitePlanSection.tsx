@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, FileText, ExternalLink, RefreshCcw, Circle, Loader2, Download } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import { formatDate } from '../utils/dateUtils';
-import { buildLdarSitePlanFilename } from '../utils/ldar';
+import { buildLdarSitePlanFilename, getLdarPlanDocumentDate } from '../utils/ldar';
 import InlineLDARSitePlanUpload from './InlineLDARSitePlanUpload';
 
 /**
@@ -245,11 +245,16 @@ export default function LDARSitePlanSection({ facility, darkMode, onChange }: LD
                   {displayFilename}
                   <ExternalLink className="inline-block align-text-bottom w-3 h-3 ml-1" />
                 </a>
-                {facility.ldar_site_plan_uploaded_at && (
-                  <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Uploaded {formatDate(facility.ldar_site_plan_uploaded_at)}
-                  </p>
-                )}
+                {(() => {
+                  // "Document date" = the date stamped on the plan (the editor's
+                  // title-block date), not the file upload date.
+                  const docDate = getLdarPlanDocumentDate(facility);
+                  return docDate ? (
+                    <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Document date {docDate}
+                    </p>
+                  ) : null;
+                })()}
               </div>
             </div>
             <div className="flex flex-shrink-0 items-center gap-1.5">
