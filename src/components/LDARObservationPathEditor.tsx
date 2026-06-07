@@ -390,14 +390,21 @@ async function refreshSourceFromSPCC(
  *     migrated from the legacy number-based `afterStop`. This is what makes
  *     renumbering safe — the waypoint→stop link no longer depends on `number`.
  */
+const PATH_SCHEMA_VERSION = 2;
+
 function normalizePathData(d: LDARObservationPathData): LDARObservationPathData {
   const stops = (d.stops ?? []).map((s, i) => ({
     ...s,
     id: s.id ?? `s_load_${i}_${Math.random().toString(36).slice(2, 6)}`,
   }));
-  // Canonicalize array order to the order the path is currently drawn in
-  // (ascending number), so existing paths render identically on load.
-  stops.sort((a, b) => a.number - b.number);
+  // Canonicalize array order to ascending number ONLY for legacy (pre-v2)
+  // data, where the route was drawn in number order. v2+ data's array order
+  // IS the route order and must be preserved across reloads — otherwise a
+  // renumber (a pure label change in-session) would silently reorder the
+  // route the next time the editor opens.
+  if ((d.schemaVersion ?? 1) < PATH_SCHEMA_VERSION) {
+    stops.sort((a, b) => a.number - b.number);
+  }
 
   const firstNumber = stops.length ? stops[0].number : 1;
   const idByNumber = new Map<number, string>();
@@ -409,7 +416,7 @@ function normalizePathData(d: LDARObservationPathData): LDARObservationPathData 
     return { ...w, id, afterStopId };
   });
 
-  return { ...d, stops, waypoints };
+  return { ...d, stops, waypoints, schemaVersion: PATH_SCHEMA_VERSION };
 }
 
 interface LDARObservationPathEditorProps {

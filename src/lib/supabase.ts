@@ -114,6 +114,11 @@ export interface LDARObservationPathData {
   /** User-added extra text/date fields placed anywhere on the plan
    *  ("Add Date" in the editor). Each is draggable + double-click editable. */
   customTextBoxes?: LDARCustomTextBox[];
+  /** Schema version. v2+ means the route + legend follow the stops ARRAY
+   *  order (number is a display-only label) and waypoints link by
+   *  `afterStopId`. Absent / <2 is legacy (route was number-sorted); the
+   *  editor canonicalizes it to array order once on load. */
+  schemaVersion?: number;
   /** Pixel size of the source page render that produced these coords.
    *  Used for diagnostics only — the overlay re-renders at the current
    *  display size using normalized coords. */
