@@ -65,29 +65,35 @@ export function getLdarSitePlanState(
 }
 
 /**
- * Resolve the date stamped on the LDAR observation plan, formatted MM-DD-YY
- * for the download filename. Priority:
- *  1. The user's custom date (dateValueOverride, typed "M/D/YY" or "M/D/YYYY").
- *  2. The date the annotated PDF was baked (annotated_pdf_uploaded_at) — that's
- *     the "today" value auto-stamped when no override is set.
- *  3. The source-PDF upload date as a last resort.
+ * Resolve the date for the download filename, formatted MM-DD-YY. The right
+ * date depends on which file we're naming:
+ *  - kind 'path' (the annotated observation-path report): the date stamped on
+ *    the plan — dateValueOverride → annotated bake date → source upload date.
+ *  - kind 'plan' (the source site-plan PDF): the source plan's OWN upload date
+ *    first (annotated bake date as a fallback), since the source PDF isn't
+ *    stamped with the editor's title-block date.
  * Returns '' when nothing is resolvable.
  */
-function resolveLdarPlanDateMMDDYY(facility: Facility): string {
+function resolveLdarPlanDateMMDDYY(facility: Facility, kind: 'path' | 'plan' = 'path'): string {
   const data = facility.ldar_observation_path_data;
-  const override = data?.dateValueOverride?.trim();
-  if (override) {
-    const m = override.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
-    if (m) {
-      const mo = m[1].padStart(2, '0');
-      const d = m[2].padStart(2, '0');
-      const y = m[3].length === 4 ? m[3].slice(2) : m[3].padStart(2, '0');
-      return `${mo}-${d}-${y}`;
+  if (kind === 'path') {
+    const override = data?.dateValueOverride?.trim();
+    if (override) {
+      const m = override.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
+      if (m) {
+        const mo = m[1].padStart(2, '0');
+        const d = m[2].padStart(2, '0');
+        const y = m[3].length === 4 ? m[3].slice(2) : m[3].padStart(2, '0');
+        return `${mo}-${d}-${y}`;
+      }
+      // Non-standard custom text — make it filename-safe and use as-is.
+      return override.replace(/[/\\:*?"<>|]/g, '-').trim();
     }
-    // Non-standard custom text — make it filename-safe and use as-is.
-    return override.replace(/[/\\:*?"<>|]/g, '-').trim();
   }
-  const iso = data?.annotated_pdf_uploaded_at ?? facility.ldar_site_plan_uploaded_at ?? null;
+  const iso =
+    kind === 'plan'
+      ? facility.ldar_site_plan_uploaded_at ?? data?.annotated_pdf_uploaded_at ?? null
+      : data?.annotated_pdf_uploaded_at ?? facility.ldar_site_plan_uploaded_at ?? null;
   const dm = iso ? String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
   return dm ? `${dm[2]}-${dm[3]}-${dm[1].slice(2)}` : '';
 }
@@ -143,7 +149,7 @@ export function buildLdarSitePlanFilename(
   const id = facility.camino_facility_id
     ? sanitize(facility.camino_facility_id) || 'NoID'
     : 'NoID';
-  const dateStr = resolveLdarPlanDateMMDDYY(facility);
+  const dateStr = resolveLdarPlanDateMMDDYY(facility, kind);
   const datePart = dateStr ? ` (${dateStr})` : '';
   const label = kind === 'plan' ? 'LDAR Site Plan' : 'LDAR Site Path';
   return `${name} - ${id} - ${label}${datePart}.pdf`;
