@@ -152,36 +152,39 @@ function pointerToNormalized(
   return { x: svgPt.x / imgW, y: svgPt.y / imgH };
 }
 
-/** Stops sorted by ascending number — used for both path tracing and legend ordering. */
-function sortStops(stops: LDARObservationPathStop[]): LDARObservationPathStop[] {
-  return [...stops].sort((a, b) => a.number - b.number);
+/** Predicate: does waypoint `w` trail stop `stop`? Prefers the id-based
+ *  `afterStopId` (renumber-safe); falls back to the legacy number match for
+ *  any data not yet migrated. `legacyFirstNumber` mirrors the old "no
+ *  afterStop ⇒ first stop" default. */
+function waypointTrailsStop(
+  w: LDARObservationPathWaypoint,
+  stop: LDARObservationPathStop,
+  legacyFirstNumber: number,
+): boolean {
+  if (w.afterStopId) return w.afterStopId === stop.id;
+  return (w.afterStop ?? legacyFirstNumber) === stop.number;
 }
 
-/** "Trace" the path through stops in number order, inserting waypoints
- *  into the correct inter-stop segment as identified by their
- *  `afterStop` field. A waypoint with `afterStop = N` belongs on the
- *  segment from stop N to the next-higher-numbered stop.
- *
- *  Legacy data (no afterStop on waypoints) defaults to the first stop's
- *  number — preserves the old "all waypoints between stops 1 and 2"
- *  rendering so saved paths don't suddenly jump around. */
+/** "Trace" the path through stops in ARRAY order, inserting each stop's
+ *  trailing waypoints (by id) after it. Array order is canonicalized to the
+ *  number order at load (see normalizePathData), so the drawn route doesn't
+ *  depend on the live `number` — renumbering a stop is a pure label change. */
 function tracedPointsSimple(
   stops: LDARObservationPathStop[],
   waypoints: LDARObservationPathWaypoint[],
 ): Array<{ x: number; y: number }> {
   // Off-path stops stay in the legend but are not part of the drawn route.
-  const sorted = sortStops(stops.filter((s) => !s.offPath));
-  if (sorted.length === 0) return [];
-  if (sorted.length === 1) return sorted.map((s) => ({ x: s.x, y: s.y }));
+  const seq = stops.filter((s) => !s.offPath);
+  if (seq.length === 0) return [];
+  if (seq.length === 1) return seq.map((s) => ({ x: s.x, y: s.y }));
 
-  const legacyAfterStop = sorted[0].number;
+  const legacyFirstNumber = seq[0].number;
   const out: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const stop = sorted[i];
+  for (let i = 0; i < seq.length; i++) {
+    const stop = seq[i];
     out.push({ x: stop.x, y: stop.y });
-    if (i < sorted.length - 1) {
-      // Waypoints attached to THIS stop's segment, in array order.
-      const segWps = waypoints.filter((w) => (w.afterStop ?? legacyAfterStop) === stop.number);
+    if (i < seq.length - 1) {
+      const segWps = waypoints.filter((w) => waypointTrailsStop(w, stop, legacyFirstNumber));
       segWps.forEach((w) => out.push({ x: w.x, y: w.y }));
     }
   }
@@ -214,47 +217,48 @@ function pointToSegmentDistance(
 }
 
 /** Given a click point in normalized 0..1 coords, figure out which
- *  inter-stop segment it's closest to (using the currently rendered
- *  trace points, which include any existing waypoints). Returns the
- *  `afterStop` value that should be assigned to a new waypoint
- *  inserted at this point. */
+ *  inter-stop segment it's closest to and return the trailing stop a new
+ *  waypoint there should attach to (id + number). Uses the same ARRAY-order
+ *  trace as the rendered path so attribution matches what the user sees. */
 function inferAfterStop(
   clickN: { x: number; y: number },
   stops: LDARObservationPathStop[],
   waypoints: LDARObservationPathWaypoint[],
-): number {
-  const sorted = sortStops(stops);
-  if (sorted.length === 0) return 1;
-  if (sorted.length === 1) return sorted[0].number;
-  const legacyAfterStop = sorted[0].number;
-  // Build the same trace as tracedPointsSimple, but tagged with the
-  // afterStop value each point "belongs to" for click attribution.
-  type Tagged = { x: number; y: number; afterStop: number };
+): { afterStopId: string; afterStop: number } | null {
+  const seq = stops.filter((s) => !s.offPath);
+  if (seq.length === 0) return null;
+  if (seq.length === 1) return { afterStopId: seq[0].id, afterStop: seq[0].number };
+  const legacyFirstNumber = seq[0].number;
+  // Build the same trace as tracedPointsSimple, tagged with the stop each
+  // point "belongs to" for click attribution.
+  type Tagged = { x: number; y: number; ownerId: string; ownerNumber: number };
   const tagged: Tagged[] = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const stop = sorted[i];
-    // A stop "owns" the segment that STARTS at it — i.e. afterStop = its number.
-    // For the last stop, there's no outgoing segment, so we tag it with the
-    // previous stop's number (it'll only ever be the END of a segment).
-    const afterStopForThis = i < sorted.length - 1 ? stop.number : sorted[i - 1].number;
-    tagged.push({ x: stop.x, y: stop.y, afterStop: afterStopForThis });
-    if (i < sorted.length - 1) {
-      const segWps = waypoints.filter((w) => (w.afterStop ?? legacyAfterStop) === stop.number);
-      segWps.forEach((w) => tagged.push({ x: w.x, y: w.y, afterStop: stop.number }));
+  for (let i = 0; i < seq.length; i++) {
+    const stop = seq[i];
+    // A stop "owns" the segment that STARTS at it. The last stop has no
+    // outgoing segment, so tag it with the previous stop (it's only ever a
+    // segment END).
+    const owner = i < seq.length - 1 ? stop : seq[i - 1];
+    tagged.push({ x: stop.x, y: stop.y, ownerId: owner.id, ownerNumber: owner.number });
+    if (i < seq.length - 1) {
+      const segWps = waypoints.filter((w) => waypointTrailsStop(w, stop, legacyFirstNumber));
+      segWps.forEach((w) => tagged.push({ x: w.x, y: w.y, ownerId: stop.id, ownerNumber: stop.number }));
     }
   }
   let best = Infinity;
-  let bestAfterStop = sorted[0].number;
+  let bestId = seq[0].id;
+  let bestNumber = seq[0].number;
   for (let i = 0; i < tagged.length - 1; i++) {
     const a = tagged[i];
     const b = tagged[i + 1];
     const d = pointToSegmentDistance(clickN, a, b);
     if (d < best) {
       best = d;
-      bestAfterStop = a.afterStop;
+      bestId = a.ownerId;
+      bestNumber = a.ownerNumber;
     }
   }
-  return bestAfterStop;
+  return { afterStopId: bestId, afterStop: bestNumber };
 }
 
 /** Format today's date matching the year-digit style of an original
@@ -373,22 +377,39 @@ async function refreshSourceFromSPCC(
   };
 }
 
-/** Make sure every stop and waypoint has a stable id. The AI returns them
- *  without ids (just numbers / coords); older saved data may also lack
- *  them. Without this, useState-based mutations would lose track of which
- *  element is being dragged. */
-function sanitizeIds(d: LDARObservationPathData): LDARObservationPathData {
-  return {
-    ...d,
-    stops: (d.stops ?? []).map((s, i) => ({
-      ...s,
-      id: s.id ?? `s_load_${i}_${Math.random().toString(36).slice(2, 6)}`,
-    })),
-    waypoints: (d.waypoints ?? []).map((w, i) => ({
-      ...w,
-      id: w.id ?? `w_load_${i}_${Math.random().toString(36).slice(2, 6)}`,
-    })),
-  };
+/**
+ * Normalize loaded / AI-generated path data into the canonical shape the
+ * editor edits:
+ *  1. Every stop + waypoint gets a stable id (the AI returns none; old saves
+ *     may lack them).
+ *  2. The stops ARRAY is sorted into the current number order. From here on
+ *     the route + legend follow ARRAY order (not the live `number`), so the
+ *     first render is identical to before, but a later renumber is a pure
+ *     LABEL change that never reshuffles the route or drops waypoints.
+ *  3. Each waypoint is bound to its trailing stop by ID (`afterStopId`),
+ *     migrated from the legacy number-based `afterStop`. This is what makes
+ *     renumbering safe — the waypoint→stop link no longer depends on `number`.
+ */
+function normalizePathData(d: LDARObservationPathData): LDARObservationPathData {
+  const stops = (d.stops ?? []).map((s, i) => ({
+    ...s,
+    id: s.id ?? `s_load_${i}_${Math.random().toString(36).slice(2, 6)}`,
+  }));
+  // Canonicalize array order to the order the path is currently drawn in
+  // (ascending number), so existing paths render identically on load.
+  stops.sort((a, b) => a.number - b.number);
+
+  const firstNumber = stops.length ? stops[0].number : 1;
+  const idByNumber = new Map<number, string>();
+  for (const s of stops) if (!idByNumber.has(s.number)) idByNumber.set(s.number, s.id);
+
+  const waypoints = (d.waypoints ?? []).map((w, i) => {
+    const id = w.id ?? `w_load_${i}_${Math.random().toString(36).slice(2, 6)}`;
+    const afterStopId = w.afterStopId ?? idByNumber.get(w.afterStop ?? firstNumber);
+    return { ...w, id, afterStopId };
+  });
+
+  return { ...d, stops, waypoints };
 }
 
 interface LDARObservationPathEditorProps {
@@ -455,7 +476,7 @@ export default function LDARObservationPathEditor({
   // has a stable id (the AI returns them id-less). Subsequent mutations
   // preserve ids — see commitChange / drag handlers.
   const initialData = useMemo<LDARObservationPathData>(
-    () => sanitizeIds(facility.ldar_observation_path_data ?? emptyPathData()),
+    () => normalizePathData(facility.ldar_observation_path_data ?? emptyPathData()),
     // Computed once on mount. The editor is keyed by facility.id in its
     // parent so a facility swap unmounts + remounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -847,21 +868,16 @@ export default function LDARObservationPathEditor({
         throw new Error(json?.error || `Generation failed (${resp.status})`);
       }
       // Server returns { stops, waypoints, legend, model, generated_at }.
-      // Attach ids to stops/waypoints so they're stable across edits.
-      const aiData: LDARObservationPathData = {
-        stops: (json.stops as Array<Omit<LDARObservationPathStop, 'id'>>).map((s, i) => ({
-          ...s,
-          id: shortId(`s${i}`),
-        })),
-        waypoints: (json.waypoints as Array<Omit<LDARObservationPathWaypoint, 'id'>>).map((w, i) => ({
-          ...w,
-          id: shortId(`w${i}`),
-        })),
+      // Run it through the same normalizer as loaded data so stops/waypoints
+      // get stable ids, canonical array order, and id-based waypoint links.
+      const aiData = normalizePathData({
+        stops: json.stops as LDARObservationPathStop[],
+        waypoints: json.waypoints as LDARObservationPathWaypoint[],
         legend: json.legend,
         imageSize: { w: workingImage.w, h: workingImage.h },
         model: json.model,
         generated_at: json.generated_at,
-      };
+      });
       commitChange(aiData);
       setIsEditMode(true);
     } catch (err) {
@@ -1308,12 +1324,14 @@ export default function LDARObservationPathEditor({
       // Figure out which inter-stop segment the click is on, so the new
       // waypoint ends up shaping the right part of the route instead of
       // getting dumped into the default (between stops 1 and 2).
-      const afterStop = inferAfterStop(norm, pathData.stops, pathData.waypoints);
+      const inferred = inferAfterStop(norm, pathData.stops, pathData.waypoints);
       const newWp: LDARObservationPathWaypoint = {
         id: shortId('w'),
         x: norm.x,
         y: norm.y,
-        afterStop,
+        // Bind by id (renumber-safe); keep the number too for any legacy reader.
+        afterStopId: inferred?.afterStopId,
+        afterStop: inferred?.afterStop,
       };
       commitChange({
         ...pathData,
@@ -1408,11 +1426,10 @@ export default function LDARObservationPathEditor({
 
   // -----------------------------------------------------------
   // Add a new stop ("Area").
-  //   - If a stop is currently selected → INSERT after it: shift every
-  //     stop whose number > selected.number up by 1, then give the new
-  //     stop number = selected.number + 1. The legend reorders by
-  //     number, so this slots the new stop into the correct sequence
-  //     position automatically.
+  //   - If a stop is currently selected → INSERT after it: bump the labels
+  //     above it (number > selected up by 1, new = selected+1) AND splice the
+  //     new stop into the array right after the source, since the route +
+  //     legend now follow ARRAY order, not the live number.
   //   - Otherwise → append at the end with the next-highest number.
   // The new stop is also auto-selected so the user can reposition it
   // immediately. Position defaults to a small offset from the source
@@ -1432,16 +1449,16 @@ export default function LDARObservationPathEditor({
       // overlap; clamp so the new one stays on-canvas.
       const nx = Math.max(0.02, Math.min(0.98, selectedStop.x + 0.03));
       const ny = Math.max(0.02, Math.min(0.98, selectedStop.y + 0.03));
+      // Bump labels above the insertion point so they stay sequential...
       const shifted = pathData.stops.map((s) =>
         s.number > insertAfter ? { ...s, number: s.number + 1 } : s,
       );
-      commitChange({
-        ...pathData,
-        stops: [
-          ...shifted,
-          { id: newId, number: newNumber, x: nx, y: ny, label: `Area ${newNumber}` },
-        ],
-      });
+      // ...and splice the new stop into the ARRAY right after the source, so
+      // the route (which follows array order) inserts it in the right place.
+      const idx = shifted.findIndex((s) => s.id === selectedStop.id);
+      const stops = [...shifted];
+      stops.splice(idx + 1, 0, { id: newId, number: newNumber, x: nx, y: ny, label: `Area ${newNumber}` });
+      commitChange({ ...pathData, stops });
     } else {
       const nextNumber = pathData.stops.length === 0
         ? 1
@@ -1523,7 +1540,10 @@ export default function LDARObservationPathEditor({
   // ----------------------------------------------------------
   // Sorted legend items, derived from stops sorted by number.
   // ----------------------------------------------------------
-  const legendItems = useMemo(() => sortStops(stops), [stops]);
+  // Legend follows the same ARRAY order as the route (canonicalized to number
+  // order at load), so the legend + the numbered circles stay in lockstep and
+  // a renumber relabels in place instead of reshuffling the list.
+  const legendItems = useMemo(() => stops, [stops]);
 
   // The path goes first-stop → waypoints → remaining stops in number order.
   const pathPoints = useMemo(
