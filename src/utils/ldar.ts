@@ -121,16 +121,22 @@ export function getLdarPlanDocumentDate(facility: Facility): string | null {
 }
 
 /**
- * Canonical download filename for an LDAR site plan PDF — mirrors the SPCC
- * plan convention but with the "LDAR Site Path" label and the plan's own
- * stamped date:
+ * Canonical download filename for an LDAR PDF — mirrors the SPCC plan
+ * convention, with the plan's own stamped date:
  *
- *   "{Facility Name} - {Camino Facility ID} - LDAR Site Path (MM-DD-YY).pdf"
+ *   kind 'path' (the annotated observation-path report):
+ *     "{Facility Name} - {Camino Facility ID} - LDAR Site Path (MM-DD-YY).pdf"
+ *   kind 'plan' (the source site-plan PDF):
+ *     "{Facility Name} - {Camino Facility ID} - LDAR Site Plan (MM-DD-YY).pdf"
  *
  * Facility name + Camino ID resolved the same way as SPCC filenames
  * (pickFacilityFilenameName; "NoID" placeholder when the ID is missing).
+ * Defaults to 'path' for backward compatibility with the single-file download.
  */
-export function buildLdarSitePlanFilename(facility: Facility): string {
+export function buildLdarSitePlanFilename(
+  facility: Facility,
+  kind: 'path' | 'plan' = 'path',
+): string {
   const sanitize = (s: string) =>
     s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
   const name = sanitize(pickFacilityFilenameName(facility)) || 'Unnamed Facility';
@@ -139,5 +145,6 @@ export function buildLdarSitePlanFilename(facility: Facility): string {
     : 'NoID';
   const dateStr = resolveLdarPlanDateMMDDYY(facility);
   const datePart = dateStr ? ` (${dateStr})` : '';
-  return `${name} - ${id} - LDAR Site Path${datePart}.pdf`;
+  const label = kind === 'plan' ? 'LDAR Site Plan' : 'LDAR Site Path';
+  return `${name} - ${id} - ${label}${datePart}.pdf`;
 }

@@ -36,7 +36,7 @@ import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
-import { getLdarSitePlanState, isLdarSitePlanRequired, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
+import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
@@ -3003,6 +3003,112 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
     } catch (err) {
       console.error('Bulk PDF download error:', err);
+      setError('Failed to create zip file. Please try again.');
+    } finally {
+      setIsBulkDownloading(false);
+    }
+  };
+
+  /**
+   * Bulk-download LDAR PDFs as a zip, one PDF per facility, named in the
+   * canonical convention. `kind`:
+   *   'path' → the annotated observation-path report
+   *            (ldar_observation_path_data.annotated_pdf_url),
+   *            "Name - Camino ID - LDAR Site Path (date).pdf"
+   *   'plan' → the source site-plan PDF (ldar_site_plan_url),
+   *            "Name - Camino ID - LDAR Site Plan (date).pdf"
+   * Scope mirrors the SPCC bulk download: ticked rows win, else the filtered
+   * list. The LDAR fields already live on each facility, so no extra query.
+   */
+  const handleBulkLdarDownload = async (kind: 'path' | 'plan') => {
+    const targetFacilities =
+      selectedFacilityIds.size > 0
+        ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+        : filteredFacilities;
+
+    const items = targetFacilities
+      .map((f) => ({
+        facility: f,
+        url:
+          kind === 'path'
+            ? f.ldar_observation_path_data?.annotated_pdf_url ?? null
+            : f.ldar_site_plan_url ?? null,
+        // Cache-buster so we never pull stale bytes from the fixed storage path.
+        ts:
+          kind === 'path'
+            ? f.ldar_observation_path_data?.annotated_pdf_uploaded_at ?? null
+            : f.ldar_site_plan_uploaded_at ?? null,
+      }))
+      .filter((it): it is { facility: Facility; url: string; ts: string | null } => !!it.url);
+
+    if (items.length === 0) {
+      setError(
+        kind === 'path'
+          ? 'No LDAR observation-path reports for these facilities yet.'
+          : 'No LDAR site plans uploaded for these facilities yet.',
+      );
+      return;
+    }
+
+    setIsBulkDownloading(true);
+    setError(null);
+    try {
+      const zip = new JSZip();
+      let successCount = 0;
+      let failCount = 0;
+      const usedNames = new Set<string>();
+
+      await Promise.all(
+        items.map(async (it) => {
+          try {
+            let entryName = buildLdarSitePlanFilename(it.facility, kind);
+            // Last-resort uniqueness if two facilities sanitize to the same name.
+            if (usedNames.has(entryName)) {
+              let suffix = 1;
+              let candidate = entryName;
+              while (usedNames.has(candidate)) {
+                suffix++;
+                candidate = entryName.replace(/\.pdf$/i, ` (${suffix}).pdf`);
+              }
+              entryName = candidate;
+            }
+            usedNames.add(entryName);
+
+            const fetchUrl = it.ts
+              ? `${it.url}${it.url.includes('?') ? '&' : '?'}t=${encodeURIComponent(it.ts)}`
+              : it.url;
+            const response = await fetch(fetchUrl);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const blob = await response.blob();
+            zip.file(entryName, blob);
+            successCount++;
+          } catch (err) {
+            console.warn(`Failed LDAR ${kind} download for facility ${it.facility.id}:`, err);
+            failCount++;
+          }
+        }),
+      );
+
+      if (successCount === 0) {
+        setError('Failed to download any LDAR PDFs. Check your connection and try again.');
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(zipBlob);
+      const zipLabel = kind === 'path' ? 'LDAR Observation Paths' : 'LDAR Site Plans';
+      link.download = `${zipLabel} (${new Date().toISOString().split('T')[0]}).zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+      if (failCount > 0) {
+        setError(`Downloaded ${successCount} file${successCount === 1 ? '' : 's'}. ${failCount} failed to download.`);
+      }
+    } catch (err) {
+      console.error('Bulk LDAR download error:', err);
       setError('Failed to create zip file. Please try again.');
     } finally {
       setIsBulkDownloading(false);
@@ -6050,6 +6156,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         // user has filtered to. 'all' mode shows everything, grouped.
         const showPlansSection = spccMode !== 'inspection';
         const showInspectionsSection = spccMode !== 'plan';
+        // LDAR is a facility-level report independent of the plan/inspection
+        // axis — surface its bulk downloads in All mode.
+        const showLdarSection = spccMode === 'all';
+        const scopedLdarPathCount = scopedFacilities.filter(
+          (f) => f.ldar_observation_path_data?.annotated_pdf_url,
+        ).length;
+        const scopedLdarPlanCount = scopedFacilities.filter((f) => f.ldar_site_plan_url).length;
 
         return (
         <div
@@ -6147,6 +6260,55 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       <p className="text-sm font-medium text-gray-900 dark:text-white">Inspection Reports</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         HTML inspection reports for {scopedFacilityCount} facilit{scopedFacilityCount === 1 ? 'y' : 'ies'} (chosen in the next step)
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {/* ─── LDAR section (All mode) ──────────────────────────── */}
+              {showLdarSection && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
+                    LDAR
+                  </p>
+                  <button
+                    onClick={() => {
+                      setShowReportTypePicker(false);
+                      handleBulkLdarDownload('path');
+                    }}
+                    disabled={isBulkDownloading || scopedLdarPathCount === 0}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-300 dark:hover:border-emerald-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                      <Route className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Observation Path Reports (ZIP)</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {scopedLdarPathCount === 0
+                          ? 'No observation-path reports generated for these facilities yet'
+                          : `${scopedLdarPathCount} PDF${scopedLdarPathCount === 1 ? '' : 's'}, named "… - LDAR Site Path (date)"`}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowReportTypePicker(false);
+                      handleBulkLdarDownload('plan');
+                    }}
+                    disabled={isBulkDownloading || scopedLdarPlanCount === 0}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-300 dark:hover:border-emerald-600 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">Site Plans (ZIP)</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {scopedLdarPlanCount === 0
+                          ? 'No LDAR site plans uploaded for these facilities yet'
+                          : `${scopedLdarPlanCount} PDF${scopedLdarPlanCount === 1 ? '' : 's'}, named "… - LDAR Site Plan (date)"`}
                       </p>
                     </div>
                   </button>
