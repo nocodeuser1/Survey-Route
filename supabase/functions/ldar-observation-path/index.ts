@@ -127,8 +127,13 @@ A top-down aerial photo of a wellsite/tank battery, with yellow callout boxes th
 2. The SECOND stop (number 2) must be the piece of equipment that is FARTHEST from the combustor/flare. On a typical layout this is the sales-gas line or another upstream component on the far side of the facility from the combustor. Pick by visual distance from the combustor callout.
 3. From stop 2, walk TOWARD the combustor/flare, visiting every labeled piece of equipment in succession. Choose the natural order along the production train (sales-gas → gas-cooler / compressor → separators → heater-treaters → tanks → VRU → combustor). The path moves geographically across the facility — it does NOT zig-zag back and forth.
 4. The LAST stop (number N) is the combustor/flare (or whichever destructive-emission device is present).
-5. If multiple identical units exist (e.g. "4x Separators", "2x Heater Treaters", "6x Crude Oil Storage Tanks"), they are ONE stop, not many. Place the circle on the cluster centroid and use the labeled count in the legend text (e.g. "Separators (4x)").
-6. Tank thief hatches, dump valves, and tank piping are observed together as ONE stop, NOT separate stops. Use the legend wording: "View Thief Hatches, Dump Valves, and Tank Piping (for Crude Oil Storage Tanks and Produced Water Storage Tank)" — match the exact tank names visible in the photo.
+5. If multiple identical NON-TANK units exist (e.g. "4x Separators", "2x Heater Treaters"), they are ONE stop, not many. Place the circle on the cluster centroid and use the labeled count in the legend text (e.g. "Separators (4x)"). (Storage tanks are handled differently — see rule 6.)
+6. STORAGE TANKS ARE NEVER THEIR OWN STOPS OR LEGEND NUMBERS. The crude-oil storage tanks, produced-water storage tanks, and their thief hatches, dump valves, and tank piping are ALL observed together as exactly ONE stop. That stop's legend label MUST ALWAYS be of the form:
+   "View Thief Hatches, Dump Valves, and Tank Piping (for <Nx> <full tank name> and <Mx> <full tank name>)"
+   - Inside the parentheses, list EACH tank type present, each with its count multiplier and the FULL description copied verbatim from the photo's yellow callout. Example: "View Thief Hatches, Dump Valves, and Tank Piping (for 6x 400 Bbl Steel Crude Oil Storage Tanks and 2x 400 Bbl Steel Produced Water Storage Tanks)".
+   - If only one tank type is present, list just that one: "(for 3x 400 Bbl Steel Crude Oil Storage Tanks)".
+   - ABSOLUTELY DO NOT emit the tanks as their own separate legend entry such as "400 Bbl Steel Crude Oil Storage Tanks (3x)" or "Produced Water Storage Tank". The ONLY place the tanks appear in the legend is inside the parentheses of this single "View Thief Hatches, Dump Valves, and Tank Piping (...)" entry. Every generated path MUST contain exactly one such entry whenever storage tanks are present.
+   Place this stop's circle near the tank cluster (empty ground preferred).
 7. Methanol tanks and corrosion-inhibitor tanks are observed implicitly while walking past — DO NOT add separate stops for them unless they are clearly isolated from the production train.
 8. Numbers are sequential 1..N with no gaps and no duplicates.
 
@@ -216,8 +221,12 @@ Return EXACTLY this shape:
 {
   "stops": [
     { "number": 1, "x": 0.55, "y": 0.65, "label": "Wellheads (2x)" },
-    { "number": 2, "x": 0.06, "y": 0.18, "label": "Sales Gas" }
-    // ... one entry per stop, ending with the combustor
+    { "number": 2, "x": 0.06, "y": 0.18, "label": "Sales Gas" },
+    // ... separators, heater treaters, etc. ...
+    // The ONE tank-observation stop — tanks are summarized in the parentheses,
+    // never broken out into their own numbered entries:
+    { "number": 6, "x": 0.62, "y": 0.78, "label": "View Thief Hatches, Dump Valves, and Tank Piping (for 6x 400 Bbl Steel Crude Oil Storage Tanks and 2x 400 Bbl Steel Produced Water Storage Tanks)" }
+    // ... ending with the combustor/flare
   ],
   "waypoints": [
     { "afterStop": 1, "x": 0.40, "y": 0.55 },  // shapes the segment between stops 1 and 2
