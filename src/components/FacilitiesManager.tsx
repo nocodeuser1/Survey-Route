@@ -1870,6 +1870,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             if (d === 'changes_found') return 1;
             return 2; // no_changes
           }
+          case 'ldar_site_plan_status': {
+            // Group by LDAR state so the badges cluster when sorted (this
+            // column is computed, not a raw field — without an explicit case
+            // it fell through to default '' and rows sorted by name instead).
+            // Severity-first on ascending, matching the other status columns:
+            // Needed (action required) → Uploaded → Completed → N/A (not
+            // required, sinks to the bottom).
+            const order: Record<ReturnType<typeof getLdarSitePlanState>, number> = {
+              needed: 0,
+              uploaded: 1,
+              completed: 2,
+              not_required: 3,
+            };
+            return order[getLdarSitePlanState(facility)];
+          }
           case 'spcc_plan_uploaded':
             // Asc → "Not uploaded" first, then "Uploaded"; flip via header click.
             return facility.spcc_plan_url ? 1 : 0;
