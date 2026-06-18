@@ -5277,8 +5277,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           )}
 
-          {/* Floating Selection Actions Bar — fixed to bottom on mobile, sticky on desktop */}
-          {selectedFacilityIds.size > 0 && (
+          {/* Floating Selection Actions Bar — fixed to bottom on mobile, sticky on desktop.
+              Hidden while a report/overview modal is open: those modals sit at a
+              lower z-index than this z-[9999] bar, so the bar would float on top of
+              and overlap them. The selection itself is preserved (the export reads
+              selectedFacilityIds directly), so the bar simply reappears on close. */}
+          {selectedFacilityIds.size > 0 &&
+            !showExportPopup &&
+            !showReportTypePicker &&
+            !showOverviewTypePicker && (
             <div
               className="fixed bottom-0 left-0 right-0 z-[9999] animate-[slideUp_0.25s_ease-out]"
               style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
