@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal } from 'lucide-react';
 import JSZip from 'jszip';
@@ -6165,7 +6166,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
 
       {
-        showExportPopup && (
+        showExportPopup && createPortal(
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-2 sm:p-3"
             onClick={() => setShowExportPopup(false)}
@@ -6201,7 +6202,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )
       }
 
