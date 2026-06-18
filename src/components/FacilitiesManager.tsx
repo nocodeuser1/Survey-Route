@@ -1323,14 +1323,29 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
-    setSelectedReportType(reportType);
 
-    // Auto-switch app-wide mode based on report type filter
-    if (reportType === 'spcc_plan') {
-      setSpccMode('plan');
-    } else if (reportType === 'spcc_inspection' || reportType === 'spcc_inspection_internal' || reportType === 'spcc_inspection_external') {
-      setSpccMode('inspection');
+    // Auto-switch app-wide mode based on report type filter — but ONLY when the
+    // mode actually needs to change. setSpccMode resets selectedReportType to
+    // the mode's default (and clears status filters); calling it while already
+    // in the target mode would clobber the Internal/External refinement the
+    // user just picked. That was the bug: choosing Internal/External in
+    // Inspection mode snapped straight back to plain "SPCC Inspection".
+    const targetMode: 'plan' | 'inspection' | null =
+      reportType === 'spcc_plan'
+        ? 'plan'
+        : reportType === 'spcc_inspection' ||
+            reportType === 'spcc_inspection_internal' ||
+            reportType === 'spcc_inspection_external'
+          ? 'inspection'
+          : null;
+    if (targetMode && spccMode !== targetMode) {
+      setSpccMode(targetMode);
     }
+
+    // Apply the chosen report type LAST so it survives setSpccMode's
+    // reset-to-default (literal-value setters: the final write in the batch
+    // wins) when a mode switch did happen.
+    setSelectedReportType(reportType);
 
     try {
       const { error } = await supabase
@@ -1615,16 +1630,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     if (selectedReportType === 'spcc_inspection_internal') {
-      const inspection = inspections.get(facility.id);
-      return isInspectionValid(inspection);
+      // Currently-inspected facilities that were NOT completed externally —
+      // matches the blue "Inspected" badge. getInspectionStatus is the same
+      // source the badge + sort use, so the filter agrees with what's on screen.
+      return (
+        getInspectionStatus(facility) === 'inspected' &&
+        facility.spcc_completion_type !== 'external'
+      );
     }
 
     if (selectedReportType === 'spcc_inspection_external') {
-      if (!facility.spcc_completion_type || !facility.spcc_inspection_date) return false;
-      const completedDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromCompletion = new Date(completedDate);
-      oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-      return new Date() <= oneYearFromCompletion;
+      // Currently-inspected facilities completed externally — matches the
+      // yellow "SPCC External" badge. Must check the type is specifically
+      // 'external' (a facility marked 'internal' also has a completion type,
+      // so the old "type is set" check wrongly let internals through here).
+      return (
+        getInspectionStatus(facility) === 'inspected' &&
+        facility.spcc_completion_type === 'external'
+      );
     }
 
     return false;
