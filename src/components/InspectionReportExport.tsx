@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Download, FileText, Loader, Search, ArrowUpDown } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, UserSettings, InspectionPhoto } from '../lib/supabase';
 import { formatInspectionTimestamp } from '../utils/inspectionTimestamp';
+import { buildInspectionFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import JSZip from 'jszip';
 
 interface InspectionReportExportProps {
@@ -759,13 +760,30 @@ export default function InspectionReportExport({ facilities, userId, accountId }
     // If not combined and multiple reports, create a zip file
     if (!combinedReport && selectedInspectionsList.length > 1) {
       const zip = new JSZip();
+      const usedNames = new Set<string>();
 
       selectedInspectionsList.forEach((inspection) => {
         const facility = facilities.find(f => f.id === inspection.facility_id);
-        const facilityName = facility?.name || 'Unknown Facility';
-        const safeFileName = facilityName.replace(/[^a-z0-9]/gi, '_');
         const htmlContent = generateStandaloneReport(inspection);
-        const fileName = `${safeFileName}_SPCC_Inspection_${new Date().toISOString().split('T')[0]}.html`;
+        // Same canonical convention as SPCC plans:
+        // "{Name} - {Camino ID} - SPCC Inspection (MM-DD-YY).html",
+        // dated by the inspection itself (not the export date).
+        let fileName = buildInspectionFilename({
+          facilityName: facility ? pickFacilityFilenameName(facility) : 'Unknown Facility',
+          caminoFacilityId: facility?.camino_facility_id,
+          conductedAt: inspection.conducted_at,
+        });
+        // Disambiguate same facility + same inspection date.
+        if (usedNames.has(fileName)) {
+          let suffix = 1;
+          let candidate = fileName;
+          while (usedNames.has(candidate)) {
+            suffix++;
+            candidate = fileName.replace(/\.html$/i, ` (${suffix}).html`);
+          }
+          fileName = candidate;
+        }
+        usedNames.add(fileName);
         zip.file(fileName, htmlContent);
       });
 
@@ -773,7 +791,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `SPCC_Inspection_Reports_${selectedInspectionsList.length}_Facilities_${new Date().toISOString().split('T')[0]}.zip`;
+      a.download = `SPCC Inspection Reports (${selectedInspectionsList.length} Facilities).zip`;
       a.click();
       URL.revokeObjectURL(url);
       return;
@@ -1916,9 +1934,22 @@ export default function InspectionReportExport({ facilities, userId, accountId }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const filename = combinedReport && selectedInspectionsList.length > 1
-      ? `SPCC_Combined_Report_${selectedInspectionsList.length}_Facilities_${new Date().toISOString().split('T')[0]}.html`
-      : `SPCC_Inspection_Reports_${new Date().toISOString().split('T')[0]}.html`;
+    let filename: string;
+    if (combinedReport && selectedInspectionsList.length > 1) {
+      // Multiple facilities in one file — no single facility/date to key on.
+      filename = `SPCC Inspection - Combined Report (${selectedInspectionsList.length} Facilities).html`;
+    } else {
+      // Single report — canonical SPCC-style name with the inspection's date.
+      const only = selectedInspectionsList[0];
+      const facility = only ? facilities.find(f => f.id === only.facility_id) : undefined;
+      filename = only
+        ? buildInspectionFilename({
+            facilityName: facility ? pickFacilityFilenameName(facility) : 'Unknown Facility',
+            caminoFacilityId: facility?.camino_facility_id,
+            conductedAt: only.conducted_at,
+          })
+        : 'SPCC Inspection Report.html';
+    }
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);

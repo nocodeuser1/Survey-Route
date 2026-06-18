@@ -6,6 +6,7 @@
 
 import { supabase } from '../lib/supabase';
 import type { Facility, SPCCPlan } from '../lib/supabase';
+import { APP_TIME_ZONE } from './dateUtils';
 
 export interface FacilityWell {
   /** 1-based index (matches well_name_N / well_api_N columns). */
@@ -156,6 +157,49 @@ export function buildPlanFilename(opts: {
   const m = opts.date.match(/^(\d{4})-(\d{2})-(\d{2})/);
   const dateStr = m ? `${m[2]}-${m[3]}-${m[1].slice(2)}` : '';
   return `${name} - ${id} - ${kindLabel} (${dateStr}).pdf`;
+}
+
+/**
+ * Canonical download filename for an exported SPCC inspection report — same
+ * convention as buildPlanFilename, but with the "SPCC Inspection" label, an
+ * .html extension, and the INSPECTION date (not the export date):
+ *
+ *   "{Facility Name} - {Camino Facility ID} - SPCC Inspection (MM-DD-YY).html"
+ *
+ * conductedAt is a timestamp, so it's formatted in Central time to match the
+ * date shown in the app (a UTC-substring slice could land a day off).
+ */
+export function buildInspectionFilename(opts: {
+  facilityName: string;
+  caminoFacilityId: string | null | undefined;
+  /** Inspection timestamp (ISO) — rendered in Central time to MM-DD-YY. */
+  conductedAt: string;
+}): string {
+  const sanitize = (s: string) =>
+    s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+
+  const name = sanitize(opts.facilityName) || 'Unnamed Facility';
+  const id = opts.caminoFacilityId
+    ? sanitize(opts.caminoFacilityId) || 'NoID'
+    : 'NoID';
+
+  let dateStr = '';
+  const d = new Date(opts.conductedAt);
+  if (!isNaN(d.getTime())) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: APP_TIME_ZONE,
+      year: '2-digit',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    const mm = get('month');
+    const dd = get('day');
+    const yy = get('year');
+    if (mm && dd && yy) dateStr = `${mm}-${dd}-${yy}`;
+  }
+
+  return `${name} - ${id} - SPCC Inspection (${dateStr}).html`;
 }
 
 /**
