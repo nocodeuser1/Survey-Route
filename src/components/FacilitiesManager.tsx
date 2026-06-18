@@ -2005,10 +2005,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           case 'inspection_invoice_status':
             return facility.inspection_invoiced_at ? new Date(facility.inspection_invoiced_at).getTime() : 0;
           case 'invoiced_date': {
-            // Mode-aware sort by the invoiced date (the dedicated date column).
-            const at = spccMode !== 'inspection'
-              ? facility.plan_invoiced_at
-              : facility.inspection_invoiced_at;
+            // Sort by the EXACT date the cell shows so the visible dates stay
+            // in order: a paid row renders its paid_at (green), an
+            // invoiced-but-unpaid row renders its invoiced_at (amber). Sorting
+            // a paid row by invoiced_at while it displays paid_at made the
+            // column look unsorted. Mode-aware (plan vs inspection fields).
+            const isPlan = spccMode !== 'inspection';
+            const paid = isPlan ? facility.plan_paid : facility.inspection_paid;
+            const at = paid
+              ? (isPlan ? facility.plan_paid_at : facility.inspection_paid_at)
+              : (isPlan ? facility.plan_invoiced_at : facility.inspection_invoiced_at);
             return at ? new Date(at).getTime() : 0;
           }
           case 'address':
