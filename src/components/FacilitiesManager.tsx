@@ -1848,8 +1848,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             // Sort severity-first so the user sees what needs attention at the
             // top of an ascending sort. Mirrors the spcc_status ordering:
             // overdue → expired → due_soon → expiring → upcoming → inspected
-            // → no_ip (unknowns sink to the bottom).
+            // → inspected-externally → no_ip (unknowns sink to the bottom).
             const status = getInspectionStatus(facility);
+            // A valid inspection completed EXTERNALLY renders as a distinct
+            // "SPCC External" badge (see getVerificationIcon — only in the
+            // 'valid' branch). The status itself collapses to 'inspected', so
+            // without this split the external rows interleave with internal
+            // "Inspected" rows and the column looks ungrouped — which is the
+            // bug. Give external its own adjacent slot so the badges cluster.
+            if (status === 'inspected' && facility.spcc_completion_type === 'external') {
+              return 6;
+            }
             const order: Record<InspectionFilterValue, number> = {
               overdue: 0,
               expired: 1,
@@ -1857,7 +1866,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               expiring: 3,
               upcoming: 4,
               inspected: 5,
-              no_ip: 6,
+              no_ip: 7,
             };
             return order[status];
           }
