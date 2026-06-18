@@ -6167,15 +6167,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       {
         showExportPopup && (
           <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-2 sm:p-3"
             onClick={() => setShowExportPopup(false)}
           >
             <div
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col transition-colors duration-200"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[96vh] flex flex-col overflow-hidden transition-colors duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
+              <div className="px-4 py-3 border-b dark:border-gray-600 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Export Inspection Reports</h3>
                 <button
                   onClick={() => setShowExportPopup(false)}
                   className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
@@ -6183,7 +6183,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <Undo2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 </button>
               </div>
-              <div className="p-4 bg-white dark:bg-gray-800 transition-colors duration-200 overflow-y-auto">
+              <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-gray-800 transition-colors duration-200">
                 <InspectionReportExport
                   // Same scope rule as the bulk PDF download: if the user
                   // ticked specific rows, export those; otherwise fall back to

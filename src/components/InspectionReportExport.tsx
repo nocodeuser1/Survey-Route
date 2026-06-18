@@ -1991,80 +1991,82 @@ export default function InspectionReportExport({ facilities, userId, accountId }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg transition-colors duration-200">
-        <p className="text-sm text-blue-900 dark:text-blue-100">
-          <span className="font-semibold">{facilities.length}</span> facilities in route
-        </p>
-        <p className="text-sm text-blue-900 dark:text-blue-100">
-          <span className="font-semibold">{filteredAndSortedInspections.length}</span> of <span className="font-semibold">{inspections.length}</span> inspections shown
-        </p>
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* Sticky top zone — always visible (summary + search + sort + select/clear) */}
+      <div className="flex-shrink-0 px-4 pt-3 pb-2 space-y-2 border-b border-gray-100 dark:border-gray-700">
+        <div className="p-2.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg transition-colors duration-200">
+          <p className="text-xs text-blue-900 dark:text-blue-100">
+            <span className="font-semibold">{facilities.length}</span> facilities in route
+          </p>
+          <p className="text-xs text-blue-900 dark:text-blue-100">
+            <span className="font-semibold">{filteredAndSortedInspections.length}</span> of <span className="font-semibold">{inspections.length}</span> inspections shown
+          </p>
+        </div>
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <input
+            type="text"
+            placeholder="Search by facility, inspector, or date..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-colors duration-200"
+          />
+        </div>
+
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+          <span className="text-xs text-gray-600 dark:text-gray-400">Sort by:</span>
+          <button
+            onClick={() => toggleSort('date')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors ${
+              sortBy === 'date'
+                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Date
+            {sortBy === 'date' && <ArrowUpDown className="w-3 h-3" />}
+          </button>
+          <button
+            onClick={() => toggleSort('facility')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors ${
+              sortBy === 'facility'
+                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Facility
+            {sortBy === 'facility' && <ArrowUpDown className="w-3 h-3" />}
+          </button>
+          <button
+            onClick={() => toggleSort('flagged')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors ${
+              sortBy === 'flagged'
+                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            Flagged
+            {sortBy === 'flagged' && <ArrowUpDown className="w-3 h-3" />}
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={selectAll}
+            className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+          >
+            Select All
+          </button>
+          <button
+            onClick={clearAll}
+            className="px-2 py-0.5 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+          >
+            Clear All
+          </button>
+        </div>
       </div>
 
-      <div className="mb-3 relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-        <input
-          type="text"
-          placeholder="Search by facility, inspector, or date..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-colors duration-200"
-        />
-      </div>
-
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-sm text-gray-600 dark:text-gray-400">Sort by:</span>
-        <button
-          onClick={() => toggleSort('date')}
-          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
-            sortBy === 'date'
-              ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-          }`}
-        >
-          Date
-          {sortBy === 'date' && <ArrowUpDown className="w-3 h-3" />}
-        </button>
-        <button
-          onClick={() => toggleSort('facility')}
-          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
-            sortBy === 'facility'
-              ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-          }`}
-        >
-          Facility
-          {sortBy === 'facility' && <ArrowUpDown className="w-3 h-3" />}
-        </button>
-        <button
-          onClick={() => toggleSort('flagged')}
-          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
-            sortBy === 'flagged'
-              ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-          }`}
-        >
-          Flagged
-          {sortBy === 'flagged' && <ArrowUpDown className="w-3 h-3" />}
-        </button>
-      </div>
-
-      <div className="flex items-center justify-end gap-2">
-        <button
-          onClick={selectAll}
-          className="px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-        >
-          Select All
-        </button>
-        <button
-          onClick={clearAll}
-          className="px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-        >
-          Clear All
-        </button>
-      </div>
-
-      <div className="space-y-2 mb-4 max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-800 transition-colors duration-200">
+      {/* Scrollable list — the ONLY scrolling area; header above and footer below stay put */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-1.5">
         {filteredAndSortedInspections.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             <p className="text-sm">No inspections match your search</p>
@@ -2075,22 +2077,22 @@ export default function InspectionReportExport({ facilities, userId, accountId }
           return (
             <label
               key={inspection.id}
-              className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer bg-white dark:bg-gray-800 transition-colors duration-200"
+              className="flex items-center gap-3 p-2.5 border border-gray-200 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer bg-white dark:bg-gray-800 transition-colors duration-200"
             >
               <input
                 type="checkbox"
                 checked={selectedInspections.has(inspection.id)}
                 onChange={() => toggleInspection(inspection.id)}
-                className="w-3 h-3"
+                className="w-3.5 h-3.5 flex-shrink-0"
               />
-              <div className="flex-1">
-                <p className="font-medium text-gray-900 dark:text-white">{facility?.name || 'Unknown Facility'}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{facility?.name || 'Unknown Facility'}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
                   {new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })} - {inspection.inspector_name}
                 </p>
               </div>
               {inspection.flagged_items_count > 0 && (
-                <span className="text-xs bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200 px-2 py-1 rounded">
+                <span className="text-[11px] bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200 px-2 py-0.5 rounded flex-shrink-0">
                   {inspection.flagged_items_count} flagged
                 </span>
               )}
@@ -2100,55 +2102,58 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         )}
       </div>
 
-      <div className={`mb-4 p-4 rounded-lg border transition-all duration-200 ${
-        selectedInspections.size > 1
-          ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700'
-          : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 opacity-60'
-      }`}>
-        <label className={`flex items-start gap-3 ${selectedInspections.size > 1 ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-          <input
-            type="checkbox"
-            checked={combinedReport && selectedInspections.size > 1}
-            onChange={(e) => setCombinedReport(e.target.checked)}
-            disabled={selectedInspections.size < 2}
-            className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-          <div className="flex-1">
-            <div className={`font-medium ${
-              selectedInspections.size > 1
-                ? 'text-blue-900 dark:text-blue-100'
-                : 'text-gray-600 dark:text-gray-400'
-            }`}>
-              Create Combined Report {selectedInspections.size > 1 && '✨'}
+      {/* Sticky bottom zone — always visible (combined-report toggle + export button) */}
+      <div className="flex-shrink-0 px-4 pt-2 pb-3 space-y-2 border-t border-gray-100 dark:border-gray-700">
+        <div className={`p-2.5 rounded-lg border transition-all duration-200 ${
+          selectedInspections.size > 1
+            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700'
+            : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 opacity-60'
+        }`}>
+          <label className={`flex items-start gap-2.5 ${selectedInspections.size > 1 ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              checked={combinedReport && selectedInspections.size > 1}
+              onChange={(e) => setCombinedReport(e.target.checked)}
+              disabled={selectedInspections.size < 2}
+              className="mt-0.5 w-3.5 h-3.5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+            />
+            <div className="flex-1">
+              <div className={`text-sm font-medium ${
+                selectedInspections.size > 1
+                  ? 'text-blue-900 dark:text-blue-100'
+                  : 'text-gray-600 dark:text-gray-400'
+              }`}>
+                Create Combined Report {selectedInspections.size > 1 && '✨'}
+              </div>
+              <div className={`text-xs mt-0.5 ${
+                selectedInspections.size > 1
+                  ? 'text-blue-700 dark:text-blue-200'
+                  : 'text-gray-500 dark:text-gray-500'
+              }`}>
+                {selectedInspections.size > 1
+                  ? 'Generate a single report with a summary dashboard and easy navigation between facilities. Perfect for reviewing multiple inspections at once.'
+                  : selectedInspections.size === 1
+                  ? 'Select at least one more inspection to create a combined report with summary dashboard.'
+                  : 'Select 2 or more inspections to enable combined report mode.'}
+              </div>
             </div>
-            <div className={`text-sm mt-1 ${
-              selectedInspections.size > 1
-                ? 'text-blue-700 dark:text-blue-200'
-                : 'text-gray-500 dark:text-gray-500'
-            }`}>
-              {selectedInspections.size > 1
-                ? 'Generate a single report with a summary dashboard and easy navigation between facilities. Perfect for reviewing multiple inspections at once.'
-                : selectedInspections.size === 1
-                ? 'Select at least one more inspection to create a combined report with summary dashboard.'
-                : 'Select 2 or more inspections to enable combined report mode.'}
-            </div>
-          </div>
-        </label>
-      </div>
+          </label>
+        </div>
 
-      <button
-        onClick={exportReports}
-        disabled={selectedInspections.size === 0}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 dark:bg-green-700 text-white rounded-md hover:bg-green-700 dark:hover:bg-green-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
-      >
-        <Download className="w-5 h-5" />
-        {combinedReport && selectedInspections.size > 1
-          ? `Export Combined Report (${selectedInspections.size} Facilities)`
-          : `Export ${selectedInspections.size} Report${selectedInspections.size !== 1 ? 's' : ''}`} (HTML)
-      </button>
-      <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
-        Download as HTML file, then open in browser and print to PDF
-      </p>
+        <button
+          onClick={exportReports}
+          disabled={selectedInspections.size === 0}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 dark:bg-green-700 text-white text-sm rounded-md hover:bg-green-700 dark:hover:bg-green-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
+        >
+          <Download className="w-4 h-4" />
+          {combinedReport && selectedInspections.size > 1
+            ? `Export Combined Report (${selectedInspections.size} Facilities)`
+            : `Export ${selectedInspections.size} Report${selectedInspections.size !== 1 ? 's' : ''}`} (HTML)
+        </button>
+        <p className="text-[11px] text-gray-600 dark:text-gray-400 text-center">
+          Download as HTML file, then open in browser and print to PDF
+        </p>
+      </div>
     </div>
   );
 }
