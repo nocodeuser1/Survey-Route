@@ -6178,7 +6178,17 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               </div>
               <div className="p-4 bg-white dark:bg-gray-800 transition-colors duration-200 overflow-y-auto">
                 <InspectionReportExport
-                  facilities={facilities.filter(f => selectedFacilityIds.has(f.id))}
+                  // Same scope rule as the bulk PDF download: if the user
+                  // ticked specific rows, export those; otherwise fall back to
+                  // the current filtered list ("I didn't pick any, so export
+                  // everything I can see"). Passing only the selection meant an
+                  // empty array when nothing was ticked → "no completed
+                  // inspections to export".
+                  facilities={
+                    selectedFacilityIds.size > 0
+                      ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
+                      : filteredFacilities
+                  }
                   userId={userId}
                   accountId={accountId}
                 />
