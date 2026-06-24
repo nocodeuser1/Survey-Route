@@ -855,6 +855,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // round-trip per row; refetched whenever the facility set or account
   // changes (account-switch already remounts via key={accountId}).
   const [commentsByFacility, setCommentsByFacility] = useState<Map<string, FacilityComment[]>>(new Map());
+  // Bumped to force a comments reload — e.g. after the detail modal closes, so
+  // resolving/adding/deleting a comment there updates the row bubble count.
+  const [commentsRefreshKey, setCommentsRefreshKey] = useState(0);
   // Popover state — anchored at click coords like DayActionsPopover.
   const [commentsPopover, setCommentsPopover] = useState<
     { facility: Facility; x: number; y: number } | null
@@ -891,7 +894,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     };
     load();
     return () => { cancelled = true; };
-  }, [accountId, facilities]);
+  }, [accountId, facilities, commentsRefreshKey]);
 
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [columnSearch, setColumnSearch] = useState('');
@@ -3605,10 +3608,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const surveyCompletion = activeSurveyTypeId && activeType && !activeType.is_system && getCompletionStatus
           ? getCompletionStatus(facility.id, activeSurveyTypeId)
           : null;
-        // Only count user comments for the row indicator — system/audit
-        // comments ([SYSTEM] ...) shouldn't surface a chat bubble on the row.
+        // Row indicator counts only OPEN user comments: system/audit comments
+        // ([SYSTEM] ...) never surface a bubble, and comments checked off
+        // (resolved_at set) drop out of the count — so a fully-resolved
+        // facility shows no bubble at all.
         const facilityComments = (commentsByFacility.get(facility.id) ?? []).filter(isUserComment);
-        const commentCount = facilityComments.length;
+        const commentCount = facilityComments.filter((c) => !c.resolved_at).length;
         const isInRoute = !!currentRouteFacilityIds && currentRouteFacilityIds.has(facility.id);
         return (
           <div className="flex items-center gap-2 min-w-0">
@@ -6106,6 +6111,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               setForcedTab(null);
               setOpenToComments(false);
               loadInspections();
+              // Reload row comment counts — a comment may have been resolved,
+              // added, or deleted while the modal was open.
+              setCommentsRefreshKey((k) => k + 1);
             }}
             onShowOnMap={onShowOnMap}
             onEdit={() => handleEdit(selectedFacility)}
