@@ -341,6 +341,12 @@ export default function FacilityDetailModal({
   };
 
   const currentAuthorName = user?.fullName || user?.email || 'User';
+  // Comments are stored with the public.users.id (user?.id), but the `userId`
+  // prop is auth.uid() — so "am I the author?" and the edit/delete row filters
+  // must key off user?.id, falling back to the prop only if the context user
+  // is somehow absent. Without this, isOwner was always false (no edit button)
+  // and edit/delete matched zero rows.
+  const myUserId = user?.id ?? userId;
   const latestComment = facilityComments[0] || null;
   const commentCount = facilityComments.length;
 
@@ -405,7 +411,7 @@ export default function FacilityDetailModal({
         .from('facility_comments')
         .update({ body })
         .eq('id', commentId)
-        .eq('user_id', userId)
+        .eq('user_id', myUserId)
         .select('*')
         .single();
 
@@ -430,7 +436,7 @@ export default function FacilityDetailModal({
         .from('facility_comments')
         .delete()
         .eq('id', commentId)
-        .eq('user_id', userId);
+        .eq('user_id', myUserId);
 
       if (error) throw error;
 
@@ -2009,25 +2015,27 @@ export default function FacilityDetailModal({
                 <ul className="divide-y divide-gray-100 dark:divide-gray-700">
                   {facilityComments.map((comment) => {
                     const isEditing = editingCommentId === comment.id;
-                    const isOwner = comment.user_id === userId;
+                    const isOwner = comment.user_id === myUserId;
                     const isResolved = !!comment.resolved_at;
                     // The author or an agency owner may check a comment off.
                     const canResolve = isOwner || !!user?.isAgencyOwner;
                     return (
                       <li key={comment.id} className="group py-3 first:pt-0 last:pb-0">
-                        <div className="flex items-start gap-3">
-                          {/* Checklist circle — hover-revealed when open, solid
-                              green when done. Non-resolvers still see the green
-                              check (read-only) so the status is visible to all. */}
+                        <div className="flex items-start">
+                          {/* Checklist circle — collapses to zero width (no left
+                              gap) until you hover the row; solid green once done.
+                              Touch devices can't hover, so there it stays
+                              visible. Non-resolvers still see the green check
+                              (read-only) so the status is visible to all. */}
                           {!isEditing && (canResolve || isResolved) && (
                             <button
                               type="button"
                               onClick={() => canResolve && handleToggleCommentResolved(comment)}
                               disabled={!canResolve || togglingCommentId === comment.id}
-                              className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                              className={`mt-0.5 flex-shrink-0 h-5 rounded-full border flex items-center justify-center overflow-hidden transition-all duration-150 ${
                                 isResolved
-                                  ? 'bg-green-500 border-green-500 text-white'
-                                  : 'border-gray-300 dark:border-gray-600 text-gray-300 dark:text-gray-600 hover:border-green-500 hover:text-green-500 opacity-0 group-hover:opacity-100 focus:opacity-100'
+                                  ? 'w-5 mr-3 opacity-100 bg-green-500 border-green-500 text-white'
+                                  : 'border-gray-300 dark:border-gray-600 text-gray-300 dark:text-gray-600 hover:border-green-500 hover:text-green-500 w-0 mr-0 opacity-0 group-hover:w-5 group-hover:mr-3 group-hover:opacity-100 focus:w-5 focus:mr-3 focus:opacity-100 [@media(hover:none)]:w-5 [@media(hover:none)]:mr-3 [@media(hover:none)]:opacity-100'
                               } ${canResolve ? 'cursor-pointer' : 'cursor-default'} disabled:cursor-wait`}
                               title={
                                 !canResolve
@@ -2104,8 +2112,7 @@ export default function FacilityDetailModal({
                           </div>
 
                           {isOwner && !isEditing && (
-                            <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
-                                 style={{ opacity: 1 }}>
+                            <div className="flex items-center gap-0.5 flex-shrink-0 ml-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                               <button
                                 type="button"
                                 onClick={() => {
