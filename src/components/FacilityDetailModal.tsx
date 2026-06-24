@@ -165,6 +165,7 @@ export default function FacilityDetailModal({
   const [nameCopied, setNameCopied] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState('');
+  const [togglingCommentId, setTogglingCommentId] = useState<string | null>(null);
   const [showInspectionForm, setShowInspectionForm] = useState(false);
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
   const [showNavigationPopup, setShowNavigationPopup] = useState(false);
@@ -441,6 +442,37 @@ export default function FacilityDetailModal({
     } catch (err) {
       console.error('Error deleting facility comment:', err);
       alert('Failed to delete comment. Please try again.');
+    }
+  };
+
+  // Check a comment off (or un-check it). Resolving is allowed for the
+  // comment's author or any agency owner (RLS enforces the same); we don't
+  // scope by user_id here so an owner can clear a teammate's item. The DB
+  // trigger only bumps updated_at on body changes, so this won't mark the
+  // comment "(edited)".
+  const handleToggleCommentResolved = async (comment: FacilityComment) => {
+    if (togglingCommentId) return;
+    const willResolve = !comment.resolved_at;
+    try {
+      setTogglingCommentId(comment.id);
+      const patch = willResolve
+        ? { resolved_at: new Date().toISOString(), resolved_by_name: currentAuthorName }
+        : { resolved_at: null, resolved_by_name: null };
+      const { data, error } = await supabase
+        .from('facility_comments')
+        .update(patch)
+        .eq('id', comment.id)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      setFacilityComments((prev) => prev.map((c) => (c.id === comment.id ? data : c)));
+    } catch (err) {
+      console.error('Error updating facility comment resolved state:', err);
+      alert('Failed to update comment. Please try again.');
+    } finally {
+      setTogglingCommentId(null);
     }
   };
 
@@ -1978,12 +2010,40 @@ export default function FacilityDetailModal({
                   {facilityComments.map((comment) => {
                     const isEditing = editingCommentId === comment.id;
                     const isOwner = comment.user_id === userId;
+                    const isResolved = !!comment.resolved_at;
+                    // The author or an agency owner may check a comment off.
+                    const canResolve = isOwner || !!user?.isAgencyOwner;
                     return (
-                      <li key={comment.id} className="py-3 first:pt-0 last:pb-0">
-                        <div className="flex items-start justify-between gap-3">
+                      <li key={comment.id} className="group py-3 first:pt-0 last:pb-0">
+                        <div className="flex items-start gap-3">
+                          {/* Checklist circle — hover-revealed when open, solid
+                              green when done. Non-resolvers still see the green
+                              check (read-only) so the status is visible to all. */}
+                          {!isEditing && (canResolve || isResolved) && (
+                            <button
+                              type="button"
+                              onClick={() => canResolve && handleToggleCommentResolved(comment)}
+                              disabled={!canResolve || togglingCommentId === comment.id}
+                              className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                                isResolved
+                                  ? 'bg-green-500 border-green-500 text-white'
+                                  : 'border-gray-300 dark:border-gray-600 text-gray-300 dark:text-gray-600 hover:border-green-500 hover:text-green-500 opacity-0 group-hover:opacity-100 focus:opacity-100'
+                              } ${canResolve ? 'cursor-pointer' : 'cursor-default'} disabled:cursor-wait`}
+                              title={
+                                !canResolve
+                                  ? 'Completed'
+                                  : isResolved
+                                    ? 'Mark as not completed'
+                                    : 'Mark as completed'
+                              }
+                              aria-label={isResolved ? 'Mark as not completed' : 'Mark as completed'}
+                            >
+                              <Check className="w-3 h-3" strokeWidth={3} />
+                            </button>
+                          )}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-2 text-xs">
-                              <span className="font-semibold text-gray-900 dark:text-white">
+                              <span className={`font-semibold ${isResolved ? 'text-gray-500 dark:text-gray-500' : 'text-gray-900 dark:text-white'}`}>
                                 {comment.author_name}
                               </span>
                               <span className="text-gray-400 dark:text-gray-500">
@@ -2024,9 +2084,22 @@ export default function FacilityDetailModal({
                                 </div>
                               </div>
                             ) : (
-                              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
-                                {comment.body}
-                              </p>
+                              <>
+                                <p className={`mt-1 text-sm whitespace-pre-wrap break-words ${
+                                  isResolved
+                                    ? 'line-through text-gray-400 dark:text-gray-500'
+                                    : 'text-gray-700 dark:text-gray-300'
+                                }`}>
+                                  {comment.body}
+                                </p>
+                                {isResolved && (
+                                  <p className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                                    <Check className="w-3 h-3" strokeWidth={3} />
+                                    Completed {formatCommentTimestamp(comment.resolved_at!)}
+                                    {comment.resolved_by_name ? ` · ${comment.resolved_by_name}` : ''}
+                                  </p>
+                                )}
+                              </>
                             )}
                           </div>
 

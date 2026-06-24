@@ -364,6 +364,10 @@ export interface FacilityComment {
   body: string;
   created_at: string;
   updated_at: string;
+  /** When the comment was checked off / resolved (null = still open). */
+  resolved_at?: string | null;
+  /** Display name of whoever checked it off. */
+  resolved_by_name?: string | null;
 }
 
 export interface HomeBase {
