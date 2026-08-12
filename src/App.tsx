@@ -40,6 +40,7 @@ import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
 import { parseLocalDate } from './utils/dateUtils';
 import { resolveSurveyTypeIcon } from './utils/surveyTypeIcons';
+import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
 import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
@@ -1546,8 +1547,24 @@ function App() {
         console.log(`Custom mode "${activeSurveyTypeRow.name}": ${facilitiesForRouting.length} facilities need surveying`);
       }
 
+      // A facility with no coordinates on file can't be placed in a route —
+      // it would be optimized as if it sat at 0,0 and wreck the day's mileage.
+      // Drop it and tell the user which ones need coordinates.
+      const facilitiesMissingCoords = facilitiesForRouting.filter(f => !hasCoords(f));
+      if (facilitiesMissingCoords.length > 0) {
+        facilitiesForRouting = facilitiesForRouting.filter(f => hasCoords(f));
+        console.warn(
+          `[App] Excluding ${facilitiesMissingCoords.length} facility(ies) with no coordinates from routing:`,
+          facilitiesMissingCoords.map(f => f.name)
+        );
+      }
+
       if (facilitiesForRouting.length === 0) {
-        setError('No active facilities to route. Please restore excluded facilities or upload new ones.');
+        setError(
+          facilitiesMissingCoords.length > 0
+            ? `No routable facilities: ${facilitiesMissingCoords.length} facility(ies) have no coordinates on file. Add coordinates to route them.`
+            : 'No active facilities to route. Please restore excluded facilities or upload new ones.'
+        );
         setIsGenerating(false);
         return;
       }
@@ -1928,7 +1945,7 @@ function App() {
     try {
       // Filter to only selected facilities with valid coordinates
       const selectedFacilities = facilities.filter(
-        f => facilityIds.includes(f.id) && f.latitude && f.longitude
+        f => facilityIds.includes(f.id) && hasCoords(f)
       );
 
       if (selectedFacilities.length === 0) {

@@ -13,6 +13,7 @@ import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
 import SavedRoutesManager from './SavedRoutesManager';
 import { calculateDistanceMatrix } from '../services/osrm';
+import { getCoords } from '../utils/coordinates';
 
 // Helper function to check if a facility is active (not excluded or removed)
 const isActiveFacility = (facility: Facility): boolean => {
@@ -2360,7 +2361,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           <div className="flex-1">
                             <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {facility.latitude.toFixed(6)}, {facility.longitude.toFixed(6)}
+                              {(() => {
+                                const c = getCoords(facility);
+                                return c ? `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}` : 'No Coordinates';
+                              })()}
                             </div>
                           </div>
                         </div>

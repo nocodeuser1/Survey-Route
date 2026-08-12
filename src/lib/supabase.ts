@@ -146,8 +146,11 @@ export interface Facility {
   account_id?: string;
   name: string;
   address?: string;
-  latitude: number;
-  longitude: number;
+  // Null when the facility has no coordinates on file (cleared by a user, or
+  // imported without coordinate columns). Use the helpers in
+  // src/utils/coordinates.ts rather than reading these directly.
+  latitude: number | null;
+  longitude: number | null;
   visit_duration_minutes: number;
   upload_batch_id: string;
   day_assignment: number | null;

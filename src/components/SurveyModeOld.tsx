@@ -915,8 +915,8 @@ export default function SurveyMode({ result, facilities, userId, teamNumber, acc
 
       {showNavigationPopup && selectedFacilityForNav && settings && (
         <NavigationPopup
-          latitude={selectedFacilityForNav.latitude}
-          longitude={selectedFacilityForNav.longitude}
+          latitude={Number(selectedFacilityForNav.latitude ?? 0)}
+          longitude={Number(selectedFacilityForNav.longitude ?? 0)}
           facilityName={selectedFacilityForNav.name}
           mapPreference={settings.map_preference}
           includeGoogleEarth={settings.include_google_earth}

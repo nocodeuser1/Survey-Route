@@ -15,6 +15,7 @@ import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SpeedDisplay from './SpeedDisplay';
+import { getCoords } from '../utils/coordinates';
 
 interface RouteMapProps {
   result: OptimizationResult | null;
@@ -1762,6 +1763,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           // Skip if already shown in route
           if (facilitiesInRoutes.has(facility.name)) return;
 
+          // No coordinates on file — there's nowhere to put the marker, and
+          // falling back to 0,0 would drop a pin in the Gulf of Guinea.
+          const facilityCoords = getCoords(facility);
+          if (!facilityCoords) return;
+
           // Skip if facility should be hidden by Plan Visibility filter
           // Exception: keep recently-assigned facilities visible.
           if (hideCompletedFacilities && completedFacilityNames.has(facility.name) && !recentlyAssignedIds.has(facility.id)) return;
@@ -1859,7 +1865,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             iconAnchor: [markerAnchor, markerAnchor],
           });
 
-          const marker = L.marker([Number(facility.latitude), Number(facility.longitude)], {
+          const marker = L.marker([facilityCoords.lat, facilityCoords.lng], {
             icon: markerIcon,
             opacity: 1,
           }).addTo(mapRef.current!);
@@ -4300,7 +4306,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             <div className="px-4 py-3 bg-gradient-to-br from-gray-50 to-gray-100 border-b border-gray-200">
               <p className="font-semibold text-gray-900 dark:text-white text-base leading-tight">{contextMenu.facility.name}</p>
               <p className="text-xs text-gray-600 mt-1.5 font-mono">
-                {contextMenu.facility.latitude.toFixed(6)}, {contextMenu.facility.longitude.toFixed(6)}
+                {(() => {
+                  const c = getCoords(contextMenu.facility);
+                  return c ? `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}` : 'No Coordinates';
+                })()}
               </p>
             </div>
 
@@ -4354,11 +4363,15 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 );
 
                 // Find the matching full facility data to open detail modal
-                const fullFacility = facilities.find(f =>
-                  f.name === nextFacility.facility.name &&
-                  Math.abs(f.latitude - nextFacility.facility.latitude) < 0.0001 &&
-                  Math.abs(f.longitude - nextFacility.facility.longitude) < 0.0001
-                );
+                const fullFacility = facilities.find(f => {
+                  const c = getCoords(f);
+                  return (
+                    f.name === nextFacility.facility.name &&
+                    !!c &&
+                    Math.abs(c.lat - nextFacility.facility.latitude) < 0.0001 &&
+                    Math.abs(c.lng - nextFacility.facility.longitude) < 0.0001
+                  );
+                });
 
                 if (fullFacility) {
                   // Open facility detail modal after a short delay

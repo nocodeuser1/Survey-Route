@@ -14,6 +14,7 @@ import { isInspectionValid } from '../utils/inspectionUtils';
 import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
+import { getCoords } from '../utils/coordinates';
 
 const COLORS = [
   '#3B82F6', // Blue
@@ -516,19 +517,28 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       : facilities;
 
     const withDistance = sourceFacilities.map(facility => {
-      const distance = calculateDistance(
-        currentPosition.lat,
-        currentPosition.lng,
-        facility.latitude,
-        facility.longitude
-      );
+      // Facilities with no coordinates on file have no measurable distance or
+      // bearing — park them at the end of the list instead of pretending they
+      // sit at 0,0 off the coast of Africa.
+      const coords = getCoords(facility);
 
-      const bearing = calculateBearing(
-        currentPosition.lat,
-        currentPosition.lng,
-        facility.latitude,
-        facility.longitude
-      );
+      const distance = coords
+        ? calculateDistance(
+            currentPosition.lat,
+            currentPosition.lng,
+            coords.lat,
+            coords.lng
+          )
+        : Infinity;
+
+      const bearing = coords
+        ? calculateBearing(
+            currentPosition.lat,
+            currentPosition.lng,
+            coords.lat,
+            coords.lng
+          )
+        : 0;
 
       const teamRoute = result.routes[teamNumber - 1];
       let day: number | undefined;
@@ -572,11 +582,15 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           result.routes.forEach((dailyRoute, routeIdx) => {
             dailyRoute.facilities.forEach((routeFacility, facIdx) => {
               // Find matching facility from our sorted list
-              const facility = sorted.find(f =>
-                f.name === routeFacility.name &&
-                Math.abs(f.latitude - routeFacility.latitude) < 0.0001 &&
-                Math.abs(f.longitude - routeFacility.longitude) < 0.0001
-              );
+              const facility = sorted.find(f => {
+                const c = getCoords(f);
+                return (
+                  f.name === routeFacility.name &&
+                  !!c &&
+                  Math.abs(c.lat - routeFacility.latitude) < 0.0001 &&
+                  Math.abs(c.lng - routeFacility.longitude) < 0.0001
+                );
+              });
 
               if (facility && facility.distance < closestDistance) {
                 closestDistance = facility.distance;
@@ -603,11 +617,15 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
             // Match route facilities to actual facilities by comparing their properties
             currentDayRoute.facilities.forEach((routeFacility, routeIdx) => {
               // Find the matching facility from our facilities list
-              const matchingFacility = facilities.find(f =>
-                f.name === routeFacility.name &&
-                Math.abs(f.latitude - routeFacility.latitude) < 0.0001 &&
-                Math.abs(f.longitude - routeFacility.longitude) < 0.0001
-              );
+              const matchingFacility = facilities.find(f => {
+                const c = getCoords(f);
+                return (
+                  f.name === routeFacility.name &&
+                  !!c &&
+                  Math.abs(c.lat - routeFacility.latitude) < 0.0001 &&
+                  Math.abs(c.lng - routeFacility.longitude) < 0.0001
+                );
+              });
 
               if (matchingFacility) {
                 facilityIdToRoutePosition.set(matchingFacility.id, routeIdx + 1);

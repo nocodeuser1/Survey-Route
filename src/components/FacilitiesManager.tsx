@@ -40,6 +40,7 @@ import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans'
 import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
+import { getCoords } from '../utils/coordinates';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -2096,8 +2097,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // Initialize form data with current facility values
     const formData: Record<ColumnId, string> = {} as Record<ColumnId, string>;
     formData.name = facility.name;
-    formData.latitude = String(facility.latitude);
-    formData.longitude = String(facility.longitude);
+    // Blank rather than the string "null" when the facility has no coordinates.
+    formData.latitude = facility.latitude == null ? '' : String(facility.latitude);
+    formData.longitude = facility.longitude == null ? '' : String(facility.longitude);
     formData.visit_duration = String(facility.visit_duration_minutes);
     formData.matched_facility_name = facility.matched_facility_name || '';
     formData.well_name_1 = facility.well_name_1 || '';
@@ -2549,8 +2551,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         } else {
           const duplicate = existingFacilities?.find(existing => {
             const nameMatch = existing.name.toLowerCase() === parsedFacility.name.toLowerCase();
-            const latMatch = parsedFacility.latitude != null && Math.abs(existing.latitude - parsedFacility.latitude) < 0.0001;
-            const lngMatch = parsedFacility.longitude != null && Math.abs(existing.longitude - parsedFacility.longitude) < 0.0001;
+            const latMatch = parsedFacility.latitude != null && existing.latitude != null && Math.abs(existing.latitude - parsedFacility.latitude) < 0.0001;
+            const lngMatch = parsedFacility.longitude != null && existing.longitude != null && Math.abs(existing.longitude - parsedFacility.longitude) < 0.0001;
             return nameMatch || (latMatch && lngMatch);
           });
 
@@ -3674,10 +3676,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </div>
         );
       }
-      case 'latitude':
-        return Number(facility.latitude).toFixed(6);
-      case 'longitude':
-        return Number(facility.longitude).toFixed(6);
+      case 'latitude': {
+        const c = getCoords(facility);
+        return c ? c.lat.toFixed(6) : <span className="text-gray-400 italic">None</span>;
+      }
+      case 'longitude': {
+        const c = getCoords(facility);
+        return c ? c.lng.toFixed(6) : <span className="text-gray-400 italic">None</span>;
+      }
       case 'spcc_status':
         return <SPCCStatusBadge facility={facility} showMessage />;
       case 'spcc_plan_uploaded': {

@@ -1,5 +1,6 @@
 import { Facility } from '../lib/supabase';
 import { isInspectionValid } from './inspectionUtils';
+import { getCoords } from './coordinates';
 
 export function calculateDistance(
   lat1: number,
@@ -41,6 +42,12 @@ export function findNearbyFacilities(
 ): NearbyFacilityWithDistance[] {
   const nearby: NearbyFacilityWithDistance[] = [];
 
+  // Nothing is "near" a facility whose own location is unknown.
+  const origin = getCoords(currentFacility);
+  if (!origin) {
+    return nearby;
+  }
+
   for (const facility of allFacilities) {
     if (facility.id === currentFacility.id) {
       continue;
@@ -67,11 +74,18 @@ export function findNearbyFacilities(
       continue;
     }
 
+    // No coordinates on file — there's no distance to measure, so it can't be
+    // "nearby". Skip rather than treating it as 0,0.
+    const other = getCoords(facility);
+    if (!other) {
+      continue;
+    }
+
     const distance = calculateDistance(
-      currentFacility.latitude,
-      currentFacility.longitude,
-      facility.latitude,
-      facility.longitude
+      origin.lat,
+      origin.lng,
+      other.lat,
+      other.lng
     );
 
     if (distance <= radiusMeters) {

@@ -51,6 +51,7 @@ import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, isRecertificationActive, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
 import { US_STATES } from '../utils/usStates';
+import { getCoords } from '../utils/coordinates';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
@@ -195,6 +196,10 @@ export default function FacilityDetailModal({
   const [coordsLngDraft, setCoordsLngDraft] = useState('');
   const [savingCoords, setSavingCoords] = useState(false);
   const [coordsError, setCoordsError] = useState<string | null>(null);
+  const facilityCoords = getCoords(facility);
+  const hasCoordinates = facilityCoords !== null;
+  const coordsLat = facilityCoords?.lat ?? 0;
+  const coordsLng = facilityCoords?.lng ?? 0;
   const menuRef = useRef<HTMLDivElement>(null);
   const commentsSectionRef = useRef<HTMLDivElement>(null);
 
@@ -895,22 +900,10 @@ export default function FacilityDetailModal({
     bumpFacilityRender();
   };
 
-  // Coordinates inline-edit save. Validates ranges, writes both columns in
-  // one update, and mutates the prop in place (same convention as
-  // updateFacilityField) so the modal reflects the new value immediately.
-  const saveCoordinates = async () => {
-    const latStr = coordsLatDraft.trim();
-    const lngStr = coordsLngDraft.trim();
-    const lat = parseFloat(latStr);
-    const lng = parseFloat(lngStr);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-      setCoordsError('Latitude must be a number between -90 and 90.');
-      return;
-    }
-    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
-      setCoordsError('Longitude must be a number between -180 and 180.');
-      return;
-    }
+  // Writes both coordinate columns in one update and mutates the prop in place
+  // (same convention as updateFacilityField) so the modal reflects the new
+  // value immediately. Passing null for both clears the coordinates.
+  const writeCoordinates = async (lat: number | null, lng: number | null) => {
     setSavingCoords(true);
     setCoordsError(null);
     try {
@@ -925,15 +918,48 @@ export default function FacilityDetailModal({
       setEditingCoords(false);
     } catch (err: any) {
       console.error('[FacilityDetailModal] Error saving coordinates:', err);
-      setCoordsError(err?.message || 'Could not save coordinates.');
+      // 23502 = not_null_violation. Until the drop-not-null migration is run,
+      // clearing fails at the DB; say so instead of leaking raw Postgres text.
+      setCoordsError(
+        err?.code === '23502'
+          ? 'The database still requires coordinates on every facility. Run the pending migration to allow clearing them.'
+          : (err?.message || 'Could not save coordinates.')
+      );
     } finally {
       setSavingCoords(false);
     }
   };
 
+  // Coordinates inline-edit save. Blanking both fields clears the coordinates;
+  // otherwise both must be present and in range.
+  const saveCoordinates = async () => {
+    const latStr = coordsLatDraft.trim();
+    const lngStr = coordsLngDraft.trim();
+    if (!latStr && !lngStr) {
+      await writeCoordinates(null, null);
+      return;
+    }
+    const lat = parseFloat(latStr);
+    const lng = parseFloat(lngStr);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      setCoordsError('Latitude must be a number between -90 and 90.');
+      return;
+    }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      setCoordsError('Longitude must be a number between -180 and 180.');
+      return;
+    }
+    await writeCoordinates(lat, lng);
+  };
+
+  const clearCoordinates = async () => {
+    if (!window.confirm(`Clear the coordinates for "${facility.name}"? Navigation and route planning won't work for this facility until they're set again.`)) return;
+    await writeCoordinates(null, null);
+  };
+
   const enterCoordsEdit = () => {
-    setCoordsLatDraft(String(facility.latitude));
-    setCoordsLngDraft(String(facility.longitude));
+    setCoordsLatDraft(hasCoordinates ? String(facility.latitude) : '');
+    setCoordsLngDraft(hasCoordinates ? String(facility.longitude) : '');
     setCoordsError(null);
     setEditingCoords(true);
   };
@@ -1558,24 +1584,46 @@ export default function FacilityDetailModal({
                         </button>
                       </div>
                     </div>
-                    {coordsError && (
+                    {coordsError ? (
                       <p className="text-xs text-red-600 dark:text-red-400">{coordsError}</p>
+                    ) : (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Leave both blank to clear the coordinates.</p>
                     )}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                      {Number(facility.latitude).toFixed(6)}, {Number(facility.longitude).toFixed(6)}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={enterCoordsEdit}
-                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 transition-colors"
-                      title="Edit coordinates"
-                      aria-label="Edit coordinates"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {hasCoordinates
+                          ? `${coordsLat.toFixed(6)}, ${coordsLng.toFixed(6)}`
+                          : 'No Coordinates'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={enterCoordsEdit}
+                        disabled={savingCoords}
+                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 transition-colors disabled:opacity-50"
+                        title="Edit coordinates"
+                        aria-label="Edit coordinates"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      {hasCoordinates && (
+                        <button
+                          type="button"
+                          onClick={clearCoordinates}
+                          disabled={savingCoords}
+                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50"
+                          title="Clear coordinates"
+                          aria-label="Clear coordinates"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    {coordsError && (
+                      <p className="text-xs text-red-600 dark:text-red-400">{coordsError}</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -3012,22 +3060,36 @@ export default function FacilityDetailModal({
 
 
       {showNavigationPopup && (
-        <NavigationPopup
-          latitude={facility.latitude}
-          longitude={facility.longitude}
-          facilityName={facility.name}
-          mapPreference={settings?.map_preference ?? (createFallbackSettings(userId, accountId).map_preference)}
-          includeGoogleEarth={settings?.include_google_earth ?? (createFallbackSettings(userId, accountId).include_google_earth)}
-          onClose={() => setShowNavigationPopup(false)}
-          onShowOnMap={
-            onShowOnMap
-              ? () => {
-                  onShowOnMap(facility.latitude, facility.longitude);
-                  setShowNavigationPopup(false);
-                }
-              : undefined
-          }
-        />
+        hasCoordinates ? (
+          <NavigationPopup
+            latitude={coordsLat}
+            longitude={coordsLng}
+            facilityName={facility.name}
+            mapPreference={settings?.map_preference ?? (createFallbackSettings(userId, accountId).map_preference)}
+            includeGoogleEarth={settings?.include_google_earth ?? (createFallbackSettings(userId, accountId).include_google_earth)}
+            onClose={() => setShowNavigationPopup(false)}
+            onShowOnMap={
+              onShowOnMap
+                ? () => {
+                    onShowOnMap(coordsLat, coordsLng);
+                    setShowNavigationPopup(false);
+                  }
+                : undefined
+            }
+          />
+        ) : (
+          // Same guard SurveyMode uses: without coordinates the map handoff
+          // silently 404s, so say why instead of opening it.
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNavigationPopup(false)}>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No coordinates</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                “{facility.name}” doesn't have a latitude / longitude on file, so we can't open Maps. Add coordinates on the General tab to enable navigation.
+              </p>
+              <button onClick={() => setShowNavigationPopup(false)} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Close</button>
+            </div>
+          </div>
+        )
       )}
     </div>
   );
