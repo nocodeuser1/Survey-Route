@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 import { supabase } from '../lib/supabase';
 import { Route, Plus, Users, MapPin, Calendar, LogOut, Building2, CheckCircle, UserPlus, X, Mail, Briefcase, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -36,6 +37,7 @@ interface PendingRequest {
 
 export default function AgencyDashboard() {
   const { user, signOut } = useAuth();
+  const { selectAccount } = useAccount();
   const navigate = useNavigate();
   const [agency, setAgency] = useState<Agency | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -189,12 +191,22 @@ export default function AgencyDashboard() {
   }
 
   async function handleEnterAccount(accountId: string) {
-    localStorage.setItem('currentAccountId', accountId);
-    // Always land on Facilities when entering an account from the agency view —
-    // the saved view is per-user and would otherwise leak across accounts
-    // (e.g. last left in Settings on Account A → opens Account B in Settings).
-    localStorage.setItem('currentView', 'facilities');
-    navigate('/app');
+    try {
+      const selected = await selectAccount(accountId);
+
+      if (!selected) {
+        throw new Error('Could not access the selected account');
+      }
+
+      // Always land on Facilities when entering an account from the agency view —
+      // the saved view is per-user and would otherwise leak across accounts
+      // (e.g. last left in Settings on Account A → opens Account B in Settings).
+      localStorage.setItem('currentView', 'facilities');
+      navigate('/app');
+    } catch (err: any) {
+      console.error('Error entering account:', err);
+      setError(err.message || 'Failed to enter account');
+    }
   }
 
   async function handleSignOut() {

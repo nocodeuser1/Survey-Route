@@ -46,7 +46,7 @@ interface AccountContextType {
   accounts: Account[];
   accountRole: 'account_admin' | 'user' | null;
   loading: boolean;
-  selectAccount: (accountId: string) => void;
+  selectAccount: (accountId: string) => Promise<boolean>;
   refreshAccounts: () => Promise<void>;
 }
 
@@ -179,8 +179,29 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }
 
   async function selectAccount(accountId: string) {
-    const account = accounts.find(a => a.id === accountId);
-    if (!account || !user) return;
+    if (!user) return false;
+
+    let account = accounts.find(a => a.id === accountId);
+
+    if (!account) {
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('*')
+        .eq('id', accountId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return false;
+
+      account = data;
+      setAccounts(prev => (
+        prev.some(existing => existing.id === data.id)
+          ? prev
+          : [data, ...prev]
+      ));
+    }
+
+    if (!account) return false;
 
     setCurrentAccount(account);
 
@@ -199,6 +220,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     }
 
     localStorage.setItem('currentAccountId', accountId);
+    return true;
   }
 
   async function refreshAccounts() {
