@@ -128,14 +128,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [showStartTimeModal, setShowStartTimeModal] = useState(false);
   const [tempDayStartTimes, setTempDayStartTimes] = useState<Record<number, string>>({});
 
-  // Per-day "be back at home base by" deadlines, set by clicking the Home
-  // Base row inside a day. When a day has one, its start time becomes
-  // DERIVED: start = deadline - (drive + visit time), so the return drive
-  // lands exactly on the time the user asked for. The deadline outranks both
-  // the per-day start time and settings.start_time, and the sync effect
-  // below re-applies it whenever `result` changes underneath us — otherwise
-  // Refresh Times and Apply & Refresh Times would silently stamp
-  // settings.start_time back over the user's deadline.
+  // Per-day "leave for home base by" deadlines, set from the Home Base row
+  // inside a day: the latest the crew may leave the last site. The day keeps
+  // its start time; the deadline caps how much work fits in it and the plan
+  // re-packs around that — see refitDeadlines below.
   const [dayReturnByTimes, setDayReturnByTimes] = useState<Record<number, string>>({});
   const [returnByModalDay, setReturnByModalDay] = useState<number | null>(null);
   const [tempReturnByTime, setTempReturnByTime] = useState<string>('');
@@ -151,12 +147,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const timeToMinutesLocal = (time: string): number => {
     const [hours, mins] = (time || '00:00').split(':').map(Number);
     return (hours || 0) * 60 + (mins || 0);
-  };
-
-  const minutesToTimeLocal = (minutes: number): string => {
-    const clamped = Math.max(0, Math.round(minutes));
-    const hours = Math.floor(clamped / 60) % 24;
-    return `${String(hours).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
   };
 
   type DayRoute = OptimizationResult['routes'][number];
@@ -240,43 +230,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return timeToMinutesLocal(rescheduleRoute(route, '00:00').endTime);
   };
 
-  /** Latest departure that still gets this day home by `returnByTime`. */
-  const getDerivedStartTime = (route: DayRoute, returnByTime: string): string =>
-    minutesToTimeLocal(Math.max(0, timeToMinutesLocal(returnByTime) - getRouteElapsedMinutes(route)));
+  /** The start time a day runs on: its per-day override, else the account default. */
+  const computeStartTime = (route: DayRoute, startTimes: Record<number, string>): string =>
+    startTimes[route.day] || settings?.start_time || '08:00';
 
-  /**
-   * The start time a day should actually run on. A "be back by" deadline wins
-   * over a per-day start time, which wins over the account-wide start time.
-   */
-  const computeStartTime = (
-    route: DayRoute,
-    startTimes: Record<number, string>,
-    returnByTimes: Record<number, string>
-  ): string => {
-    const returnBy = returnByTimes[route.day];
-    if (returnBy && route.segments && route.segments.length > 0) {
-      return getDerivedStartTime(route, returnBy);
-    }
-    return startTimes[route.day] || settings?.start_time || '08:00';
-  };
+  const getEffectiveStartTime = (route: DayRoute) => computeStartTime(route, dayStartTimes);
 
-  const getEffectiveStartTime = (route: DayRoute) => computeStartTime(route, dayStartTimes, dayReturnByTimes);
+  const getDayStartTime = (day: number) => dayStartTimes[day] || settings?.start_time || '08:00';
 
-  const getDayStartTime = (day: number) => {
-    const route = result?.routes.find(r => r.day === day);
-    if (route) return getEffectiveStartTime(route);
-    return dayStartTimes[day] || settings?.start_time || '08:00';
-  };
-
-  /** Re-clock every day from the given per-day start times / deadlines. */
-  const applyDaySchedules = (
-    startTimes: Record<number, string>,
-    returnByTimes: Record<number, string>
-  ) => {
+  /** Re-clock every day from the given per-day start times. */
+  const applyDayStartTimes = (startTimes: Record<number, string>) => {
     if (!result || !onUpdateResult) return;
 
     const updatedRoutes = result.routes.map(route =>
-      rescheduleRoute(route, computeStartTime(route, startTimes, returnByTimes))
+      rescheduleRoute(route, computeStartTime(route, startTimes))
     );
 
     // Re-aggregate result-level totals so the summary cards above the day
@@ -287,34 +254,313 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     onUpdateResult({ ...result, routes: updatedRoutes, totalDriveTime, totalVisitTime, totalTime });
     setDayStartTimes(startTimes);
-    setDayReturnByTimes(returnByTimes);
   };
 
   const openReturnByModal = (day: number) => {
     const route = result?.routes.find(r => r.day === day);
-    setTempReturnByTime(dayReturnByTimes[day] || route?.endTime || settings?.return_by_time || '17:00');
+    setTempReturnByTime(
+      dayReturnByTimes[day] || route?.lastFacilityDepartureTime || route?.endTime || settings?.return_by_time || '17:00'
+    );
     setReturnByModalDay(day);
   };
 
-  // Keep per-day overrides authoritative when the result is rebuilt beneath
-  // us. Refresh Times and Apply & Refresh Times both re-clock every day from
-  // settings.start_time, which would quietly discard a per-day start time and
-  // (worse) a "be back by" deadline. Re-deriving here also means a deadline
-  // stays honest after a refresh changes the day's drive time: the start
-  // shifts, the arrival stays put. Converges in one pass — once the routes
-  // carry the derived start times, nothing drifts and this no-ops.
-  useEffect(() => {
-    if (!result || !onUpdateResult) return;
-    const hasOverrides = Object.keys(dayReturnByTimes).length > 0 || Object.keys(dayStartTimes).length > 0;
-    if (!hasOverrides) return;
+  // ── "Be back by" refit ─────────────────────────────────────────────────────
+  //
+  // A per-day deadline — "leave the last site for home base by HH:MM" — is a
+  // CAPACITY constraint, not a clock shift: the day keeps the start time the
+  // user set and the PLAN re-packs around it. It bites on the last facility's
+  // departure (when the crew is done in the field), not on the home arrival,
+  // so the drive home can run past it.
+  //
+  //   • a day with room left pulls the nearest sites forward out of later days
+  //   • a day that would run past its deadline pushes the excess back
+  //   • every following day is rebuilt from what's left, so the whole plan
+  //     shifts toward day one, and days that end up with no sites are deleted
+  //     (the rest renumber to stay contiguous)
+  //
+  // A day WITHOUT its own deadline is capped at the number of sites it already
+  // has, so backfilling cascades one day at a time instead of a single
+  // unconstrained day swallowing the entire plan. Days beyond the end of the
+  // plan (only reached when sites are being pushed back) are uncapped.
+  const [isRefitting, setIsRefitting] = useState(false);
+  // Plan+deadline fingerprint of the last automatic refit. Stops the passive
+  // overrun watcher below from retrying forever on a deadline that simply
+  // can't be met (a single site that already blows past it).
+  const lastRefitSignatureRef = useRef<string>('');
 
-    const drifted = result.routes.some(route => {
-      if (!dayReturnByTimes[route.day] && !dayStartTimes[route.day]) return false;
-      return route.startTime !== computeStartTime(route, dayStartTimes, dayReturnByTimes);
+  /** The live facility row behind a route entry, falling back to the route's
+   *  own copy if the facility has since been deleted (same rule as Refresh
+   *  Times: never silently drop a site from the plan). */
+  const resolveRouteFacility = (rf: DayRoute['facilities'][number]): Facility =>
+    facilities.find(f => f.name === rf.name) ?? ({
+      id: `route-only-${rf.name}`,
+      name: rf.name,
+      latitude: rf.latitude,
+      longitude: rf.longitude,
+      visit_duration_minutes: rf.visitDuration,
+    } as unknown as Facility);
+
+  const refitDeadlines = async (
+    returnByTimes: Record<number, string>,
+    baseRoutes?: DayRoute[]
+  ): Promise<boolean> => {
+    const routes = (baseRoutes ?? result?.routes ?? []).slice().sort((a, b) => a.day - b.day);
+    if (!settings || !homeBase || !onUpdateResult || routes.length === 0) return false;
+
+    const deadlineDays = Object.keys(returnByTimes)
+      .map(Number)
+      .filter(day => returnByTimes[day]);
+    if (deadlineDays.length === 0) return false;
+
+    // Everything before the first constrained day is left exactly as it is —
+    // a deadline on day 3 must not reshuffle days 1 and 2.
+    const firstDay = Math.min(...deadlineDays);
+    const untouched = routes.filter(r => r.day < firstDay);
+    const repackDays = routes.filter(r => r.day >= firstDay);
+    if (repackDays.length === 0) return false;
+
+    // Pool = every site from firstDay onward, in plan order. Day order is what
+    // makes this a conveyor: the sites nearest the front are the ones that get
+    // pulled forward first.
+    const seenIds = new Set<string>();
+    const pool: Facility[] = [];
+    const originalCounts = new Map<number, number>();
+    for (const route of repackDays) {
+      let count = 0;
+      for (const rf of route.facilities) {
+        const item = resolveRouteFacility(rf);
+        if (seenIds.has(item.id)) continue;
+        seenIds.add(item.id);
+        pool.push(item);
+        count++;
+      }
+      originalCounts.set(route.day, count);
+    }
+    if (pool.length === 0) {
+      // Nothing to move (e.g. a cut-off set on a day with no sites yet) —
+      // record it so it applies the moment the day has work in it.
+      setDayReturnByTimes(returnByTimes);
+      return true;
+    }
+
+    // One matrix for home base + the whole pool; index 0 is home base.
+    const distanceMatrix = await calculateDistanceMatrix([
+      { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
+      ...pool.map(f => ({ latitude: Number(f.latitude), longitude: Number(f.longitude) })),
+    ]);
+
+    const calcFacilities = pool.map((f, idx) => ({
+      index: idx + 1,
+      name: f.name,
+      latitude: Number(f.latitude),
+      longitude: Number(f.longitude),
+      visitDuration: f.visit_duration_minutes || 30,
+    }));
+    const durations = distanceMatrix.durations;
+
+    const lunchBreak = settings.lunch_break_minutes || 0;
+    const maxFacilities = settings.use_facilities_constraint ? (settings.max_facilities_per_day || 0) : 0;
+    const maxHours = settings.use_hours_constraint ? (settings.max_hours_per_day || 0) : 0;
+    const maxDrive = settings.max_drive_time_minutes || 0;
+
+    /** Cheapest place to bolt `cand` onto `seq`, in added minutes. */
+    const insertionCost = (seq: number[], cand: number) => {
+      const visit = calcFacilities[cand - 1]?.visitDuration || 0;
+      if (seq.length === 0) {
+        return { cost: (durations[0][cand] || 0) + (durations[cand][0] || 0) + visit, position: 0 };
+      }
+      const nodes = [0, ...seq, 0];
+      let cost = Infinity;
+      let position = 0;
+      for (let i = 0; i < nodes.length - 1; i++) {
+        const a = nodes[i];
+        const b = nodes[i + 1];
+        const delta = (durations[a][cand] || 0) + (durations[cand][b] || 0) - (durations[a][b] || 0);
+        if (delta < cost) {
+          cost = delta;
+          position = i;
+        }
+      }
+      return { cost: cost + visit, position };
+    };
+
+    const remaining = calcFacilities.map(f => f.index);
+    const lastOriginalDay = repackDays[repackDays.length - 1].day;
+    const built: { slot: number; route: DayRoute }[] = [];
+    let dayNum = firstDay;
+    // Backstop: one iteration per site is already more days than any plan can
+    // legitimately need.
+    let guard = pool.length + repackDays.length + 5;
+
+    while (remaining.length > 0 && guard-- > 0) {
+      // The per-day deadline is "leave the last site for home base by" — the
+      // moment the crew is done in the field. It replaces the account-wide
+      // "Return to Home Base By" (which is a home-ARRIVAL deadline, return
+      // drive included) for the days that have one.
+      const leaveByDeadline = returnByTimes[dayNum] || '';
+      const arriveByDeadline = leaveByDeadline ? '' : (settings.return_by_time || '');
+      const startTime = dayStartTimes[dayNum] || settings.start_time || '08:00';
+      // Days the user didn't put a deadline on hold their current size.
+      const softCap = leaveByDeadline ? null : (originalCounts.get(dayNum) ?? null);
+
+      let seq: number[] = [];
+
+      while (remaining.length > 0) {
+        if (softCap !== null && seq.length >= softCap) break;
+        if (maxFacilities && seq.length >= maxFacilities) break;
+
+        let bestCand = -1;
+        let bestCost = Infinity;
+        let bestPos = 0;
+        for (const cand of remaining) {
+          const { cost, position } = insertionCost(seq, cand);
+          if (cost < bestCost) {
+            bestCost = cost;
+            bestCand = cand;
+            bestPos = position;
+          }
+        }
+        if (bestCand === -1) break;
+
+        const trial = [...seq.slice(0, bestPos), bestCand, ...seq.slice(bestPos)];
+        // Same builder every other path uses (order + clock + lunch break), so
+        // the times this decides against are the times the day card shows.
+        const trialRoute = rebuildDayRoute(calcFacilities, trial, distanceMatrix, 0, startTime, lunchBreak);
+        const fits = (!leaveByDeadline || trialRoute.lastFacilityDepartureTime <= leaveByDeadline)
+          && (!arriveByDeadline || trialRoute.endTime <= arriveByDeadline)
+          && (!maxHours || trialRoute.totalTime / 60 <= maxHours)
+          && (!maxDrive || trialRoute.totalDriveTime <= maxDrive);
+
+        // A brand-new day past the end of the plan has to take at least one
+        // site even when nothing "fits", or leftovers would never land
+        // anywhere and this would spin.
+        const forceFirst = seq.length === 0 && dayNum > lastOriginalDay;
+        if (!fits && !forceFirst) break;
+
+        seq = trial;
+        remaining.splice(remaining.indexOf(bestCand), 1);
+        if (!fits) break;
+      }
+
+      if (seq.length > 0) {
+        built.push({
+          slot: dayNum,
+          route: { ...rebuildDayRoute(calcFacilities, seq, distanceMatrix, 0, startTime, lunchBreak), day: dayNum },
+        });
+      }
+      dayNum++;
+    }
+
+    if (remaining.length > 0) {
+      // Bailing out whole: a partial plan would silently drop sites.
+      console.warn('[RouteResults] Refit could not place every site', { left: remaining.length });
+      alert(
+        `Couldn't refit the plan — ${remaining.length} ${remaining.length === 1 ? 'site' : 'sites'} had nowhere to go. ` +
+        `Try a later cut-off time, or loosen the max hours / max drive time limits.`
+      );
+      return false;
+    }
+
+    // Empty days drop out and the survivors renumber, so the plan always reads
+    // Day 1..N with no gaps.
+    const finalRoutes: DayRoute[] = [
+      ...untouched,
+      ...built.map((b, idx) => ({ ...b.route, day: untouched.length + idx + 1 })),
+    ];
+
+    const dayRemap = new Map<number, number>();
+    built.forEach((b, idx) => dayRemap.set(b.slot, untouched.length + idx + 1));
+    const remapDays = (src: Record<number, string>): Record<number, string> => {
+      const out: Record<number, string> = {};
+      Object.entries(src).forEach(([key, value]) => {
+        const day = Number(key);
+        if (!value) return;
+        if (day < firstDay) {
+          out[day] = value;
+          return;
+        }
+        // A day that vanished takes its override with it.
+        const mapped = dayRemap.get(day);
+        if (mapped) out[mapped] = value;
+      });
+      return out;
+    };
+
+    // Persist the new membership the same way drag-and-drop does, so the plan
+    // survives a reload and the map/exports agree with the list.
+    const assignmentUpdates = finalRoutes
+      .filter(route => route.day > untouched.length)
+      .flatMap(route => route.facilities.map(rf => {
+        const live = pool.find(f => f.name === rf.name);
+        if (!live || live.id.startsWith('route-only-')) return null;
+        if (live.day_assignment === route.day) return null;
+        return supabase.from('facilities').update({ day_assignment: route.day }).eq('id', live.id);
+      }))
+      .filter(Boolean);
+
+    if (assignmentUpdates.length > 0) {
+      await Promise.all(assignmentUpdates);
+    }
+
+    const totalMiles = finalRoutes.reduce((sum, r) => sum + (r.totalMiles || 0), 0);
+    const totalDriveTime = finalRoutes.reduce((sum, r) => sum + (r.totalDriveTime || 0), 0);
+    const totalVisitTime = finalRoutes.reduce((sum, r) => sum + (r.totalVisitTime || 0), 0);
+
+    onUpdateResult({
+      routes: finalRoutes,
+      totalDays: finalRoutes.length,
+      totalMiles,
+      totalFacilities: untouched.reduce((sum, r) => sum + r.facilities.length, 0) + pool.length,
+      totalDriveTime,
+      totalVisitTime,
+      totalTime: totalDriveTime + totalVisitTime,
     });
+    setDayStartTimes(prev => remapDays(prev));
+    setDayReturnByTimes(remapDays(returnByTimes));
 
-    if (drifted) applyDaySchedules(dayStartTimes, dayReturnByTimes);
-  }, [result, dayStartTimes, dayReturnByTimes]);
+    if (assignmentUpdates.length > 0 && onFacilitiesUpdated) {
+      await onFacilitiesUpdated();
+    }
+    return true;
+  };
+
+  /** refitDeadlines + spinner + the one place refit failures get reported. */
+  const runRefit = async (returnByTimes: Record<number, string>, baseRoutes?: DayRoute[]) => {
+    if (isRefitting) return false;
+    setIsRefitting(true);
+    try {
+      return await refitDeadlines(returnByTimes, baseRoutes);
+    } catch (err) {
+      console.error('[RouteResults] Error refitting days to deadline:', err);
+      alert(`Failed to refit the plan: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      return false;
+    } finally {
+      setIsRefitting(false);
+    }
+  };
+
+  // Passive guard: keep deadlines true when the result is rebuilt beneath us.
+  // Apply & Refresh Times re-clocks every day from the account settings (new
+  // visit durations, a new start time), which can push a day past a deadline
+  // the user set. Overrun only — this never pulls extra work forward on its
+  // own; that happens when the user applies a deadline or hits Refresh Times.
+  useEffect(() => {
+    if (!result || !onUpdateResult || isRefitting) return;
+    const overrunDays = result.routes.filter(route =>
+      dayReturnByTimes[route.day] &&
+      route.facilities.length > 0 &&
+      (route.lastFacilityDepartureTime || route.endTime) > dayReturnByTimes[route.day]
+    );
+    if (overrunDays.length === 0) return;
+
+    const signature = JSON.stringify([
+      result.routes.map(r => [r.day, r.startTime, r.facilities.map(f => f.name)]),
+      dayReturnByTimes,
+    ]);
+    if (signature === lastRefitSignatureRef.current) return;
+    lastRefitSignatureRef.current = signature;
+    void runRefit(dayReturnByTimes);
+  }, [result, dayReturnByTimes, isRefitting]);
 
   useEffect(() => {
     loadInspections();
@@ -1292,6 +1538,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onUpdateResult) {
         onUpdateResult(newResult);
       }
+
+      // Re-ordering a day changes its drive time, which changes what fits
+      // before a "leave for home base by" cut-off. Re-pack in both directions
+      // (pull forward if there's now room, push back if there isn't) so the
+      // cut-offs the user set still hold after a refresh.
+      if (Object.values(dayReturnByTimes).some(Boolean)) {
+        await runRefit(dayReturnByTimes, newRoutes);
+      }
     } catch (err) {
       console.error('[RouteResults] Error re-optimizing days:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -2246,10 +2500,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                 openReturnByModal(route.day);
                               }}
                               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${dayReturnByTimes[route.day] ? 'bg-white/25 font-semibold' : 'hover:bg-white/20'}`}
-                              title={`Set when Day ${route.day} needs to be back at home base`}
+                              title={`Set the latest Day ${route.day} may leave its last site for home base`}
                             >
                               <span>home by {formatTimeTo12Hour(homeArrivalTime)}</span>
-                              {dayReturnByTimes[route.day] && <Home className="w-3 h-3" />}
+                              {dayReturnByTimes[route.day] && (
+                                <span className="inline-flex items-center gap-0.5">
+                                  <Home className="w-3 h-3" />
+                                  <span>leave by {formatTimeTo12Hour(dayReturnByTimes[route.day])}</span>
+                                </span>
+                              )}
                             </button>
                           </div>
                           {(() => {
@@ -2388,7 +2647,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                           openReturnByModal(route.day);
                                         }}
                                         className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                        title={`Set when Day ${route.day} needs to be back at home base`}
+                                        title={`Set the latest Day ${route.day} may leave its last site for home base`}
                                       >
                                         <span>→ Home Base</span>
                                         <Clock className="w-3.5 h-3.5 opacity-50" />
@@ -2406,16 +2665,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     {segment.to === 'Home Base' && dayReturnByTimes[route.day] && (
                                       <span
                                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 text-xs font-semibold"
-                                        title="This day's start time is derived from this deadline"
+                                        title="Day is packed to fit this cut-off; the drive home may run past it"
                                       >
                                         <Home className="w-3 h-3" />
-                                        Back by {formatTimeTo12Hour(dayReturnByTimes[route.day])}
+                                        Leave by {formatTimeTo12Hour(dayReturnByTimes[route.day])}
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            const next = { ...dayReturnByTimes };
-                                            delete next[route.day];
-                                            applyDaySchedules(dayStartTimes, next);
+                                            // Dropping the deadline releases the
+                                            // cap; the day keeps the sites it
+                                            // has until something re-packs it.
+                                            setDayReturnByTimes(prev => {
+                                              const next = { ...prev };
+                                              delete next[route.day];
+                                              return next;
+                                            });
                                           }}
                                           className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100"
                                           title="Clear this day's deadline"
@@ -3170,7 +3434,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       </span>
                       {dayReturnByTimes[route.day] && (
                         <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-                          Derived from “back by {formatTimeTo12Hour(dayReturnByTimes[route.day])}” — changing this releases it
+                          Must leave its last site by {formatTimeTo12Hour(dayReturnByTimes[route.day])} — sites refit to what fits
                         </p>
                       )}
                     </div>
@@ -3206,20 +3470,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </button>
                 <button
                   onClick={() => {
-                    // A day whose start time the user actually typed over is a
-                    // day whose "be back by" deadline they just overruled —
-                    // the two can't both drive the clock. Days they left alone
-                    // keep their deadline (and therefore their derived start).
-                    const nextReturnBy = { ...dayReturnByTimes };
-                    result.routes.forEach(r => {
-                      if (!nextReturnBy[r.day]) return;
-                      const currentStart = getEffectiveStartTime(r);
-                      if ((tempDayStartTimes[r.day] || currentStart) !== currentStart) {
-                        delete nextReturnBy[r.day];
-                      }
-                    });
-                    applyDaySchedules(tempDayStartTimes, nextReturnBy);
+                    applyDayStartTimes(tempDayStartTimes);
                     setShowStartTimeModal(false);
+                    // A later start eats into a deadline day's window, so
+                    // re-pack anything that no longer fits.
+                    if (Object.values(dayReturnByTimes).some(Boolean)) {
+                      void runRefit(dayReturnByTimes);
+                    }
                   }}
                   className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all"
                 >
@@ -3237,29 +3494,34 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         if (!route) return null;
 
         const elapsedMinutes = getRouteElapsedMinutes(route);
-        const derivedStart = getDerivedStartTime(route, tempReturnByTime);
-        // The day doesn't fit before the deadline if the drive + visits would
-        // have to start before midnight. Rare, but say so rather than silently
-        // clamping to 12:00 AM.
-        const doesNotFit = timeToMinutesLocal(tempReturnByTime) - elapsedMinutes < 0;
+        const startTime = getDayStartTime(route.day);
+        // The deadline is about finishing in the field, so everything here is
+        // measured against the last facility's departure — the drive home is
+        // allowed to run past it.
+        const currentLeaveTime = route.lastFacilityDepartureTime || route.endTime || startTime;
         const currentReturnBy = dayReturnByTimes[returnByModalDay];
+        const slackMinutes = timeToMinutesLocal(tempReturnByTime) - timeToMinutesLocal(currentLeaveTime);
+        // A deadline earlier than the day's own start leaves nowhere to put
+        // anything — the day would empty out completely.
+        const beforeStart = timeToMinutesLocal(tempReturnByTime) <= timeToMinutesLocal(startTime);
 
         return (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setReturnByModalDay(null)}>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !isRefitting && setReturnByModalDay(null)}>
             <div
               className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Be Back By — Day {route.day}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Leave for Home Base By — Day {route.day}</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                    Set when this day has to end at home base
+                    The latest this day may finish its last site
                   </p>
                 </div>
                 <button
                   onClick={() => setReturnByModalDay(null)}
-                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  disabled={isRefitting}
+                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40"
                 >
                   <XIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 </button>
@@ -3269,7 +3531,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <div>
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
                     <Home className="w-4 h-4" />
-                    Home base arrival
+                    Leave the last site by
                   </label>
                   <input
                     type="time"
@@ -3279,60 +3541,82 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   />
                 </div>
 
-                <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl text-sm space-y-1">
-                  <p className="text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-                    <Navigation className="w-4 h-4 text-blue-500" />
-                    Leave home base at{' '}
-                    <span className="font-semibold">{formatTimeTo12Hour(derivedStart)}</span>
+                <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl text-sm space-y-1.5">
+                  <p className="text-gray-700 dark:text-gray-200">
+                    Day {route.day} leaves home at <span className="font-semibold">{formatTimeTo12Hour(startTime)}</span>
+                    {' '}and currently finishes its last site at{' '}
+                    <span className="font-semibold">{formatTimeTo12Hour(currentLeaveTime)}</span>
+                    {' '}({route.facilities.length} {route.facilities.length === 1 ? 'site' : 'sites'},{' '}
+                    {Math.floor(elapsedMinutes / 60)}h {elapsedMinutes % 60}m including the drive home).
                   </p>
-                  <p className="text-gray-500 dark:text-gray-400 text-xs">
-                    {Math.floor(elapsedMinutes / 60)}h {elapsedMinutes % 60}m on the road
-                    ({route.facilities.length} {route.facilities.length === 1 ? 'facility' : 'facilities'}, drive + visits).
-                    This day's start time is worked backwards from the time above.
-                  </p>
-                  {doesNotFit && (
-                    <p className="text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-1.5 pt-1">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" />
-                      This day is longer than the time available before that deadline — it would have to start the day before.
+                  {!beforeStart && slackMinutes > 0 && (
+                    <p className="text-gray-600 dark:text-gray-300 text-xs flex items-start gap-1.5">
+                      <TrendingUp className="w-4 h-4 flex-shrink-0 mt-px text-green-600" />
+                      About {Math.floor(slackMinutes / 60)}h {slackMinutes % 60}m of room — the nearest sites from later
+                      days get pulled forward to fill it, and the days behind them shift up.
                     </p>
                   )}
+                  {!beforeStart && slackMinutes < 0 && (
+                    <p className="text-gray-600 dark:text-gray-300 text-xs flex items-start gap-1.5">
+                      <Navigation className="w-4 h-4 flex-shrink-0 mt-px text-orange-500" />
+                      About {Math.floor(-slackMinutes / 60)}h {-slackMinutes % 60}m too long — whatever doesn't fit moves
+                      back into the following days.
+                    </p>
+                  )}
+                  {beforeStart && (
+                    <p className="text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-1.5">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" />
+                      That's at or before this day's {formatTimeTo12Hour(startTime)} departure — nothing would fit, and
+                      every site would move to a later day.
+                    </p>
+                  )}
+                  <p className="text-gray-500 dark:text-gray-400 text-xs">
+                    The start time doesn't move, and the drive home may still run past this time. Days left with no
+                    sites are deleted and the rest renumber.
+                  </p>
                 </div>
 
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Sticks through Refresh Times and Apply &amp; Refresh Times: the start time re-derives, the arrival stays put.
+                  Stays in force afterwards: Refresh Times re-packs the day, and a day that drifts past its deadline is
+                  refit automatically.
                 </p>
               </div>
 
               <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
                 <button
                   onClick={() => {
-                    const next = { ...dayReturnByTimes };
-                    delete next[returnByModalDay];
-                    applyDaySchedules(dayStartTimes, next);
+                    setDayReturnByTimes(prev => {
+                      const next = { ...prev };
+                      delete next[returnByModalDay];
+                      return next;
+                    });
                     setReturnByModalDay(null);
                   }}
-                  disabled={!currentReturnBy}
+                  disabled={!currentReturnBy || isRefitting}
                   className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-                  title={currentReturnBy ? 'Go back to this day\'s start time' : 'No deadline set for this day'}
+                  title={currentReturnBy ? 'Remove this day\'s cut-off (the plan stays as it is)' : 'No cut-off set for this day'}
                 >
                   Clear
                 </button>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setReturnByModalDay(null)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    disabled={isRefitting}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      applyDaySchedules(dayStartTimes, { ...dayReturnByTimes, [returnByModalDay]: tempReturnByTime });
-                      setReturnByModalDay(null);
+                    onClick={async () => {
+                      const next = { ...dayReturnByTimes, [returnByModalDay]: tempReturnByTime };
+                      const ok = await runRefit(next);
+                      if (ok) setReturnByModalDay(null);
                     }}
-                    disabled={!tempReturnByTime}
-                    className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all disabled:opacity-50"
+                    disabled={!tempReturnByTime || isRefitting}
+                    className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
                   >
-                    Apply
+                    {isRefitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+                    {isRefitting ? 'Refitting…' : 'Apply'}
                   </button>
                 </div>
               </div>
