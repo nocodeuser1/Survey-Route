@@ -128,7 +128,17 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [showStartTimeModal, setShowStartTimeModal] = useState(false);
   const [tempDayStartTimes, setTempDayStartTimes] = useState<Record<number, string>>({});
 
-  const getDayStartTime = (day: number) => dayStartTimes[day] || settings?.start_time || '08:00';
+  // Per-day "be back at home base by" deadlines, set by clicking the Home
+  // Base row inside a day. When a day has one, its start time becomes
+  // DERIVED: start = deadline - (drive + visit time), so the return drive
+  // lands exactly on the time the user asked for. The deadline outranks both
+  // the per-day start time and settings.start_time, and the sync effect
+  // below re-applies it whenever `result` changes underneath us — otherwise
+  // Refresh Times and Apply & Refresh Times would silently stamp
+  // settings.start_time back over the user's deadline.
+  const [dayReturnByTimes, setDayReturnByTimes] = useState<Record<number, string>>({});
+  const [returnByModalDay, setReturnByModalDay] = useState<number | null>(null);
+  const [tempReturnByTime, setTempReturnByTime] = useState<string>('');
 
   const addMinutesToTimeLocal = (time: string, minutes: number): string => {
     const [hours, mins] = time.split(':').map(Number);
@@ -138,72 +148,136 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
   };
 
-  const applyDayStartTimes = (startTimes: Record<number, string>) => {
+  const timeToMinutesLocal = (time: string): number => {
+    const [hours, mins] = (time || '00:00').split(':').map(Number);
+    return (hours || 0) * 60 + (mins || 0);
+  };
+
+  const minutesToTimeLocal = (minutes: number): string => {
+    const clamped = Math.max(0, Math.round(minutes));
+    const hours = Math.floor(clamped / 60) % 24;
+    return `${String(hours).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+  };
+
+  type DayRoute = OptimizationResult['routes'][number];
+
+  /**
+   * Re-walk one day's segment chain from a new departure time. Pulled out of
+   * applyDayStartTimes so the "be back by" path can reuse the exact same
+   * arithmetic — anything that recomputes a day's clock goes through here.
+   *
+   * ALWAYS recompute, even when newStartTime matches route.startTime. The old
+   * early-return left routes whose endTime / segment times had stale values
+   * (e.g. routes saved before the calculateDayRoute fix for
+   * lastFacilityDepartureTime) untouched on Apply — the user's "times don't
+   * refresh after Apply" report. Re-walking is cheap (<= 15 facilities/day in
+   * practice) and guarantees every value the day card renders is fresh.
+   */
+  const rescheduleRoute = (route: DayRoute, newStartTime: string): DayRoute => {
+    // Empty placeholder day (from Add Day with nothing assigned yet) —
+    // just stamp the new start time and bail; segments are empty.
+    if (!route.segments || route.segments.length === 0) {
+      return { ...route, startTime: newStartTime, endTime: newStartTime, lastFacilityDepartureTime: newStartTime };
+    }
+
+    const updatedSegments = [];
+    let currentTime = newStartTime;
+    let totalVisitMinutes = 0;
+    let totalDriveMinutes = 0;
+
+    for (const segment of route.segments) {
+      // Drive to this location
+      currentTime = addMinutesToTimeLocal(currentTime, segment.duration);
+      totalDriveMinutes += segment.duration || 0;
+      const arrivalTime = currentTime;
+
+      let departureTime = arrivalTime;
+      if (segment.to !== 'Home Base') {
+        // Find visit duration from the existing segment timing
+        const oldArrival = segment.arrivalTime;
+        const oldDepart = segment.departureTime;
+        const [aH, aM] = oldArrival.split(':').map(Number);
+        const [dH, dM] = oldDepart.split(':').map(Number);
+        const visitMinutes = Math.max((dH * 60 + dM) - (aH * 60 + aM), 0);
+        totalVisitMinutes += visitMinutes;
+        departureTime = addMinutesToTimeLocal(arrivalTime, visitMinutes);
+        currentTime = departureTime;
+      }
+
+      updatedSegments.push({
+        ...segment,
+        arrivalTime,
+        departureTime,
+      });
+    }
+
+    // Compute last facility departure (second to last segment)
+    const lastFacilityDept = updatedSegments.length > 1
+      ? updatedSegments[updatedSegments.length - 2].departureTime
+      : updatedSegments[updatedSegments.length - 1]?.departureTime || newStartTime;
+
+    return {
+      ...route,
+      startTime: newStartTime,
+      endTime: updatedSegments[updatedSegments.length - 1]?.arrivalTime || newStartTime,
+      lastFacilityDepartureTime: lastFacilityDept,
+      totalDriveTime: totalDriveMinutes,
+      totalVisitTime: totalVisitMinutes,
+      totalTime: totalDriveMinutes + totalVisitMinutes,
+      segments: updatedSegments,
+    };
+  };
+
+  /**
+   * Elapsed minutes from leaving home base to pulling back in, for the day as
+   * currently sequenced. Measured by re-walking the chain from midnight
+   * rather than summing raw segment durations, so the per-segment rounding in
+   * addMinutesToTimeLocal can't make the derived start drift by a minute
+   * (which would leave the sync effect re-applying forever).
+   */
+  const getRouteElapsedMinutes = (route: DayRoute): number => {
+    if (!route.segments || route.segments.length === 0) return 0;
+    return timeToMinutesLocal(rescheduleRoute(route, '00:00').endTime);
+  };
+
+  /** Latest departure that still gets this day home by `returnByTime`. */
+  const getDerivedStartTime = (route: DayRoute, returnByTime: string): string =>
+    minutesToTimeLocal(Math.max(0, timeToMinutesLocal(returnByTime) - getRouteElapsedMinutes(route)));
+
+  /**
+   * The start time a day should actually run on. A "be back by" deadline wins
+   * over a per-day start time, which wins over the account-wide start time.
+   */
+  const computeStartTime = (
+    route: DayRoute,
+    startTimes: Record<number, string>,
+    returnByTimes: Record<number, string>
+  ): string => {
+    const returnBy = returnByTimes[route.day];
+    if (returnBy && route.segments && route.segments.length > 0) {
+      return getDerivedStartTime(route, returnBy);
+    }
+    return startTimes[route.day] || settings?.start_time || '08:00';
+  };
+
+  const getEffectiveStartTime = (route: DayRoute) => computeStartTime(route, dayStartTimes, dayReturnByTimes);
+
+  const getDayStartTime = (day: number) => {
+    const route = result?.routes.find(r => r.day === day);
+    if (route) return getEffectiveStartTime(route);
+    return dayStartTimes[day] || settings?.start_time || '08:00';
+  };
+
+  /** Re-clock every day from the given per-day start times / deadlines. */
+  const applyDaySchedules = (
+    startTimes: Record<number, string>,
+    returnByTimes: Record<number, string>
+  ) => {
     if (!result || !onUpdateResult) return;
 
-    const updatedRoutes = result.routes.map(route => {
-      const newStartTime = startTimes[route.day] || settings?.start_time || '08:00';
-
-      // Empty placeholder day (from Add Day with nothing assigned yet) —
-      // just stamp the new start time and bail; segments are empty.
-      if (!route.segments || route.segments.length === 0) {
-        return { ...route, startTime: newStartTime, endTime: newStartTime, lastFacilityDepartureTime: newStartTime };
-      }
-
-      // ALWAYS recompute, even when newStartTime matches route.startTime.
-      // The old early-return left routes whose endTime / segment times had
-      // stale values (e.g. routes saved before the calculateDayRoute fix
-      // for lastFacilityDepartureTime) untouched on Apply — the user's
-      // "times don't refresh after Apply" report. Re-walking the segment
-      // chain is cheap (≤ 15 facilities/day in practice) and guarantees
-      // every value the day card renders is freshly derived.
-      const updatedSegments = [];
-      let currentTime = newStartTime;
-      let totalVisitMinutes = 0;
-      let totalDriveMinutes = 0;
-
-      for (const segment of route.segments) {
-        // Drive to this location
-        currentTime = addMinutesToTimeLocal(currentTime, segment.duration);
-        totalDriveMinutes += segment.duration || 0;
-        const arrivalTime = currentTime;
-
-        let departureTime = arrivalTime;
-        if (segment.to !== 'Home Base') {
-          // Find visit duration from the existing segment timing
-          const oldArrival = segment.arrivalTime;
-          const oldDepart = segment.departureTime;
-          const [aH, aM] = oldArrival.split(':').map(Number);
-          const [dH, dM] = oldDepart.split(':').map(Number);
-          const visitMinutes = Math.max((dH * 60 + dM) - (aH * 60 + aM), 0);
-          totalVisitMinutes += visitMinutes;
-          departureTime = addMinutesToTimeLocal(arrivalTime, visitMinutes);
-          currentTime = departureTime;
-        }
-
-        updatedSegments.push({
-          ...segment,
-          arrivalTime,
-          departureTime,
-        });
-      }
-
-      // Compute last facility departure (second to last segment)
-      const lastFacilityDept = updatedSegments.length > 1
-        ? updatedSegments[updatedSegments.length - 2].departureTime
-        : updatedSegments[updatedSegments.length - 1]?.departureTime || newStartTime;
-
-      return {
-        ...route,
-        startTime: newStartTime,
-        endTime: updatedSegments[updatedSegments.length - 1]?.arrivalTime || newStartTime,
-        lastFacilityDepartureTime: lastFacilityDept,
-        totalDriveTime: totalDriveMinutes,
-        totalVisitTime: totalVisitMinutes,
-        totalTime: totalDriveMinutes + totalVisitMinutes,
-        segments: updatedSegments,
-      };
-    });
+    const updatedRoutes = result.routes.map(route =>
+      rescheduleRoute(route, computeStartTime(route, startTimes, returnByTimes))
+    );
 
     // Re-aggregate result-level totals so the summary cards above the day
     // list ("19h 23m total", drive time, etc.) also refresh.
@@ -213,7 +287,34 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     onUpdateResult({ ...result, routes: updatedRoutes, totalDriveTime, totalVisitTime, totalTime });
     setDayStartTimes(startTimes);
+    setDayReturnByTimes(returnByTimes);
   };
+
+  const openReturnByModal = (day: number) => {
+    const route = result?.routes.find(r => r.day === day);
+    setTempReturnByTime(dayReturnByTimes[day] || route?.endTime || settings?.return_by_time || '17:00');
+    setReturnByModalDay(day);
+  };
+
+  // Keep per-day overrides authoritative when the result is rebuilt beneath
+  // us. Refresh Times and Apply & Refresh Times both re-clock every day from
+  // settings.start_time, which would quietly discard a per-day start time and
+  // (worse) a "be back by" deadline. Re-deriving here also means a deadline
+  // stays honest after a refresh changes the day's drive time: the start
+  // shifts, the arrival stays put. Converges in one pass — once the routes
+  // carry the derived start times, nothing drifts and this no-ops.
+  useEffect(() => {
+    if (!result || !onUpdateResult) return;
+    const hasOverrides = Object.keys(dayReturnByTimes).length > 0 || Object.keys(dayStartTimes).length > 0;
+    if (!hasOverrides) return;
+
+    const drifted = result.routes.some(route => {
+      if (!dayReturnByTimes[route.day] && !dayStartTimes[route.day]) return false;
+      return route.startTime !== computeStartTime(route, dayStartTimes, dayReturnByTimes);
+    });
+
+    if (drifted) applyDaySchedules(dayStartTimes, dayReturnByTimes);
+  }, [result, dayStartTimes, dayReturnByTimes]);
 
   useEffect(() => {
     loadInspections();
@@ -2058,7 +2159,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         e.stopPropagation();
                         const times: Record<number, string> = {};
                         result.routes.forEach(r => {
-                          times[r.day] = dayStartTimes[r.day] || r.startTime || settings?.start_time || '08:00';
+                          // Seed from the EFFECTIVE start (a "back by" day's
+                          // start is derived), so a day the user doesn't touch
+                          // compares equal on Apply and keeps its deadline.
+                          times[r.day] = getEffectiveStartTime(r) || r.startTime || settings?.start_time || '08:00';
                         });
                         setTempDayStartTimes(times);
                         setShowStartTimeModal(true);
@@ -2131,8 +2235,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                       return (
                         <>
-                          <div className="text-sm text-blue-100" title={`Leave home ${formatTimeTo12Hour(route.startTime)} → leave last facility ${formatTimeTo12Hour(lastDepartureTime)} → home by ${formatTimeTo12Hour(homeArrivalTime)}`}>
-                            {formatTimeTo12Hour(route.startTime)} – home by {formatTimeTo12Hour(homeArrivalTime)}
+                          <div className="text-sm text-blue-100 flex items-center gap-1" title={`Leave home ${formatTimeTo12Hour(route.startTime)} → leave last facility ${formatTimeTo12Hour(lastDepartureTime)} → home by ${formatTimeTo12Hour(homeArrivalTime)}`}>
+                            <span>{formatTimeTo12Hour(route.startTime)} –</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openReturnByModal(route.day);
+                              }}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${dayReturnByTimes[route.day] ? 'bg-white/25 font-semibold' : 'hover:bg-white/20'}`}
+                              title={`Set when Day ${route.day} needs to be back at home base`}
+                            >
+                              <span>home by {formatTimeTo12Hour(homeArrivalTime)}</span>
+                              {dayReturnByTimes[route.day] && <Home className="w-3 h-3" />}
+                            </button>
                           </div>
                           {(() => {
 
@@ -2257,16 +2372,55 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             <div className="flex-1">
                               <div className="flex items-center justify-between">
                                 <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <p
-                                      className={`font-medium ${segment.to !== 'Home Base' ? 'text-blue-600 hover:text-blue-800 cursor-pointer' : 'text-gray-900 dark:text-white'
-                                        }`}
-                                      onClick={(e) => segment.to !== 'Home Base' && handleFacilityClick(segment.to, e)}
-                                      onContextMenu={(e) => segment.to !== 'Home Base' && openDayActionsPopover(segment.to, e)}
-                                      title={segment.to !== 'Home Base' ? 'Click to reassign or view details' : undefined}
-                                    >
-                                      {segment.to === 'Home Base' ? '→ Home Base' : segment.to}
-                                    </p>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {segment.to === 'Home Base' ? (
+                                      /* The return-to-home row doubles as the
+                                         "be back by" control for this day —
+                                         mirror of the start-time button in
+                                         the header, but for the other end of
+                                         the day. */
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openReturnByModal(route.day);
+                                        }}
+                                        className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                        title={`Set when Day ${route.day} needs to be back at home base`}
+                                      >
+                                        <span>→ Home Base</span>
+                                        <Clock className="w-3.5 h-3.5 opacity-50" />
+                                      </button>
+                                    ) : (
+                                      <p
+                                        className="font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+                                        onClick={(e) => handleFacilityClick(segment.to, e)}
+                                        onContextMenu={(e) => openDayActionsPopover(segment.to, e)}
+                                        title="Click to reassign or view details"
+                                      >
+                                        {segment.to}
+                                      </p>
+                                    )}
+                                    {segment.to === 'Home Base' && dayReturnByTimes[route.day] && (
+                                      <span
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 text-xs font-semibold"
+                                        title="This day's start time is derived from this deadline"
+                                      >
+                                        <Home className="w-3 h-3" />
+                                        Back by {formatTimeTo12Hour(dayReturnByTimes[route.day])}
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const next = { ...dayReturnByTimes };
+                                            delete next[route.day];
+                                            applyDaySchedules(dayStartTimes, next);
+                                          }}
+                                          className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100"
+                                          title="Clear this day's deadline"
+                                        >
+                                          <XIcon className="w-3 h-3" />
+                                        </button>
+                                      </span>
+                                    )}
                                     {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
                                     {effectiveKind === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
                                       const facility = getFacilityForStop(segment.to);
@@ -3011,6 +3165,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
                         {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
                       </span>
+                      {dayReturnByTimes[route.day] && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                          Derived from “back by {formatTimeTo12Hour(dayReturnByTimes[route.day])}” — changing this releases it
+                        </p>
+                      )}
                     </div>
                   </div>
                   <input
@@ -3044,7 +3203,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </button>
                 <button
                   onClick={() => {
-                    applyDayStartTimes(tempDayStartTimes);
+                    // A day whose start time the user actually typed over is a
+                    // day whose "be back by" deadline they just overruled —
+                    // the two can't both drive the clock. Days they left alone
+                    // keep their deadline (and therefore their derived start).
+                    const nextReturnBy = { ...dayReturnByTimes };
+                    result.routes.forEach(r => {
+                      if (!nextReturnBy[r.day]) return;
+                      const currentStart = getEffectiveStartTime(r);
+                      if ((tempDayStartTimes[r.day] || currentStart) !== currentStart) {
+                        delete nextReturnBy[r.day];
+                      }
+                    });
+                    applyDaySchedules(tempDayStartTimes, nextReturnBy);
                     setShowStartTimeModal(false);
                   }}
                   className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all"
@@ -3056,6 +3227,116 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         </div>
       )}
+
+      {/* Per-Day "Be Back By" Modal — opened from a day's Home Base row. */}
+      {returnByModalDay !== null && (() => {
+        const route = result.routes.find(r => r.day === returnByModalDay);
+        if (!route) return null;
+
+        const elapsedMinutes = getRouteElapsedMinutes(route);
+        const derivedStart = getDerivedStartTime(route, tempReturnByTime);
+        // The day doesn't fit before the deadline if the drive + visits would
+        // have to start before midnight. Rare, but say so rather than silently
+        // clamping to 12:00 AM.
+        const doesNotFit = timeToMinutesLocal(tempReturnByTime) - elapsedMinutes < 0;
+        const currentReturnBy = dayReturnByTimes[returnByModalDay];
+
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setReturnByModalDay(null)}>
+            <div
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Be Back By — Day {route.day}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    Set when this day has to end at home base
+                  </p>
+                </div>
+                <button
+                  onClick={() => setReturnByModalDay(null)}
+                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <XIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+                    <Home className="w-4 h-4" />
+                    Home base arrival
+                  </label>
+                  <input
+                    type="time"
+                    value={tempReturnByTime}
+                    onChange={(e) => setTempReturnByTime(e.target.value)}
+                    className="mt-2 w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl text-sm space-y-1">
+                  <p className="text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+                    <Navigation className="w-4 h-4 text-blue-500" />
+                    Leave home base at{' '}
+                    <span className="font-semibold">{formatTimeTo12Hour(derivedStart)}</span>
+                  </p>
+                  <p className="text-gray-500 dark:text-gray-400 text-xs">
+                    {Math.floor(elapsedMinutes / 60)}h {elapsedMinutes % 60}m on the road
+                    ({route.facilities.length} {route.facilities.length === 1 ? 'facility' : 'facilities'}, drive + visits).
+                    This day's start time is worked backwards from the time above.
+                  </p>
+                  {doesNotFit && (
+                    <p className="text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-1.5 pt-1">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" />
+                      This day is longer than the time available before that deadline — it would have to start the day before.
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Sticks through Refresh Times and Apply &amp; Refresh Times: the start time re-derives, the arrival stays put.
+                </p>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => {
+                    const next = { ...dayReturnByTimes };
+                    delete next[returnByModalDay];
+                    applyDaySchedules(dayStartTimes, next);
+                    setReturnByModalDay(null);
+                  }}
+                  disabled={!currentReturnBy}
+                  className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                  title={currentReturnBy ? 'Go back to this day\'s start time' : 'No deadline set for this day'}
+                >
+                  Clear
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setReturnByModalDay(null)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      applyDaySchedules(dayStartTimes, { ...dayReturnByTimes, [returnByModalDay]: tempReturnByTime });
+                      setReturnByModalDay(null);
+                    }}
+                    disabled={!tempReturnByTime}
+                    className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all disabled:opacity-50"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
