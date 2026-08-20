@@ -714,9 +714,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           cluster_balance_weight: tempSettings.cluster_balance_weight
         });
 
-        // Since visit duration and sunset offset are no longer in this modal,
-        // we should never trigger the time-only recalculation path from here
-        const onlyTimeOrVisitDurationChanged = false;
 
         // Save the updated settings FIRST (keeping visit duration, start time, and sunset offset from current settings)
         const { error } = await supabase
@@ -755,84 +752,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
         console.log('Settings saved successfully to database');
 
-        // If only time or visit duration changed, recalculate times without regenerating the route
-        if (onlyTimeOrVisitDurationChanged && onUpdateResult) {
-          console.log('Only start time or visit duration changed, recalculating times without regenerating route...');
-          console.log('New start time:', tempSettings.start_time, 'New visit duration:', tempSettings.default_visit_duration_minutes);
-
-          // Recalculate times for each route
-          const updatedRoutes = result.routes.map(route => {
-            const updatedSegments = [];
-            let currentTime = tempSettings.start_time || '08:00';
-            let totalDriveTime = 0;
-            let totalVisitTime = 0;
-
-            // Helper function to add minutes to time
-            const addMinutesToTime = (time: string, minutes: number): string => {
-              const [hours, mins] = time.split(':').map(Number);
-              const totalMinutes = Math.round(hours * 60 + mins + minutes);
-              const newHours = Math.floor(totalMinutes / 60) % 24;
-              const newMins = totalMinutes % 60;
-              return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
-            };
-
-            // Process each segment
-            for (const segment of route.segments) {
-              const arrivalTime = addMinutesToTime(currentTime, segment.duration);
-              totalDriveTime += segment.duration;
-
-              let departureTime = arrivalTime;
-              if (segment.to !== 'Home Base') {
-                const facility = facilities.find(f => f.name === segment.to);
-                const visitDuration = effectiveKind === 'spcc_inspection'
-                  ? (tempSettings.inspection_visit_duration_minutes ?? settings?.inspection_visit_duration_minutes ?? 30)
-                  : effectiveKind === 'spcc_plan'
-                    ? (tempSettings.plan_visit_duration_minutes ?? settings?.plan_visit_duration_minutes ?? 60)
-                    : (facility?.visit_duration_minutes || tempSettings.default_visit_duration_minutes);
-                departureTime = addMinutesToTime(arrivalTime, visitDuration);
-                totalVisitTime += visitDuration;
-              }
-
-              updatedSegments.push({
-                ...segment,
-                arrivalTime,
-                departureTime
-              });
-
-              currentTime = departureTime;
-            }
-
-            return {
-              ...route,
-              startTime: tempSettings.start_time || '08:00',
-              endTime: currentTime,
-              totalDriveTime,
-              totalVisitTime,
-              totalTime: totalDriveTime + totalVisitTime,
-              segments: updatedSegments
-            };
-          });
-
-          const updatedResult = {
-            ...result,
-            routes: updatedRoutes,
-            totalDriveTime: updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
-            totalVisitTime: updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
-            totalTime: updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0),
-          };
-
-          console.log('Time recalculation complete:', {
-            oldTotalVisitTime: result.totalVisitTime,
-            newTotalVisitTime: updatedResult.totalVisitTime,
-            oldTotalTime: result.totalTime,
-            newTotalTime: updatedResult.totalTime,
-          });
-
-          onUpdateResult(updatedResult);
-          setShowRefreshOptions(false);
-          setShowAdvanced(false);
-          return;
-        }
 
         console.log('Triggering route regeneration with new settings...');
         // Trigger refresh - this should set isGenerating=true and regenerate
