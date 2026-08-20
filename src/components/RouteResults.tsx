@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2 } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
+import { OptimizationResult, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
 import { UserSettings, Facility, Inspection, supabase } from '../lib/supabase';
@@ -1148,6 +1148,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     try {
       console.log('[RouteResults] Starting re-optimization', { settings, homeBase });
 
+      // Fall back to the account's configured visit duration rather than a
+      // hard-coded 30, so a day re-clocked here matches what a regenerate
+      // would produce for the same facilities.
+      const defaultVisitDuration = settings.default_visit_duration_minutes || 30;
+
       // Source the facility list from the CURRENT route (result.routes), not
       // from facility.day_assignment in the database. Two reasons:
       //   1. The DB-driven path was filtering out anything with a completed
@@ -1225,37 +1230,35 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             name: f.name,
             latitude: Number(f.latitude),
             longitude: Number(f.longitude),
-            visitDuration: f.visit_duration_minutes || 30,
+            visitDuration: f.visit_duration_minutes || defaultVisitDuration,
           };
         });
 
         const indices = facilitiesWithIndex.map(f => f.index);
         console.log(`[RouteResults] Day ${day} indices:`, indices);
 
-        const optimizedSequence = optimizeRouteOrder(
-          distanceMatrix.distances,
-          indices,
-          0
-        );
-        console.log(`[RouteResults] Day ${day} optimized sequence:`, optimizedSequence);
-
-        // Create a facilities array indexed by matrix position for calculateDayRoute
-        // The function expects facilities[sequence[i] - 1] to return the correct facility
+        // Facilities array indexed by matrix position — rebuildDayRoute
+        // expects facilities[sequence[i] - 1] to return the right facility.
         const facilitiesForCalculation = allFacilitiesForMatrix.map(f => ({
           index: allFacilitiesForMatrix.indexOf(f) + 1,
           name: f.name,
           latitude: Number(f.latitude),
           longitude: Number(f.longitude),
-          visitDuration: f.visit_duration_minutes || 30,
+          visitDuration: f.visit_duration_minutes || defaultVisitDuration,
         }));
 
-        const dayRoute = calculateDayRoute(
+        // Same builder the generate/reassign/remove paths use, including the
+        // lunch break — this path used to omit it, so Refresh Times quietly
+        // reported a day as ending earlier than a regenerate would.
+        const dayRoute = rebuildDayRoute(
           facilitiesForCalculation,
-          optimizedSequence,
+          indices,
           distanceMatrix,
           0,
-          settings.start_time || '08:00'
+          settings.start_time || '08:00',
+          settings.lunch_break_minutes || 0
         );
+        console.log(`[RouteResults] Day ${day} optimized sequence:`, dayRoute.sequence);
         console.log(`[RouteResults] Day ${day} route calculated:`, {
           totalMiles: dayRoute.totalMiles,
           totalTime: dayRoute.totalTime

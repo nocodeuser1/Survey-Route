@@ -30,7 +30,7 @@ import CompletedFacilitiesVisibilityModal, { CompletedVisibility } from './compo
 import HomeBaseModal from './components/HomeBaseModal';
 import LoadingScreen from './components/LoadingScreen';
 import { calculateDistanceMatrix } from './services/osrm';
-import { optimizeRoutes, OptimizationResult, FacilityWithIndex, optimizeRouteOrder, calculateDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
+import { optimizeRoutes, OptimizationResult, OptimizationConstraints, FacilityWithIndex, rebuildDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
 import { useAuth } from './contexts/AuthContext';
 import { useAccount, getAccountDisplayName } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
@@ -1437,6 +1437,148 @@ function App() {
     setShowHomeBaseModal(true);
   };
 
+  /**
+   * The single optimization entry point. Both "Generate Routes" and
+   * "Create route from selection" (which is what Apply & Re-optimize calls
+   * when the user has a selected facility list) go through here, so a
+   * multi-team account gets per-team home bases either way. The selection
+   * path used to skip the per-team branch entirely and route everything from
+   * team 1's home base.
+   */
+  const runRouteOptimization = async (
+    facilitiesForRouting: Facility[],
+    settings: UserSettings,
+    constraints: OptimizationConstraints,
+    surveyTypeForDuration: string
+  ): Promise<{
+    result: OptimizationResult;
+    usePerTeamOptimization: boolean;
+    teamHomeBases: HomeBaseType[];
+    currentTeamCount: number;
+  }> => {
+    if (!homeBase) throw new Error('Home base is required to optimize routes');
+
+    const currentTeamCount = settings.team_count || 1;
+    const teamHomeBases = homeBases
+      .filter(hb => hb.team_number <= currentTeamCount)
+      .sort((a, b) => a.team_number - b.team_number);
+
+    // Per-team optimization: when multiple teams have their own home bases,
+    // pre-assign facilities to nearest team and optimize each team separately
+    const usePerTeamOptimization = currentTeamCount > 1 && teamHomeBases.length >= currentTeamCount;
+
+    let result: OptimizationResult;
+
+    if (usePerTeamOptimization) {
+      console.log(`Per-team optimization: ${currentTeamCount} teams with individual home bases`);
+
+      // Pre-assign each facility to the nearest team's home base
+      const teamFacilities = new Map<number, Facility[]>();
+      for (let t = 1; t <= currentTeamCount; t++) teamFacilities.set(t, []);
+
+      for (const facility of facilitiesForRouting) {
+        let nearestTeam = 1;
+        let minDist = Infinity;
+        for (const hb of teamHomeBases) {
+          const dist = haversineDistance(
+            Number(facility.latitude), Number(facility.longitude),
+            hb.latitude, hb.longitude
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestTeam = hb.team_number;
+          }
+        }
+        teamFacilities.get(nearestTeam)!.push(facility);
+      }
+
+      console.log('Facility distribution by team:', Array.from(teamFacilities.entries()).map(
+        ([team, facs]) => `Team ${team}: ${facs.length} facilities`
+      ));
+
+      // Optimize each team separately with their own home base
+      const allRoutes: DailyRoute[] = [];
+      let globalDayNumber = 1;
+
+      for (let t = 1; t <= currentTeamCount; t++) {
+        const teamFacs = teamFacilities.get(t) || [];
+        if (teamFacs.length === 0) continue;
+
+        const teamHB = teamHomeBases.find(hb => hb.team_number === t)!;
+        const teamLocations = [
+          { latitude: teamHB.latitude, longitude: teamHB.longitude },
+          ...teamFacs.map(f => ({ latitude: Number(f.latitude), longitude: Number(f.longitude) })),
+        ];
+
+        const teamDistMatrix = await calculateDistanceMatrix(teamLocations);
+        const teamFacilitiesWithIndex: FacilityWithIndex[] = teamFacs.map((f, idx) => ({
+          index: idx + 1,
+          name: f.name,
+          latitude: Number(f.latitude),
+          longitude: Number(f.longitude),
+          visitDuration: getVisitDuration(f, settings, surveyTypeForDuration, dbSurveyTypes),
+        }));
+
+        const teamResult = optimizeRoutes(
+          teamFacilitiesWithIndex,
+          teamDistMatrix,
+          constraints,
+          { latitude: teamHB.latitude, longitude: teamHB.longitude }
+        );
+
+        console.log(`Team ${t} optimization: ${teamResult.totalDays} days, ${teamResult.totalFacilities} facilities`);
+
+        // Assign global day numbers and add routes
+        for (const route of teamResult.routes) {
+          route.day = globalDayNumber++;
+          allRoutes.push(route);
+        }
+      }
+
+      // Build combined result
+      result = {
+        routes: allRoutes,
+        totalDays: allRoutes.length,
+        totalMiles: allRoutes.reduce((sum, r) => sum + r.totalMiles, 0),
+        totalFacilities: allRoutes.reduce((sum, r) => sum + r.facilities.length, 0),
+        totalDriveTime: allRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
+        totalVisitTime: allRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
+        totalTime: allRoutes.reduce((sum, r) => sum + r.totalTime, 0),
+      };
+    } else {
+      // Single-team or fallback: single optimization pass
+      const locations = [
+        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
+        ...facilitiesForRouting.map((f) => ({
+          latitude: Number(f.latitude),
+          longitude: Number(f.longitude),
+        })),
+      ];
+
+      const distanceMatrix = await calculateDistanceMatrix(locations);
+
+      const facilitiesWithIndex: FacilityWithIndex[] = facilitiesForRouting.map((f, idx) => ({
+        index: idx + 1,
+        name: f.name,
+        latitude: Number(f.latitude),
+        longitude: Number(f.longitude),
+        visitDuration: getVisitDuration(f, settings, surveyTypeForDuration, dbSurveyTypes),
+      }));
+
+      result = optimizeRoutes(
+        facilitiesWithIndex,
+        distanceMatrix,
+        constraints,
+        {
+          latitude: Number(homeBase.latitude),
+          longitude: Number(homeBase.longitude),
+        }
+      );
+    }
+
+    return { result, usePerTeamOptimization, teamHomeBases, currentTeamCount };
+  };
+
   const handleGenerateRoutes = async (settings: UserSettings) => {
     if (!homeBase) {
       promptForHomeBase(
@@ -1612,123 +1754,12 @@ function App() {
       console.log('Generating routes with constraints:', constraints);
       console.log('Using default visit duration:', settings.default_visit_duration_minutes, 'minutes');
 
-      const currentTeamCount = settings.team_count || 1;
-      const teamHomeBases = homeBases
-        .filter(hb => hb.team_number <= currentTeamCount)
-        .sort((a, b) => a.team_number - b.team_number);
-
-      // Per-team optimization: when multiple teams have their own home bases,
-      // pre-assign facilities to nearest team and optimize each team separately
-      const usePerTeamOptimization = currentTeamCount > 1 && teamHomeBases.length >= currentTeamCount;
-
-      let result: OptimizationResult;
-
-      if (usePerTeamOptimization) {
-        console.log(`Per-team optimization: ${currentTeamCount} teams with individual home bases`);
-
-        // Pre-assign each facility to the nearest team's home base
-        const teamFacilities = new Map<number, Facility[]>();
-        for (let t = 1; t <= currentTeamCount; t++) teamFacilities.set(t, []);
-
-        for (const facility of facilitiesForRouting) {
-          let nearestTeam = 1;
-          let minDist = Infinity;
-          for (const hb of teamHomeBases) {
-            const dist = haversineDistance(
-              Number(facility.latitude), Number(facility.longitude),
-              hb.latitude, hb.longitude
-            );
-            if (dist < minDist) {
-              minDist = dist;
-              nearestTeam = hb.team_number;
-            }
-          }
-          teamFacilities.get(nearestTeam)!.push(facility);
-        }
-
-        console.log('Facility distribution by team:', Array.from(teamFacilities.entries()).map(
-          ([team, facs]) => `Team ${team}: ${facs.length} facilities`
-        ));
-
-        // Optimize each team separately with their own home base
-        const allRoutes: DailyRoute[] = [];
-        let globalDayNumber = 1;
-
-        for (let t = 1; t <= currentTeamCount; t++) {
-          const teamFacs = teamFacilities.get(t) || [];
-          if (teamFacs.length === 0) continue;
-
-          const teamHB = teamHomeBases.find(hb => hb.team_number === t)!;
-          const teamLocations = [
-            { latitude: teamHB.latitude, longitude: teamHB.longitude },
-            ...teamFacs.map(f => ({ latitude: Number(f.latitude), longitude: Number(f.longitude) })),
-          ];
-
-          const teamDistMatrix = await calculateDistanceMatrix(teamLocations);
-          const teamFacilitiesWithIndex: FacilityWithIndex[] = teamFacs.map((f, idx) => ({
-            index: idx + 1,
-            name: f.name,
-            latitude: Number(f.latitude),
-            longitude: Number(f.longitude),
-            visitDuration: getVisitDuration(f, settings, surveyType, dbSurveyTypes),
-          }));
-
-          const teamResult = optimizeRoutes(
-            teamFacilitiesWithIndex,
-            teamDistMatrix,
-            constraints,
-            { latitude: teamHB.latitude, longitude: teamHB.longitude }
-          );
-
-          console.log(`Team ${t} optimization: ${teamResult.totalDays} days, ${teamResult.totalFacilities} facilities`);
-
-          // Assign global day numbers and add routes
-          for (const route of teamResult.routes) {
-            route.day = globalDayNumber++;
-            allRoutes.push(route);
-          }
-        }
-
-        // Build combined result
-        result = {
-          routes: allRoutes,
-          totalDays: allRoutes.length,
-          totalMiles: allRoutes.reduce((sum, r) => sum + r.totalMiles, 0),
-          totalFacilities: allRoutes.reduce((sum, r) => sum + r.facilities.length, 0),
-          totalDriveTime: allRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0),
-          totalVisitTime: allRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0),
-          totalTime: allRoutes.reduce((sum, r) => sum + r.totalTime, 0),
-        };
-      } else {
-        // Single-team or fallback: single optimization pass
-        const locations = [
-          { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-          ...facilitiesForRouting.map((f) => ({
-            latitude: Number(f.latitude),
-            longitude: Number(f.longitude),
-          })),
-        ];
-
-        const distanceMatrix = await calculateDistanceMatrix(locations);
-
-        const facilitiesWithIndex: FacilityWithIndex[] = facilitiesForRouting.map((f, idx) => ({
-          index: idx + 1,
-          name: f.name,
-          latitude: Number(f.latitude),
-          longitude: Number(f.longitude),
-          visitDuration: getVisitDuration(f, settings, surveyType, dbSurveyTypes),
-        }));
-
-        result = optimizeRoutes(
-          facilitiesWithIndex,
-          distanceMatrix,
-          constraints,
-          {
-            latitude: Number(homeBase.latitude),
-            longitude: Number(homeBase.longitude),
-          }
-        );
-      }
+      const {
+        result,
+        usePerTeamOptimization,
+        teamHomeBases,
+        currentTeamCount,
+      } = await runRouteOptimization(facilitiesForRouting, settings, constraints, surveyType);
 
       console.log('Route generation complete:', {
         totalDays: result.totalDays,
@@ -1997,30 +2028,15 @@ function App() {
         returnByTime: settings.return_by_time || '',
       };
 
-      const locations = [
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-        ...selectedFacilities.map(f => ({
-          latitude: Number(f.latitude),
-          longitude: Number(f.longitude),
-        })),
-      ];
-
-      const distanceMatrix = await calculateDistanceMatrix(locations);
-
-      // Use sourceSurveyType directly (not the state surveyType) since setSurveyType is async
-      const facilitiesWithIndex: FacilityWithIndex[] = selectedFacilities.map((f, idx) => ({
-        index: idx + 1,
-        name: f.name,
-        latitude: Number(f.latitude),
-        longitude: Number(f.longitude),
-        visitDuration: getVisitDuration(f, settings, sourceSurveyType, dbSurveyTypes),
-      }));
-
-      const result = optimizeRoutes(
-        facilitiesWithIndex,
-        distanceMatrix,
+      // Same optimizer the full generate uses, so a multi-team account gets
+      // its per-team home bases here too. Pass sourceSurveyType (the param)
+      // rather than the surveyType state — setSurveyType is async and hasn't
+      // landed yet at this point.
+      const { result } = await runRouteOptimization(
+        selectedFacilities,
+        settings,
         constraints,
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) }
+        sourceSurveyType
       );
 
       // Update facility day_assignment in DB
@@ -2500,15 +2516,9 @@ function App() {
 
         console.log(`[Reassign] Remapped fromRoute sequence from [${fromRoute.sequence.join(', ')}] to [${remappedFromSequence.join(', ')}]`);
 
-        const optimizedFromSequence = optimizeRouteOrder(
-          distanceMatrix.distances,
-          remappedFromSequence,
-          homeIndex
-        );
-
-        const newFromRoute = calculateDayRoute(
+        const newFromRoute = rebuildDayRoute(
           facilitiesWithIndex,
-          optimizedFromSequence,
+          remappedFromSequence,
           distanceMatrix,
           homeIndex,
           // Preserve any per-day start time the user had set on this day.
@@ -2518,7 +2528,8 @@ function App() {
           // and re-applying the start-time modal" phenomenon. The modal's
           // tempDayStartTimes still held the override; clicking Apply
           // detected the mismatch and recalculated correctly.
-          fromRoute.startTime || lastUsedSettings.start_time || '08:00'
+          fromRoute.startTime || lastUsedSettings.start_time || '08:00',
+          lastUsedSettings.lunch_break_minutes || 0
         );
         newFromRoute.day = fromDay;
 
@@ -2557,20 +2568,15 @@ function App() {
 
       console.log(`[Reassign] Remapped toRoute sequence from [${toRoute.sequence.join(', ')}] to [${remappedToSequence.join(', ')}]`);
 
-      const optimizedToSequence = optimizeRouteOrder(
-        distanceMatrix.distances,
-        remappedToSequence,
-        homeIndex
-      );
-
-      const newToRoute = calculateDayRoute(
+      const newToRoute = rebuildDayRoute(
         facilitiesWithIndex,
-        optimizedToSequence,
+        remappedToSequence,
         distanceMatrix,
         homeIndex,
         // Preserve the destination day's existing start time (per-day override
         // stays intact across reassigns). See comment on the fromRoute branch.
-        toRoute.startTime || lastUsedSettings.start_time || '08:00'
+        toRoute.startTime || lastUsedSettings.start_time || '08:00',
+        lastUsedSettings.lunch_break_minutes || 0
       );
       newToRoute.day = toDay;
 
@@ -2742,21 +2748,16 @@ function App() {
 
           console.log(`[BulkReassign] Remapped Day ${route.day} sequence from [${route.sequence.slice(0, 5).join(', ')}...] to [${remappedSequence.slice(0, 5).join(', ')}...]`);
 
-          const optimizedSequence = optimizeRouteOrder(
-            distanceMatrix.distances,
-            remappedSequence,
-            homeIndex
-          );
-
-          const newRoute = calculateDayRoute(
+          const newRoute = rebuildDayRoute(
             facilitiesWithIndex,
-            optimizedSequence,
+            remappedSequence,
             distanceMatrix,
             homeIndex,
             // Preserve the day's existing start time across bulk reassigns.
             // Same root cause as handleReassignFacility — see the longer
             // comment there.
-            route.startTime || lastUsedSettings.start_time || '08:00'
+            route.startTime || lastUsedSettings.start_time || '08:00',
+            lastUsedSettings.lunch_break_minutes || 0
           );
           newRoute.day = route.day;
           routesToKeep.push(newRoute);
@@ -2928,19 +2929,12 @@ function App() {
       // Calculate distance matrix for this day only
       const distanceMatrix = await calculateDistanceMatrix(facilitiesForMatrix);
 
-      // Re-optimize the route order
-      const optimizedSequence = optimizeRouteOrder(
-        distanceMatrix.distances,
-        updatedSequence,
-        homeIndex
-      );
-
-      // Calculate the new route with updated times. Preserve the day's
-      // existing start time so per-day overrides survive a remove. Same
-      // pattern as the reassign handlers.
-      const newRoute = calculateDayRoute(
+      // Re-order and re-clock the day. Preserve the day's existing start time
+      // so per-day overrides survive a remove. Same pattern as the reassign
+      // handlers.
+      const newRoute = rebuildDayRoute(
         facilitiesWithIndex,
-        optimizedSequence,
+        updatedSequence,
         distanceMatrix,
         homeIndex,
         routeToUpdate.startTime || lastUsedSettings.start_time || '08:00',

@@ -112,57 +112,111 @@ export function optimizeRouteOrder(
   let bestRoute = [...route];
   let bestDistance = calculateRouteDistance(distanceMatrix, bestRoute, homeIndex);
 
-  // Apply 2-opt optimization to improve the route
-  // This looks for crossing paths and uncrosses them by reversing segments
+  // Neighbours of a position within the day; home base sits at both ends.
+  const nodeBefore = (seq: number[], i: number) => (i <= 0 ? homeIndex : seq[i - 1]);
+  const nodeAfter = (seq: number[], i: number) =>
+    (i >= seq.length - 1 ? homeIndex : seq[i + 1]);
+
+  // Accept a candidate ordering only if a full recompute agrees it's shorter.
+  // The delta arithmetic below assumes a symmetric matrix; real OSRM matrices
+  // are only near-symmetric, so every proposed move gets confirmed for real
+  // before it's kept.
+  const tryCandidate = (candidate: number[]): boolean => {
+    const candidateDistance = calculateRouteDistance(distanceMatrix, candidate, homeIndex);
+    if (candidateDistance < bestDistance - 0.001) {
+      bestRoute = candidate;
+      bestDistance = candidateDistance;
+      return true;
+    }
+    return false;
+  };
+
   let improved = true;
   let iterations = 0;
-  const maxIterations = 200;
+  const maxIterations = 300;
 
   while (improved && iterations < maxIterations) {
     improved = false;
     iterations++;
 
+    // --- 2-opt: find crossing paths and uncross them by reversing a run ---
+    twoOpt:
     for (let i = 0; i < bestRoute.length - 1; i++) {
       for (let j = i + 1; j < bestRoute.length; j++) {
-        // Get the four edges involved in this 2-opt swap
-        // Edge 1: from previous location to route[i]
-        // Edge 2: from route[i] to route[i+1]
-        // Edge 3: from route[j] to route[j+1] (or back to home)
-        // Edge 4: from route[j-1] to route[j]
+        const prev = nodeBefore(bestRoute, i);
+        const next = nodeAfter(bestRoute, j);
+        const delta =
+          distanceMatrix[prev][bestRoute[j]] + distanceMatrix[bestRoute[i]][next] -
+          distanceMatrix[prev][bestRoute[i]] - distanceMatrix[bestRoute[j]][next];
 
-        const prevI = i === 0 ? homeIndex : bestRoute[i - 1];
-        const currI = bestRoute[i];
-        // nextI unused
+        if (delta >= -0.001) continue;
 
-        const currJ = bestRoute[j];
-        const nextJ = j + 1 < bestRoute.length ? bestRoute[j + 1] : homeIndex;
+        const candidate = [...bestRoute];
+        let left = i;
+        let right = j;
+        while (left < right) {
+          const temp = candidate[left];
+          candidate[left] = candidate[right];
+          candidate[right] = temp;
+          left++;
+          right--;
+        }
 
-        // Current distance: prevI -> currI + currJ -> nextJ
-        const currentDist = distanceMatrix[prevI][currI] + distanceMatrix[currJ][nextJ];
+        if (tryCandidate(candidate)) {
+          improved = true;
+          break twoOpt;
+        }
+      }
+    }
 
-        // New distance after swap: prevI -> currJ + currI -> nextJ
-        const newDist = distanceMatrix[prevI][currJ] + distanceMatrix[currI][nextJ];
+    // --- Or-opt: lift a run of 1-3 stops out and drop it somewhere better ---
+    // 2-opt alone can't fix "this stop is on the way to that one but sits at
+    // the wrong end of the day" — reversing a contiguous run is all it can do.
+    // Or-opt relocates a stop (or a short chain) to its cheapest insertion
+    // point, in either orientation, which is what actually straightens out a
+    // drive-past within a single day.
+    orOpt:
+    for (let segLen = 1; segLen <= 3 && segLen < bestRoute.length; segLen++) {
+      for (let start = 0; start + segLen <= bestRoute.length; start++) {
+        const segment = bestRoute.slice(start, start + segLen);
+        const without = [
+          ...bestRoute.slice(0, start),
+          ...bestRoute.slice(start + segLen),
+        ];
 
-        if (newDist < currentDist - 0.001) {
-          // Perform 2-opt swap: reverse the segment between i and j
-          const newRoute = [...bestRoute];
-          let left = i;
-          let right = j;
+        const prev = start === 0 ? homeIndex : bestRoute[start - 1];
+        const next =
+          start + segLen >= bestRoute.length ? homeIndex : bestRoute[start + segLen];
+        const removalGain =
+          distanceMatrix[prev][segment[0]] +
+          distanceMatrix[segment[segLen - 1]][next] -
+          distanceMatrix[prev][next];
 
-          while (left < right) {
-            const temp = newRoute[left];
-            newRoute[left] = newRoute[right];
-            newRoute[right] = temp;
-            left++;
-            right--;
-          }
+        const orientations = segLen === 1 ? [segment] : [segment, [...segment].reverse()];
 
-          const newTotalDistance = calculateRouteDistance(distanceMatrix, newRoute, homeIndex);
+        for (let pos = 0; pos <= without.length; pos++) {
+          if (pos === start) continue; // right back where it came from
 
-          if (newTotalDistance < bestDistance) {
-            bestRoute = newRoute;
-            bestDistance = newTotalDistance;
-            improved = true;
+          const a = pos === 0 ? homeIndex : without[pos - 1];
+          const b = pos === without.length ? homeIndex : without[pos];
+
+          for (const oriented of orientations) {
+            const insertionCost =
+              distanceMatrix[a][oriented[0]] +
+              distanceMatrix[oriented[segLen - 1]][b] -
+              distanceMatrix[a][b];
+
+            if (removalGain - insertionCost <= 0.001) continue;
+
+            const candidate = [
+              ...without.slice(0, pos),
+              ...oriented,
+              ...without.slice(pos),
+            ];
+            if (tryCandidate(candidate)) {
+              improved = true;
+              break orOpt;
+            }
           }
         }
       }
@@ -598,6 +652,278 @@ function absorbBimodalIntoNeighbors(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Shared day builder
+// ---------------------------------------------------------------------------
+
+/**
+ * The one way a day's route gets (re)built: order the stops, then clock the
+ * day. Every entry point — first generation, drag-and-drop reassign, bulk
+ * reassign, remove-from-day, the Refresh Times button — goes through here so
+ * they can't drift apart. They used to: some call sites passed the lunch
+ * break to calculateDayRoute and some didn't, so the same set of stops came
+ * out with different arrival times depending on which button produced it.
+ */
+export function rebuildDayRoute(
+  facilities: FacilityWithIndex[],
+  sequence: number[],
+  distanceMatrix: DistanceMatrix,
+  homeIndex: number,
+  startTime: string,
+  lunchBreakMinutes: number = 0
+): DailyRoute {
+  const optimized = optimizeRouteOrder(distanceMatrix.distances, sequence, homeIndex);
+  return calculateDayRoute(
+    facilities,
+    optimized,
+    distanceMatrix,
+    homeIndex,
+    startTime,
+    lunchBreakMinutes
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-day refinement
+// ---------------------------------------------------------------------------
+
+// How many nearby stops each facility considers as "who else is around here".
+// Cross-day moves are only ever proposed between days that already have a
+// stop in each other's neighbourhood, which is what keeps this pass from
+// being an O(days^2 * stops^2) sweep.
+const CROSS_DAY_NEIGHBORS = 12;
+// Minimum drive-time saving (minutes) before a move is worth the churn.
+const CROSS_DAY_MIN_GAIN = 1;
+const CROSS_DAY_MAX_PASSES = 60;
+// What each stop a day is short of MIN_VIABLE_DAY_FACILITIES is "worth", in
+// drive-minutes. Pure distance minimization will happily strip a day down to
+// one stop to shave a few miles off its neighbour — a whole working day for a
+// single facility, which is not the trade the user wants. Charging for
+// underfilled days means a move has to save real driving before it's allowed
+// to thin a day out, and conversely makes topping a thin day back up cheap.
+const CROSS_DAY_UNDERFILL_PENALTY_MINUTES = 45;
+
+function timeToMinutes(time: string): number {
+  const [hours, mins] = time.split(':').map(Number);
+  return hours * 60 + mins;
+}
+
+/**
+ * What a day costs us. Drive time is the real currency — it's what the
+ * "you drove right past that stop" complaint is actually about — with
+ * mileage as a tie-breaker so two equal-time orderings pick the shorter one,
+ * plus a charge for days that come out under-loaded (see the constant).
+ */
+function dayCost(route: DailyRoute): number {
+  const underfill = Math.max(0, MIN_VIABLE_DAY_FACILITIES - route.facilities.length);
+  return route.totalDriveTime
+    + route.totalMiles * 0.01
+    + underfill * CROSS_DAY_UNDERFILL_PENALTY_MINUTES;
+}
+
+/**
+ * How badly a day breaks the user's constraints, in roughly-comparable
+ * penalty units. A move is never allowed to make the pair of days it touches
+ * worse on this score — but days that were ALREADY over (clustering sometimes
+ * has no choice) can still be improved, which a hard feasible/infeasible gate
+ * would forbid.
+ */
+function dayViolation(route: DailyRoute, constraints: OptimizationConstraints): number {
+  let violation = 0;
+
+  if (constraints.useHoursConstraint && constraints.maxHoursPerDay) {
+    violation += Math.max(0, route.totalTime / 60 - constraints.maxHoursPerDay) * 60;
+  }
+  if (constraints.useFacilitiesConstraint && constraints.maxFacilitiesPerDay) {
+    violation += Math.max(0, route.facilities.length - constraints.maxFacilitiesPerDay) * 1000;
+  }
+  const maxDriveTime = constraints.maxDriveTimeMinutes || 0;
+  if (maxDriveTime > 0) {
+    violation += Math.max(0, route.totalDriveTime - maxDriveTime);
+  }
+  const returnByTime = constraints.returnByTime || '';
+  if (returnByTime && route.endTime > returnByTime) {
+    violation += timeToMinutes(route.endTime) - timeToMinutes(returnByTime);
+  }
+
+  return violation;
+}
+
+/**
+ * Clustering decides which stops belong together by looking at where they
+ * sit on a map. It cannot see the roads, and it cannot see the shape of the
+ * finished day — so it regularly produces two days whose routes run down the
+ * same corridor, and you end up driving past a Day 1 stop on your way to a
+ * Day 2 stop.
+ *
+ * This pass fixes that after the fact, the way vehicle-routing solvers do:
+ * repeatedly try (a) relocating one stop into another day and (b) swapping a
+ * stop between two days, keeping any move that shortens total driving without
+ * breaking that pair of days' constraints. Because it works off the real
+ * distance matrix and the fully-built day (drive + visit + lunch + return),
+ * "is this stop on the way?" is answered by actual road time rather than by
+ * how the clusterer felt about it.
+ *
+ * Deliberately NOT done here: emptying a day. A day is never allowed to drop
+ * to zero stops, so this pass changes which stops go together, never how many
+ * days the trip takes. Deciding the trip is a day shorter is the clustering
+ * phase's call, not a local-search side effect.
+ */
+export function improveAcrossDays(
+  routes: DailyRoute[],
+  facilities: FacilityWithIndex[],
+  distanceMatrix: DistanceMatrix,
+  constraints: OptimizationConstraints,
+  homeIndex: number = 0,
+  lunchBreakMinutes: number = 0
+): DailyRoute[] {
+  const empties = routes.filter(r => r.sequence.length === 0);
+  const working = routes.filter(r => r.sequence.length > 0).map(r => ({ ...r }));
+
+  // Nothing to trade between.
+  if (working.length < 2) return routes;
+
+  const distances = distanceMatrix.distances;
+  const durations = distanceMatrix.durations;
+  const driveTime = (from: number, to: number): number => durations[from]?.[to] ?? 0;
+
+  // Candidate lists: for each stop, the handful of stops physically nearest
+  // to it. Those are the only stops whose days are worth trading with.
+  const allStops = working.flatMap(r => r.sequence);
+  const neighbors = new Map<number, number[]>();
+  for (const stop of allStops) {
+    const ranked = allStops
+      .filter(other => other !== stop)
+      .sort((x, y) => (distances[stop]?.[x] ?? Infinity) - (distances[stop]?.[y] ?? Infinity))
+      .slice(0, CROSS_DAY_NEIGHBORS);
+    neighbors.set(stop, ranked);
+  }
+
+  const dayOfStop = new Map<number, number>();
+  const reindex = () => {
+    dayOfStop.clear();
+    working.forEach((route, idx) => route.sequence.forEach(stop => dayOfStop.set(stop, idx)));
+  };
+  reindex();
+
+  // Cheap screens — what we'd save by pulling a stop out, and what the
+  // cheapest place to drop it into another day would cost. Only proposals
+  // that look like a win here get built and checked for real.
+  const removalGain = (sequence: number[], position: number): number => {
+    const prev = position === 0 ? homeIndex : sequence[position - 1];
+    const next = position === sequence.length - 1 ? homeIndex : sequence[position + 1];
+    return driveTime(prev, sequence[position]) + driveTime(sequence[position], next)
+      - driveTime(prev, next);
+  };
+
+  const bestInsertionCost = (sequence: number[], stop: number): number => {
+    let best = Infinity;
+    for (let pos = 0; pos <= sequence.length; pos++) {
+      const before = pos === 0 ? homeIndex : sequence[pos - 1];
+      const after = pos === sequence.length ? homeIndex : sequence[pos];
+      const cost = driveTime(before, stop) + driveTime(stop, after) - driveTime(before, after);
+      if (cost < best) best = cost;
+    }
+    return best;
+  };
+
+  const rebuild = (sequence: number[], template: DailyRoute): DailyRoute | null => {
+    if (sequence.length === 0) return null;
+    try {
+      const rebuilt = rebuildDayRoute(
+        facilities,
+        sequence,
+        distanceMatrix,
+        homeIndex,
+        template.startTime,
+        lunchBreakMinutes
+      );
+      rebuilt.day = template.day;
+      return rebuilt;
+    } catch (err) {
+      console.warn('[routeOptimizer] cross-day move rejected, could not rebuild day', err);
+      return null;
+    }
+  };
+
+  const accept = (
+    oldA: DailyRoute,
+    oldB: DailyRoute,
+    newA: DailyRoute | null,
+    newB: DailyRoute | null
+  ): boolean => {
+    if (!newA || !newB) return false;
+    const gain = (dayCost(oldA) + dayCost(oldB)) - (dayCost(newA) + dayCost(newB));
+    if (gain < CROSS_DAY_MIN_GAIN) return false;
+    const oldViolation = dayViolation(oldA, constraints) + dayViolation(oldB, constraints);
+    const newViolation = dayViolation(newA, constraints) + dayViolation(newB, constraints);
+    return newViolation <= oldViolation + 1e-6;
+  };
+
+  let passes = 0;
+  let movedSomething = true;
+
+  while (movedSomething && passes < CROSS_DAY_MAX_PASSES) {
+    movedSomething = false;
+    passes++;
+
+    scan:
+    for (let a = 0; a < working.length; a++) {
+      const routeA = working[a];
+      // Never empty a day — see the note above about day count.
+      if (routeA.sequence.length <= 1) continue;
+
+      for (let posA = 0; posA < routeA.sequence.length; posA++) {
+        const stopA = routeA.sequence[posA];
+        const gainOutA = removalGain(routeA.sequence, posA);
+        const sequenceAWithout = routeA.sequence.filter(s => s !== stopA);
+
+        for (const neighbor of neighbors.get(stopA) || []) {
+          const b = dayOfStop.get(neighbor);
+          if (b === undefined || b === a) continue;
+          const routeB = working[b];
+
+          // (a) Relocate: stopA moves from day A into day B.
+          if (gainOutA - bestInsertionCost(routeB.sequence, stopA) > CROSS_DAY_MIN_GAIN) {
+            const newA = rebuild(sequenceAWithout, routeA);
+            const newB = rebuild([...routeB.sequence, stopA], routeB);
+            if (accept(routeA, routeB, newA, newB)) {
+              working[a] = newA!;
+              working[b] = newB!;
+              reindex();
+              movedSomething = true;
+              continue scan;
+            }
+          }
+
+          // (b) Swap: stopA and its neighbour trade days.
+          const posB = routeB.sequence.indexOf(neighbor);
+          if (posB < 0) continue;
+          const gainOutB = removalGain(routeB.sequence, posB);
+          const sequenceBWithout = routeB.sequence.filter(s => s !== neighbor);
+          const swapScreen = gainOutA + gainOutB
+            - bestInsertionCost(sequenceBWithout, stopA)
+            - bestInsertionCost(sequenceAWithout, neighbor);
+
+          if (swapScreen > CROSS_DAY_MIN_GAIN) {
+            const newA = rebuild([...sequenceAWithout, neighbor], routeA);
+            const newB = rebuild([...sequenceBWithout, stopA], routeB);
+            if (accept(routeA, routeB, newA, newB)) {
+              working[a] = newA!;
+              working[b] = newB!;
+              reindex();
+              movedSomething = true;
+              continue scan;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...working, ...empties];
+}
+
 export function optimizeRoutes(
   facilities: FacilityWithIndex[],
   distanceMatrix: DistanceMatrix,
@@ -906,15 +1232,50 @@ export function optimizeRoutes(
     }
   }
 
-  const totalMiles = routes.reduce((sum, route) => sum + route.totalMiles, 0);
-  const totalDriveTime = routes.reduce((sum, route) => sum + route.totalDriveTime, 0);
+  // Clustering picked which stops share a day by looking at a map; this pass
+  // re-checks those choices against real road time now that every day is
+  // fully built. It's what stops the "I drove right past a Day 1 stop on my
+  // way out to a Day 2 stop" case — that stop now gets picked up en route.
+  const refinedRoutes = improveAcrossDays(
+    routes,
+    facilities,
+    distanceMatrix,
+    constraints,
+    homeIndex,
+    lunchBreak
+  );
 
-  const totalVisitTime = routes.reduce((sum, route) => sum + route.totalVisitTime, 0);
-  const totalTime = routes.reduce((sum, route) => sum + route.totalTime, 0);
+  // Membership shifted, so re-establish the "nearest days first" numbering
+  // the clustering phase set up. Without this, a day that gave up its close-in
+  // stops could keep a low day number while sitting far out.
+  refinedRoutes.sort((a, b) => {
+    const distanceFromHome = (route: DailyRoute): number => {
+      if (route.facilities.length === 0) return Infinity;
+      const centroid = calculateCentroid(
+        route.facilities.map(f => ({ latitude: f.latitude, longitude: f.longitude }))
+      );
+      return haversineDistance(
+        homeBase.latitude,
+        homeBase.longitude,
+        centroid.latitude,
+        centroid.longitude
+      );
+    };
+    return distanceFromHome(a) - distanceFromHome(b);
+  });
+  refinedRoutes.forEach((route, idx) => {
+    route.day = idx + 1;
+  });
+
+  const totalMiles = refinedRoutes.reduce((sum, route) => sum + route.totalMiles, 0);
+  const totalDriveTime = refinedRoutes.reduce((sum, route) => sum + route.totalDriveTime, 0);
+
+  const totalVisitTime = refinedRoutes.reduce((sum, route) => sum + route.totalVisitTime, 0);
+  const totalTime = refinedRoutes.reduce((sum, route) => sum + route.totalTime, 0);
 
   return {
-    routes,
-    totalDays: routes.length,
+    routes: refinedRoutes,
+    totalDays: refinedRoutes.length,
     totalMiles,
     totalFacilities: facilities.length,
     totalDriveTime,
