@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Zap, Home, Coffee, Navigation, X as XIcon } from 'lucide-react';
 import { supabase, UserSettings } from '../lib/supabase';
 import { convertTo12Hour } from '../utils/timeFormat';
+import { getDefaultReturnByTime, minutesTo12Hour, getSunTimes, getSeasonLabel } from '../utils/sunset';
 
 interface RoutePlanningSettingsProps {
   accountId: string;
@@ -31,10 +32,61 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  // Home base coordinates, used only to compute the seasonal sunset default
+  // for "Return to Home Base By". Same default the Update Route Settings
+  // modal seeds — see utils/sunset.ts.
+  const [homeBaseCoords, setHomeBaseCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  const seasonalReturnBy = homeBaseCoords
+    ? getDefaultReturnByTime(
+        homeBaseCoords.latitude,
+        homeBaseCoords.longitude,
+        settings.sunset_offset_minutes ?? 0
+      )
+    : '';
+  const seasonalReturnByLabel = homeBaseCoords
+    ? minutesTo12Hour(
+        getSunTimes(homeBaseCoords.latitude, homeBaseCoords.longitude).sunsetMinutes +
+        (settings.sunset_offset_minutes ?? 0)
+      )
+    : '';
+
+  // Seed the seasonal default into state exactly once, after both the saved
+  // settings and the home base have loaded — so it actually persists when the
+  // user hits Apply. Guarded by a ref so clearing the field (the X button)
+  // means "no limit" and doesn't immediately snap back to sunset.
+  const seededReturnBy = useRef(false);
+  useEffect(() => {
+    if (seededReturnBy.current) return;
+    if (!settingsLoaded || !seasonalReturnBy) return;
+    seededReturnBy.current = true;
+    setSettings(prev => (prev.return_by_time ? prev : { ...prev, return_by_time: seasonalReturnBy }));
+  }, [seasonalReturnBy, settingsLoaded]);
 
   useEffect(() => {
     loadSettings();
+    loadHomeBaseCoords();
   }, [accountId]);
+
+  const loadHomeBaseCoords = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('home_base')
+        .select('latitude, longitude')
+        .eq('account_id', accountId)
+        .order('team_number', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data?.latitude != null && data?.longitude != null) {
+        setHomeBaseCoords({ latitude: Number(data.latitude), longitude: Number(data.longitude) });
+      }
+    } catch (err) {
+      console.error('Error loading home base for sunset default:', err);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -58,6 +110,11 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
       }
     } catch (err) {
       console.error('Error loading settings:', err);
+    } finally {
+      // Gate the seasonal seed on this — otherwise a fast home-base fetch can
+      // seed before the saved settings land, and loadSettings then overwrites
+      // the seeded value with the empty one from the database.
+      setSettingsLoaded(true);
     }
   };
 
@@ -500,6 +557,11 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
                 Return to Home Base By
               </label>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
+              {seasonalReturnBy && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Defaults to today's sunset at your home base ({seasonalReturnByLabel} — {getSeasonLabel()}). Change it and your value sticks.
+                </p>
+              )}
               <div className="relative mt-2">
                 <input
                   type="time"

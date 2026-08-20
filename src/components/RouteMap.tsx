@@ -6,6 +6,7 @@ import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
+import { getSunTimes, minutesTo12Hour } from '../utils/sunset';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, isRecertificationActive } from '../utils/spccStatus';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
@@ -1250,35 +1251,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               `;
             }
 
-            // Calculate sunset time (approximate based on facility location)
-            const calculateSunset = (lat: number) => {
-              const today = new Date();
-              const month = today.getMonth() + 1;
-              const isWinter = month >= 11 || month <= 2;
-              const isSummer = month >= 5 && month <= 8;
-
-              // Approximate sunset times (EST/CST baseline)
-              let baseHour = 18; // 6 PM
-              if (isWinter) baseHour = 17; // 5 PM in winter
-              if (isSummer) baseHour = 20; // 8 PM in summer
-
-              // Adjust for latitude (rough approximation)
-              const latAdjust = Math.floor((lat - 35) / 10);
-              baseHour += latAdjust;
-
-              return baseHour;
-            };
-
-            const sunsetHour = calculateSunset(Number(currentLat));
+            // Real solar sunset for this facility on today's date — see
+            // utils/sunset.ts. The old inline month-bucket approximation
+            // (winter 5 PM / summer 8 PM / else 6 PM) was off by up to ~90
+            // minutes inside a single bucket.
+            const { sunsetMinutes } = getSunTimes(Number(currentLat), Number(currentLng));
 
             // Apply sunset offset from settings
             const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
-            const adjustedSunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
-            const adjustedSunsetHour = Math.floor(adjustedSunsetInMinutes / 60);
-            const adjustedSunsetMinute = adjustedSunsetInMinutes % 60;
-            const sunsetTime = adjustedSunsetHour > 12
-              ? `${adjustedSunsetHour - 12}:${String(adjustedSunsetMinute).padStart(2, '0')} PM`
-              : `${adjustedSunsetHour}:${String(adjustedSunsetMinute).padStart(2, '0')} AM`;
+            const adjustedSunsetInMinutes = sunsetMinutes + sunsetOffsetMinutes;
+            const sunsetTime = minutesTo12Hour(adjustedSunsetInMinutes);
 
             // Compare end time to sunset
             const endHour = lastDepartureTime.includes('PM')

@@ -3,6 +3,7 @@ import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, optimizeRouteOrder, calculateDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
+import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
 import { UserSettings, Facility, Inspection, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
@@ -228,6 +229,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
   }, [pendingReoptimize, facilities]);
 
+  // Seasonally-aware "be home by" default. The old behaviour left this blank,
+  // so the only thing ending the day was Max Hours Per Day — which is why an
+  // 8 AM start always landed at ~4 PM whether it was June (sunset 9:06 PM) or
+  // December (5:25 PM). Sunset at the home base on today's date is a much
+  // better starting point; the user can still type over it in this modal.
+  const seasonalReturnBy = (() => {
+    if (!homeBase?.latitude || !homeBase?.longitude) return '';
+    return getDefaultReturnByTime(
+      Number(homeBase.latitude),
+      Number(homeBase.longitude),
+      settings?.sunset_offset_minutes ?? 0
+    );
+  })();
+  const seasonalReturnByLabel = seasonalReturnBy
+    ? minutesTo12Hour(
+        getSunTimes(Number(homeBase!.latitude), Number(homeBase!.longitude)).sunsetMinutes +
+        (settings?.sunset_offset_minutes ?? 0)
+      )
+    : '';
+
   useEffect(() => {
     if (showRefreshOptions && settings) {
       setTempSettings({
@@ -237,10 +258,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         cluster_balance_weight: settings.cluster_balance_weight ?? 0.35,
         lunch_break_minutes: settings.lunch_break_minutes ?? 0,
         max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
-        return_by_time: settings.return_by_time ?? '',
+        // Only seed the seasonal default when the user has never set one.
+        // An explicit value they saved earlier always wins.
+        return_by_time: settings.return_by_time || seasonalReturnBy,
       });
     }
-  }, [showRefreshOptions, settings, accountId]);
+  }, [showRefreshOptions, settings, accountId, seasonalReturnBy]);
 
   // Lock body scroll when route settings modal is open
   useEffect(() => {
@@ -1518,6 +1541,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         Return to Home Base By
                       </label>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
+                      {seasonalReturnBy && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Defaults to today's sunset at your home base ({seasonalReturnByLabel} — {getSeasonLabel()}). Change it and your value sticks.
+                        </p>
+                      )}
                       <div className="relative mt-2">
                         <input
                           type="time"
@@ -1667,14 +1695,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </button>
                 <button
                   onClick={handleRefreshTimesOnly}
-                  className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
+                  className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
                   title="Quickly update times without regenerating routes"
                 >
                   Apply & Refresh Times
                 </button>
                 <button
                   onClick={handleRefreshWithSettings}
-                  className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
+                  className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
                   title="Fully re-optimize routes with new constraints"
                 >
                   Apply & Re-optimize
@@ -1979,14 +2007,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             onClick={handleReoptimizeDays}
             disabled={isReoptimizing}
             className="flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 bg-teal-600 dark:bg-teal-700 text-white rounded-md hover:bg-teal-700 dark:hover:bg-teal-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors group relative"
-            title="Re-optimize route order within each day while keeping day assignments and removing completed facilities"
+            title="Refresh times and route order within each day, keeping day assignments and removing completed facilities"
           >
             {isReoptimizing ? (
               <div className="animate-spin rounded-full h-5 w-5 sm:h-4 sm:w-4 border-b-2 border-white"></div>
             ) : (
               <RefreshCw className="w-5 h-5 sm:w-4 sm:h-4" />
             )}
-            <span className="hidden sm:inline">{isReoptimizing ? 'Re-optimizing...' : 'Re-optimize Days'}</span>
+            <span className="hidden sm:inline">{isReoptimizing ? 'Refreshing...' : 'Refresh Times'}</span>
           </button>
         </div>
         <button
@@ -2112,20 +2140,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             const firstFacility = route.facilities[0];
                             if (!firstFacility || !lastDepartureTime) return null;
 
-                            const calculateSunset = (lat: number) => {
-                              const today = new Date();
-                              const month = today.getMonth() + 1;
-                              const isWinter = month >= 11 || month <= 2;
-                              const isSummer = month >= 5 && month <= 8;
-                              let baseHour = 18;
-                              if (isWinter) baseHour = 17;
-                              if (isSummer) baseHour = 20;
-                              const latAdjust = Math.floor((lat - 35) / 10);
-                              baseHour += latAdjust;
-                              return baseHour;
-                            };
-
-                            const sunsetHour = calculateSunset(Number(firstFacility.latitude));
+                            // Real solar sunset for this facility on today's
+                            // date — see utils/sunset.ts. The old inline
+                            // month-bucket version was off by up to ~90 min.
+                            const { sunsetMinutes: rawSunsetMinutes } = getSunTimes(
+                              Number(firstFacility.latitude),
+                              Number(firstFacility.longitude)
+                            );
 
                             // Parse end time
                             const endHour = lastDepartureTime.includes('PM')
@@ -2136,7 +2157,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                             // Apply sunset offset from settings
                             const sunsetOffsetMinutes = settings?.sunset_offset_minutes ?? 0;
-                            const sunsetInMinutes = sunsetHour * 60 + sunsetOffsetMinutes;
+                            const sunsetInMinutes = rawSunsetMinutes + sunsetOffsetMinutes;
                             const minutesUntilSunset = sunsetInMinutes - endTimeInMinutes;
 
                             let icon = '';
@@ -2695,6 +2716,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       Return to Home Base By
                     </label>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Hard deadline for arriving back at home base — return drive is included. Leave empty for no limit.</p>
+                    {seasonalReturnBy && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Defaults to today's sunset at your home base ({seasonalReturnByLabel} — {getSeasonLabel()}). Change it and your value sticks.
+                      </p>
+                    )}
                     <div className="relative mt-2">
                       <input
                         type="time"
@@ -2844,14 +2870,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </button>
               <button
                 onClick={handleRefreshTimesOnly}
-                className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
+                className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
                 title="Quickly update times without regenerating routes"
               >
                 Apply & Refresh Times
               </button>
               <button
                 onClick={handleRefreshWithSettings}
-                className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
+                className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
                 title="Fully re-optimize routes with new constraints"
               >
                 Apply & Re-optimize

@@ -2944,7 +2944,10 @@ function App() {
         distanceMatrix,
         homeIndex,
         routeToUpdate.startTime || lastUsedSettings.start_time || '08:00',
-        lastUsedSettings.sunset_offset_minutes || 0
+        // 6th arg is lunchBreakMinutes — this was passing sunset_offset_minutes,
+        // which silently injected a phantom mid-day break (or none at all) on
+        // every facility removal.
+        lastUsedSettings.lunch_break_minutes || 0
       );
 
       // Update the route in the optimization result
