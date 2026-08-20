@@ -10,6 +10,12 @@ interface HomeBaseModalProps {
   onTeamCountChange: (count: number) => void;
   onSaved: () => void;
   onClose: () => void;
+  /**
+   * Why the modal was opened, when something else triggered it (e.g. the user
+   * hit "Generate Routes" before setting a home base). Rendered as an inline
+   * explanation so the modal doesn't appear out of nowhere.
+   */
+  contextMessage?: string;
 }
 
 interface HomeBaseForm {
@@ -25,6 +31,27 @@ interface HomeBaseForm {
 
 const TEAM_OPTIONS = [1, 2, 3, 4] as const;
 
+/**
+ * Supabase returns PostgrestError plain objects, not Error instances, so an
+ * `err instanceof Error` check swallows the real reason and shows "Unknown
+ * error". Pull the message out of whatever shape we actually got, and
+ * translate the one conflict users can realistically hit into plain language.
+ */
+function describeSaveError(err: unknown): string {
+  const e = err as { code?: string; message?: string; details?: string; hint?: string } | null;
+
+  // 23505 = unique_violation. Before the account-scoped uniqueness migration
+  // this fired whenever a user set a home base on a second account.
+  if (e?.code === '23505') {
+    return 'a home base already exists for this team. If this account is new, the database still has the old one-home-base-per-user rule — the pending migration fixes it.';
+  }
+
+  const parts = [e?.message, e?.details, e?.hint].filter(Boolean);
+  if (parts.length > 0) return parts.join(' — ');
+  if (err instanceof Error) return err.message;
+  return 'Unknown error';
+}
+
 export default function HomeBaseModal({
   userId,
   accountId,
@@ -32,6 +59,7 @@ export default function HomeBaseModal({
   onTeamCountChange,
   onSaved,
   onClose,
+  contextMessage,
 }: HomeBaseModalProps) {
   const [localTeamCount, setLocalTeamCount] = useState(teamCount);
   const [homeBases, setHomeBases] = useState<HomeBase[]>([]);
@@ -197,7 +225,7 @@ export default function HomeBaseModal({
     } catch (err) {
       console.error('Error saving home bases:', err);
       updateForm(0, {
-        error: `Failed to save: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        error: `Failed to save: ${describeSaveError(err)}`,
       });
     } finally {
       setIsSaving(false);
@@ -243,6 +271,13 @@ export default function HomeBaseModal({
 
         {/* Scrollable content */}
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+          {contextMessage && (
+            <div className="flex items-start gap-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 px-3.5 py-3">
+              <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-blue-900 dark:text-blue-200 leading-snug">{contextMessage}</p>
+            </div>
+          )}
+
           {/* Team count selector - sliding segmented control */}
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">

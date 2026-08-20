@@ -222,6 +222,21 @@ function App() {
   const [triggerMapLocation, setTriggerMapLocation] = useState(0);
   const [showVisibilityModal, setShowVisibilityModal] = useState(false);
   const [showHomeBaseModal, setShowHomeBaseModal] = useState(false);
+  // When a route action is blocked purely because no home base is configured,
+  // we don't dead-end the user on a red banner. We open the Home Base modal
+  // with an explanation and remember what they were trying to do, then run it
+  // for them once the home base saves. The intent is stored as data (not a
+  // closure) so the resume runs against the freshly-loaded home base rather
+  // than the stale one captured when the action was blocked.
+  type PendingRouteAction =
+    | { kind: 'generate'; settings: UserSettings }
+    | { kind: 'fromSelection'; facilityIds: string[]; sourceSurveyType: string };
+  const [pendingRouteAction, setPendingRouteAction] = useState<PendingRouteAction | null>(null);
+  const [homeBaseModalContext, setHomeBaseModalContext] = useState<string | null>(null);
+  // The modal auto-closes ~600ms after a successful save, which can beat the
+  // reload that populates homeBase. Without this flag that close would look
+  // like a dismissal and discard the action we're about to resume.
+  const homeBaseJustSavedRef = useRef(false);
   // Settings tab is persisted in the URL query string so a refresh on
   // (e.g.) the Team tab lands you back on Team rather than the default
   // Route Planning tab. The param is read once on mount and updated
@@ -1413,9 +1428,21 @@ function App() {
     }
   };
 
+  // Opens the Home Base modal in place of a dead-end error, remembering what
+  // the user was trying to do so it can be resumed once a home base exists.
+  const promptForHomeBase = (action: PendingRouteAction, why: string) => {
+    setError(null);
+    setPendingRouteAction(action);
+    setHomeBaseModalContext(why);
+    setShowHomeBaseModal(true);
+  };
+
   const handleGenerateRoutes = async (settings: UserSettings) => {
     if (!homeBase) {
-      setError('Please configure your home base first');
+      promptForHomeBase(
+        { kind: 'generate', settings },
+        "Routes start and end at your home base, so we need one before planning. Set it below and we'll pick up right where you left off."
+      );
       return;
     }
 
@@ -1903,7 +1930,10 @@ function App() {
 
   const handleCreateRouteFromSelection = async (facilityIds: string[], sourceSurveyType: string) => {
     if (!homeBase) {
-      setError('Please configure your home base first');
+      promptForHomeBase(
+        { kind: 'fromSelection', facilityIds, sourceSurveyType },
+        `Routes start and end at your home base, so we need one first. Set it below and we'll build the route for your ${facilityIds.length} selected ${facilityIds.length === 1 ? 'facility' : 'facilities'} straight after — your selection is safe.`
+      );
       return;
     }
 
@@ -2076,6 +2106,23 @@ function App() {
       setIsGenerating(false);
     }
   };
+
+  // Resume the action the user was blocked on once a home base exists. The
+  // handlers are re-created each render, so calling them from here runs them
+  // against the home base that just loaded rather than the missing one that
+  // triggered the prompt.
+  useEffect(() => {
+    if (!homeBase || !pendingRouteAction) return;
+    const action = pendingRouteAction;
+    setPendingRouteAction(null);
+    setHomeBaseModalContext(null);
+    if (action.kind === 'generate') {
+      handleGenerateRoutes(action.settings);
+    } else {
+      handleCreateRouteFromSelection(action.facilityIds, action.sourceSurveyType);
+    }
+  }, [homeBase, pendingRouteAction]);
+
 
   const handleApplyWithTimeRefresh = async () => {
     if (!optimizationResult || !lastUsedSettings) {
@@ -4586,8 +4633,21 @@ function App() {
           accountId={currentAccount.id}
           teamCount={teamCount}
           onTeamCountChange={setTeamCount}
-          onSaved={() => loadData()}
-          onClose={() => setShowHomeBaseModal(false)}
+          onSaved={() => {
+            homeBaseJustSavedRef.current = true;
+            loadData();
+          }}
+          contextMessage={homeBaseModalContext || undefined}
+          onClose={() => {
+            setShowHomeBaseModal(false);
+            // Dismissed without saving — drop the queued action rather than
+            // firing it later out of nowhere.
+            if (!homeBaseJustSavedRef.current) {
+              setPendingRouteAction(null);
+              setHomeBaseModalContext(null);
+            }
+            homeBaseJustSavedRef.current = false;
+          }}
         />
       )}
 
