@@ -523,7 +523,7 @@ function App() {
           };
         }),
       };
-      return recalculateRouteTimes(routeWithUpdatedDurations);
+      return recalculateRouteTimes(routeWithUpdatedDurations, lastUsedSettings.lunch_break_minutes || 0);
     });
 
     const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
@@ -1218,7 +1218,7 @@ function App() {
             };
 
             // Recalculate times based on new visit durations
-            return recalculateRouteTimes(routeWithUpdatedFacilities);
+            return recalculateRouteTimes(routeWithUpdatedFacilities, currentSettings?.lunch_break_minutes || 0);
           });
 
           // Recalculate totals
@@ -2187,7 +2187,7 @@ function App() {
         };
 
         // Recalculate all times
-        return recalculateRouteTimes(routeWithNewStartTime);
+        return recalculateRouteTimes(routeWithNewStartTime, latestSettings.lunch_break_minutes || 0);
       });
 
       // Update totals

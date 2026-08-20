@@ -367,7 +367,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       name: f.name,
       latitude: Number(f.latitude),
       longitude: Number(f.longitude),
-      visitDuration: f.visit_duration_minutes || 30,
+      visitDuration: f.visit_duration_minutes || settings.default_visit_duration_minutes || 30,
     }));
     const durations = distanceMatrix.durations;
 
@@ -554,22 +554,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       setIsRefitting(false);
     }
   };
-
-  // Apply & Re-optimize regenerates `result` asynchronously through the
-  // `onRefresh` prop, so there's no fresh route data to refit against at the
-  // point the button handler runs — only after the parent re-renders us with
-  // the new `result`. This ref is the handoff: the handler arms it right
-  // before calling onRefresh, and the effect below fires the account-wide
-  // fill the next time `result` actually changes, then disarms itself.
-  const pendingAccountFillRef = useRef(false);
-
-  useEffect(() => {
-    if (!pendingAccountFillRef.current) return;
-    pendingAccountFillRef.current = false;
-    if (!result || !settings?.return_by_time) return;
-    void runRefit(dayReturnByTimes, result.routes, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result]);
 
   // Passive guard: keep deadlines true when the result is rebuilt beneath us.
   // Apply & Refresh Times re-clocks every day from the account settings (new
@@ -851,17 +835,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         }
 
         console.log('Triggering route regeneration with new settings...');
-        // Trigger refresh - this should set isGenerating=true and regenerate the route
-        // Clustering builds day membership by geography alone — the account-
-        // wide return-by deadline only gets consulted afterward, as a ceiling
-        // on days already assembled. A day whose region has few nearby sites
-        // ends early even with hours of deadline still on the table, because
-        // nothing pulls sites from OTHER days in to fill it. Arm the pending
-        // fill so the moment `result` reflects the regenerated plan, every
-        // day gets packed forward toward the deadline (see the effect above).
-        if (tempSettings.return_by_time) {
-          pendingAccountFillRef.current = true;
-        }
+        // Trigger refresh - this should set isGenerating=true and regenerate
+        // the route. The optimizer owns the whole answer now: the account-wide
+        // return-by deadline rides in through the constraints, and its
+        // cross-day refinement dissolves thin days into the rest of the plan.
+        // This used to arm a second, geography-blind repack (the refit
+        // conveyor) to run over the freshly optimized result — which undid
+        // the optimization it had just waited for. One packing logic, run
+        // once, in the optimizer.
         await onRefresh();
         console.log('Route update complete');
       } catch (err) {

@@ -368,7 +368,10 @@ export function calculateDayRoute(
   };
 }
 
-export function recalculateRouteTimes(route: DailyRoute): DailyRoute {
+export function recalculateRouteTimes(
+  route: DailyRoute,
+  lunchBreakMinutes: number = 0
+): DailyRoute {
   // Empty-day placeholders (from a reassign that left a day with no
   // facilities) have `segments: []`. Bailing here prevents the crash at
   // `segments[segments.length - 1].arrivalTime` further down — that
@@ -380,28 +383,61 @@ export function recalculateRouteTimes(route: DailyRoute): DailyRoute {
     return route;
   }
 
-  // Recalculate times based on current visit durations without changing facility assignments
+  // Re-clock the existing stop order with the SAME walk calculateDayRoute
+  // uses: drive to a facility, THEN visit it; lunch after the midpoint
+  // facility; the return drive included in endTime. The previous version
+  // hand-rolled a different walk that stamped each arrival before adding
+  // that leg's drive and never added the return leg at all — so every
+  // arrival ran one leg early and endTime was really "when you left the
+  // last facility". That's how a day could show 7½ hours of work but a
+  // home-by time only 6½ hours after its start: any path that re-clocked
+  // a day through here (visit-duration changes, start-time changes,
+  // facility refreshes) silently shaved the return drive off the day.
   const segments: RouteSegment[] = [];
   let totalVisitTime = 0;
+  let totalDriveTime = 0;
   let currentTime = route.startTime;
 
-  // Process each segment in order
+  // segments[0] is home→first, segments[1..n-1] are between facilities,
+  // segments[n] is last→home; facilities[i] is the destination of
+  // segments[i]. Lunch placement mirrors calculateDayRoute: before the
+  // between-facility drive at index floor(n/2)+1 (and, like there, a
+  // single-stop day never gets one).
+  const facilityCount = route.segments.length - 1;
+  const lunchAfterFacility = lunchBreakMinutes > 0 ? Math.floor(facilityCount / 2) : -1;
+  let lunchAdded = false;
+  let lastFacilityDepartureTime = route.startTime;
+
   for (let i = 0; i < route.segments.length; i++) {
     const segment = route.segments[i];
-    const facility = route.facilities[i];
-    const visitDuration = facility?.visitDuration || 0;
+    const isReturnLeg = i === route.segments.length - 1;
 
-    // For non-home segments, update arrival time
+    if (
+      !lunchAdded &&
+      lunchBreakMinutes > 0 &&
+      !isReturnLeg &&
+      i >= 1 &&
+      i - 1 === lunchAfterFacility
+    ) {
+      currentTime = addMinutesToTime(currentTime, lunchBreakMinutes);
+      lunchAdded = true;
+    }
+
+    if (isReturnLeg) {
+      // Leaving the last facility now; home arrival is after the return drive.
+      lastFacilityDepartureTime = currentTime;
+    }
+
+    totalDriveTime += segment.duration || 0;
+    currentTime = addMinutesToTime(currentTime, segment.duration || 0);
     const arrivalTime = currentTime;
 
-    // Calculate departure time based on visit duration
     let departureTime: string;
-    if (segment.to === 'Home Base') {
-      // Last segment - no visit time at home
-      departureTime = currentTime;
+    if (isReturnLeg) {
+      departureTime = arrivalTime;
     } else {
-      // Regular facility visit
-      departureTime = addMinutesToTime(currentTime, visitDuration);
+      const visitDuration = route.facilities[i]?.visitDuration || 0;
+      departureTime = addMinutesToTime(arrivalTime, visitDuration);
       totalVisitTime += visitDuration;
       currentTime = departureTime;
     }
@@ -411,24 +447,15 @@ export function recalculateRouteTimes(route: DailyRoute): DailyRoute {
       arrivalTime,
       departureTime,
     });
-
-    // Add drive time to next location
-    if (i < route.segments.length - 1) {
-      currentTime = addMinutesToTime(currentTime, segment.duration);
-    }
   }
 
   const endTime = segments[segments.length - 1].arrivalTime;
-  const totalTime = route.totalDriveTime + totalVisitTime;
-
-  // Get departure time from last facility (second to last segment, before returning home)
-  const lastFacilityDepartureTime = segments.length > 1
-    ? segments[segments.length - 2].departureTime
-    : endTime;
+  const totalTime = totalDriveTime + totalVisitTime + (lunchAdded ? lunchBreakMinutes : 0);
 
   return {
     ...route,
     segments,
+    totalDriveTime,
     totalVisitTime,
     totalTime,
     endTime,
@@ -505,6 +532,13 @@ function mergeAdjacentClusters(
         currentCluster.points.length < MIN_VIABLE_DAY_FACILITIES ||
         candidateCluster.points.length < MIN_VIABLE_DAY_FACILITIES;
       if (!eitherSubViable && centroidDistance > MAX_MERGE_CENTROID_DISTANCE_MILES) continue;
+      // The sub-viable relaxation still needs SOME ceiling. Unbounded, two
+      // lone facilities ~90 miles apart merged into one "day" that drove
+      // 300+ miles to hit two stops — worse than either the two short days
+      // it replaced or leaving each to be absorbed elsewhere. Twice the
+      // normal ceiling keeps the mercy-merge for genuinely nearby stubs
+      // and lets the cross-day refinement pass deal with the far-flung ones.
+      if (eitherSubViable && centroidDistance > MAX_MERGE_CENTROID_DISTANCE_MILES * 2) continue;
       // Relative check: clusters are adjacent only if centroid distance is
       // within 2x average intra-cluster distance. Skipped when both
       // clusters are size-1 because the relative measure is undefined; the
@@ -695,13 +729,26 @@ const CROSS_DAY_NEIGHBORS = 12;
 // Minimum drive-time saving (minutes) before a move is worth the churn.
 const CROSS_DAY_MIN_GAIN = 1;
 const CROSS_DAY_MAX_PASSES = 60;
-// What each stop a day is short of MIN_VIABLE_DAY_FACILITIES is "worth", in
-// drive-minutes. Pure distance minimization will happily strip a day down to
-// one stop to shave a few miles off its neighbour — a whole working day for a
-// single facility, which is not the trade the user wants. Charging for
-// underfilled days means a move has to save real driving before it's allowed
-// to thin a day out, and conversely makes topping a thin day back up cheap.
-const CROSS_DAY_UNDERFILL_PENALTY_MINUTES = 45;
+// Underfilled-day charge. Pure distance minimization happily leaves one day
+// with a single 90-minute errand while its neighbour runs the full allowed
+// window — fewer miles on paper, but a wasted crew-day in practice, and it
+// reads as broken in the plan view ("home by 10:30 AM" next to a 9-hour
+// day). So a day is expected to carry at least UNDERFILL_TARGET_FRACTION of
+// the allowed working minutes; every minute short of that is charged at
+// UNDERFILL_WEIGHT drive-minutes. Time-based rather than stop-count-based
+// on purpose: two far-flung stops can legitimately fill a whole day, and
+// five quick ones can legitimately not.
+const UNDERFILL_TARGET_FRACTION = 0.5;
+const UNDERFILL_WEIGHT = 0.5;
+// Working window to measure against when the user has no max-hours
+// constraint switched on.
+const DEFAULT_DAY_MINUTES = 480;
+// How much extra total driving (minutes) dissolving an entire day is allowed
+// to cost. A day's existence has a real fixed price — a crew mobilized, a
+// home-base round trip, an unproductive short afternoon — so trading up to
+// this much drive time to delete a whole day from the plan is a win. The
+// receiving days still have to stay inside the user's constraints.
+const DAY_ELIMINATION_DRIVE_TOLERANCE_MINUTES = 45;
 
 function timeToMinutes(time: string): number {
   const [hours, mins] = time.split(':').map(Number);
@@ -712,13 +759,19 @@ function timeToMinutes(time: string): number {
  * What a day costs us. Drive time is the real currency — it's what the
  * "you drove right past that stop" complaint is actually about — with
  * mileage as a tie-breaker so two equal-time orderings pick the shorter one,
- * plus a charge for days that come out under-loaded (see the constant).
+ * plus the underfill charge (see the constants above). Because moves are
+ * only ever accepted when they lower the summed cost, the charge doubles as
+ * balance pressure: shifting work out of a packed day into a near-empty one
+ * earns the underfill credit, up to the target fraction and no further.
  */
-function dayCost(route: DailyRoute): number {
-  const underfill = Math.max(0, MIN_VIABLE_DAY_FACILITIES - route.facilities.length);
+function dayCost(route: DailyRoute, constraints: OptimizationConstraints): number {
+  const dayMinutes = constraints.useHoursConstraint && constraints.maxHoursPerDay
+    ? constraints.maxHoursPerDay * 60
+    : DEFAULT_DAY_MINUTES;
+  const underfillMinutes = Math.max(0, dayMinutes * UNDERFILL_TARGET_FRACTION - route.totalTime);
   return route.totalDriveTime
     + route.totalMiles * 0.01
-    + underfill * CROSS_DAY_UNDERFILL_PENALTY_MINUTES;
+    + underfillMinutes * UNDERFILL_WEIGHT;
 }
 
 /**
@@ -853,7 +906,8 @@ export function improveAcrossDays(
     newB: DailyRoute | null
   ): boolean => {
     if (!newA || !newB) return false;
-    const gain = (dayCost(oldA) + dayCost(oldB)) - (dayCost(newA) + dayCost(newB));
+    const gain = (dayCost(oldA, constraints) + dayCost(oldB, constraints))
+      - (dayCost(newA, constraints) + dayCost(newB, constraints));
     if (gain < CROSS_DAY_MIN_GAIN) return false;
     const oldViolation = dayViolation(oldA, constraints) + dayViolation(oldB, constraints);
     const newViolation = dayViolation(newA, constraints) + dayViolation(newB, constraints);
@@ -861,9 +915,10 @@ export function improveAcrossDays(
   };
 
   let passes = 0;
-  let movedSomething = true;
 
-  while (movedSomething && passes < CROSS_DAY_MAX_PASSES) {
+  const relocateAndSwap = () => {
+    let movedSomething = true;
+    while (movedSomething && passes < CROSS_DAY_MAX_PASSES) {
     movedSomething = false;
     passes++;
 
@@ -919,6 +974,101 @@ export function improveAcrossDays(
         }
       }
     }
+    }
+  };
+
+  /**
+   * Dissolve a whole day into the rest of the plan. The relocate/swap moves
+   * above deliberately never empty a day, so a day that exists only because
+   * clustering carved one out — two stops and home by noon — survives even
+   * when every one of its stops would slot cheaply into the other days.
+   * This step tries exactly that, smallest day first: place each of the
+   * victim's stops at its cheapest insertion point among the other days,
+   * rebuild those days for real, and commit only when every receiving day
+   * stays within the user's constraints and the whole plan's drive time
+   * doesn't grow by more than the elimination tolerance. One fewer day is
+   * the single biggest win this pass can deliver — it's what "fill the thin
+   * days" actually means once you follow it to its conclusion.
+   */
+  const tryEliminateOneDay = (): boolean => {
+    if (working.length < 2) return false;
+
+    const bySize = working
+      .map((route, idx) => ({ idx, size: route.sequence.length }))
+      .sort((x, y) => x.size - y.size);
+
+    victims:
+    for (const { idx: victimIdx } of bySize) {
+      const victim = working[victimIdx];
+
+      // Trial state: every other day's sequence, mutated as victim stops land.
+      const trialSeqs = working.map(r => [...r.sequence]);
+      const touched = new Set<number>();
+
+      // Farthest-from-home stops first — they're the hardest to place, so
+      // fail fast before disturbing the trial state much.
+      const victimStops = [...victim.sequence].sort(
+        (x, y) => (distances[homeIndex]?.[y] ?? 0) - (distances[homeIndex]?.[x] ?? 0)
+      );
+
+      for (const stop of victimStops) {
+        let bestDay = -1;
+        let bestCost = Infinity;
+        for (let j = 0; j < working.length; j++) {
+          if (j === victimIdx) continue;
+          if (
+            constraints.useFacilitiesConstraint &&
+            constraints.maxFacilitiesPerDay &&
+            trialSeqs[j].length >= constraints.maxFacilitiesPerDay
+          ) continue;
+          const cost = bestInsertionCost(trialSeqs[j], stop);
+          if (cost < bestCost) {
+            bestCost = cost;
+            bestDay = j;
+          }
+        }
+        if (bestDay < 0) continue victims;
+        trialSeqs[bestDay].push(stop);
+        touched.add(bestDay);
+      }
+
+      // Build the receiving days for real and hold them to the constraints.
+      const rebuilt = new Map<number, DailyRoute>();
+      let driveDelta = -victim.totalDriveTime;
+      let feasible = true;
+      for (const j of touched) {
+        const candidate = rebuild(trialSeqs[j], working[j]);
+        if (!candidate) { feasible = false; break; }
+        // Each receiver individually must not get worse against the
+        // constraints — summing violations across days would let one day's
+        // headroom hide another day's overrun.
+        if (dayViolation(candidate, constraints) > dayViolation(working[j], constraints) + 1e-6) {
+          feasible = false;
+          break;
+        }
+        driveDelta += candidate.totalDriveTime - working[j].totalDriveTime;
+        rebuilt.set(j, candidate);
+      }
+      if (!feasible) continue;
+      if (driveDelta > DAY_ELIMINATION_DRIVE_TOLERANCE_MINUTES) continue;
+
+      for (const [j, candidate] of rebuilt) {
+        working[j] = candidate;
+      }
+      working.splice(victimIdx, 1);
+      reindex();
+      return true;
+    }
+
+    return false;
+  };
+
+  // Polish, try to delete a day, polish what absorbed it, repeat. Elimination
+  // changes the landscape the relocate/swap moves operate on, so they get
+  // another look after every successful dissolve.
+  relocateAndSwap();
+  while (tryEliminateOneDay()) {
+    relocateAndSwap();
   }
 
   return [...working, ...empties];
