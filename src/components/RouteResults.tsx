@@ -302,7 +302,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   const refitDeadlines = async (
     returnByTimes: Record<number, string>,
-    baseRoutes?: DayRoute[]
+    baseRoutes?: DayRoute[],
+    // fillAll: driven by the account-wide "Return to Home Base By" setting
+    // instead of a per-day cut-off. Every day is treated as open capacity
+    // (not just days with their own override) and repacking starts at day
+    // 1, so a thin early day pulls sites forward from wherever in the plan
+    // has slack before the shared arrival deadline — that's the whole
+    // point of the account-wide field, vs. a per-day cut-off which only
+    // ever reshuffles the days at and after the one the user flagged.
+    fillAll = false
   ): Promise<boolean> => {
     const routes = (baseRoutes ?? result?.routes ?? []).slice().sort((a, b) => a.day - b.day);
     if (!settings || !homeBase || !onUpdateResult || routes.length === 0) return false;
@@ -310,11 +318,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const deadlineDays = Object.keys(returnByTimes)
       .map(Number)
       .filter(day => returnByTimes[day]);
-    if (deadlineDays.length === 0) return false;
+    if (fillAll) {
+      if (!settings.return_by_time) return false;
+    } else if (deadlineDays.length === 0) {
+      return false;
+    }
 
     // Everything before the first constrained day is left exactly as it is —
-    // a deadline on day 3 must not reshuffle days 1 and 2.
-    const firstDay = Math.min(...deadlineDays);
+    // a deadline on day 3 must not reshuffle days 1 and 2. The account-wide
+    // fill has no "day the user flagged" to anchor on, so it starts at day 1.
+    const firstDay = fillAll ? 1 : Math.min(...deadlineDays);
     const untouched = routes.filter(r => r.day < firstDay);
     const repackDays = routes.filter(r => r.day >= firstDay);
     if (repackDays.length === 0) return false;
@@ -396,12 +409,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       // The per-day deadline is "leave the last site for home base by" — the
       // moment the crew is done in the field. It replaces the account-wide
       // "Return to Home Base By" (which is a home-ARRIVAL deadline, return
-      // drive included) for the days that have one.
+      // drive included) for the days that have one; fillAll runs the arrival
+      // deadline against every day since none of them have their own.
       const leaveByDeadline = returnByTimes[dayNum] || '';
       const arriveByDeadline = leaveByDeadline ? '' : (settings.return_by_time || '');
       const startTime = dayStartTimes[dayNum] || settings.start_time || '08:00';
-      // Days the user didn't put a deadline on hold their current size.
-      const softCap = leaveByDeadline ? null : (originalCounts.get(dayNum) ?? null);
+      // Days the user didn't put a deadline on hold their current size —
+      // UNLESS this is the account-wide fill, where every day is meant to
+      // grow toward the shared deadline.
+      const softCap = (fillAll || leaveByDeadline) ? null : (originalCounts.get(dayNum) ?? null);
 
       let seq: number[] = [];
 
@@ -525,11 +541,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   };
 
   /** refitDeadlines + spinner + the one place refit failures get reported. */
-  const runRefit = async (returnByTimes: Record<number, string>, baseRoutes?: DayRoute[]) => {
+  const runRefit = async (returnByTimes: Record<number, string>, baseRoutes?: DayRoute[], fillAll = false) => {
     if (isRefitting) return false;
     setIsRefitting(true);
     try {
-      return await refitDeadlines(returnByTimes, baseRoutes);
+      return await refitDeadlines(returnByTimes, baseRoutes, fillAll);
     } catch (err) {
       console.error('[RouteResults] Error refitting days to deadline:', err);
       alert(`Failed to refit the plan: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -538,6 +554,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       setIsRefitting(false);
     }
   };
+
+  // Apply & Re-optimize regenerates `result` asynchronously through the
+  // `onRefresh` prop, so there's no fresh route data to refit against at the
+  // point the button handler runs — only after the parent re-renders us with
+  // the new `result`. This ref is the handoff: the handler arms it right
+  // before calling onRefresh, and the effect below fires the account-wide
+  // fill the next time `result` actually changes, then disarms itself.
+  const pendingAccountFillRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingAccountFillRef.current) return;
+    pendingAccountFillRef.current = false;
+    if (!result || !settings?.return_by_time) return;
+    void runRefit(dayReturnByTimes, result.routes, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
 
   // Passive guard: keep deadlines true when the result is rebuilt beneath us.
   // Apply & Refresh Times re-clocks every day from the account settings (new
@@ -820,6 +852,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
         console.log('Triggering route regeneration with new settings...');
         // Trigger refresh - this should set isGenerating=true and regenerate the route
+        // Clustering builds day membership by geography alone — the account-
+        // wide return-by deadline only gets consulted afterward, as a ceiling
+        // on days already assembled. A day whose region has few nearby sites
+        // ends early even with hours of deadline still on the table, because
+        // nothing pulls sites from OTHER days in to fill it. Arm the pending
+        // fill so the moment `result` reflects the regenerated plan, every
+        // day gets packed forward toward the deadline (see the effect above).
+        if (tempSettings.return_by_time) {
+          pendingAccountFillRef.current = true;
+        }
         await onRefresh();
         console.log('Route update complete');
       } catch (err) {
