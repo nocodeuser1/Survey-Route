@@ -1395,6 +1395,15 @@ export function optimizeRoutes(
     lunchBreak
   );
 
+  // Proof-of-run marker: if this line isn't in the console, the optimizer
+  // didn't run and whatever is on screen is a loaded/stale plan.
+  console.log('[routeOptimizer] cross-day refinement complete:', {
+    daysBefore: routes.length,
+    daysAfter: refinedRoutes.length,
+    milesBefore: Math.round(routes.reduce((s, r) => s + r.totalMiles, 0)),
+    milesAfter: Math.round(refinedRoutes.reduce((s, r) => s + r.totalMiles, 0)),
+  });
+
   // Membership shifted, so re-establish the "nearest days first" numbering
   // the clustering phase set up. Without this, a day that gave up its close-in
   // stops could keep a low day number while sitting far out.

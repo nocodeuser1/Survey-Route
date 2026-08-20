@@ -4,6 +4,12 @@ import { registerServiceWorker } from './lib/registerSW';
 import { initAutoSync } from './lib/syncQueue';
 import './index.css';
 
+// Which build is this browser actually running? Logged first thing and
+// pinned on window so a support question never has to guess at deploys,
+// CDN caches, or service-worker staleness again.
+console.log(`[build] survey-route @ ${__BUILD_COMMIT__}`);
+(window as unknown as { __BUILD_COMMIT__: string }).__BUILD_COMMIT__ = __BUILD_COMMIT__;
+
 // Register service worker for map tile caching
 registerServiceWorker();
 

@@ -10,3 +10,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
     readonly env: ImportMetaEnv
 }
+
+// Injected at build time (vite.config.ts define) — short commit hash of the
+// deployed code, 'local-d' for local dev builds.
+declare const __BUILD_COMMIT__: string;

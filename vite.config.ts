@@ -3,6 +3,14 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Build stamp: Netlify exposes the deployed commit as COMMIT_REF. Baked
+  // into the bundle and logged at startup so "which code is this browser
+  // actually running?" is a console check, not a forensic exercise.
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(
+      (process.env.COMMIT_REF || 'local-dev').slice(0, 7)
+    ),
+  },
   plugins: [react()],
   optimizeDeps: {
     // mupdf ships its WASM via `new URL('mupdf-wasm.wasm', import.meta.url)`.
