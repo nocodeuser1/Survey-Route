@@ -17,6 +17,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+export interface RouteVisitEvent {
+  id: string;
+  facility_id: string;
+  account_id: string;
+  recorded_by?: string | null;
+  visited_at: string;
+}
+
 /**
  * Walking-path overlay drawn on top of the LDAR site plan PDF. All coords
  * are normalized 0..1 to the source page so the overlay scales with any

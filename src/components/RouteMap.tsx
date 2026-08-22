@@ -180,7 +180,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
   // Helper to check if any completed facilities are hidden
   const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans;
-  const markersRef = useRef<Map<number, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
+  const markersRef = useRef<Map<string, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
   const polylinesRef = useRef<Map<number, L.Polyline>>(new Map());
   const homeMarkerRef = useRef<L.Marker | null>(null);
   const initialLoadRef = useRef(true);
@@ -210,7 +210,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [recentlyAssignedIds, setRecentlyAssignedIds] = useState<Set<string>>(new Set());
   const [assignSuccessMsg, setAssignSuccessMsg] = useState<string | null>(null);
-  const [spiderfiedMarkers, setSpiderfiedMarkers] = useState<Map<number, L.Marker>>(new Map());
+  const [spiderfiedMarkers, setSpiderfiedMarkers] = useState<Map<string, L.Marker>>(new Map());
   const spiderfyLinesRef = useRef<L.Polyline[]>([]);
   const spiderfyBackdropRef = useRef<L.Layer | null>(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -749,7 +749,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           ? result.routes.filter((r) => r.day === selectedDay)
           : result.routes;
 
-      const currentFacilityIndexes = new Set<number>();
+      const currentFacilityIndexes = new Set<string>();
       const bounds = L.latLngBounds([[Number(homeBase.latitude), Number(homeBase.longitude)]]);
 
       // Update or create facility markers
@@ -757,7 +757,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         const color = COLORS[(route.day - 1) % COLORS.length];
 
         route.facilities.forEach((facility, index) => {
-          currentFacilityIndexes.add(facility.index);
+          const markerKey = `route:${route.day}:${facility.index}`;
+          currentFacilityIndexes.add(markerKey);
 
           // Look up the latest coordinates from the facilities prop
           // This ensures map markers update when lat-long is edited in Facilities tab
@@ -793,7 +794,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             bounds.extend([currentLat, currentLng]);
           }
 
-          const existingMarkerData = markersRef.current.get(facility.index);
+          const existingMarkerData = markersRef.current.get(markerKey);
           const isSelected = selectedFacilities.has(facility.index);
 
           // Check if facility has a valid completed inspection (within last year)
@@ -1662,7 +1663,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
             // Add click handler to check for overlapping markers
             marker.on('click', (e) => {
-              const overlappingIndexes = findOverlappingMarkers(facility.index);
+              const overlappingIndexes = findOverlappingMarkers(markerKey);
               if (overlappingIndexes.length > 1) {
                 // Multiple markers at this location - spiderfy them
                 L.DomEvent.stopPropagation(e as any);
@@ -1718,7 +1719,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               });
             }
           }
-          markersRef.current.set(facility.index, { marker, day: route.day, wasSelectionMode: selectionMode, wasSelected: isSelected });
+          markersRef.current.set(markerKey, { marker, day: route.day, wasSelectionMode: selectionMode, wasSelected: isSelected });
         });
       });
 
@@ -1741,7 +1742,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         });
 
         // Show all other facilities from facilities tab
-        facilities.forEach((facility, idx) => {
+        facilities.forEach((facility) => {
           // Skip if already shown in route
           if (facilitiesInRoutes.has(facility.name)) return;
 
@@ -1767,7 +1768,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Use a unique negative index for non-route facilities to avoid conflicts
           const facilityIndex = -(idx + 1);
-          currentFacilityIndexes.add(facilityIndex);
+          const markerKey = `unassigned:${facility.id}`;
+          currentFacilityIndexes.add(markerKey);
 
           // Check if facility is completed
           const facilityInspections = inspections.filter(i => i.facility_id === facility.id)
@@ -2135,7 +2137,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           });
 
           bounds.extend([Number(facility.latitude), Number(facility.longitude)]);
-          markersRef.current.set(facilityIndex, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
+          markersRef.current.set(markerKey, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
         });
       }
 
@@ -2158,8 +2160,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const isNotExcluded = facility.day_assignment !== -1 && facility.day_assignment !== -2;
 
           if (isExternallyCompleted && isNotInRoute && isNotExcluded) {
-            const facilityIndex = 9000 + idx; // Use high index to avoid conflicts with route facilities
-            currentFacilityIndexes.add(facilityIndex);
+            const markerKey = `external:${facility.id}`;
+            currentFacilityIndexes.add(markerKey);
 
             const currentLat = Number(facility.latitude);
             const currentLng = Number(facility.longitude);
@@ -2220,7 +2222,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             `;
 
             marker.bindPopup(popupContent);
-            markersRef.current.set(facilityIndex, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
+            markersRef.current.set(markerKey, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
           }
         });
       }
@@ -3457,14 +3459,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   }, [triggerLocationCenter]);
 
   // Helper function to find overlapping markers using pixel distance
-  const findOverlappingMarkers = (clickedIndex: number): number[] => {
+  const findOverlappingMarkers = (clickedIndex: string): string[] => {
     const clickedMarkerInfo = markersRef.current.get(clickedIndex);
     if (!clickedMarkerInfo || !mapRef.current) return [clickedIndex];
 
     const map = mapRef.current;
     const clickedLatLng = clickedMarkerInfo.marker.getLatLng();
     const clickedPoint = map.latLngToContainerPoint(clickedLatLng);
-    const overlapping: number[] = [clickedIndex];
+    const overlapping: string[] = [clickedIndex];
     const pixelThreshold = 40; // 40 pixels radius for clustering nearby markers
 
     markersRef.current.forEach((markerInfo, index) => {
@@ -3520,7 +3522,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   };
 
   // Spiderfy markers (spread them out horizontally)
-  const spiderfyMarkers = (overlappingIndexes: number[], centerLatLng: L.LatLng) => {
+  const spiderfyMarkers = (overlappingIndexes: string[], centerLatLng: L.LatLng) => {
     if (!mapRef.current) return;
 
     // First, unspiderfy any existing spiderfied markers
@@ -3529,7 +3531,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     if (overlappingIndexes.length <= 1) return;
 
     const map = mapRef.current;
-    const newSpiderfiedMarkers = new Map<number, L.Marker>();
+    const newSpiderfiedMarkers = new Map<string, L.Marker>();
 
     // Use pixel-based spacing for consistent visual distance regardless of zoom level
     const pixelSpacing = 60; // 60 pixels between markers

@@ -4,7 +4,7 @@ import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
-import { UserSettings, Facility, Inspection, supabase } from '../lib/supabase';
+import { UserSettings, Facility, Inspection, RouteVisitEvent, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
@@ -73,6 +73,7 @@ type SurveyType = string;
 
 export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
+  const [routeVisitEvents, setRouteVisitEvents] = useState<RouteVisitEvent[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
@@ -580,9 +581,31 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   useEffect(() => {
     loadInspections();
+    loadRouteVisitEvents();
     setExcludedCount(facilities.filter(f => f.day_assignment === -1).length);
     checkRemovedFacilities();
   }, [facilities]);
+
+  const loadRouteVisitEvents = async () => {
+    const facilityIds = facilities.map(f => f.id);
+    if (facilityIds.length === 0) {
+      setRouteVisitEvents([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('route_visit_events')
+      .select('id, facility_id, account_id, recorded_by, visited_at')
+      .in('facility_id', facilityIds)
+      .order('visited_at', { ascending: true });
+
+    if (error) {
+      // The migration may not be deployed yet; route results should remain usable.
+      console.warn('[RouteResults] Route visit history unavailable:', error.message);
+      return;
+    }
+    setRouteVisitEvents((data ?? []) as RouteVisitEvent[]);
+  };
 
   // Auto re-optimize routes after facility day reassignment
   useEffect(() => {
@@ -915,6 +938,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const getFacilityForStop = (facilityName: string): Facility | undefined => {
     return facilities.find(f => f.name === facilityName);
   };
+
+  const formatVisitDateTime = (timestamp: string) => new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
+
+  const routeVisitSummary = routeVisitEvents
+    .map(event => ({
+      event,
+      facility: facilities.find(facility => facility.id === event.facility_id),
+    }))
+    .filter((entry): entry is { event: RouteVisitEvent; facility: Facility } => Boolean(entry.facility));
 
   const hasValidInspection = (facilityName: string): boolean => {
     const facility = getFacilityForStop(facilityName);
@@ -2170,6 +2207,54 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
 
+      {routeVisitSummary.length > 0 && (
+        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                <Route className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                Visit Route Summary
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Actual order recorded from Photos Taken, independent of planned days
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+              {routeVisitSummary.length} visited
+            </span>
+          </div>
+          <div className="px-4 sm:px-6 py-5 overflow-x-auto">
+            <div className="flex flex-col md:flex-row md:min-w-max">
+              {routeVisitSummary.map(({ event, facility }, index) => (
+                <div key={event.id} className="flex md:flex-1 md:min-w-[180px] items-start gap-3 md:gap-0">
+                  <div className="flex md:flex-col items-center md:items-stretch md:flex-1">
+                    <div className="flex items-center md:items-start">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold shadow-sm shrink-0">
+                        {index + 1}
+                      </div>
+                      {index < routeVisitSummary.length - 1 && (
+                        <div className="hidden md:block h-0.5 flex-1 bg-blue-200 dark:bg-blue-800 mt-4" />
+                      )}
+                    </div>
+                    <div className="ml-3 md:ml-0 md:mt-3 md:pr-4">
+                      <button
+                        onClick={(e) => handleFacilityClick(facility.name, e)}
+                        className="text-left font-semibold text-blue-700 dark:text-blue-300 hover:underline"
+                      >
+                        {facility.name}
+                      </button>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Day {facility.day_assignment && facility.day_assignment > 0 ? facility.day_assignment : 'unassigned'} · {formatVisitDateTime(event.visited_at)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Survey Type Selector - hidden when rendered above map via App.tsx */}
       {!showOnlyRouteList && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
@@ -2540,6 +2625,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
                         const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
                         const isSelected = selectedFacilityNames.has(facilityName);
+                        const facility = isHomeBaseSegment ? undefined : getFacilityForStop(facilityName);
+                        const photosTaken = Boolean(facility?.photos_taken);
 
                         return (
                           <div
@@ -2596,7 +2683,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       </button>
                                     ) : (
                                       <p
-                                        className="font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+                                        className={`font-medium text-blue-600 hover:text-blue-800 cursor-pointer ${photosTaken ? 'line-through text-gray-500 dark:text-gray-400' : ''}`}
                                         onClick={(e) => handleFacilityClick(segment.to, e)}
                                         onContextMenu={(e) => openDayActionsPopover(segment.to, e)}
                                         title="Click to reassign or view details"
@@ -2636,10 +2723,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       if (!facility) return null;
                                       return <SPCCStatusBadge facility={facility} showMessage />;
                                     })()}
-                                    {/* Photos taken indicator - show in plans mode */}
-                                    {effectiveKind === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
-                                      const facility = getFacilityForStop(segment.to);
-                                      if (!facility) return null;
+                                    {/* Photos taken indicator - keep visible in every day-list mode. */}
+                                    {segment.to !== 'Home Base' && facility && (() => {
                                       return (
                                         <span
                                           title={facility.photos_taken ? 'Photos taken' : 'Photos not taken'}
