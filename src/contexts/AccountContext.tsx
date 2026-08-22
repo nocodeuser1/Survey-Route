@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { setAccountTimeZone } from '../utils/dateUtils';
 
 interface Account {
   id: string;
@@ -14,6 +15,9 @@ interface Account {
   // rendering the brand label.
   account_name?: string | null;
   company_name?: string | null;
+  /** IANA zone from Account Branding settings. Drives how visit dates and
+   *  times are stamped and displayed — see setAccountTimeZone. */
+  timezone?: string | null;
 }
 
 /**
@@ -55,6 +59,15 @@ const AccountContext = createContext<AccountContextType | undefined>(undefined);
 export function AccountProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [currentAccount, setCurrentAccount] = useState<Account | null>(null);
+
+  // Publish the account's timezone to the date helpers. The Account Branding
+  // screen has always promised "all dates and times across the account will be
+  // displayed in this timezone", but nothing read the column — so visit stamps
+  // came out in the browser's zone, or UTC from Postgres. One place to set it,
+  // so every consumer of getAccountTimeZone() agrees.
+  useEffect(() => {
+    setAccountTimeZone(currentAccount?.timezone);
+  }, [currentAccount?.id, currentAccount?.timezone]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountRole, setAccountRole] = useState<'account_admin' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);

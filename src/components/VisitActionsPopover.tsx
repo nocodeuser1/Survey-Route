@@ -1,7 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { X as XIcon, Camera, CheckCircle, Calendar, Clock } from 'lucide-react';
 import { Facility, supabase } from '../lib/supabase';
-import { parseDateInput, formatDateDisplay } from '../utils/dateUtils';
+import {
+  parseDateInput,
+  formatDateDisplay,
+  instantToZonedParts,
+  nowInAccountTimeZone,
+} from '../utils/dateUtils';
 import {
   parseVisitTimeInput,
   formatVisitTimeDisplay,
@@ -27,6 +32,9 @@ interface VisitActionsPopoverProps {
   facility: Facility;
   /** The element this popover is pinned to — the facility name button. */
   anchorEl: HTMLElement;
+  /** `visited_at` of the event this stop represents. Pre-fills the fields, so
+   *  the popover opens showing the same moment the row above it displays. */
+  visitedAt?: string | null;
   /** Refresh facilities + visit events after a write lands. */
   onSaved: () => void | Promise<void>;
   onClose: () => void;
@@ -36,20 +44,10 @@ const MARGIN = 12;
 const GAP = 8;
 const WIDTH = 264;
 
-/** Now, rounded to the nearest five minutes — matches the DB trigger's stamp. */
-function roundedNow(): { date: string; time: string } {
-  const now = new Date();
-  now.setMinutes(Math.round(now.getMinutes() / 5) * 5, 0, 0);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return {
-    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
-  };
-}
-
 export default function VisitActionsPopover({
   facility,
   anchorEl,
+  visitedAt,
   onSaved,
   onClose,
 }: VisitActionsPopoverProps) {
@@ -66,15 +64,40 @@ export default function VisitActionsPopover({
     onCloseRef.current = onClose;
   }, [onClose]);
 
+  /**
+   * What the fields open with. The visit event is the better source: it's a
+   * true instant, so rendering it in the account's timezone gives the same
+   * moment the summary row shows. facility.field_visit_* is the fallback —
+   * those are bare date/time columns with no zone attached, and rows stamped
+   * before the trigger fix hold UTC wall-clock (a 11 PM Central visit reading
+   * as 4 AM the next day, which is exactly what looked wrong).
+   */
+  const seedFields = useCallback(() => {
+    if (visitedAt) {
+      const zoned = instantToZonedParts(visitedAt);
+      if (zoned.date) {
+        return {
+          date: formatDateDisplay(zoned.date),
+          time: formatVisitTimeDisplay(zoned.time),
+        };
+      }
+    }
+    return {
+      date: formatDateDisplay(facility.field_visit_date),
+      time: formatVisitTimeDisplay(facility.field_visit_time),
+    };
+  }, [visitedAt, facility.field_visit_date, facility.field_visit_time]);
+
   const [photosTaken, setPhotosTaken] = useState(facility.photos_taken ?? false);
-  const [dateInput, setDateInput] = useState(formatDateDisplay(facility.field_visit_date));
-  const [timeInput, setTimeInput] = useState(formatVisitTimeDisplay(facility.field_visit_time));
+  const [dateInput, setDateInput] = useState(() => seedFields().date);
+  const [timeInput, setTimeInput] = useState(() => seedFields().time);
 
   useEffect(() => {
+    const seeded = seedFields();
     setPhotosTaken(facility.photos_taken ?? false);
-    setDateInput(formatDateDisplay(facility.field_visit_date));
-    setTimeInput(formatVisitTimeDisplay(facility.field_visit_time));
-  }, [facility.id, facility.photos_taken, facility.field_visit_date, facility.field_visit_time]);
+    setDateInput(seeded.date);
+    setTimeInput(seeded.time);
+  }, [facility.id, facility.photos_taken, seedFields]);
 
   // Re-pin to the anchor. Called on mount, then on every scroll/resize so the
   // popover tracks the row it belongs to rather than staying where the click
@@ -168,7 +191,7 @@ export default function VisitActionsPopover({
     setSaving(true);
     setPhotosTaken(next);
     try {
-      const seeded = roundedNow();
+      const seeded = nowInAccountTimeZone();
       const date = next ? facility.field_visit_date || seeded.date : null;
       const time = next ? facility.field_visit_time?.slice(0, 5) || seeded.time : null;
 

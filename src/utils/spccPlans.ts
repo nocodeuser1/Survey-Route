@@ -6,7 +6,7 @@
 
 import { supabase } from '../lib/supabase';
 import type { Facility, SPCCPlan } from '../lib/supabase';
-import { APP_TIME_ZONE } from './dateUtils';
+import { APP_TIME_ZONE, zonedPartsToInstant } from './dateUtils';
 
 export interface FacilityWell {
   /** 1-based index (matches well_name_N / well_api_N columns). */
@@ -559,7 +559,10 @@ export async function saveFieldVisitTime(
   // reason to fail the edit the user just made — the time itself is saved.
   if (fetchError && !fetchError.message.includes('does not exist')) throw fetchError;
 
-  const visitedAt = new Date(`${isoDate}T${time}:00`);
+  // The date and time are wall-clock in the ACCOUNT's zone, so the instant
+  // has to be built with that zone — `new Date("...T14:15:00")` would read it
+  // as the viewer's local time and put the event log hours off the facility.
+  const visitedAt = zonedPartsToInstant(isoDate, time);
   if (latestEvent?.id) {
     const { error: updateError } = await supabase
       .from('route_visit_events')

@@ -113,3 +113,116 @@ export function formatDateDisplay(isoDate: string | null | undefined): string {
   return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
 }
 
+/* ------------------------------------------------------------------------ *
+ * Account timezone
+ *
+ * Accounts carry a `timezone` (set in Account Branding settings, which
+ * promises "all dates and times across the account will be displayed in this
+ * timezone"). Nothing read it, so visit stamps came out in whatever zone the
+ * browser — or Postgres, which is UTC — happened to be in: a 9:01 PM Central
+ * visit was stored and shown as 2:01 AM the next day.
+ *
+ * Held module-level rather than in context because exactly one account is
+ * active at a time and the formatting helpers here are plain functions. App
+ * sets it when an account loads or is switched; until then, Central.
+ * ------------------------------------------------------------------------ */
+
+let activeAccountTimeZone: string = APP_TIME_ZONE;
+
+/** Called by App when the active account loads or changes. Falsy or
+ *  unrecognised values fall back to Central rather than throwing. */
+export function setAccountTimeZone(timeZone: string | null | undefined): void {
+  if (!timeZone) {
+    activeAccountTimeZone = APP_TIME_ZONE;
+    return;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    activeAccountTimeZone = timeZone;
+  } catch {
+    console.warn(`[dateUtils] Unknown account timezone "${timeZone}", using ${APP_TIME_ZONE}`);
+    activeAccountTimeZone = APP_TIME_ZONE;
+  }
+}
+
+/** The active account's timezone (Central until an account sets otherwise). */
+export function getAccountTimeZone(): string {
+  return activeAccountTimeZone;
+}
+
+interface ZonedParts {
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:MM, 24-hour */
+  time: string;
+}
+
+/** Wall-clock date and time an instant reads as in `timeZone`. */
+export function instantToZonedParts(
+  instant: Date | string,
+  timeZone: string = getAccountTimeZone()
+): ZonedParts {
+  const d = instant instanceof Date ? instant : new Date(instant);
+  if (isNaN(d.getTime())) return { date: '', time: '' };
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      // h23 rather than hour12:false — the latter renders midnight as "24"
+      // in some engines, which would round-trip to the wrong day.
+      hourCycle: 'h23',
+    })
+      .formatToParts(d)
+      .map(p => [p.type, p.value])
+  ) as Record<string, string>;
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+/** How far `timeZone` is from UTC at a given instant, in milliseconds. */
+function zoneOffsetMs(at: Date, timeZone: string): number {
+  const { date, time } = instantToZonedParts(at, timeZone);
+  if (!date) return 0;
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  // Seconds are dropped by instantToZonedParts, so compare against a
+  // second-truncated version of the instant.
+  const truncated = Math.floor(at.getTime() / 60000) * 60000;
+  return Date.UTC(y, m - 1, d, hh, mm) - truncated;
+}
+
+/** The instant at which `timeZone` reads the given wall-clock date and time.
+ *  Inverse of instantToZonedParts. */
+export function zonedPartsToInstant(
+  date: string,
+  time: string,
+  timeZone: string = getAccountTimeZone()
+): Date {
+  const asIfUtc = new Date(`${date}T${time}:00Z`);
+  if (isNaN(asIfUtc.getTime())) return new Date(NaN);
+  // One correction pass, then a second in case the first landed on the other
+  // side of a DST boundary and the offset changed underneath us.
+  const first = zoneOffsetMs(asIfUtc, timeZone);
+  let instant = new Date(asIfUtc.getTime() - first);
+  const second = zoneOffsetMs(instant, timeZone);
+  if (second !== first) instant = new Date(asIfUtc.getTime() - second);
+  return instant;
+}
+
+/** Now, in the account's timezone, rounded to the nearest five minutes —
+ *  the granularity the visit-stamp trigger uses. */
+export function nowInAccountTimeZone(timeZone: string = getAccountTimeZone()): ZonedParts {
+  const now = new Date();
+  // Rounding the instant is safe: every supported zone is offset from UTC by
+  // a whole or half hour, so the minutes-past-the-hour are unchanged mod 5.
+  now.setSeconds(0, 0);
+  now.setMinutes(Math.round(now.getMinutes() / 5) * 5);
+  return instantToZonedParts(now, timeZone);
+}
+

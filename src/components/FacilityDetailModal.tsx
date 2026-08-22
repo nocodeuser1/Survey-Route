@@ -45,6 +45,7 @@ import LDARObservationPathSection from './LDARObservationPathSection';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { parseVisitTimeInput, formatVisitTimeDisplay, saveFieldVisitTime } from '../utils/spccPlans';
+import { nowInAccountTimeZone, zonedPartsToInstant } from '../utils/dateUtils';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
@@ -1132,17 +1133,9 @@ export default function FacilityDetailModal({
     }
   };
 
-  const roundToFiveMinutes = (date: Date) => {
-    const rounded = new Date(date);
-    rounded.setSeconds(0, 0);
-    rounded.setMinutes(Math.round(rounded.getMinutes() / 5) * 5);
-    return rounded;
-  };
-
-  const getRoundedLocalTime = (date = new Date()) => {
-    const rounded = roundToFiveMinutes(date);
-    return `${String(rounded.getHours()).padStart(2, '0')}:${String(rounded.getMinutes()).padStart(2, '0')}`;
-  };
+  // Account timezone, not the browser's — a visit is stamped where the work
+  // happened. See setAccountTimeZone.
+  const getRoundedLocalTime = () => nowInAccountTimeZone().time;
 
   const handleSaveVisitTime = async () => {
     // Typed free-text ("2:15 pm", "215p", "1415") rather than a dropdown, so
@@ -1176,7 +1169,7 @@ export default function FacilityDetailModal({
     try {
       const roundedTime = newVal ? (facility.field_visit_time?.slice(0, 5) || getRoundedLocalTime()) : null;
       const roundedDate = newVal
-        ? (facility.field_visit_date || new Date().toISOString().slice(0, 10))
+        ? (facility.field_visit_date || nowInAccountTimeZone().date)
         : null;
       const { error } = await supabase
         .from('facilities')
@@ -1186,7 +1179,11 @@ export default function FacilityDetailModal({
       facility.photos_taken = newVal;
       facility.field_visit_date = roundedDate;
       facility.field_visit_time = roundedTime;
-      setLatestVisitAt(roundedDate && roundedTime ? new Date(`${roundedDate}T${roundedTime}:00`).toISOString() : null);
+      setLatestVisitAt(
+        roundedDate && roundedTime
+          ? zonedPartsToInstant(roundedDate, roundedTime).toISOString()
+          : null
+      );
       setVisitDateValue(roundedDate ? formatDate(roundedDate) : '');
       setVisitTimeValue(roundedTime || '');
     } catch (err) {

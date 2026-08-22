@@ -12,7 +12,7 @@ import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
 import { getFacilityPhotosState } from '../utils/spccPlans';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import VisitActionsPopover from './VisitActionsPopover';
-import { parseLocalDate } from '../utils/dateUtils';
+import { parseLocalDate, getAccountTimeZone } from '../utils/dateUtils';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
 import SavedRoutesManager from './SavedRoutesManager';
@@ -964,7 +964,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return facilities.find(f => f.name === facilityName);
   };
 
-  const formatVisitDateTime = (timestamp: string) => new Intl.DateTimeFormat(undefined, {
+  // Account timezone, not the viewer's — a visit belongs to where the work
+  // happened, and the rest of the app renders instants the same way.
+  const formatVisitDateTime = (timestamp: string) => new Intl.DateTimeFormat('en-US', {
+    timeZone: getAccountTimeZone(),
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -1134,7 +1137,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // than the day-reassignment actions the route lists offer. Anchored to the
   // clicked name so it follows on scroll.
   const [visitActionsPopover, setVisitActionsPopover] = useState<
-    { facility: Facility; anchorEl: HTMLElement } | null
+    { facility: Facility; anchorEl: HTMLElement; visitedAt: string | null } | null
   >(null);
 
   const openDayActionsPopover = (facilityName: string, e: React.MouseEvent) => {
@@ -2393,6 +2396,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           setVisitActionsPopover({
                             facility,
                             anchorEl: e.currentTarget as HTMLElement,
+                            visitedAt: event.visited_at,
                           });
                         }}
                         className="text-left font-semibold text-blue-700 dark:text-blue-300 hover:underline"
@@ -3132,6 +3136,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               ?? visitActionsPopover.facility
           }
           anchorEl={visitActionsPopover.anchorEl}
+          // Re-resolved from the live summary, not the value captured at
+          // click: editing the time rewrites the event's visited_at, and
+          // re-seeding from the stale capture would redisplay the old time
+          // and look like the edit was thrown away.
+          visitedAt={
+            routeVisitSummary.find(
+              entry => entry.facility.id === visitActionsPopover.facility.id
+            )?.event.visited_at ?? visitActionsPopover.visitedAt
+          }
           onSaved={async () => {
             await loadRouteVisitEvents();
             if (onFacilitiesUpdated) await onFacilitiesUpdated();
