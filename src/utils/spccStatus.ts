@@ -437,6 +437,17 @@ export function facilityNeedsSPCCPlan(facility: SPCCStatusFacility): boolean {
     'expired',
     'expiring',
     'renewal_due',
+    // 'no_ip_date' means "no plan on file AND no first-production date to
+    // compute a deadline from" — an unanswered question, not finished work.
+    // Leaving it out of this list made its inverse (!facilityNeedsSPCCPlan)
+    // read as "plan complete", so plants and compressor stations — midstream
+    // assets that never have an initial-production date at all — reported as
+    // SPCC-complete and were silently dropped from SPCC Plan routing. The
+    // rest of the app already treats it as needing attention: the detail
+    // modal labels it "IP Date Required" with a warning icon, the plans
+    // overview buckets it with no_plan/initial_due, and the compliance
+    // validator raises it as an issue.
+    'no_ip_date',
   ].includes(status);
 }
 

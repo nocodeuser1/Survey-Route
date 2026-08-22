@@ -9,6 +9,8 @@ import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
+import { getFacilityPhotosState } from '../utils/spccPlans';
+import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { parseLocalDate } from '../utils/dateUtils';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
@@ -1006,15 +1008,44 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return false;
   };
 
+  /** Photos on file = someone has physically been to the site. */
+  const isFacilityVisited = (facility: Facility): boolean =>
+    getFacilityPhotosState(facility) === 'all';
+
+  /** Names of every facility in the route currently being planned. */
+  const getRouteFacilityNames = (): Set<string> => {
+    const names = new Set<string>();
+    result.routes.forEach(route => route.facilities.forEach(f => names.add(f.name)));
+    return names;
+  };
+
+  /**
+   * The "done" panel under the day cards.
+   *
+   * SPCC Plan mode tracks VISITS here, not plan completion. This tab plans
+   * driving, so the question it answers is "which of these stops have I
+   * already been to" — which is what photos-on-file records. Plan completion
+   * is a separate, slower-moving fact about the facility (see
+   * facilityNeedsSPCCPlan), and hiding plan-complete facilities is the
+   * Visibility panel's job, not this list's. Keying this panel off plan
+   * status instead meant marking two sites visited changed nothing here
+   * while all nine reported "completed".
+   *
+   * Scoped to the current route for the same reason: a site visited last
+   * month that isn't in this route isn't this tab's business.
+   *
+   * Inspection and All modes are unchanged — inspection completion.
+   */
   const getCompletedFacilities = (): Facility[] => {
+    if (effectiveKind === 'spcc_plan') {
+      const inRoute = getRouteFacilityNames();
+      return facilities.filter(
+        f => f.status !== 'sold' && inRoute.has(f.name) && isFacilityVisited(f)
+      );
+    }
+
     return facilities.filter(f => {
       if (f.status === 'sold') return false;
-
-      if (effectiveKind === 'spcc_plan') {
-        // In SPCC Plan mode, "completed" means the facility has a valid plan
-        // (doesn't need plan attention) - inspection status is irrelevant
-        return !facilityNeedsSPCCPlan(f);
-      }
 
       // For inspection and all modes, check inspection completion
       const inspection = inspections.get(f.id);
@@ -2861,7 +2892,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold">Completed Facilities</h3>
+                  <h3 className="text-lg font-semibold">
+                    {effectiveKind === 'spcc_plan' ? 'Visited Facilities' : 'Completed Facilities'}
+                  </h3>
                   {completedCollapsed ? (
                     <ChevronDown className="w-5 h-5" />
                   ) : (
@@ -2871,8 +2904,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                 <div className="flex items-center gap-4 text-sm">
                   <span className="flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" />
-                    {getCompletedFacilities().length} completed
+                    {effectiveKind === 'spcc_plan' ? (
+                      <Camera className="w-4 h-4" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4" />
+                    )}
+                    {getCompletedFacilities().length}{' '}
+                    {effectiveKind === 'spcc_plan' ? 'visited' : 'completed'}
                   </span>
                 </div>
               </div>
@@ -2911,13 +2949,30 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                 )}
                               </button>
                             )}
-                            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
+                            {effectiveKind === 'spcc_plan' ? (
+                              <PhotosTakenStatusBadge facility={facility} className="flex-shrink-0" />
+                            ) : (
+                              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
+                            )}
                             <div className="flex-1">
                               <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
-                              {inspection && (
-                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                  Inspected: {new Date(inspection.conducted_at).toLocaleDateString()}
-                                </div>
+                              {effectiveKind === 'spcc_plan' ? (
+                                facility.field_visit_date && (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Visited: {new Date(facility.field_visit_date + 'T00:00:00').toLocaleDateString()}
+                                    {/* field_visit_time is stamped alongside the date when
+                                        photos_taken flips true, and is editable on the
+                                        facility's General tab. Stored as HH:MM:SS. */}
+                                    {facility.field_visit_time &&
+                                      ` at ${formatTimeTo12Hour(facility.field_visit_time.slice(0, 5))}`}
+                                  </div>
+                                )
+                              ) : (
+                                inspection && (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Inspected: {new Date(inspection.conducted_at).toLocaleDateString()}
+                                  </div>
+                                )
                               )}
                             </div>
                           </div>
