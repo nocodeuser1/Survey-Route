@@ -188,6 +188,9 @@ export default function FacilityDetailModal({
   const [oilValue, setOilValue] = useState(facility.estimated_oil_per_day?.toString() || '');
   const [editingVisitDate, setEditingVisitDate] = useState(false);
   const [visitDateValue, setVisitDateValue] = useState(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
+  const [editingVisitTime, setEditingVisitTime] = useState(false);
+  const [visitTimeValue, setVisitTimeValue] = useState(facility.field_visit_time?.slice(0, 5) || '');
+  const [latestVisitAt, setLatestVisitAt] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
   // Coordinates inline editor on the General tab. Kept local because there
   // are two fields (lat, lng) so InlineEditField (single-input) doesn't fit.
@@ -214,6 +217,25 @@ export default function FacilityDetailModal({
   useEffect(() => {
     didScrollToCommentsRef.current = false;
   }, [facility.id]);
+
+  useEffect(() => {
+    setVisitDateValue(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
+    setVisitTimeValue(facility.field_visit_time?.slice(0, 5) || '');
+    setLatestVisitAt(null);
+    void supabase
+      .from('route_visit_events')
+      .select('visited_at')
+      .eq('facility_id', facility.id)
+      .order('visited_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data?.visited_at) {
+          setLatestVisitAt(data.visited_at);
+          setVisitTimeValue(new Date(data.visited_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+        }
+      });
+  }, [facility.id, facility.field_visit_date, facility.field_visit_time]);
   useEffect(() => {
     if (!scrollToComments || didScrollToCommentsRef.current) return;
     if (activeTab !== 'general' || commentsLoading) return;
@@ -1109,16 +1131,79 @@ export default function FacilityDetailModal({
     }
   };
 
-  const togglePhotosTaken = async () => {
-    const newVal = !facility.photos_taken;
+  const roundToFiveMinutes = (date: Date) => {
+    const rounded = new Date(date);
+    rounded.setSeconds(0, 0);
+    rounded.setMinutes(Math.round(rounded.getMinutes() / 5) * 5);
+    return rounded;
+  };
+
+  const getRoundedLocalTime = (date = new Date()) => {
+    const rounded = roundToFiveMinutes(date);
+    return `${String(rounded.getHours()).padStart(2, '0')}:${String(rounded.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const handleSaveVisitTime = async () => {
+    if (!/^\d{2}:\d{2}$/.test(visitTimeValue)) return;
+    const [hours, minutes] = visitTimeValue.split(':').map(Number);
+    if (hours > 23 || minutes > 59 || minutes % 5 !== 0) return;
     setSavingDate(true);
     try {
       const { error } = await supabase
         .from('facilities')
-        .update({ photos_taken: newVal })
+        .update({ field_visit_time: visitTimeValue })
+        .eq('id', facility.id);
+      if (error) throw error;
+
+      const isoDate = facility.field_visit_date || parseDateInput(visitDateValue);
+      if (isoDate) {
+        const { data: latestEvent, error: eventFetchError } = await supabase
+          .from('route_visit_events')
+          .select('id')
+          .eq('facility_id', facility.id)
+          .order('visited_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (eventFetchError && !eventFetchError.message.includes('does not exist')) throw eventFetchError;
+        if (latestEvent?.id) {
+          const eventDate = new Date(`${isoDate}T${visitTimeValue}:00`);
+          const { error: eventUpdateError } = await supabase
+            .from('route_visit_events')
+            .update({ visited_at: eventDate.toISOString() })
+            .eq('id', latestEvent.id);
+          if (eventUpdateError) throw eventUpdateError;
+          setLatestVisitAt(eventDate.toISOString());
+        }
+      }
+
+      facility.field_visit_time = visitTimeValue;
+      setEditingVisitTime(false);
+    } catch (err) {
+      console.error('Error saving visit time:', err);
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const togglePhotosTaken = async () => {
+    const newVal = !facility.photos_taken;
+    setSavingDate(true);
+    try {
+      const roundedTime = newVal ? (facility.field_visit_time?.slice(0, 5) || getRoundedLocalTime()) : null;
+      const roundedDate = newVal
+        ? (facility.field_visit_date || new Date().toISOString().slice(0, 10))
+        : null;
+      const { error } = await supabase
+        .from('facilities')
+        .update({ photos_taken: newVal, field_visit_date: roundedDate, field_visit_time: roundedTime })
         .eq('id', facility.id);
       if (error) throw error;
       facility.photos_taken = newVal;
+      facility.field_visit_date = roundedDate;
+      facility.field_visit_time = roundedTime;
+      setLatestVisitAt(roundedDate && roundedTime ? new Date(`${roundedDate}T${roundedTime}:00`).toISOString() : null);
+      setVisitDateValue(roundedDate ? formatDate(roundedDate) : '');
+      setVisitTimeValue(roundedTime || '');
     } catch (err) {
       console.error('Error toggling photos taken:', err);
     } finally {
@@ -2550,6 +2635,52 @@ export default function FacilityDetailModal({
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                   </button>
+                )}
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      Time Taken
+                    </p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">
+                      {latestVisitAt || facility.field_visit_time
+                        ? new Date(latestVisitAt || `2000-01-01T${facility.field_visit_time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                        : 'Not set'}
+                    </p>
+                  </div>
+                  {!editingVisitTime && (
+                    <button
+                      onClick={() => setEditingVisitTime(true)}
+                      className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400"
+                      title="Edit Photos Taken time"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                {editingVisitTime && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <select
+                      value={visitTimeValue}
+                      onChange={(e) => setVisitTimeValue(e.target.value)}
+                      className="text-sm px-2 py-1 rounded border dark:bg-gray-600 dark:border-gray-500 dark:text-white"
+                      autoFocus
+                    >
+                      <option value="">Select time</option>
+                      {Array.from({ length: 288 }, (_, index) => {
+                        const totalMinutes = index * 5;
+                        const hour = Math.floor(totalMinutes / 60);
+                        const minute = totalMinutes % 60;
+                        const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                        const label = new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                        return <option key={value} value={value}>{label}</option>;
+                      })}
+                    </select>
+                    <button onClick={handleSaveVisitTime} disabled={savingDate || !visitTimeValue} className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-50">Save</button>
+                    <button onClick={() => { setEditingVisitTime(false); setVisitTimeValue(facility.field_visit_time?.slice(0, 5) || ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                  </div>
                 )}
               </div>
             </div>

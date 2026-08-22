@@ -247,6 +247,7 @@ export interface Facility {
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;
   field_visit_date?: string | null;
+  field_visit_time?: string | null;
   /** Total number of berms on this facility (mirrored from spcc_plans).
    *  Used together with `berms_with_photos_count` to render an
    *  all/partial/none photos status. See migration
