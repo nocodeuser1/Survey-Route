@@ -126,6 +126,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [bulkReassignTargetDay, setBulkReassignTargetDay] = useState<number>(1);
   const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
   const [pendingReoptimize, setPendingReoptimize] = useState(false);
+  const [isReoptimizing, setIsReoptimizing] = useState(false);
+  // Day moves the user has requested (popover / drag-drop / bulk reassign)
+  // that the next re-optimize pass must honor. handleReoptimizeDays groups
+  // facilities from the CURRENTLY DISPLAYED result.routes — not the DB —
+  // so without this the DB write lands but the on-screen lists never change.
+  const pendingDayMovesRef = useRef<Array<{ facilityName: string; targetDay: number }>>([]);
+  // Names of facilities that just landed on a new day — drives a brief
+  // highlight so the user sees where the row went instead of a silent redraw.
+  const [recentlyMovedNames, setRecentlyMovedNames] = useState<Set<string>>(new Set());
+  const recentlyMovedTimerRef = useRef<number | null>(null);
+
+  const flashMovedFacilities = (names: string[]) => {
+    if (names.length === 0) return;
+    setRecentlyMovedNames(new Set(names));
+    if (recentlyMovedTimerRef.current) window.clearTimeout(recentlyMovedTimerRef.current);
+    recentlyMovedTimerRef.current = window.setTimeout(() => {
+      setRecentlyMovedNames(new Set());
+      recentlyMovedTimerRef.current = null;
+    }, 2500);
+  };
 
   // Per-day start times
   const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
@@ -610,13 +630,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     setRouteVisitEvents((data ?? []) as RouteVisitEvent[]);
   };
 
-  // Auto re-optimize routes after facility day reassignment
+  // Auto re-optimize routes after facility day reassignment. Waits out an
+  // in-flight run (isReoptimizing in the deps re-fires this when it clears)
+  // so a move made mid-optimize isn't dropped on the floor.
   useEffect(() => {
-    if (pendingReoptimize && settings && homeBase && accountId) {
+    if (pendingReoptimize && settings && homeBase && accountId && !isReoptimizing) {
       setPendingReoptimize(false);
       handleReoptimizeDays();
     }
-  }, [pendingReoptimize, facilities]);
+  }, [pendingReoptimize, facilities, isReoptimizing]);
 
   // Seasonally-aware "be home by" default. The old behaviour left this blank,
   // so the only thing ending the day was Max Hours Per Day — which is why an
@@ -1136,6 +1158,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         .eq('id', facility.id);
       if (error) throw error;
       setDayActionsPopover(null);
+      pendingDayMovesRef.current.push({ facilityName: facility.name, targetDay });
       if (onFacilitiesUpdated) await onFacilitiesUpdated();
       // Same re-optimize trigger the drag-and-drop path uses so the day's
       // stop order/timing reflects the new membership.
@@ -1416,6 +1439,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       if (error) throw error;
 
+      facilitiesToUpdate.forEach(f =>
+        pendingDayMovesRef.current.push({ facilityName: f.name, targetDay: bulkReassignTargetDay })
+      );
       setSelectedFacilityNames(new Set());
       setListSelectionMode(false);
 
@@ -1433,8 +1459,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const handleDragStart = (facilityName: string, fromDay: number) => {
     setDraggedFacility({ name: facilityName, fromDay });
   };
-
-  const [isReoptimizing, setIsReoptimizing] = useState(false);
 
   const handleReoptimizeDays = async () => {
     if (!settings || !homeBase || isReoptimizing) return;
@@ -1482,9 +1506,41 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           dayList.push(item);
           dayOrderedRouteFacilities.push(item);
         }
-        if (dayList.length > 0) {
-          facilitiesByDay.set(route.day, dayList);
+        // Keep empty days too — a day the user added (or just emptied via a
+        // move) should survive the refresh rather than silently vanish.
+        facilitiesByDay.set(route.day, dayList);
+      }
+
+      // Apply the day moves the user requested since the last rebuild. The
+      // grouping above reflects the OLD on-screen lists; without this step a
+      // "Move to Day" click writes the DB but the facility never leaves its
+      // old day's list. A targetDay past the last route creates that day.
+      const movesToApply = pendingDayMovesRef.current.splice(0);
+      const movedNames: string[] = [];
+      for (const move of movesToApply) {
+        let moved: (typeof facilities)[number] | undefined;
+        for (const [, dayList] of facilitiesByDay) {
+          const idx = dayList.findIndex(f => f.name === move.facilityName);
+          if (idx !== -1) {
+            moved = dayList.splice(idx, 1)[0];
+            break;
+          }
         }
+        if (!moved) {
+          // Not on the displayed route (e.g. restored facility) — pull the
+          // live row so the move still lands.
+          const live = facilities.find(f => f.name === move.facilityName);
+          if (!live) continue;
+          moved = live;
+          if (!seenFacilityIds.has(live.id)) {
+            seenFacilityIds.add(live.id);
+            dayOrderedRouteFacilities.push(live);
+          }
+        }
+        const targetList = facilitiesByDay.get(move.targetDay) ?? [];
+        targetList.push(moved);
+        facilitiesByDay.set(move.targetDay, targetList);
+        movedNames.push(move.facilityName);
       }
 
       console.log('[RouteResults] Facilities grouped from current route', {
@@ -1517,6 +1573,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       // Re-optimize each day's route order
       const newRoutes = Array.from(facilitiesByDay.entries()).map(([day, dayFacilities]) => {
         console.log(`[RouteResults] Optimizing day ${day}`, { facilityCount: dayFacilities.length });
+
+        if (dayFacilities.length === 0) {
+          // A day left empty (added by hand, or emptied by a move) keeps a
+          // shell route so it stays visible; the user can delete it from
+          // the day header if it's no longer wanted.
+          const startTime = settings.start_time || '08:00';
+          return {
+            day,
+            facilities: [],
+            sequence: [],
+            totalMiles: 0,
+            totalDriveTime: 0,
+            totalVisitTime: 0,
+            totalTime: 0,
+            startTime,
+            endTime: startTime,
+            lastFacilityDepartureTime: startTime,
+            segments: [],
+          };
+        }
 
         const facilitiesWithIndex = dayFacilities.map((f) => {
           const matrixIndex = allFacilitiesForMatrix.findIndex(af => af.id === f.id) + 1;
@@ -1587,6 +1663,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (onUpdateResult) {
         onUpdateResult(newResult);
       }
+      flashMovedFacilities(movedNames);
 
       // Re-ordering a day changes its drive time, which changes what fits
       // before a "leave for home base by" cut-off. Re-pack in both directions
@@ -1629,6 +1706,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       if (error) throw error;
 
       setDraggedFacility(null);
+      pendingDayMovesRef.current.push({ facilityName: facility.name, targetDay });
 
       if (onFacilitiesUpdated) {
         await onFacilitiesUpdated();
@@ -2761,7 +2839,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       </button>
                                     ) : (
                                       <p
-                                        className={`font-medium text-blue-600 hover:text-blue-800 cursor-pointer ${photosTaken ? 'line-through text-gray-500 dark:text-gray-400' : ''}`}
+                                        className={`font-medium text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-500 ${photosTaken ? 'line-through text-gray-500 dark:text-gray-400' : ''} ${recentlyMovedNames.has(segment.to) ? 'bg-yellow-100 dark:bg-yellow-900/50 rounded px-1.5 -mx-1.5 animate-pulse' : ''}`}
                                         onClick={(e) => handleFacilityClick(segment.to, e)}
                                         onContextMenu={(e) => openDayActionsPopover(segment.to, e)}
                                         title="Click to reassign or view details"
