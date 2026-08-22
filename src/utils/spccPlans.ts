@@ -446,3 +446,127 @@ export function nextBermIndex(plans: SPCCPlan[]): number {
 export function sortPlansByBermIndex(plans: SPCCPlan[]): SPCCPlan[] {
   return [...plans].sort((a, b) => a.berm_index - b.berm_index);
 }
+
+/**
+ * Canonical stored form for a visit time is "HH:MM" on a 24-hour clock.
+ *
+ * There is deliberately no five-minute-boundary rule here any more. That
+ * constraint existed only because the two editors were dropdowns that could
+ * not offer anything else; now that both are free-text fields, rejecting a
+ * typed "2:17 PM" would be the field refusing what the user plainly meant.
+ * The database trigger still ROUNDS its own auto-stamp to five minutes when
+ * photos_taken flips — that's a separate concern from what a person types.
+ */
+export function isValidVisitTime(time: string): boolean {
+  if (!/^\d{2}:\d{2}$/.test(time)) return false;
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours <= 23 && minutes <= 59;
+}
+
+/**
+ * Parse a typed visit time into canonical "HH:MM", or null if it can't be
+ * read as a time. Accepts the shapes people actually type:
+ *
+ *   "2:15 PM"  "2:15pm"  "215p"  "1415"  "14:15"  "2p"  "9"
+ *
+ * Without an am/pm marker the input is read as a 24-hour clock, so "14:15"
+ * works and "2:15" means 02:15. That's a guess either way; committing to the
+ * literal reading at least makes it predictable, and the field re-displays
+ * what was saved ("2:15 AM") so a wrong guess is visible and correctable.
+ */
+export function parseVisitTimeInput(input: string): string | null {
+  const cleaned = input.trim().toLowerCase().replace(/[.\s]/g, '');
+  if (cleaned === '') return null;
+
+  const match = cleaned.match(/^(\d{1,2})(?::?(\d{2}))?(am|pm|a|p)?$/);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = match[2] == null ? 0 : Number(match[2]);
+  const meridiem = match[3]?.[0]; // 'a' | 'p' | undefined
+
+  if (minutes > 59) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === 'p' && hours !== 12) hours += 12;
+    if (meridiem === 'a' && hours === 12) hours = 0;
+  } else if (hours > 23) {
+    return null;
+  }
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/**
+ * How a stored visit time is shown back to the user: "2:15 PM". Accepts the
+ * "HH:MM:SS" the database column returns as well as bare "HH:MM".
+ */
+export function formatVisitTimeDisplay(time: string | null | undefined): string {
+  if (!time) return '';
+  const [hours, minutes] = time.split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return '';
+  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Persist a facility's field visit time and keep the newest
+ * route_visit_events row in step with it. Pass null to clear.
+ *
+ * Lives here rather than inside a modal because two surfaces edit this value
+ * — the facility detail modal's General tab and the SPCC plan modal's Field
+ * Operations panel — and a visit time that means different things depending
+ * on which panel you typed it into would be worse than no editor at all.
+ *
+ * Note the asymmetry with photos_taken / field_visit_date: when a facility
+ * has a single berm those live on the per-berm `spcc_plans` row and are
+ * mirrored up to the facility by trigger. There is no field_visit_time
+ * column on spcc_plans — a visit happens at one time no matter how many
+ * berms were photographed — so this always writes the facility row.
+ *
+ * Returns the combined visit timestamp (ISO) when there was a date to pair
+ * the time with, otherwise null.
+ */
+export async function saveFieldVisitTime(
+  facilityId: string,
+  isoDate: string | null,
+  time: string | null
+): Promise<string | null> {
+  if (time !== null && !isValidVisitTime(time)) {
+    throw new Error(`Invalid visit time "${time}" — expected HH:MM`);
+  }
+
+  const { error } = await supabase
+    .from('facilities')
+    .update({ field_visit_time: time })
+    .eq('id', facilityId);
+  if (error) throw error;
+
+  // Nothing to stamp on the event log without both halves of the instant.
+  if (!isoDate || !time) return null;
+
+  const { data: latestEvent, error: fetchError } = await supabase
+    .from('route_visit_events')
+    .select('id')
+    .eq('facility_id', facilityId)
+    .order('visited_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // The events table postdates some deployments. A missing table is not a
+  // reason to fail the edit the user just made — the time itself is saved.
+  if (fetchError && !fetchError.message.includes('does not exist')) throw fetchError;
+
+  const visitedAt = new Date(`${isoDate}T${time}:00`);
+  if (latestEvent?.id) {
+    const { error: updateError } = await supabase
+      .from('route_visit_events')
+      .update({ visited_at: visitedAt.toISOString() })
+      .eq('id', latestEvent.id);
+    if (updateError) throw updateError;
+  }
+
+  return visitedAt.toISOString();
+}

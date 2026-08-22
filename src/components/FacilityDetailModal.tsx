@@ -44,6 +44,7 @@ import LDARSitePlanSection from './LDARSitePlanSection';
 import LDARObservationPathSection from './LDARObservationPathSection';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
+import { parseVisitTimeInput, formatVisitTimeDisplay, saveFieldVisitTime } from '../utils/spccPlans';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
@@ -189,7 +190,7 @@ export default function FacilityDetailModal({
   const [editingVisitDate, setEditingVisitDate] = useState(false);
   const [visitDateValue, setVisitDateValue] = useState(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
   const [editingVisitTime, setEditingVisitTime] = useState(false);
-  const [visitTimeValue, setVisitTimeValue] = useState(facility.field_visit_time?.slice(0, 5) || '');
+  const [visitTimeValue, setVisitTimeValue] = useState(formatVisitTimeDisplay(facility.field_visit_time));
   const [latestVisitAt, setLatestVisitAt] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
   // Coordinates inline editor on the General tab. Kept local because there
@@ -220,7 +221,7 @@ export default function FacilityDetailModal({
 
   useEffect(() => {
     setVisitDateValue(facility.field_visit_date ? formatDate(facility.field_visit_date) : '');
-    setVisitTimeValue(facility.field_visit_time?.slice(0, 5) || '');
+    setVisitTimeValue(formatVisitTimeDisplay(facility.field_visit_time));
     setLatestVisitAt(null);
     void supabase
       .from('route_visit_events')
@@ -1144,39 +1145,23 @@ export default function FacilityDetailModal({
   };
 
   const handleSaveVisitTime = async () => {
-    if (!/^\d{2}:\d{2}$/.test(visitTimeValue)) return;
-    const [hours, minutes] = visitTimeValue.split(':').map(Number);
-    if (hours > 23 || minutes > 59 || minutes % 5 !== 0) return;
+    // Typed free-text ("2:15 pm", "215p", "1415") rather than a dropdown, so
+    // parse before saving; unparseable input is left alone for the user to
+    // fix, flagged by the red border on the field.
+    const parsed = parseVisitTimeInput(visitTimeValue);
+    if (!parsed) return;
     setSavingDate(true);
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ field_visit_time: visitTimeValue })
-        .eq('id', facility.id);
-      if (error) throw error;
-
-      const isoDate = facility.field_visit_date || parseDateInput(visitDateValue);
-      if (isoDate) {
-        const { data: latestEvent, error: eventFetchError } = await supabase
-          .from('route_visit_events')
-          .select('id')
-          .eq('facility_id', facility.id)
-          .order('visited_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (eventFetchError && !eventFetchError.message.includes('does not exist')) throw eventFetchError;
-        if (latestEvent?.id) {
-          const eventDate = new Date(`${isoDate}T${visitTimeValue}:00`);
-          const { error: eventUpdateError } = await supabase
-            .from('route_visit_events')
-            .update({ visited_at: eventDate.toISOString() })
-            .eq('id', latestEvent.id);
-          if (eventUpdateError) throw eventUpdateError;
-          setLatestVisitAt(eventDate.toISOString());
-        }
-      }
-
-      facility.field_visit_time = visitTimeValue;
+      // Shared with the SPCC plan modal's Field Operations panel, which
+      // edits the same field — see saveFieldVisitTime.
+      const visitedAt = await saveFieldVisitTime(
+        facility.id,
+        facility.field_visit_date || parseDateInput(visitDateValue),
+        parsed
+      );
+      if (visitedAt) setLatestVisitAt(visitedAt);
+      facility.field_visit_time = parsed;
+      setVisitTimeValue(formatVisitTimeDisplay(parsed));
       setEditingVisitTime(false);
     } catch (err) {
       console.error('Error saving visit time:', err);
@@ -2662,24 +2647,24 @@ export default function FacilityDetailModal({
                 </div>
                 {editingVisitTime && (
                   <div className="flex items-center gap-2 mt-2">
-                    <select
+                    <input
+                      type="text"
+                      placeholder="h:mm am"
                       value={visitTimeValue}
                       onChange={(e) => setVisitTimeValue(e.target.value)}
-                      className="text-sm px-2 py-1 rounded border dark:bg-gray-600 dark:border-gray-500 dark:text-white"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveVisitTime();
+                        }
+                      }}
+                      className={`text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white ${
+                        visitTimeValue && !parseVisitTimeInput(visitTimeValue) ? 'border-red-400' : ''
+                      }`}
                       autoFocus
-                    >
-                      <option value="">Select time</option>
-                      {Array.from({ length: 288 }, (_, index) => {
-                        const totalMinutes = index * 5;
-                        const hour = Math.floor(totalMinutes / 60);
-                        const minute = totalMinutes % 60;
-                        const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-                        const label = new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                        return <option key={value} value={value}>{label}</option>;
-                      })}
-                    </select>
-                    <button onClick={handleSaveVisitTime} disabled={savingDate || !visitTimeValue} className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-50">Save</button>
-                    <button onClick={() => { setEditingVisitTime(false); setVisitTimeValue(facility.field_visit_time?.slice(0, 5) || ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                    />
+                    <button onClick={handleSaveVisitTime} disabled={savingDate || !parseVisitTimeInput(visitTimeValue)} className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-50">Save</button>
+                    <button onClick={() => { setEditingVisitTime(false); setVisitTimeValue(formatVisitTimeDisplay(facility.field_visit_time)); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
                   </div>
                 )}
               </div>

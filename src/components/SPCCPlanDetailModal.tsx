@@ -5,7 +5,7 @@ import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/sup
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate } from '../utils/dateUtils';
-import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel } from '../utils/spccPlans';
+import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel, parseVisitTimeInput, formatVisitTimeDisplay, saveFieldVisitTime } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
 import LDARSitePlanSection from './LDARSitePlanSection';
@@ -54,12 +54,62 @@ function FieldOperationsSection({
   const [visitDateInput, setVisitDateInput] = useState(
     facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : ''
   );
+  // Visit time is facility-level even when the date lives on a berm row —
+  // spcc_plans has no field_visit_time column, because a visit happens at one
+  // time regardless of how many berms got photographed. Stored as HH:MM:SS,
+  // typed and displayed as "2:15 PM" (same free-text treatment as the visit
+  // date right below it, for the same reason: native pickers commit partial
+  // input on blur).
+  const [visitTimeInput, setVisitTimeInput] = useState(
+    formatVisitTimeDisplay(facility.field_visit_time)
+  );
 
   // Sync with parent if facility prop changes
   useEffect(() => {
     setPhotosTaken(facility.photos_taken || false);
     setVisitDateInput(facility.field_visit_date ? formatDateDisplay(facility.field_visit_date) : '');
-  }, [facility.photos_taken, facility.field_visit_date]);
+    setVisitTimeInput(formatVisitTimeDisplay(facility.field_visit_time));
+  }, [facility.photos_taken, facility.field_visit_date, facility.field_visit_time]);
+
+  // Commit on blur or Enter, mirroring commitVisitDate. Unparseable input is
+  // left in the field with a red border rather than discarded.
+  const commitVisitTime = async () => {
+    const trimmed = visitTimeInput.trim();
+    const parsed = trimmed ? parseVisitTimeInput(trimmed) : null;
+
+    if (trimmed === '') {
+      if (!facility.field_visit_time) return; // nothing to clear
+      try {
+        await saveFieldVisitTime(facility.id, null, null);
+        facility.field_visit_time = null;
+        onFacilitiesChange();
+      } catch (err) {
+        console.error('Error clearing field_visit_time:', err);
+        setVisitTimeInput(formatVisitTimeDisplay(facility.field_visit_time));
+      }
+      return;
+    }
+
+    // Invalid — leave it for the user to fix; the red border flags it.
+    if (!parsed) return;
+
+    // Re-display canonically so a typed "215p" comes back as "2:15 PM".
+    setVisitTimeInput(formatVisitTimeDisplay(parsed));
+    if (parsed === facility.field_visit_time?.slice(0, 5)) return;
+
+    try {
+      await saveFieldVisitTime(
+        facility.id,
+        facility.field_visit_date || (visitDateInput ? parseDateInput(visitDateInput) : null),
+        parsed
+      );
+      facility.field_visit_time = parsed;
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error updating field_visit_time:', err);
+      setVisitTimeInput(formatVisitTimeDisplay(facility.field_visit_time));
+    }
+  };
 
   const handleTogglePhotos = async () => {
     const newVal = !photosTaken;
@@ -204,6 +254,8 @@ function FieldOperationsSection({
                 return (
                   <div className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
                     Visited: {formatDate(iso)}
+                    {facility.field_visit_time &&
+                      ` at ${formatVisitTimeDisplay(facility.field_visit_time)}`}
                   </div>
                 );
               })()}
@@ -235,6 +287,34 @@ function FieldOperationsSection({
                 ? 'bg-gray-700 border-gray-600 text-white'
                 : 'bg-white border-gray-300 text-gray-900'
             } ${visitDateInput && !parseDateInput(visitDateInput) ? 'border-red-400' : ''}`}
+          />
+        </div>
+
+        {/* Field Visit Time - Editable. Same value the facility detail
+            modal's "Time Taken" row edits; both write through
+            saveFieldVisitTime so the event log stays in step either way. */}
+        <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Clock className={`w-4 h-4 flex-shrink-0 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} />
+            <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Visit Time</span>
+          </div>
+          <input
+            type="text"
+            placeholder="h:mm am"
+            value={visitTimeInput}
+            onChange={(e) => setVisitTimeInput(e.target.value)}
+            onBlur={commitVisitTime}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className={`text-sm font-medium px-2 py-1 rounded border w-28 ${
+              darkMode
+                ? 'bg-gray-700 border-gray-600 text-white'
+                : 'bg-white border-gray-300 text-gray-900'
+            } ${visitTimeInput && !parseVisitTimeInput(visitTimeInput) ? 'border-red-400' : ''}`}
           />
         </div>
 

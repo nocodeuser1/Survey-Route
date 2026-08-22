@@ -11,6 +11,7 @@ import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspect
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
 import { getFacilityPhotosState } from '../utils/spccPlans';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
+import VisitActionsPopover from './VisitActionsPopover';
 import { parseLocalDate } from '../utils/dateUtils';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
@@ -948,12 +949,42 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     minute: '2-digit',
   }).format(new Date(timestamp));
 
-  const routeVisitSummary = routeVisitEvents
-    .map(event => ({
-      event,
-      facility: facilities.find(facility => facility.id === event.facility_id),
-    }))
-    .filter((entry): entry is { event: RouteVisitEvent; facility: Facility } => Boolean(entry.facility));
+  /**
+   * One stop per facility, in the order they were actually visited.
+   *
+   * route_visit_events is an append-only log: the database trigger adds a row
+   * every time photos_taken flips false -> true, so un-marking and re-marking
+   * a site — or correcting one that was ticked by accident — leaves several
+   * rows for the same facility. Rendering the log directly listed the same
+   * facility three times in a row that was only ever visited once.
+   *
+   * Keep the most recent event per facility rather than the first: that's the
+   * row saveFieldVisitTime edits, and the one that agrees with the facility's
+   * field_visit_date / field_visit_time, so correcting a visit time in either
+   * modal moves the stop here too instead of leaving the two views disagreeing.
+   */
+  const routeVisitSummary = (() => {
+    const latestByFacility = new Map<string, RouteVisitEvent>();
+    for (const event of routeVisitEvents) {
+      const existing = latestByFacility.get(event.facility_id);
+      if (!existing || new Date(event.visited_at).getTime() > new Date(existing.visited_at).getTime()) {
+        latestByFacility.set(event.facility_id, event);
+      }
+    }
+
+    return Array.from(latestByFacility.values())
+      .sort((a, b) => new Date(a.visited_at).getTime() - new Date(b.visited_at).getTime())
+      .map(event => ({
+        event,
+        facility: facilities.find(facility => facility.id === event.facility_id),
+      }))
+      .filter((entry): entry is { event: RouteVisitEvent; facility: Facility } => Boolean(entry.facility))
+      // The log is never rewritten, so un-marking a stop leaves its rows
+      // behind. Photos taken is what "visited" means, so it decides
+      // membership here — that's what makes clearing the flag drop the
+      // facility out of the summary.
+      .filter(({ facility }) => Boolean(facility.photos_taken));
+  })();
 
   const hasValidInspection = (facilityName: string): boolean => {
     const facility = getFacilityForStop(facilityName);
@@ -1074,6 +1105,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // {facility, x, y} → render at (x,y) clamped to the viewport.
   const [dayActionsPopover, setDayActionsPopover] = useState<
     { facility: Facility; x: number; y: number } | null
+  >(null);
+
+  // The Visit Route Summary gets its own popover: that list is about visits,
+  // so its actions are the visit's own facts (photos / date / time) rather
+  // than the day-reassignment actions the route lists offer. Anchored to the
+  // clicked name so it follows on scroll.
+  const [visitActionsPopover, setVisitActionsPopover] = useState<
+    { facility: Facility; anchorEl: HTMLElement } | null
   >(null);
 
   const openDayActionsPopover = (facilityName: string, e: React.MouseEvent) => {
@@ -2269,7 +2308,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     </div>
                     <div className="ml-3 md:ml-0 md:mt-3 md:pr-4">
                       <button
-                        onClick={(e) => handleFacilityClick(facility.name, e)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDayActionsPopover(null);
+                          setVisitActionsPopover({
+                            facility,
+                            anchorEl: e.currentTarget as HTMLElement,
+                          });
+                        }}
                         className="text-left font-semibold text-blue-700 dark:text-blue-300 hover:underline"
                       >
                         {facility.name}
@@ -2996,6 +3043,24 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
       </div>
+
+      {visitActionsPopover && (
+        <VisitActionsPopover
+          // Re-resolve from the live list so the popover shows what was
+          // actually persisted after each save, not the snapshot taken when
+          // it opened.
+          facility={
+            facilities.find(f => f.id === visitActionsPopover.facility.id)
+              ?? visitActionsPopover.facility
+          }
+          anchorEl={visitActionsPopover.anchorEl}
+          onSaved={async () => {
+            await loadRouteVisitEvents();
+            if (onFacilitiesUpdated) await onFacilitiesUpdated();
+          }}
+          onClose={() => setVisitActionsPopover(null)}
+        />
+      )}
 
       {dayActionsPopover && (
         <DayActionsPopover
