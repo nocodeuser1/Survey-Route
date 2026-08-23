@@ -2782,8 +2782,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         const facilityName = segment.to;
                         return isFacilityVisible(facilityName);
                       }).map((segment, index) => {
-                        const isHomeBaseSegment = segment.from === 'Home Base' || segment.to === 'Home Base';
-                        const facilityName = segment.to === 'Home Base' ? segment.from : segment.to;
+                        // Only the return-home row lacks a facility. The first
+                        // stop's row has from === 'Home Base' but its
+                        // DESTINATION is a real facility — treating it as a
+                        // home-base row skipped its facility lookup, so the
+                        // first stop never got the photos-taken strikethrough,
+                        // camera icon, drag handle, or selection checkbox.
+                        const isHomeBaseSegment = segment.to === 'Home Base';
+                        const facilityName = segment.to;
                         const isSelected = selectedFacilityNames.has(facilityName);
                         const facility = isHomeBaseSegment ? undefined : getFacilityForStop(facilityName);
                         const photosTaken = Boolean(facility?.photos_taken);
