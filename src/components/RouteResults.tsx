@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2 } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { OptimizationResult, rebuildDayRoute } from '../services/routeOptimizer';
+import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
 import { UserSettings, Facility, Inspection, RouteVisitEvent, supabase } from '../lib/supabase';
@@ -12,7 +12,7 @@ import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
 import { getFacilityPhotosState } from '../utils/spccPlans';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import VisitActionsPopover from './VisitActionsPopover';
-import { parseLocalDate, getAccountTimeZone } from '../utils/dateUtils';
+import { parseLocalDate, getAccountTimeZone, instantToZonedParts } from '../utils/dateUtils';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import ExportRoutes from './ExportRoutes';
 import SavedRoutesManager from './SavedRoutesManager';
@@ -127,6 +127,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
   const [pendingReoptimize, setPendingReoptimize] = useState(false);
   const [isReoptimizing, setIsReoptimizing] = useState(false);
+  // Guards the "Apply to Day Lists" action in the Visit Route Summary — it
+  // writes every facility's day_assignment and rebuilds the whole plan, so a
+  // double-click must not start a second pass over half-written state.
+  const [isApplyingVisitDays, setIsApplyingVisitDays] = useState(false);
   // Day moves the user has requested (popover / drag-drop / bulk reassign)
   // that the next re-optimize pass must honor. handleReoptimizeDays groups
   // facilities from the CURRENTLY DISPLAYED result.routes — not the DB —
@@ -974,6 +978,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     minute: '2-digit',
   }).format(new Date(timestamp));
 
+  /** Just the calendar day a visit landed on, for day-group headings. */
+  const formatVisitDate = (timestamp: string) => new Intl.DateTimeFormat('en-US', {
+    timeZone: getAccountTimeZone(),
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(timestamp));
+
+  /** Names of every facility in the route currently being planned. */
+  const getRouteFacilityNames = (): Set<string> => {
+    const names = new Set<string>();
+    result.routes.forEach(route => route.facilities.forEach(f => names.add(f.name)));
+    return names;
+  };
+
   /**
    * One stop per facility, in the order they were actually visited.
    *
@@ -987,8 +1006,27 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    * row saveFieldVisitTime edits, and the one that agrees with the facility's
    * field_visit_date / field_visit_time, so correcting a visit time in either
    * modal moves the stop here too instead of leaving the two views disagreeing.
+   *
+   * Each entry also carries an OBSERVED day number, derived from the visit's
+   * own calendar date in the account's timezone: the earliest date visited is
+   * Day 1, the next distinct date is Day 2, and so on. This deliberately
+   * ignores facility.day_assignment. That field says which planned list the
+   * stop sits in, and the plan is routinely wrong about the order the trip
+   * actually ran — a stop planned for Day 2 but driven first on the evening
+   * of the trip's first day was being labelled "Day 2" here while its
+   * timestamp plainly read the earlier date. This panel is the record of
+   * what happened, so the record decides the day.
+   *
+   * Scoped to the current route, for the same reason getCompletedFacilities
+   * is: route_visit_events is loaded for every facility in the account and
+   * photos_taken is never cleared between trips, so an unscoped list drags in
+   * sites surveyed months ago. That mattered little when each row printed its
+   * own day_assignment, but the day counter is shared — one stray visit dated
+   * before the trip would take Day 1 and push the trip's real first day to
+   * Day 2, which is the exact off-by-one this panel is meant to stop telling.
    */
   const routeVisitSummary = (() => {
+    const inRoute = getRouteFacilityNames();
     const latestByFacility = new Map<string, RouteVisitEvent>();
     for (const event of routeVisitEvents) {
       const existing = latestByFacility.get(event.facility_id);
@@ -997,7 +1035,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }
     }
 
-    return Array.from(latestByFacility.values())
+    const visits = Array.from(latestByFacility.values())
       .sort((a, b) => new Date(a.visited_at).getTime() - new Date(b.visited_at).getTime())
       .map(event => ({
         event,
@@ -1008,7 +1046,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       // behind. Photos taken is what "visited" means, so it decides
       // membership here — that's what makes clearing the flag drop the
       // facility out of the summary.
-      .filter(({ facility }) => Boolean(facility.photos_taken));
+      .filter(({ facility }) => Boolean(facility.photos_taken))
+      .filter(({ facility }) => inRoute.has(facility.name));
+
+    // Number the distinct calendar dates in the order they were driven. The
+    // list is already sorted by instant and the zone is fixed, so first-seen
+    // order is chronological order.
+    const dayByDate = new Map<string, number>();
+    return visits.map(entry => {
+      const visitDate =
+        instantToZonedParts(entry.event.visited_at).date || entry.event.visited_at.slice(0, 10);
+      if (!dayByDate.has(visitDate)) dayByDate.set(visitDate, dayByDate.size + 1);
+      return { ...entry, visitDate, observedDay: dayByDate.get(visitDate) as number };
+    });
   })();
 
   const hasValidInspection = (facilityName: string): boolean => {
@@ -1067,13 +1117,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   /** Photos on file = someone has physically been to the site. */
   const isFacilityVisited = (facility: Facility): boolean =>
     getFacilityPhotosState(facility) === 'all';
-
-  /** Names of every facility in the route currently being planned. */
-  const getRouteFacilityNames = (): Set<string> => {
-    const names = new Set<string>();
-    result.routes.forEach(route => route.facilities.forEach(f => names.add(f.name)));
-    return names;
-  };
 
   /**
    * The "done" panel under the day cards.
@@ -1681,6 +1724,255 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       alert(`Failed to re-optimize route order: ${errorMessage}\n\nCheck console for details.`);
     } finally {
       setIsReoptimizing(false);
+    }
+  };
+
+  /**
+   * Rebuild the day lists so the plan agrees with the visit log.
+   *
+   * The day cards are a plan written before the trip; the Visit Route Summary
+   * is the record of what was actually driven. When they disagree the record
+   * wins, so this action rewrites the plan from it:
+   *
+   *   - Every stop with a recorded visit moves to the day its timestamp fell
+   *     on (Day 1 = earliest calendar date visited, in the account's
+   *     timezone), and keeps its recorded order inside that day. Those days
+   *     go through calculateDayRoute, NOT rebuildDayRoute — re-optimizing a
+   *     day that has already been driven would invent an order nobody drove.
+   *   - Stops with no recorded visit keep their relative planned grouping and
+   *     slide to the days after the visited ones, still optimized. The
+   *     remaining plan survives instead of being dissolved into history.
+   *
+   * Only stops in the current route are touched — routeVisitSummary is
+   * already scoped that way, so this action and the timeline it sits under
+   * always agree on which day a stop belongs to.
+   */
+  const applyVisitOrderToDayLists = async () => {
+    if (isApplyingVisitDays || isReoptimizing) return;
+    if (!accountId || !settings || !homeBase || !onUpdateResult) {
+      alert('Rearranging the day lists needs the route settings and home base loaded. Try again once the route has finished loading.');
+      return;
+    }
+
+    if (routeVisitSummary.length === 0) return;
+
+    // Group by the SAME observedDay the panel prints. Deriving a second
+    // numbering here would let the day cards and the timeline above them
+    // disagree about which day a stop belongs to — the disagreement this
+    // whole action exists to end.
+    const visitedDays = new Map<number, typeof routeVisitSummary>();
+    for (const entry of routeVisitSummary) {
+      const list = visitedDays.get(entry.observedDay) ?? [];
+      list.push(entry);
+      visitedDays.set(entry.observedDay, list);
+    }
+    const visitedDayEntries = Array.from(visitedDays.entries()).sort((a, b) => a[0] - b[0]);
+    const visitedDayCount = visitedDayEntries.length;
+    const visitedNames = new Set(routeVisitSummary.map(entry => entry.facility.name));
+
+    // Unvisited stops, grouped exactly as the current plan groups them.
+    // Planned days that end up empty collapse out rather than leaving holes.
+    const remainingDays: string[][] = [];
+    for (const route of result.routes) {
+      const names = route.facilities.map(f => f.name).filter(name => !visitedNames.has(name));
+      if (names.length > 0) remainingDays.push(names);
+    }
+    const remainingCount = remainingDays.reduce((sum, names) => sum + names.length, 0);
+
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const lines = visitedDayEntries.map(([day, list]) =>
+      `  Day ${day} · ${formatVisitDate(list[0].event.visited_at)} — ${plural(list.length, 'visited stop')}, in the order the photos were taken`
+    );
+    if (remainingCount > 0) {
+      const first = visitedDayCount + 1;
+      const last = visitedDayCount + remainingDays.length;
+      lines.push(`  Day ${first}${last > first ? `–${last}` : ''} — ${plural(remainingCount, 'stop')} not visited yet, re-optimized`);
+    }
+
+    if (!confirm(
+      `Rebuild the day lists from the recorded visits?\n\n${lines.join('\n')}\n\n` +
+      `This rewrites each of these facilities' day assignment. Day start times are left alone.`
+    )) {
+      return;
+    }
+
+    setIsApplyingVisitDays(true);
+    try {
+      const newDayByName = new Map<string, number>();
+      visitedDayEntries.forEach(([day, list]) => list.forEach(entry => newDayByName.set(entry.facility.name, day)));
+      remainingDays.forEach((names, i) => names.forEach(name => newDayByName.set(name, visitedDayCount + i + 1)));
+
+      // Rebuild the displayed plan first, and only write the assignments once
+      // it exists. Same matrix-then-day-route path handleReoptimizeDays uses;
+      // the difference is which builder each day gets (see the doc comment).
+      // The order matters because this calls OSRM, which fails on a rate
+      // limit or a dead network: persisting first would leave the database
+      // holding the new grouping while the day cards still render the old
+      // one, with nothing on screen but "failed" — a reshuffle the user
+      // wouldn't discover until the next reload.
+      const defaultVisitDuration = settings.default_visit_duration_minutes || 30;
+      const dayLists: Array<{ day: number; names: string[]; preserveOrder: boolean }> = [
+        ...visitedDayEntries.map(([day, list]) => ({
+          day,
+          names: list.map(entry => entry.facility.name),
+          preserveOrder: true,
+        })),
+        ...remainingDays.map((names, i) => ({ day: visitedDayCount + i + 1, names, preserveOrder: false })),
+      ];
+
+      // Route copies are the fallback for coordinates/visit duration when a
+      // facility row has since been deleted — same reasoning as the
+      // re-optimize path: better a stale entry than a stop that vanishes.
+      const routeCopyByName = new Map<string, FacilityWithIndex>();
+      for (const route of result.routes) {
+        for (const rf of route.facilities) {
+          if (!routeCopyByName.has(rf.name)) routeCopyByName.set(rf.name, rf);
+        }
+      }
+
+      const matrixFacilities: FacilityWithIndex[] = [];
+      const matrixIndexByName = new Map<string, number>();
+      const uncharted: string[] = [];
+      for (const { names } of dayLists) {
+        for (const name of names) {
+          if (matrixIndexByName.has(name)) continue;
+          const live = facilities.find(f => f.name === name);
+          const copy = routeCopyByName.get(name);
+          const latitude = Number(live?.latitude ?? copy?.latitude);
+          const longitude = Number(live?.longitude ?? copy?.longitude);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            // Nothing to route to. Its day_assignment is still written below,
+            // so it lands in the right list on the next full regenerate.
+            uncharted.push(name);
+            continue;
+          }
+          matrixIndexByName.set(name, matrixFacilities.length + 1);
+          matrixFacilities.push({
+            index: matrixFacilities.length + 1,
+            name,
+            latitude,
+            longitude,
+            visitDuration: live?.visit_duration_minutes || copy?.visitDuration || defaultVisitDuration,
+          });
+        }
+      }
+
+      if (matrixFacilities.length === 0) {
+        throw new Error('None of these stops have coordinates to route with.');
+      }
+
+      const distanceMatrix = await calculateDistanceMatrix([
+        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
+        ...matrixFacilities.map(f => ({ latitude: f.latitude, longitude: f.longitude })),
+      ]);
+
+      const newRoutes = dayLists.map(({ day, names, preserveOrder }) => {
+        // Whatever this day slot already runs on: its per-day override if the
+        // user set one, else the clock the day is currently displaying (a
+        // saved route restores route.startTime without ever seeding
+        // dayStartTimes), else the account default. The confirm text promises
+        // start times are left alone; getDayStartTime alone would quietly
+        // reset a loaded route's day to 08:00 and shift every arrival on it.
+        const startTime =
+          dayStartTimes[day]
+          || result.routes.find(r => r.day === day)?.startTime
+          || settings.start_time
+          || '08:00';
+        const indices = names
+          .map(name => matrixIndexByName.get(name))
+          .filter((index): index is number => typeof index === 'number');
+
+        if (indices.length === 0) {
+          return {
+            day,
+            facilities: [],
+            sequence: [],
+            totalMiles: 0,
+            totalDriveTime: 0,
+            totalVisitTime: 0,
+            totalTime: 0,
+            startTime,
+            endTime: startTime,
+            lastFacilityDepartureTime: startTime,
+            segments: [],
+          };
+        }
+
+        const dayRoute = preserveOrder
+          ? calculateDayRoute(matrixFacilities, indices, distanceMatrix, 0, startTime, settings.lunch_break_minutes || 0)
+          : rebuildDayRoute(matrixFacilities, indices, distanceMatrix, 0, startTime, settings.lunch_break_minutes || 0);
+
+        return { ...dayRoute, day };
+      }).sort((a, b) => a.day - b.day);
+
+      const totalMiles = newRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
+      const totalDriveTime = newRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
+      const totalVisitTime = newRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
+      const totalTime = newRoutes.reduce((sum, r) => sum + r.totalTime, 0);
+
+      // The plan exists — now persist it, grouped by target day so this is a
+      // handful of writes rather than one per facility. Chunked because a
+      // long id list would blow the URL length limit on PostgREST's `in`.
+      const idsByDay = new Map<number, string[]>();
+      const movedNames: string[] = [];
+      for (const [name, day] of newDayByName) {
+        const live = facilities.find(f => f.name === name);
+        if (!live) continue;
+        if (live.day_assignment !== day) movedNames.push(name);
+        const ids = idsByDay.get(day) ?? [];
+        ids.push(live.id);
+        idsByDay.set(day, ids);
+      }
+      for (const [day, ids] of idsByDay) {
+        for (let i = 0; i < ids.length; i += 50) {
+          const { error } = await supabase
+            .from('facilities')
+            .update({ day_assignment: day })
+            .in('id', ids.slice(i, i + 50));
+          if (error) throw error;
+        }
+      }
+
+      // A move queued from an earlier click would be replayed against the
+      // lists we just rewrote and undo part of this. The DB already holds
+      // every assignment, so drop them.
+      pendingDayMovesRef.current.length = 0;
+
+      // Pre-arm the passive deadline guard with this exact plan. A day that
+      // was really driven 7 AM to 8 PM overruns almost any "leave for home
+      // base by" cut-off, and refitDeadlines answers an overrun by repacking
+      // every day from the deadline onward — which would immediately shuffle
+      // the stops we just placed in recorded order and put the day cards
+      // back at odds with the summary. Deadlines still apply to everything
+      // the user does after this; they just don't get to overrule history.
+      lastRefitSignatureRef.current = JSON.stringify([
+        newRoutes.map(r => [r.day, r.startTime, r.facilities.map(f => f.name)]),
+        dayReturnByTimes,
+      ]);
+
+      if (onFacilitiesUpdated) await onFacilitiesUpdated();
+
+      onUpdateResult({
+        routes: newRoutes,
+        totalDays: newRoutes.length,
+        totalMiles,
+        totalFacilities: matrixFacilities.length,
+        totalDriveTime,
+        totalVisitTime,
+        totalTime,
+      });
+      flashMovedFacilities(movedNames);
+
+      if (uncharted.length > 0) {
+        alert(
+          `Day lists rebuilt from the visit log.\n\n${plural(uncharted.length, 'stop')} had no coordinates and could not be placed on a day route: ${uncharted.join(', ')}. Their day assignment was still saved.`
+        );
+      }
+    } catch (err) {
+      console.error('[RouteResults] Error applying visit order to day lists:', err);
+      alert(`Failed to rebuild the day lists: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsApplyingVisitDays(false);
     }
   };
 
@@ -2360,7 +2652,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       {routeVisitSummary.length > 0 && (
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+          {/* Wraps rather than crushes: the header carries a title, a count
+              and an action, which is more than a phone-width row holds. */}
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Route className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -2370,13 +2664,31 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 Actual order recorded from Photos Taken, independent of planned days
               </p>
             </div>
-            <span className="shrink-0 rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
-              {routeVisitSummary.length} visited
-            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                {routeVisitSummary.length} visited
+              </span>
+              {/* Pushes the record back onto the plan: the day lists get
+                  rebuilt from these timestamps instead of the other way
+                  round. */}
+              <button
+                onClick={applyVisitOrderToDayLists}
+                disabled={isApplyingVisitDays || isReoptimizing}
+                title="Rewrite the day lists so each stop sits on the day it was actually visited, in the order the photos were taken"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 dark:border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 transition-all hover:bg-blue-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isApplyingVisitDays ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CalendarClock className="w-3.5 h-3.5" />
+                )}
+                <span>{isApplyingVisitDays ? 'Rebuilding…' : 'Apply to Day Lists'}</span>
+              </button>
+            </div>
           </div>
           <div className="px-4 sm:px-6 py-5 overflow-x-auto">
             <div className="flex flex-col md:flex-row md:min-w-max">
-              {routeVisitSummary.map(({ event, facility }, index) => (
+              {routeVisitSummary.map(({ event, facility, observedDay }, index) => (
                 <div key={event.id} className="flex md:flex-1 md:min-w-[180px] items-start gap-3 md:gap-0">
                   <div className="flex md:flex-col items-center md:items-stretch md:flex-1">
                     <div className="flex items-center md:items-start">
@@ -2403,8 +2715,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       >
                         {facility.name}
                       </button>
+                      {/* Observed day, not facility.day_assignment — see
+                          routeVisitSummary. The number counts distinct dates
+                          in the visit log, so it always agrees with the
+                          timestamp printed next to it. */}
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Day {facility.day_assignment && facility.day_assignment > 0 ? facility.day_assignment : 'unassigned'} · {formatVisitDateTime(event.visited_at)}
+                        Day {observedDay} · {formatVisitDateTime(event.visited_at)}
                       </div>
                     </div>
                   </div>
