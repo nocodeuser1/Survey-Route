@@ -91,6 +91,7 @@ export default function VisitActionsPopover({
   const [photosTaken, setPhotosTaken] = useState(facility.photos_taken ?? false);
   const [dateInput, setDateInput] = useState(() => seedFields().date);
   const [timeInput, setTimeInput] = useState(() => seedFields().time);
+  const committingFieldRef = useRef<'date' | 'time' | null>(null);
 
   useEffect(() => {
     const seeded = seedFields();
@@ -115,13 +116,21 @@ export default function VisitActionsPopover({
     }
     const anchor = anchorEl.getBoundingClientRect();
     const self = el.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportBottom = viewport
+      ? viewport.offsetTop + viewport.height
+      : window.innerHeight;
 
     // Prefer below the anchor; flip above when there isn't room.
     let top = anchor.bottom + GAP;
-    if (top + self.height > window.innerHeight - MARGIN) {
+    if (top + self.height > viewportBottom - MARGIN) {
       const above = anchor.top - GAP - self.height;
-      top = above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - self.height - MARGIN);
+      top = above >= viewportTop + MARGIN
+        ? above
+        : Math.max(viewportTop + MARGIN, viewportBottom - self.height - MARGIN);
     }
+    top = Math.max(viewportTop + MARGIN, Math.min(top, viewportBottom - self.height - MARGIN));
 
     const left = Math.max(
       MARGIN,
@@ -149,9 +158,13 @@ export default function VisitActionsPopover({
     };
     window.addEventListener('scroll', onMove, true);
     window.addEventListener('resize', onMove);
+    window.visualViewport?.addEventListener('resize', onMove);
+    window.visualViewport?.addEventListener('scroll', onMove);
     return () => {
       window.removeEventListener('scroll', onMove, true);
       window.removeEventListener('resize', onMove);
+      window.visualViewport?.removeEventListener('resize', onMove);
+      window.visualViewport?.removeEventListener('scroll', onMove);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [reposition]);
@@ -219,42 +232,46 @@ export default function VisitActionsPopover({
   };
 
   const commitDate = async () => {
+    if (committingFieldRef.current === 'date') return;
     const trimmed = dateInput.trim();
     const parsed = trimmed ? parseDateInput(trimmed) : null;
     if (trimmed !== '' && !parsed) return; // invalid — red border, keep the text
     if (parsed === (facility.field_visit_date ?? null)) return;
 
     setSaving(true);
+    committingFieldRef.current = 'date';
     try {
       const { error } = await supabase
         .from('facilities')
         .update({ field_visit_date: parsed })
         .eq('id', facility.id);
       if (error) throw error;
-      facility.field_visit_date = parsed;
       setDateInput(formatDateDisplay(parsed));
       await onSaved();
     } catch (err) {
       console.error('[VisitActionsPopover] Error saving field_visit_date:', err);
       setDateInput(formatDateDisplay(facility.field_visit_date));
     } finally {
+      committingFieldRef.current = null;
       setSaving(false);
     }
   };
 
   const commitTime = async () => {
+    if (committingFieldRef.current === 'time') return;
     const trimmed = timeInput.trim();
     const parsed = trimmed ? parseVisitTimeInput(trimmed) : null;
     if (trimmed !== '' && !parsed) return; // invalid — red border, keep the text
     if (parsed === (facility.field_visit_time?.slice(0, 5) ?? null)) return;
 
     setSaving(true);
+    committingFieldRef.current = 'time';
     try {
       // Shared writer — also re-stamps the newest route_visit_events row so
       // the summary's ordering follows the corrected time.
       await saveFieldVisitTime(
         facility.id,
-        parsed ? facility.field_visit_date || parseDateInput(dateInput) : null,
+        parsed ? parseDateInput(dateInput) || facility.field_visit_date : null,
         parsed
       );
       facility.field_visit_time = parsed;
@@ -264,15 +281,30 @@ export default function VisitActionsPopover({
       console.error('[VisitActionsPopover] Error saving field_visit_time:', err);
       setTimeInput(formatVisitTimeDisplay(facility.field_visit_time));
     } finally {
+      committingFieldRef.current = null;
       setSaving(false);
     }
   };
 
-  const commitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const commitOnEnter = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    commit: () => Promise<void>
+  ) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      (e.target as HTMLInputElement).blur();
+      void commit();
     }
+  };
+
+  const keepFocusedFieldVisible = (e: React.FocusEvent<HTMLInputElement>) => {
+    window.setTimeout(() => {
+      e.currentTarget.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'instant' as ScrollBehavior,
+      });
+      reposition();
+    }, 250);
   };
 
   const fieldClass = (invalid: boolean) =>
@@ -355,8 +387,9 @@ export default function VisitActionsPopover({
             value={dateInput}
             disabled={saving}
             onChange={(e) => setDateInput(e.target.value)}
+            onFocus={keepFocusedFieldVisible}
             onBlur={commitDate}
-            onKeyDown={commitOnEnter}
+            onKeyDown={(e) => commitOnEnter(e, commitDate)}
             className={fieldClass(Boolean(dateInput) && !parseDateInput(dateInput))}
           />
         </div>
@@ -372,8 +405,9 @@ export default function VisitActionsPopover({
             value={timeInput}
             disabled={saving}
             onChange={(e) => setTimeInput(e.target.value)}
+            onFocus={keepFocusedFieldVisible}
             onBlur={commitTime}
-            onKeyDown={commitOnEnter}
+            onKeyDown={(e) => commitOnEnter(e, commitTime)}
             className={fieldClass(Boolean(timeInput) && !parseVisitTimeInput(timeInput))}
           />
         </div>
