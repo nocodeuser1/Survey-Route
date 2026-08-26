@@ -10,6 +10,7 @@ import SignupRequestPage from './pages/SignupRequestPage';
 import AgencySignupPage from './pages/AgencySignupPage';
 import AgencyDashboard from './pages/AgencyDashboard';
 import AcceptInvitePage from './pages/AcceptInvitePage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import SignatureSetupPage from './pages/SignatureSetupPage';
 import UnsubscribePage from './pages/UnsubscribePage';
 import SPCCPlanViewerPage from './pages/SPCCPlanViewerPage';
@@ -119,6 +120,7 @@ export default function AppRouter() {
               <Route path="/request-access" element={<SignupRequestRoute />} />
               <Route path="/agency-signup" element={<AgencySignupPage />} />
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/unsubscribe" element={<UnsubscribePage />} />
               <Route path="/spcc-plan/:facilityId" element={<SPCCPlanViewerPage />} />
               <Route

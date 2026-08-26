@@ -7,11 +7,13 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { signIn, resetPassword, user, loading: authLoading } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => searchParams.get('email') || '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(
+    () => searchParams.get('forgot') === '1',
+  );
   const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
@@ -46,7 +48,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await resetPassword(email);
+      await resetPassword(email, searchParams.get('redirect') || undefined);
       setResetSent(true);
     } catch (err: any) {
       setError(err.message || 'Failed to send reset email');
@@ -68,7 +70,7 @@ export default function LoginPage() {
         <div className="max-w-md w-full">
           <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl p-8">
             <div className="flex items-center justify-center mb-8">
-              <div className="bg-blue-600 p-3 rounded-xl">
+              <div className="bg-blue-600 text-white p-3 rounded-xl">
                 <Route className="w-8 h-8 text-white" />
               </div>
             </div>
@@ -159,7 +161,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl p-8">
           <div className="flex items-center justify-center mb-8">
-            <div className="bg-blue-600 p-3 rounded-xl">
+            <div className="bg-blue-600 text-white p-3 rounded-xl">
               <Route className="w-8 h-8 text-white" />
             </div>
           </div>

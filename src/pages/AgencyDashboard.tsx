@@ -61,13 +61,36 @@ export default function AgencyDashboard() {
     loadPendingRequests();
   }, [user]);
 
+  async function sendInvitationEmail(inviteToken: string) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Sign in again.');
+
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ inviteToken }),
+      },
+    );
+
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.error || 'Invitation email could not be sent');
+    }
+  }
+
   async function loadAgencyData() {
     if (!user) return;
 
     try {
       setLoading(true);
 
-      const { data: agencyData, error: agencyError } = await supabase
+      let { data: agencyData, error: agencyError } = await supabase
         .from('agencies')
         .select('*')
         .eq('owner_email', user.email)
@@ -76,20 +99,31 @@ export default function AgencyDashboard() {
       if (agencyError) throw agencyError;
 
       if (!agencyData) {
-        const { data: newAgency, error: createError } = await supabase
-          .from('agencies')
-          .insert({
-            name: `${user.fullName}'s Agency`,
-            owner_email: user.email,
-          })
-          .select()
-          .single();
+        const { data: coOwnership, error: coOwnershipError } = await supabase
+          .from('agency_co_owners')
+          .select('agency_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
 
-        if (createError) throw createError;
-        setAgency(newAgency);
-      } else {
-        setAgency(agencyData);
+        if (coOwnershipError) throw coOwnershipError;
+        if (coOwnership) {
+          const { data: coOwnedAgency, error: coOwnedAgencyError } = await supabase
+            .from('agencies')
+            .select('*')
+            .eq('id', coOwnership.agency_id)
+            .maybeSingle();
+
+          if (coOwnedAgencyError) throw coOwnedAgencyError;
+          agencyData = coOwnedAgency;
+        }
       }
+
+      if (!agencyData) {
+        throw new Error('Your agency access could not be verified. Contact the primary agency owner.');
+      }
+
+      setAgency(agencyData);
 
       if (agencyData) {
         const { data: accountsData, error: accountsError } = await supabase
@@ -143,6 +177,18 @@ export default function AgencyDashboard() {
     if (!agency || !user) return;
 
     setError('');
+
+    const accountName = newAccountName.trim();
+    const adminEmail = newAccountAdminEmail.trim().toLowerCase();
+    if (!accountName) {
+      setError('Account name is required.');
+      return;
+    }
+    if (adminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+      setError('Enter a valid administrator email address.');
+      return;
+    }
+
     setCreating(true);
 
     try {
@@ -150,7 +196,7 @@ export default function AgencyDashboard() {
         .from('accounts')
         .insert({
           agency_id: agency.id,
-          account_name: newAccountName,
+          account_name: accountName,
           created_by: user.id,
         })
         .select()
@@ -158,31 +204,41 @@ export default function AgencyDashboard() {
 
       if (accountError) throw accountError;
 
-      if (newAccountAdminEmail) {
+      let invitationWarning = '';
+      if (adminEmail) {
         const token = crypto.randomUUID();
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + 7);
-        const temporaryPassword = crypto.randomUUID().slice(0, 12);
 
         const { error: invitationError } = await supabase
           .from('user_invitations')
           .insert({
             token,
-            email: newAccountAdminEmail,
+            email: adminEmail,
             account_id: newAccount.id,
             role: 'account_admin',
             invited_by: user.id,
             expires_at: expiresAt.toISOString(),
-            temporary_password: temporaryPassword,
+            temporary_password: `${crypto.randomUUID()}${crypto.randomUUID()}`,
           });
 
-        if (invitationError) throw invitationError;
+        if (invitationError) {
+          invitationWarning = 'The account was created, but its administrator invitation could not be created. Open Agency Settings to invite them.';
+        } else {
+          try {
+            await sendInvitationEmail(token);
+          } catch (emailError) {
+            console.error('Account created but invitation email failed:', emailError);
+            invitationWarning = 'The account and invitation were created, but the email could not be sent. Open Agency Settings to resend it.';
+          }
+        }
       }
 
       setShowCreateModal(false);
       setNewAccountName('');
       setNewAccountAdminEmail('');
       await loadAgencyData();
+      if (invitationWarning) setError(invitationWarning);
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
     } finally {
@@ -257,21 +313,30 @@ export default function AgencyDashboard() {
       const token = crypto.randomUUID();
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
-      const temporaryPassword = crypto.randomUUID().slice(0, 12);
+      let invitationWarning = '';
 
       const { error: invitationError } = await supabase
         .from('user_invitations')
         .insert({
           token,
-          email: request.email,
+          email: request.email.trim().toLowerCase(),
           account_id: newAccount.id,
           role: 'account_admin',
           invited_by: user.id,
           expires_at: expiresAt.toISOString(),
-          temporary_password: temporaryPassword,
+          temporary_password: `${crypto.randomUUID()}${crypto.randomUUID()}`,
         });
 
-      if (invitationError) throw invitationError;
+      if (invitationError) {
+        invitationWarning = 'The account was created, but the invitation could not be created. Invite the administrator from Agency Settings.';
+      } else {
+        try {
+          await sendInvitationEmail(token);
+        } catch (emailError) {
+          console.error('Approved account invitation email failed:', emailError);
+          invitationWarning = 'The account and invitation were created, but the email could not be sent. Resend it from Agency Settings.';
+        }
+      }
 
       const { error: updateError } = await supabase
         .from('pending_signup_requests')
@@ -286,7 +351,7 @@ export default function AgencyDashboard() {
 
       await loadPendingRequests();
       await loadAgencyData();
-      alert(`Account created and invitation sent to ${request.email}`);
+      alert(invitationWarning || `Account created and invitation sent to ${request.email}`);
     } catch (err: any) {
       console.error('Error approving request:', err);
       alert(err.message || 'Failed to approve request');
@@ -526,8 +591,8 @@ export default function AgencyDashboard() {
       </main>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Create New Account</h3>
 
             {error && (

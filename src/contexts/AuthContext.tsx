@@ -19,7 +19,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signUpAgencyOwner: (email: string, password: string, fullName: string, agencyName: string) => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
+  resetPassword: (email: string, returnTo?: string) => Promise<void>;
   reloadUserProfile: () => Promise<void>;
 }
 
@@ -251,9 +251,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function resetPassword(email: string) {
+  async function resetPassword(email: string, returnTo?: string) {
+    const callbackUrl = new URL('/reset-password', window.location.origin);
+    if (returnTo?.startsWith('/') && !returnTo.startsWith('//')) {
+      callbackUrl.searchParams.set('redirect', returnTo);
+    }
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: callbackUrl.toString(),
     });
     if (error) throw error;
   }

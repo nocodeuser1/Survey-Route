@@ -18,7 +18,10 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "re_GVnafrs7_6Y3Z7ydBrPFRbMeBVKWBDpLT";
+    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+    if (!RESEND_API_KEY) {
+      throw new Error("RESEND_API_KEY is not configured");
+    }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log("Starting compliance due dates check...");

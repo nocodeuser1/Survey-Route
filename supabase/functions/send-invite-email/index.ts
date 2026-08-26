@@ -7,204 +7,235 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-interface InviteEmailRequest {
-  inviteeEmail: string;
-  inviterName: string;
-  accountName: string;
-  inviteToken: string;
-  role: string;
-  acceptUrl: string;
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function headerSafe(value: string) {
+  return value.replace(/[\r\n]+/g, " ").trim();
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
   try {
-    const { inviteeEmail, inviterName, accountName, inviteToken, role, acceptUrl } = await req.json() as InviteEmailRequest;
-
-    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "re_GVnafrs7_6Y3Z7ydBrPFRbMeBVKWBDpLT";
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const APP_URL = acceptUrl.split('/accept-invite')[0]; // Extract base app URL
-
-    if (!acceptUrl) {
-      throw new Error("acceptUrl is required");
+    const authorization = req.headers.get("Authorization");
+    if (!authorization) {
+      return jsonResponse({ error: "Authentication is required" }, 401);
     }
 
-    // Initialize Supabase client
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
+    const appUrl = Deno.env.get("APP_URL") || "https://survey-route.com";
 
-    // Check if user has unsubscribed (look up by email in users table first)
-    const { data: userData } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', inviteeEmail)
+    if (!supabaseUrl || !anonKey || !serviceRoleKey || !resendApiKey) {
+      console.error("send-invite-email is missing required environment configuration");
+      return jsonResponse({ error: "Invitation email service is not configured" }, 500);
+    }
+
+    const { inviteToken } = await req.json() as { inviteToken?: string };
+    if (!inviteToken || inviteToken.length < 20 || inviteToken.length > 200) {
+      return jsonResponse({ error: "A valid invitation token is required" }, 400);
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authorization } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: { user: caller }, error: callerError } = await userClient.auth.getUser();
+    if (callerError || !caller?.email) {
+      return jsonResponse({ error: "Authentication is required" }, 401);
+    }
+
+    const { data: invitation, error: invitationError } = await adminClient
+      .from("user_invitations")
+      .select("id, email, account_id, role, invited_by, status, expires_at")
+      .eq("token", inviteToken)
+      .maybeSingle();
+
+    if (invitationError || !invitation) {
+      return jsonResponse({ error: "Invitation not found" }, 404);
+    }
+
+    if (invitation.status !== "pending" || new Date(invitation.expires_at) <= new Date()) {
+      return jsonResponse({ error: "Invitation is no longer active" }, 409);
+    }
+
+    const { data: callerProfile } = await adminClient
+      .from("users")
+      .select("id")
+      .eq("auth_user_id", caller.id)
+      .maybeSingle();
+
+    if (!callerProfile) {
+      return jsonResponse({ error: "User profile not found" }, 403);
+    }
+
+    const { data: account } = await adminClient
+      .from("accounts")
+      .select("account_name, company_name, agency_id")
+      .eq("id", invitation.account_id)
+      .maybeSingle();
+
+    if (!account) {
+      return jsonResponse({ error: "Account not found" }, 404);
+    }
+
+    const [{ data: adminMembership }, { data: agency }, { data: coOwner }] = await Promise.all([
+      adminClient
+        .from("account_users")
+        .select("id")
+        .eq("account_id", invitation.account_id)
+        .eq("user_id", callerProfile.id)
+        .eq("role", "account_admin")
+        .maybeSingle(),
+      adminClient
+        .from("agencies")
+        .select("owner_email")
+        .eq("id", account.agency_id)
+        .maybeSingle(),
+      adminClient
+        .from("agency_co_owners")
+        .select("id")
+        .eq("agency_id", account.agency_id)
+        .eq("user_id", callerProfile.id)
+        .maybeSingle(),
+    ]);
+
+    const callerEmail = caller.email.toLowerCase();
+    const authorized = Boolean(
+      adminMembership
+      || coOwner
+      || agency?.owner_email?.toLowerCase() === callerEmail,
+    );
+
+    if (!authorized) {
+      return jsonResponse({ error: "Not authorized to send this invitation" }, 403);
+    }
+
+    const { data: inviter } = await adminClient
+      .from("users")
+      .select("full_name")
+      .eq("id", invitation.invited_by)
+      .maybeSingle();
+
+    const { data: inviteeProfile } = await adminClient
+      .from("users")
+      .select("id")
+      .eq("email", invitation.email.toLowerCase())
       .maybeSingle();
 
     let unsubscribeToken: string | null = null;
-
-    if (userData) {
-      // User exists, check their notification preferences
-      const { data: prefs } = await supabase
-        .from('notification_preferences')
-        .select('email_unsubscribed, unsubscribe_token')
-        .eq('user_id', userData.id)
+    if (inviteeProfile) {
+      const { data: preferences } = await adminClient
+        .from("notification_preferences")
+        .select("email_unsubscribed, unsubscribe_token")
+        .eq("user_id", inviteeProfile.id)
         .maybeSingle();
 
-      if (prefs?.email_unsubscribed) {
-        console.log(`User ${inviteeEmail} has unsubscribed. Skipping email.`);
-        return new Response(
-          JSON.stringify({ success: false, message: 'User has unsubscribed from emails' }),
-          {
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "application/json",
-            },
-          }
-        );
+      if (preferences?.email_unsubscribed) {
+        return jsonResponse({ success: false, message: "Recipient has unsubscribed from email" }, 409);
       }
-
-      unsubscribeToken = prefs?.unsubscribe_token || null;
+      unsubscribeToken = preferences?.unsubscribe_token || null;
     }
 
-    console.log(`Sending invitation to ${inviteeEmail} with acceptUrl: ${acceptUrl}`);
-
+    const baseUrl = new URL(appUrl);
+    const acceptUrl = new URL("/accept-invite", baseUrl);
+    acceptUrl.searchParams.set("token", inviteToken);
     const unsubscribeUrl = unsubscribeToken
-      ? `${APP_URL}/unsubscribe?token=${unsubscribeToken}`
-      : `${APP_URL}/unsubscribe`;
+      ? new URL(`/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`, baseUrl).toString()
+      : null;
+
+    const accountName = headerSafe(account.company_name || account.account_name || "Survey Route");
+    const inviterName = headerSafe(inviter?.full_name || "Your account administrator");
+    const role = invitation.role === "account_admin" ? "Account administrator" : "Team member";
+    const safeAccountName = escapeHtml(accountName);
+    const safeInviterName = escapeHtml(inviterName);
+    const safeRole = escapeHtml(role);
+    const safeAcceptUrl = escapeHtml(acceptUrl.toString());
+    const currentYear = new Date().getUTCFullYear();
 
     const emailHtml = `
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>You're Invited to Survey Route</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-  <table role="presentation" style="width: 100%; border-collapse: collapse;">
-    <tr>
-      <td align="center" style="padding: 40px 0;">
-        <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08);">
-
-          <!-- Header -->
-          <tr>
-            <td style="padding: 40px 40px 30px; text-align: center; background-color: #2563eb; border-radius: 8px 8px 0 0;">
-              <div style="margin: 0 0 10px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block;">
-                  <path d="M9 11L12 14L22 4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M21 12V19C21 20.1046 20.1046 21 19 21H5C3.89543 21 3 20.1046 3 19V5C3 3.89543 3.89543 3 5 3H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">Survey-Route</h1>
-              <p style="margin: 8px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">Professional Facility Inspection Management</p>
-            </td>
-          </tr>
-
-          <!-- Content -->
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="margin: 0 0 20px; color: #1a1a1a; font-size: 24px; font-weight: 600;">You've Been Invited!</h2>
-
-              <p style="margin: 0 0 16px; color: #4a5568; font-size: 16px; line-height: 1.6;">
-                <strong>${inviterName}</strong> has invited you to join <strong>${accountName}</strong> on Survey-Route as a <strong>${role}</strong>.
-              </p>
-
-              <p style="margin: 0 0 28px; color: #4a5568; font-size: 16px; line-height: 1.6;">
-                Survey-Route helps teams manage facility inspections, route planning, and compliance tracking all in one place.
-              </p>
-
-              <!-- CTA Button -->
-              <table role="presentation" style="width: 100%; border-collapse: collapse; margin: 0 0 28px;">
-                <tr>
-                  <td align="center">
-                    <a href="${acceptUrl}" style="display: inline-block; padding: 16px 40px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
-                      Accept Invitation
-                    </a>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin: 0 0 8px; color: #718096; font-size: 14px; line-height: 1.5;">
-                Or copy and paste this link into your browser:
-              </p>
-              <p style="margin: 0 0 24px; color: #2563eb; font-size: 14px; word-break: break-all;">
-                ${acceptUrl}
-              </p>
-
-              <div style="margin: 24px 0 0; padding: 20px; background-color: #f7fafc; border-radius: 6px; border-left: 4px solid #2563eb;">
-                <p style="margin: 0; color: #4a5568; font-size: 14px; line-height: 1.5;">
-                  <strong>Note:</strong> This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.
-                </p>
-              </div>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 30px 40px; background-color: #f7fafc; border-radius: 0 0 8px 8px; text-align: center; border-top: 1px solid #e2e8f0;">
-              <p style="margin: 0 0 8px; color: #718096; font-size: 14px;">
-                © 2024 Survey-Route. All rights reserved.
-              </p>
-              <p style="margin: 0 0 12px; color: #a0aec0; font-size: 12px;">
-                Professional facility inspection and compliance management
-              </p>
-              <p style="margin: 0 0 8px; color: #a0aec0; font-size: 12px;">
-                Survey-Route LLC, 123 Business Park Dr, Suite 100, Austin, TX 78701
-              </p>
-              ${unsubscribeToken ? `
-              <p style="margin: 0; color: #a0aec0; font-size: 12px;">
-                <a href="${unsubscribeUrl}" style="color: #2563eb; text-decoration: underline;">Unsubscribe from these emails</a>
-              </p>
-              ` : ''}
-            </td>
-          </tr>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Join ${safeAccountName} on Survey Route</title>
+  </head>
+  <body style="margin:0;background:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:32px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;">
+          <tr><td style="background:#2563eb;color:#ffffff;padding:30px;text-align:center;">
+            <div style="font-size:26px;font-weight:700;">Survey Route</div>
+            <div style="font-size:14px;margin-top:6px;color:#dbeafe;">Account invitation</div>
+          </td></tr>
+          <tr><td style="padding:34px;">
+            <h1 style="font-size:24px;line-height:1.25;margin:0 0 18px;">Join ${safeAccountName}</h1>
+            <p style="font-size:16px;line-height:1.6;margin:0 0 14px;color:#4b5563;">
+              <strong>${safeInviterName}</strong> invited you to Survey Route as a <strong>${safeRole}</strong>.
+            </p>
+            <p style="font-size:14px;line-height:1.6;margin:0 0 26px;color:#4b5563;">
+              This invitation grants access only to ${safeAccountName}.
+            </p>
+            <div style="text-align:center;margin:0 0 26px;">
+              <a href="${safeAcceptUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:9px;">Accept Invitation</a>
+            </div>
+            <p style="font-size:12px;line-height:1.6;margin:0;color:#6b7280;word-break:break-all;">
+              If the button does not work, open this link:<br>${safeAcceptUrl}
+            </p>
+            <p style="font-size:12px;line-height:1.6;margin:18px 0 0;color:#6b7280;">
+              This link expires in 7 days. If you did not expect this invitation, you can ignore this email.
+            </p>
+          </td></tr>
+          <tr><td style="padding:20px 34px;border-top:1px solid #e5e7eb;text-align:center;color:#9ca3af;font-size:12px;">
+            &copy; ${currentYear} Survey Route
+            ${unsubscribeUrl ? `<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280;">Unsubscribe from email</a>` : ""}
+          </td></tr>
         </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-    `;
+      </td></tr>
+    </table>
+  </body>
+</html>`;
 
-    const emailText = `
-You've Been Invited to Survey-Route!
+    const emailText = `${inviterName} invited you to join ${accountName} on Survey Route as a ${role}.
 
-${inviterName} has invited you to join ${accountName} on Survey-Route as a ${role}.
+This invitation grants access only to ${accountName}.
 
-Survey-Route helps teams manage facility inspections, route planning, and compliance tracking all in one place.
+Accept the invitation: ${acceptUrl.toString()}
 
-To accept this invitation, visit:
-${acceptUrl}
+This link expires in 7 days. If you did not expect this invitation, you can ignore this email.`;
 
-Note: This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.
-
----
-© 2024 Survey-Route. All rights reserved.
-Professional facility inspection and compliance management
-
-Survey-Route LLC
-123 Business Park Dr, Suite 100
-Austin, TX 78701
-
-${unsubscribeToken ? `Unsubscribe: ${unsubscribeUrl}` : ''}
-    `;
-
-    // Build email headers for better deliverability
     const emailHeaders: Record<string, string> = {
-      "Precedence": "bulk",
       "Auto-Submitted": "auto-generated",
-      "X-Mailer": "Survey-Route",
-      "X-Entity-Ref-ID": inviteToken,
+      "X-Entity-Ref-ID": invitation.id,
     };
-
-    // Add List-Unsubscribe headers if we have a token
-    if (unsubscribeToken) {
+    if (unsubscribeUrl) {
       emailHeaders["List-Unsubscribe"] = `<${unsubscribeUrl}>`;
       emailHeaders["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
     }
@@ -213,46 +244,27 @@ ${unsubscribeToken ? `Unsubscribe: ${unsubscribeUrl}` : ''}
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
+        "Authorization": `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: "Survey-Route <invites@mail.survey-route.com>",
-        to: [inviteeEmail],
-        subject: `You're invited to join ${accountName} on Survey-Route`,
+        from: "Survey Route <invites@mail.survey-route.com>",
+        to: [invitation.email],
+        subject: `You're invited to join ${accountName} on Survey Route`,
         html: emailHtml,
         text: emailText,
         headers: emailHeaders,
       }),
     });
 
-    const data = await response.json();
-
+    const responseData = await response.json();
     if (!response.ok) {
-      throw new Error(`Resend API error: ${JSON.stringify(data)}`);
+      console.error("Resend rejected invitation email", response.status, responseData);
+      return jsonResponse({ error: "Email provider rejected the invitation" }, 502);
     }
 
-    return new Response(
-      JSON.stringify({ success: true, emailId: data.id }),
-      {
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    return jsonResponse({ success: true, emailId: responseData.id });
   } catch (error) {
-    console.error("Error sending invite email:", error);
-    return new Response(
-      JSON.stringify({ 
-        error: error instanceof Error ? error.message : "Failed to send invitation email" 
-      }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    console.error("send-invite-email failed", error);
+    return jsonResponse({ error: "Failed to send invitation email" }, 500);
   }
 });

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Mail, Shield, Trash2, AlertCircle, Copy, RefreshCw, Key, UserPlus, CheckCircle, Clock, XCircle, Bug, UserMinus, Layers, X } from 'lucide-react';
+import { Users, Mail, Shield, Trash2, AlertCircle, Copy, RefreshCw, UserPlus, CheckCircle, Clock, XCircle, UserMinus, Layers, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,7 +49,6 @@ export default function TeamManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<'account_admin' | 'user'>('user');
-  const [newMemberPassword, setNewMemberPassword] = useState('');
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -57,31 +56,12 @@ export default function TeamManagement() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [isCurrentUserAgencyOwner, setIsCurrentUserAgencyOwner] = useState<boolean>(false);
 
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordSuccess, setPasswordSuccess] = useState('');
-
   const [showInviteDetailsModal, setShowInviteDetailsModal] = useState(false);
   const [inviteDetails, setInviteDetails] = useState<{ email: string; link: string; } | null>(null);
-  const [showDebugInfo, setShowDebugInfo] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
   const [invitationFilter, setInvitationFilter] = useState<'pending' | 'all'>('pending');
-  const [testEmailAddress, setTestEmailAddress] = useState('');
-  const [testingEmail, setTestingEmail] = useState(false);
-  const [emailTestResults, setEmailTestResults] = useState<any>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
-  const [checkingAuthStatus, setCheckingAuthStatus] = useState(false);
-  const [authStatusResult, setAuthStatusResult] = useState<any>(null);
-  const [authCheckEmail, setAuthCheckEmail] = useState('');
 
   const [showRevokeModal, setShowRevokeModal] = useState(false);
-
-  useEffect(() => {
-    console.log('[TeamManagement] showRevokeModal changed to:', showRevokeModal);
-  }, [showRevokeModal]);
   const [invitationToRevoke, setInvitationToRevoke] = useState<{ id: string, email: string } | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [showDeleteInviteModal, setShowDeleteInviteModal] = useState(false);
@@ -146,85 +126,17 @@ export default function TeamManagement() {
 
       setTeamMembers(formattedMembers);
 
-      // Debug logging for invitations
-      console.log('[TeamManagement] Loading invitations for account:', currentAccount.id);
-      console.log('[TeamManagement] Current account details:', {
-        id: currentAccount.id,
-
-      });
-
-      // currentAuthUser already fetched above for agency owner check
-      console.log('[TeamManagement] Current auth user:', currentAuthUser?.id, userEmail);
-
-      // Check current user's role in this account
-      const { data: currentUserId } = await supabase
-        .from('users')
-        .select('id')
-        .eq('auth_user_id', currentAuthUser?.id)
-        .single();
-
-      const { data: userRole } = await supabase
-        .from('account_users')
-        .select('role')
-        .eq('account_id', currentAccount.id)
-        .eq('user_id', currentUserId?.id)
-        .maybeSingle();
-      console.log('[TeamManagement] Current user role in account:', userRole?.role);
-
-      // Check if user is agency owner
-      const { data: agencyCheck } = await supabase
-        .from('accounts')
-        .select('agency_id, agencies!inner(owner_email)')
-        .eq('id', currentAccount.id)
-        .single();
-      console.log('[TeamManagement] Agency owner email:', (agencyCheck?.agencies as any)?.owner_email);
-      console.log('[TeamManagement] Current user email matches agency owner:', currentAuthUser?.email === (agencyCheck?.agencies as any)?.owner_email);
-
-      // Get total count of invitations for this account (for debugging)
-      const { count: totalInvitationsCount } = await supabase
-        .from('user_invitations')
-        .select('*', { count: 'exact', head: true })
-        .eq('account_id', currentAccount.id);
-
-      // Capture debug info
-      const debugData = {
-        accountId: currentAccount.id,
-        authUserId: currentAuthUser?.id,
-        authUserEmail: currentAuthUser?.email,
-        userRole: userRole?.role,
-        agencyOwnerEmail: (agencyCheck?.agencies as any)?.owner_email,
-        isAgencyOwner: currentAuthUser?.email === (agencyCheck?.agencies as any)?.owner_email,
-        totalInvitationsInDB: totalInvitationsCount,
-        timestamp: new Date().toISOString(),
-        invitationsQuery: undefined as any,
-      };
-
       const { data: invites, error: invitesError } = await supabase
         .from('user_invitations')
-        .select('*')
+        .select('id, email, role, status, expires_at, created_at, token')
         .eq('account_id', currentAccount.id)
         .order('created_at', { ascending: false });
-
-      console.log('[TeamManagement] Invitations query result:', {
-        error: invitesError,
-        count: invites?.length || 0,
-        invites: invites,
-      });
-
-      // Update debug info with query results
-      debugData.invitationsQuery = {
-        error: invitesError,
-        count: invites?.length || 0,
-        invites: invites,
-      };
-      setDebugInfo(debugData);
 
       if (invitesError) {
         console.error('[TeamManagement] Error loading invitations:', invitesError);
         throw invitesError;
       }
 
-      console.log('[TeamManagement] Setting invitations state:', invites || []);
       setInvitations(invites || []);
     } catch (err: any) {
       console.error('Error loading team data:', err);
@@ -233,19 +145,6 @@ export default function TeamManagement() {
       setLoading(false);
     }
   }
-
-  const generatePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setNewPassword(password);
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
 
   const copyInviteLink = async (inviteId: string, token: string) => {
     const baseUrl = (import.meta as any).env.VITE_APP_URL || window.location.origin;
@@ -258,57 +157,6 @@ export default function TeamManagement() {
     } catch (err) {
       console.error('Failed to copy link:', err);
       setError('Failed to copy link to clipboard');
-    }
-  };
-
-  const handleSetPassword = async () => {
-    if (!selectedMember || !newPassword) return;
-
-    if (newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
-      return;
-    }
-
-    setPasswordLoading(true);
-    setPasswordError('');
-    setPasswordSuccess('');
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(
-        `${(import.meta as any).env.VITE_SUPABASE_URL}/functions/v1/update-user-password`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({
-            targetUserId: selectedMember.id,
-            newPassword: newPassword,
-          }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to update password');
-      }
-
-      setPasswordSuccess(`Password updated for ${selectedMember.email}`);
-      setTimeout(() => {
-        setShowPasswordModal(false);
-        setSelectedMember(null);
-        setNewPassword('');
-        setPasswordSuccess('');
-      }, 2000);
-    } catch (err: any) {
-      setPasswordError(err.message || 'Failed to update password');
-    } finally {
-      setPasswordLoading(false);
     }
   };
 
@@ -337,7 +185,7 @@ export default function TeamManagement() {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not authenticated');
 
-      // Prepare email for invitation (cleanup any orphaned accounts)
+      // Verify this administrator can invite the email to this account.
       console.log('[TeamManagement] Preparing email for invitation:', email, 'account:', currentAccount.id);
       const { data: prepResult, error: prepError } = await supabase
         .rpc('prepare_email_for_invitation', {
@@ -347,18 +195,12 @@ export default function TeamManagement() {
 
       if (prepError) {
         console.error('[TeamManagement] Email preparation error:', prepError);
-        // Don't fail completely, but log it
+        throw new Error('We could not verify invitation permissions. Please refresh and try again.');
       } else {
-        console.log('[TeamManagement] Email preparation result:', prepResult);
-
         if (prepResult && !prepResult.can_invite) {
-          setError('This user is already registered and has account memberships. They cannot be invited again.');
+          setError(prepResult.message || 'This user is already a member of this account.');
           setAdding(false);
           return;
-        }
-
-        if (prepResult?.cleanup_performed) {
-          console.log('[TeamManagement] Cleaned up orphaned account before creating invitation');
         }
       }
 
@@ -370,32 +212,6 @@ export default function TeamManagement() {
 
       if (!currentUserData) throw new Error('User profile not found');
 
-      const { data: existingUser } = await supabase.rpc('get_user_id_by_email', {
-        user_email: email
-      });
-
-      if (existingUser) {
-        const { data: existingMembership } = await supabase
-          .from('account_users')
-          .select('id')
-          .eq('account_id', currentAccount.id)
-          .eq('user_id', existingUser)
-          .maybeSingle();
-
-        if (existingMembership) {
-          setError('This user is already a member of this account');
-          setAdding(false);
-          return;
-        }
-      }
-
-      await supabase
-        .from('user_invitations')
-        .delete()
-        .eq('email', email)
-        .eq('account_id', currentAccount.id)
-        .eq('status', 'pending');
-
       const { data: existingInvite } = await supabase
         .from('user_invitations')
         .select('id')
@@ -405,7 +221,7 @@ export default function TeamManagement() {
         .maybeSingle();
 
       if (existingInvite) {
-        setError('An invitation for this email is already pending');
+        setError('An invitation for this email is already pending. Resend or revoke the existing invitation.');
         setAdding(false);
         return;
       }
@@ -413,18 +229,11 @@ export default function TeamManagement() {
       const token = crypto.randomUUID();
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
-      const tempPassword = generateTemporaryPassword();
+      // Legacy schema requires this field, but invitation acceptance never uses
+      // or reveals it. The recipient creates or keeps their own password.
+      const tempPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
 
-      console.log('[TeamManagement] Creating invitation with data:', {
-        email,
-        account_id: currentAccount.id,
-        role: newMemberRole,
-        invited_by: currentUserData.id,
-        status: 'pending',
-        expires_at: expiresAt.toISOString(),
-      });
-
-      const { data: invitation, error: inviteError } = await supabase
+      const { error: inviteError } = await supabase
         .from('user_invitations')
         .insert({
           email,
@@ -435,11 +244,7 @@ export default function TeamManagement() {
           invited_by: currentUserData.id,
           status: 'pending',
           expires_at: expiresAt.toISOString(),
-        })
-        .select()
-        .single();
-
-      console.log('[TeamManagement] Invitation created:', { invitation, error: inviteError });
+        });
 
       if (inviteError) {
         console.error('[TeamManagement] Error creating invitation:', inviteError);
@@ -447,8 +252,8 @@ export default function TeamManagement() {
       }
 
       const { data: { session } } = await supabase.auth.getSession();
-      const baseUrl = (import.meta as any).env.VITE_APP_URL || window.location.origin;
-      const acceptUrl = `${baseUrl}/accept-invite?token=${token}`;
+      const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+      const acceptUrl = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
@@ -460,12 +265,7 @@ export default function TeamManagement() {
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
-            inviteeEmail: email,
-            inviterName: currentUserData.full_name || 'Your teammate',
-            accountName: currentAccount.accountName || 'Survey Route',
             inviteToken: token,
-            role: newMemberRole === 'account_admin' ? 'Administrator' : 'User',
-            acceptUrl: acceptUrl,
           }),
         }
       );
@@ -486,7 +286,6 @@ export default function TeamManagement() {
       await loadTeamData();
       setNewMemberEmail('');
       setNewMemberRole('user');
-      setNewMemberPassword('');
       setShowAddModal(false);
     } catch (err: any) {
       console.error('Error adding member:', err);
@@ -507,8 +306,9 @@ export default function TeamManagement() {
     try {
       const { data: invitation } = await supabase
         .from('user_invitations')
-        .select('*')
+        .select('id, email, role, status, expires_at, token')
         .eq('id', invitationId)
+        .eq('account_id', currentAccount.id)
         .single();
 
       if (!invitation) throw new Error('Invitation not found');
@@ -516,15 +316,7 @@ export default function TeamManagement() {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not authenticated');
 
-      const { data: currentUserData } = await supabase
-        .from('users')
-        .select('full_name')
-        .eq('auth_user_id', currentUser.id)
-        .single();
-
       const { data: { session } } = await supabase.auth.getSession();
-      const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
-      const acceptUrl = `${baseUrl}/accept-invite?token=${invitation.token}`;
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
@@ -536,19 +328,13 @@ export default function TeamManagement() {
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
-            inviteeEmail: email,
-            inviterName: currentUserData?.full_name || 'Your teammate',
-            accountName: currentAccount.accountName || 'Survey Route',
             inviteToken: invitation.token,
-            role: invitation.role === 'account_admin' ? 'Administrator' : 'User',
-            acceptUrl: acceptUrl,
           }),
         }
       );
 
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to send email:', errorData);
+        console.error('Failed to resend invitation email:', await response.json());
         throw new Error('Failed to send invitation email');
       }
 
@@ -602,37 +388,16 @@ export default function TeamManagement() {
     const { id: invitationId, email } = invitationToRevoke;
 
     try {
-      // First, use force cleanup to be more aggressive
-      console.log('[TeamManagement] Force cleaning up auth account for:', email);
-      const { data: cleanupResult, error: cleanupError } = await supabase
-        .rpc('force_cleanup_auth_account', { target_email: email });
-
-      if (cleanupError) {
-        console.error('[TeamManagement] Cleanup error:', cleanupError);
-        // Don't fail the whole operation if cleanup fails
-      } else {
-        console.log('[TeamManagement] Cleanup result:', cleanupResult);
-      }
-
-      // Delete the invitation
       const { error } = await supabase
         .from('user_invitations')
-        .delete()
-        .eq('id', invitationId);
+        .update({ status: 'revoked' })
+        .eq('id', invitationId)
+        .eq('account_id', currentAccount?.id);
 
       if (error) throw error;
 
-      // Reload to get fresh data
       await loadTeamData();
-
-      if (cleanupResult?.action === 'deleted') {
-        setSuccess(`Invitation revoked and ${cleanupResult.had_profile ? 'incomplete account' : 'auth account'} cleaned up for ${email}`);
-      } else if (cleanupResult?.action === 'blocked') {
-        setSuccess(`Invitation revoked. Note: Could not clean up auth account because user has ${cleanupResult.memberships} active membership(s)`);
-      } else {
-        setSuccess('Invitation revoked successfully');
-      }
-
+      setSuccess(`Invitation revoked for ${email}. The link can no longer be used.`);
       setTimeout(() => setSuccess(''), 5000);
       setShowRevokeModal(false);
       setInvitationToRevoke(null);
@@ -815,260 +580,6 @@ export default function TeamManagement() {
     }
   }
 
-  function generateTemporaryPassword(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password;
-  }
-
-  async function checkAuthAccountStatus() {
-    if (!authCheckEmail) {
-      setError('Please enter an email address to check');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(authCheckEmail)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    setCheckingAuthStatus(true);
-    setAuthStatusResult(null);
-    setError('');
-
-    try {
-      const { data, error } = await supabase
-        .rpc('check_auth_account_status', { target_email: authCheckEmail });
-
-      if (error) throw error;
-
-      setAuthStatusResult(data);
-      setSuccess('Auth status check completed');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: any) {
-      console.error('Auth status check error:', err);
-      setError(`Failed to check auth status: ${err.message}`);
-    } finally {
-      setCheckingAuthStatus(false);
-    }
-  }
-
-  async function forceCleanupAccount() {
-    if (!authCheckEmail) {
-      setError('Please enter an email address to clean up');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to force cleanup the auth account for ${authCheckEmail}? This will remove the auth account and unlink any user profile.`)) {
-      return;
-    }
-
-    setCheckingAuthStatus(true);
-    setError('');
-
-    try {
-      const { data, error } = await supabase
-        .rpc('force_cleanup_auth_account', { target_email: authCheckEmail });
-
-      if (error) throw error;
-
-      setAuthStatusResult(data);
-
-      if (data?.action === 'deleted') {
-        setSuccess(`Auth account cleaned up successfully for ${authCheckEmail}`);
-      } else if (data?.action === 'blocked') {
-        setError(`Cannot clean up: ${data.message}`);
-      } else {
-        setSuccess(data?.message || 'No cleanup needed');
-      }
-
-      setTimeout(() => {
-        setSuccess('');
-        setError('');
-      }, 5000);
-
-      // Refresh status
-      await checkAuthAccountStatus();
-    } catch (err: any) {
-      console.error('Force cleanup error:', err);
-      setError(`Failed to force cleanup: ${err.message}`);
-    } finally {
-      setCheckingAuthStatus(false);
-    }
-  }
-
-  async function runComprehensiveEmailTest() {
-    if (!currentAccount || !testEmailAddress) {
-      setError('Please enter a test email address');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(testEmailAddress)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    setTestingEmail(true);
-    setEmailTestResults(null);
-    setError('');
-    setSuccess('');
-
-    const results: any = {
-      timestamp: new Date().toISOString(),
-      testEmail: testEmailAddress,
-      steps: [],
-      environment: {},
-      payload: {},
-      edgeFunction: {},
-      resendApi: {},
-      finalResult: null,
-    };
-
-    try {
-      results.steps.push({ step: 'Environment Check', status: 'running', time: new Date().toISOString() });
-
-      results.environment = {
-        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
-        supabaseUrlValid: !!import.meta.env.VITE_SUPABASE_URL,
-        anonKeyPresent: !!import.meta.env.VITE_SUPABASE_ANON_KEY,
-        anonKeyLength: import.meta.env.VITE_SUPABASE_ANON_KEY?.length || 0,
-        anonKeyPrefix: import.meta.env.VITE_SUPABASE_ANON_KEY?.substring(0, 10) + '...',
-        edgeFunctionUrl: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
-      };
-      results.steps[results.steps.length - 1].status = 'completed';
-
-      results.steps.push({ step: 'Getting Auth Session', status: 'running', time: new Date().toISOString() });
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        throw new Error('No active session found');
-      }
-
-      results.steps[results.steps.length - 1].status = 'completed';
-      results.steps[results.steps.length - 1].sessionPresent = true;
-      results.steps[results.steps.length - 1].accessTokenLength = session.access_token?.length || 0;
-
-      results.steps.push({ step: 'Getting Current User Data', status: 'running', time: new Date().toISOString() });
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      const { data: currentUserData } = await supabase
-        .from('users')
-        .select('id, full_name, email')
-        .eq('auth_user_id', currentUser?.id)
-        .single();
-
-      if (!currentUserData) {
-        throw new Error('User profile not found');
-      }
-
-      results.steps[results.steps.length - 1].status = 'completed';
-      results.steps[results.steps.length - 1].userFound = true;
-
-      results.steps.push({ step: 'Building Email Payload', status: 'running', time: new Date().toISOString() });
-      const testToken = 'test-' + crypto.randomUUID();
-      const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
-      const testAcceptUrl = `${baseUrl}/accept-invite?token=${testToken}`;
-
-      results.payload = {
-        inviteeEmail: testEmailAddress,
-        inviterName: currentUserData.full_name || 'Test User',
-        accountName: currentAccount.accountName || 'Test Account',
-        inviteToken: testToken,
-        role: 'User',
-        acceptUrl: testAcceptUrl,
-      };
-      results.steps[results.steps.length - 1].status = 'completed';
-
-      results.steps.push({ step: 'Calling Edge Function', status: 'running', time: new Date().toISOString() });
-      const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`;
-
-      const startTime = Date.now();
-      const response = await fetch(edgeFunctionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify(results.payload),
-      });
-      const endTime = Date.now();
-
-      results.edgeFunction = {
-        url: edgeFunctionUrl,
-        method: 'POST',
-        responseTime: `${endTime - startTime}ms`,
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries()),
-      };
-
-      let responseData;
-      try {
-        responseData = await response.json();
-        results.edgeFunction.responseBody = responseData;
-      } catch (e) {
-        const textResponse = await response.text();
-        results.edgeFunction.responseBody = textResponse;
-        results.edgeFunction.parseError = 'Could not parse response as JSON';
-      }
-
-      if (!response.ok) {
-        results.steps[results.steps.length - 1].status = 'failed';
-        results.steps[results.steps.length - 1].error = responseData?.error || 'Edge function returned error status';
-        results.finalResult = {
-          success: false,
-          message: 'Edge function call failed',
-          error: responseData?.error || `HTTP ${response.status}: ${response.statusText}`,
-        };
-      } else {
-        results.steps[results.steps.length - 1].status = 'completed';
-        results.steps[results.steps.length - 1].emailId = responseData?.emailId;
-
-        results.resendApi = {
-          emailSent: true,
-          emailId: responseData?.emailId,
-          from: 'Survey Route <invites@mail.survey-route.com>',
-          to: testEmailAddress,
-          subject: `You're invited to join ${results.payload.accountName} on Survey Route`,
-        };
-
-        results.finalResult = {
-          success: true,
-          message: `Test email successfully sent to ${testEmailAddress}!`,
-          emailId: responseData?.emailId,
-        };
-
-        setSuccess(`Test email sent successfully! Check ${testEmailAddress} for the email. Email ID: ${responseData?.emailId}`);
-      }
-
-    } catch (err: any) {
-      console.error('Email test error:', err);
-
-      if (results.steps.length > 0) {
-        results.steps[results.steps.length - 1].status = 'failed';
-        results.steps[results.steps.length - 1].error = err.message;
-      }
-
-      results.finalResult = {
-        success: false,
-        message: 'Test failed with error',
-        error: err.message,
-        stack: err.stack,
-      };
-
-      setError(`Email test failed: ${err.message}`);
-    } finally {
-      setEmailTestResults(results);
-      setTestingEmail(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="p-8 text-center">
@@ -1102,22 +613,12 @@ export default function TeamManagement() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          {currentUserEmail && agencyOwnerEmail && currentUserEmail === agencyOwnerEmail && (
-            <button
-              onClick={() => setShowDebugInfo(!showDebugInfo)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              title="Toggle debug information"
-            >
-              <Bug className="w-4 h-4" />
-              Debug
-            </button>
-          )}
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <UserPlus className="w-4 h-4" />
-            Add Team Member
+            Invite Team Member
           </button>
         </div>
       </div>
@@ -1142,293 +643,6 @@ export default function TeamManagement() {
             <button onClick={() => setSuccess('')} className="text-green-700 hover:text-green-900">
               <XCircle className="w-4 h-4" />
             </button>
-          </div>
-        </div>
-      )}
-
-      {showDebugInfo && (
-        <div className="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-4 font-mono text-xs">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <Bug className="w-4 h-4" />
-              Debug & Email Testing Panel
-            </h4>
-            <button
-              onClick={() => {
-                setShowDebugInfo(false);
-                setEmailTestResults(null);
-              }}
-              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            >
-              <XCircle className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg p-4">
-              <h5 className="font-bold text-green-900 dark:text-green-100 mb-3">Auth Account Status Checker</h5>
-              <p className="text-sm text-green-800 dark:text-green-200 mb-3 font-sans">
-                Check if an email has an orphaned auth account, user profile, or account memberships. Use this to diagnose invitation issues.
-              </p>
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="email"
-                  value={authCheckEmail}
-                  onChange={(e) => setAuthCheckEmail(e.target.value)}
-                  placeholder="email@example.com"
-                  className="flex-1 px-3 py-2 border border-green-300 dark:border-green-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-sans"
-                  disabled={checkingAuthStatus}
-                />
-                <button
-                  onClick={checkAuthAccountStatus}
-                  disabled={checkingAuthStatus || !authCheckEmail}
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-sans text-sm font-medium"
-                >
-                  {checkingAuthStatus ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Checking...
-                    </>
-                  ) : (
-                    <>
-                      <Shield className="w-4 h-4" />
-                      Check Status
-                    </>
-                  )}
-                </button>
-              </div>
-              {authStatusResult && (
-                <div className="space-y-2">
-                  <div className="bg-white dark:bg-gray-900 border border-green-300 dark:border-green-600 rounded p-3">
-                    <h6 className="font-bold text-gray-900 dark:text-white mb-2 text-sm">Status for: {authStatusResult.email}</h6>
-                    <div className="space-y-1 text-xs text-gray-800 dark:text-gray-200">
-                      <div className="flex justify-between">
-                        <span>Auth Account Exists:</span>
-                        <span className={authStatusResult.auth_exists ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-gray-500'}>
-                          {authStatusResult.auth_exists ? 'Yes' : 'No'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>User Profile Exists:</span>
-                        <span className={authStatusResult.profile_exists ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-gray-500'}>
-                          {authStatusResult.profile_exists ? 'Yes' : 'No'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Profile Linked to Auth:</span>
-                        <span className={authStatusResult.profile_linked_to_auth ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-red-600 dark:text-red-400 font-semibold'}>
-                          {authStatusResult.profile_linked_to_auth ? 'Yes' : 'No'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Account Memberships:</span>
-                        <span className="font-semibold">{authStatusResult.account_memberships}</span>
-                      </div>
-                      <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-                        <span className="font-semibold">Is Orphaned:</span>
-                        <span className={authStatusResult.is_orphaned ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-green-600 dark:text-green-400'}>
-                          {authStatusResult.is_orphaned ? 'Yes - Cleanup Needed!' : 'No'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold">Can Be Invited:</span>
-                        <span className={authStatusResult.can_be_invited ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-red-600 dark:text-red-400'}>
-                          {authStatusResult.can_be_invited ? 'Yes' : 'No'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  {authStatusResult.is_orphaned && (
-                    <button
-                      onClick={forceCleanupAccount}
-                      disabled={checkingAuthStatus}
-                      className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 font-sans text-sm font-medium"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Force Cleanup Orphaned Account
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
-              <h5 className="font-bold text-blue-900 dark:text-blue-100 mb-3">Email System Test</h5>
-              <p className="text-sm text-blue-800 dark:text-blue-200 mb-3 font-sans">
-                Send a test invitation email to diagnose email delivery issues. This will test the complete email flow including edge function connectivity and Resend API.
-              </p>
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="email"
-                  value={testEmailAddress}
-                  onChange={(e) => setTestEmailAddress(e.target.value)}
-                  placeholder="your-email@example.com"
-                  className="flex-1 px-3 py-2 border border-blue-300 dark:border-blue-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-sans"
-                  disabled={testingEmail}
-                />
-                <button
-                  onClick={runComprehensiveEmailTest}
-                  disabled={testingEmail || !testEmailAddress}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-sans text-sm font-medium"
-                >
-                  {testingEmail ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Testing...
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="w-4 h-4" />
-                      Send Test Email
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {emailTestResults && (
-              <div className="space-y-3">
-                <div className={`p-4 rounded-lg border ${emailTestResults.finalResult?.success
-                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700'
-                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
-                  }`}>
-                  <h5 className={`font-bold mb-2 ${emailTestResults.finalResult?.success
-                    ? 'text-green-900 dark:text-green-100'
-                    : 'text-red-900 dark:text-red-100'
-                    }`}>
-                    {emailTestResults.finalResult?.success ? 'Test Successful' : 'Test Failed'}
-                  </h5>
-                  <p className={`text-sm font-sans ${emailTestResults.finalResult?.success
-                    ? 'text-green-800 dark:text-green-200'
-                    : 'text-red-800 dark:text-red-200'
-                    }`}>
-                    {emailTestResults.finalResult?.message}
-                  </p>
-                  {emailTestResults.finalResult?.error && (
-                    <div className="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-red-300 dark:border-red-600">
-                      <strong className="text-red-900 dark:text-red-100">Error:</strong>
-                      <pre className="text-red-800 dark:text-red-200 text-xs mt-1 whitespace-pre-wrap">
-                        {emailTestResults.finalResult.error}
-                      </pre>
-                    </div>
-                  )}
-                  {emailTestResults.finalResult?.emailId && (
-                    <div className="mt-2 text-xs text-green-700 dark:text-green-300">
-                      <strong>Email ID:</strong> {emailTestResults.finalResult.emailId}
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-3">
-                  <h5 className="font-bold text-gray-900 dark:text-white mb-2">Test Steps</h5>
-                  <div className="space-y-2">
-                    {emailTestResults.steps.map((step: any, idx: number) => (
-                      <div key={idx} className="flex items-start gap-2">
-                        <div className="mt-0.5">
-                          {step.status === 'completed' && <CheckCircle className="w-4 h-4 text-green-600" />}
-                          {step.status === 'failed' && <XCircle className="w-4 h-4 text-red-600" />}
-                          {step.status === 'running' && <Clock className="w-4 h-4 text-blue-600 animate-spin" />}
-                        </div>
-                        <div className="flex-1">
-                          <div className="text-gray-900 dark:text-white font-medium">{step.step}</div>
-                          {step.error && (
-                            <div className="text-red-600 dark:text-red-400 text-xs mt-1">{step.error}</div>
-                          )}
-                          {step.emailId && (
-                            <div className="text-green-600 dark:text-green-400 text-xs mt-1">Email ID: {step.emailId}</div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-3">
-                  <h5 className="font-bold text-gray-900 dark:text-white mb-2">Environment</h5>
-                  <div className="space-y-1 text-gray-800 dark:text-gray-200">
-                    <div><strong>Supabase URL:</strong> {emailTestResults.environment.supabaseUrl}</div>
-                    <div><strong>URL Valid:</strong> {emailTestResults.environment.supabaseUrlValid ? 'Yes' : 'No'}</div>
-                    <div><strong>Anon Key Present:</strong> {emailTestResults.environment.anonKeyPresent ? 'Yes' : 'No'}</div>
-                    <div><strong>Anon Key Length:</strong> {emailTestResults.environment.anonKeyLength} chars</div>
-                    <div><strong>Anon Key Prefix:</strong> {emailTestResults.environment.anonKeyPrefix}</div>
-                    <div><strong>Edge Function URL:</strong> {emailTestResults.environment.edgeFunctionUrl}</div>
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-3">
-                  <h5 className="font-bold text-gray-900 dark:text-white mb-2">Email Payload</h5>
-                  <pre className="text-gray-800 dark:text-gray-200 overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(emailTestResults.payload, null, 2)}
-                  </pre>
-                </div>
-
-                <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-3">
-                  <h5 className="font-bold text-gray-900 dark:text-white mb-2">Edge Function Response</h5>
-                  <div className="space-y-1 text-gray-800 dark:text-gray-200 mb-2">
-                    <div><strong>URL:</strong> {emailTestResults.edgeFunction.url}</div>
-                    <div><strong>Status:</strong> {emailTestResults.edgeFunction.status} {emailTestResults.edgeFunction.statusText}</div>
-                    <div><strong>Success:</strong> {emailTestResults.edgeFunction.ok ? 'Yes' : 'No'}</div>
-                    <div><strong>Response Time:</strong> {emailTestResults.edgeFunction.responseTime}</div>
-                  </div>
-                  <details className="cursor-pointer">
-                    <summary className="font-medium text-gray-900 dark:text-white mb-1">Response Headers</summary>
-                    <pre className="text-gray-800 dark:text-gray-200 overflow-x-auto mt-2 p-2 bg-gray-50 dark:bg-gray-800 rounded">
-                      {JSON.stringify(emailTestResults.edgeFunction.headers, null, 2)}
-                    </pre>
-                  </details>
-                  <details className="cursor-pointer mt-2">
-                    <summary className="font-medium text-gray-900 dark:text-white mb-1">Response Body</summary>
-                    <pre className="text-gray-800 dark:text-gray-200 overflow-x-auto mt-2 p-2 bg-gray-50 dark:bg-gray-800 rounded">
-                      {JSON.stringify(emailTestResults.edgeFunction.responseBody, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-
-                {emailTestResults.resendApi?.emailSent && (
-                  <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-3">
-                    <h5 className="font-bold text-gray-900 dark:text-white mb-2">Resend API Details</h5>
-                    <div className="space-y-1 text-gray-800 dark:text-gray-200">
-                      <div><strong>From:</strong> {emailTestResults.resendApi.from}</div>
-                      <div><strong>To:</strong> {emailTestResults.resendApi.to}</div>
-                      <div><strong>Subject:</strong> {emailTestResults.resendApi.subject}</div>
-                      <div><strong>Email ID:</strong> {emailTestResults.resendApi.emailId}</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {debugInfo && (
-              <div className="pt-4 border-t border-gray-300 dark:border-gray-600">
-                <h5 className="font-bold text-gray-900 dark:text-white mb-2">RLS & Permissions Debug</h5>
-                <div className="space-y-2 text-gray-800 dark:text-gray-200">
-                  <div><strong>Account ID:</strong> {debugInfo.accountId}</div>
-                  <div><strong>Auth User ID:</strong> {debugInfo.authUserId}</div>
-                  <div><strong>Auth User Email:</strong> {debugInfo.authUserEmail}</div>
-                  <div><strong>User Role:</strong> {debugInfo.userRole || 'None'}</div>
-                  <div><strong>Agency Owner Email:</strong> {debugInfo.agencyOwnerEmail || 'N/A'}</div>
-                  <div><strong>Is Agency Owner:</strong> {debugInfo.isAgencyOwner ? 'Yes' : 'No'}</div>
-                  <div><strong>Total Invitations in DB:</strong> {debugInfo.totalInvitationsInDB}</div>
-                  <div><strong>Timestamp:</strong> {debugInfo.timestamp}</div>
-                  <details className="cursor-pointer mt-2">
-                    <summary className="font-medium text-gray-900 dark:text-white mb-1">Invitations Query Result</summary>
-                    <pre className="mt-1 p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-x-auto">
-                      {JSON.stringify(debugInfo.invitationsQuery, null, 2)}
-                    </pre>
-                  </details>
-                  {debugInfo.totalInvitationsInDB > 0 && debugInfo.invitationsQuery?.count === 0 && (
-                    <div className="mt-2 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded">
-                      <strong className="text-red-800 dark:text-red-200">⚠ RLS Policy Issue Detected:</strong>
-                      <p className="text-sm text-red-700 dark:text-red-300 mt-1 font-sans">
-                        There are {debugInfo.totalInvitationsInDB} invitations in the database for this account,
-                        but the query returned 0. This indicates that the RLS policies are blocking access.
-                        Your role is "{debugInfo.userRole || 'None'}" and you {debugInfo.isAgencyOwner ? 'are' : 'are not'} the agency owner.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1687,19 +901,6 @@ export default function TeamManagement() {
                             <Layers className="w-4 h-4" />
                           </button>
                         )}
-                        <button
-                          onClick={() => {
-                            setSelectedMember(member);
-                            setNewPassword('');
-                            setPasswordError('');
-                            setPasswordSuccess('');
-                            setShowPasswordModal(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900 rounded transition-colors"
-                        >
-                          <Key className="w-3 h-3" />
-                          Set Password
-                        </button>
                         {member.email !== agencyOwnerEmail && (
                           <button
                             onClick={() => handleRemoveMember(member.id, member.email)}
@@ -1732,12 +933,16 @@ export default function TeamManagement() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transition-colors duration-200">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-6 transition-colors duration-200">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <UserPlus className="w-5 h-5" />
-              Add Team Member
+              Invite Team Member
             </h3>
+
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+              The invitation will grant access only to this account. The recipient creates or keeps their own password.
+            </p>
 
             <div className="space-y-4">
               <div>
@@ -1751,31 +956,6 @@ export default function TeamManagement() {
                   className="form-input"
                   placeholder="colleague@company.com"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  Password (optional)
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newMemberPassword}
-                    onChange={(e) => setNewMemberPassword(e.target.value)}
-                    className="form-input flex-1 font-mono"
-                    placeholder="Leave blank for auto-generated"
-                  />
-                  <button
-                    onClick={() => setNewMemberPassword(generateTemporaryPassword())}
-                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200"
-                    title="Generate random password"
-                  >
-                    <RefreshCw className="w-5 h-5" />
-                  </button>
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Minimum 6 characters. Will be auto-generated if left blank.
-                </p>
               </div>
 
               <div>
@@ -1807,12 +987,12 @@ export default function TeamManagement() {
                   {adding ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Adding...
+                      Sending...
                     </>
                   ) : (
                     <>
                       <UserPlus className="w-4 h-4" />
-                      Add Member
+                      Send Invitation
                     </>
                   )}
                 </button>
@@ -1835,7 +1015,7 @@ export default function TeamManagement() {
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
                   Are you sure you want to revoke the invitation for <span className="font-semibold">{invitationToRevoke.email}</span>?
                   <br /><br />
-                  This will invalidate the invitation link and clean up any associated incomplete account data.
+                  This will invalidate only this invitation link. It will not change the recipient's sign-in or access to other accounts.
                 </p>
                 <div className="flex justify-end gap-3">
                   <button
@@ -1943,104 +1123,6 @@ export default function TeamManagement() {
           </div>
         </div>
       )}
-
-      {showPasswordModal && selectedMember && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
-              Set Password for {selectedMember.full_name || selectedMember.email}
-            </h3>
-
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="text-sm text-gray-700 dark:text-gray-200">
-                  <span className="font-medium">Email:</span> {selectedMember.email}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  New Password
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newPassword}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
-                    className="form-input flex-1 font-mono"
-                    placeholder="Enter new password"
-                  />
-                  <button
-                    onClick={generatePassword}
-                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    title="Generate random password"
-                  >
-                    <RefreshCw className="w-5 h-5" />
-                  </button>
-                  {newPassword && (
-                    <button
-                      onClick={() => {
-                        copyToClipboard(newPassword);
-                        alert('Password copied to clipboard!');
-                      }}
-                      className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                      title="Copy to clipboard"
-                    >
-                      <Copy className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Minimum 6 characters. Click generate for a random password.
-                </p>
-              </div>
-
-              {passwordError && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                  <p className="text-sm text-red-800">{passwordError}</p>
-                </div>
-              )}
-
-              {passwordSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  <p className="text-sm text-green-800">{passwordSuccess}</p>
-                </div>
-              )}
-
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs text-amber-800">
-                  Copy and share this password manually with the user. They can change it later from their account settings.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowPasswordModal(false);
-                  setSelectedMember(null);
-                  setNewPassword('');
-                  setPasswordError('');
-                  setPasswordSuccess('');
-                }}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSetPassword}
-                disabled={!newPassword || passwordLoading}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {passwordLoading ? 'Updating...' : 'Set Password'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )
-      }
 
       {
         showInviteDetailsModal && inviteDetails && (

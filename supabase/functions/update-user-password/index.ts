@@ -6,223 +6,81 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return jsonResponse({ error: 'Method not allowed' }, 405);
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-      }
-    );
+    const authorization = req.headers.get('Authorization');
+    if (!authorization) return jsonResponse({ error: 'Unauthorized' }, 401);
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
-        },
-      }
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      return jsonResponse({ error: 'Password service is not configured' }, 500);
     }
 
-    const { targetUserId, newPassword } = await req.json();
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authorization } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) return jsonResponse({ error: 'Unauthorized' }, 401);
+
+    const { targetUserId, newPassword } = await req.json() as {
+      targetUserId?: string;
+      newPassword?: string;
+    };
 
     if (!targetUserId || !newPassword) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return jsonResponse({ error: 'Missing required fields' }, 400);
+    }
+    if (newPassword.length < 8) {
+      return jsonResponse({ error: 'Password must be at least 8 characters' }, 400);
     }
 
-    if (newPassword.length < 6) {
-      return new Response(
-        JSON.stringify({ error: 'Password must be at least 6 characters' }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    const { data: userData } = await supabaseClient
+    const { data: callerProfile } = await adminClient
       .from('users')
-      .select('email, id')
+      .select('id')
       .eq('auth_user_id', user.id)
       .maybeSingle();
 
-    if (!userData) {
-      return new Response(
-        JSON.stringify({ error: 'User not found' }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+    // Passwords belong to the global sign-in identity, not an account. An
+    // administrator of one account must never be able to reset a member's
+    // password and inherit that member's access to other accounts.
+    if (!callerProfile || callerProfile.id !== targetUserId) {
+      return jsonResponse({ error: 'You can only change your own password' }, 403);
     }
 
-    // Use admin client to query target user (bypasses RLS)
-    const { data: targetUser } = await supabaseAdmin
-      .from('users')
-      .select('auth_user_id, email')
-      .eq('id', targetUserId)
-      .maybeSingle();
-
-    if (!targetUser || !targetUser.auth_user_id) {
-      return new Response(
-        JSON.stringify({ error: 'Target user not found' }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    const { data: agencies } = await supabaseClient
-      .from('agencies')
-      .select('id')
-      .eq('owner_email', userData.email);
-
-    const isAgencyOwner = agencies && agencies.length > 0;
-
-    if (targetUserId === userData.id) {
-      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-        targetUser.auth_user_id,
-        { password: newPassword }
-      );
-
-      if (updateError) {
-        return new Response(
-          JSON.stringify({ error: updateError.message }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, message: 'Password updated successfully' }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    if (isAgencyOwner) {
-      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-        targetUser.auth_user_id,
-        { password: newPassword }
-      );
-
-      if (updateError) {
-        return new Response(
-          JSON.stringify({ error: updateError.message }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, message: 'Password updated successfully' }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    const { data: accountUsers } = await supabaseClient
-      .from('account_users')
-      .select('account_id, role')
-      .eq('user_id', userData.id)
-      .eq('role', 'account_admin');
-
-    if (!accountUsers || accountUsers.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'Not authorized to change passwords' }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    const accountIds = accountUsers.map(au => au.account_id);
-
-    const { data: targetAccountUsers } = await supabaseClient
-      .from('account_users')
-      .select('account_id')
-      .eq('user_id', targetUserId)
-      .in('account_id', accountIds);
-
-    if (!targetAccountUsers || targetAccountUsers.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'Not authorized to change this user\'s password' }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-      targetUser.auth_user_id,
-      { password: newPassword }
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(
+      user.id,
+      { password: newPassword },
     );
 
     if (updateError) {
-      return new Response(
-        JSON.stringify({ error: updateError.message }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return jsonResponse({ error: updateError.message }, 400);
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: 'Password updated successfully' }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return jsonResponse({ success: true, message: 'Password updated successfully' });
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    console.error('update-user-password failed', error);
+    return jsonResponse({ error: 'Internal server error' }, 500);
   }
 });

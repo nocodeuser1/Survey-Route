@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Building2, Users, Key, AlertCircle, CheckCircle, Mail, UserPlus, X, Copy, RefreshCw, Shield, Trash2 } from 'lucide-react';
+import { Building2, Users, AlertCircle, CheckCircle, Mail, UserPlus, X, RefreshCw, Shield, Trash2 } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import StripeProductConfig from './StripeProductConfig';
@@ -67,13 +67,6 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordSuccess, setPasswordSuccess] = useState('');
-
   const [newAgencyName, setNewAgencyName] = useState(agency.name);
   const [renameLoading, setRenameLoading] = useState(false);
   const [renameError, setRenameError] = useState('');
@@ -284,6 +277,12 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
       return;
     }
 
+    const normalizedEmail = newUserEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setAddUserError('Please enter a valid email address');
+      return;
+    }
+
     setAddingUser(true);
     setAddUserError('');
     setAddUserSuccess('');
@@ -294,28 +293,45 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
 
       const { data: currentUserData } = await supabase
         .from('users')
-        .select('full_name')
+        .select('id')
         .eq('auth_user_id', currentUser.id)
         .single();
 
-      const { data: accountData } = await supabase
-        .from('accounts')
-        .select('account_name, company_name')
-        .eq('id', selectedAccountForUser)
-        .single();
+      if (!currentUserData) throw new Error('User profile not found');
+
+      const { data: preparation, error: preparationError } = await supabase.rpc(
+        'prepare_email_for_invitation',
+        { target_email: normalizedEmail, target_account_id: selectedAccountForUser },
+      );
+      if (preparationError) throw preparationError;
+      if (!preparation?.can_invite) {
+        throw new Error(preparation?.message || 'This user already belongs to the selected account');
+      }
+
+      const { data: pendingInvitation } = await supabase
+        .from('user_invitations')
+        .select('id')
+        .eq('account_id', selectedAccountForUser)
+        .eq('email', normalizedEmail)
+        .eq('status', 'pending')
+        .maybeSingle();
+
+      if (pendingInvitation) {
+        throw new Error('An invitation for this email is already pending. Resend or revoke it instead.');
+      }
 
       // Generate invitation token
-      const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const token = crypto.randomUUID();
 
       // Create invitation
       const { error: inviteError } = await supabase
         .from('user_invitations')
         .insert({
-          email: newUserEmail.toLowerCase(),
+          email: normalizedEmail,
           account_id: selectedAccountForUser,
           role: newUserRole,
-          temporary_password: Math.random().toString(36).substring(2, 15),
-          invited_by: currentUser.id,
+          temporary_password: `${crypto.randomUUID()}${crypto.randomUUID()}`,
+          invited_by: currentUserData.id,
           token: token,
           status: 'pending',
           expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -325,39 +341,38 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
 
       // Send invitation email
       const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      if (!session?.access_token) {
+        setAddUserError('The invitation was created, but your session expired before the email could be sent. Sign in again and use Resend.');
+      } else {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invite-email`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ inviteToken: token }),
           },
-          body: JSON.stringify({
-            inviteeEmail: newUserEmail,
-            inviterName: currentUserData?.full_name || 'Your teammate',
-            accountName: accountData?.account_name || accountData?.company_name || 'Survey Route',
-            inviteToken: token,
-            role: newUserRole === 'account_admin' ? 'Administrator' : 'User',
-          }),
-        }
-      );
+        );
 
-      if (!response.ok) {
-        throw new Error('Failed to send invitation email');
+        if (!response.ok) {
+          console.error('Invitation created but email failed:', await response.json().catch(() => null));
+          setAddUserError('The invitation was created, but the email could not be sent. Use Resend from the pending invitations list.');
+        } else {
+          setAddUserSuccess(`Invitation sent to ${newUserEmail}`);
+        }
       }
 
-      setAddUserSuccess(`Invitation sent to ${newUserEmail}`);
       setShowAddUserModal(false);
       setNewUserEmail('');
       setNewUserRole('user');
       setSelectedAccountForUser('');
+      await loadInvitations();
 
       setTimeout(() => {
         setAddUserSuccess('');
-        loadAllUsers();
       }, 2000);
     } catch (err: any) {
       console.error('Error adding user:', err);
@@ -367,29 +382,10 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
     }
   };
 
-  const generatePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setNewPassword(password);
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
-
   const handleResendInvitation = async (invitation: Invitation) => {
     try {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not authenticated');
-
-      const { data: currentUserData } = await supabase
-        .from('users')
-        .select('full_name')
-        .eq('auth_user_id', currentUser.id)
-        .single();
 
       const { data: { session } } = await supabase.auth.getSession();
 
@@ -403,11 +399,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
-            inviteeEmail: invitation.email,
-            inviterName: currentUserData?.full_name || 'Your teammate',
-            accountName: invitation.account_name || 'Survey Route',
             inviteToken: invitation.token,
-            role: invitation.role === 'account_admin' ? 'Administrator' : 'User',
           }),
         }
       );
@@ -432,7 +424,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
     try {
       const { error } = await supabase
         .from('user_invitations')
-        .delete()
+        .update({ status: 'revoked' })
         .eq('id', invitationId);
 
       if (error) throw error;
@@ -443,57 +435,6 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
     } catch (err: any) {
       setAddUserError(err.message || 'Failed to revoke invitation');
       setTimeout(() => setAddUserError(''), 5000);
-    }
-  };
-
-  const handleSetPassword = async () => {
-    if (!selectedUser || !newPassword) return;
-
-    if (newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
-      return;
-    }
-
-    setPasswordLoading(true);
-    setPasswordError('');
-    setPasswordSuccess('');
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-user-password`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({
-            targetUserId: selectedUser.id,
-            newPassword: newPassword,
-          }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to update password');
-      }
-
-      setPasswordSuccess(`Password updated for ${selectedUser.email}`);
-      setTimeout(() => {
-        setShowPasswordModal(false);
-        setSelectedUser(null);
-        setNewPassword('');
-        setPasswordSuccess('');
-      }, 2000);
-    } catch (err: any) {
-      setPasswordError(err.message || 'Failed to update password');
-    } finally {
-      setPasswordLoading(false);
     }
   };
 
@@ -796,19 +737,9 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                             ))}
                           </div>
                         </div>
-                        <button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setNewPassword('');
-                            setPasswordError('');
-                            setPasswordSuccess('');
-                            setShowPasswordModal(true);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
-                        >
-                          <Key className="w-4 h-4" />
-                          Set Password
-                        </button>
+                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                          User-managed password
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -1092,106 +1023,9 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
         </div>
       </div>
 
-      {showPasswordModal && selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
-              Set Password for {selectedUser.full_name || selectedUser.email}
-            </h3>
-
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="text-sm text-gray-700 dark:text-gray-200">
-                  <span className="font-medium">Email:</span> {selectedUser.email}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  New Password
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="form-input flex-1 font-mono"
-                    placeholder="Enter new password"
-                  />
-                  <button
-                    onClick={generatePassword}
-                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    title="Generate random password"
-                  >
-                    <RefreshCw className="w-5 h-5" />
-                  </button>
-                  {newPassword && (
-                    <button
-                      onClick={() => {
-                        copyToClipboard(newPassword);
-                        alert('Password copied to clipboard!');
-                      }}
-                      className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                      title="Copy to clipboard"
-                    >
-                      <Copy className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Minimum 6 characters. Click generate for a random password.
-                </p>
-              </div>
-
-              {passwordError && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                  <p className="text-sm text-red-800">{passwordError}</p>
-                </div>
-              )}
-
-              {passwordSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  <p className="text-sm text-green-800">{passwordSuccess}</p>
-                </div>
-              )}
-
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs text-amber-800">
-                  Copy and share this password manually with the user. They can change it later from their account settings.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowPasswordModal(false);
-                  setSelectedUser(null);
-                  setNewPassword('');
-                  setPasswordError('');
-                  setPasswordSuccess('');
-                }}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSetPassword}
-                disabled={!newPassword || passwordLoading}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {passwordLoading ? 'Updating...' : 'Set Password'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showAddUserModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                 Invite User to Account

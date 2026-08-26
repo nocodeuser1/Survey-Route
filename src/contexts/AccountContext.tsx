@@ -7,6 +7,7 @@ interface Account {
   id: string;
   accountName: string;
   agencyId: string;
+  agency_id?: string;
   status: string;
   createdAt: string;
   // Raw DB columns. The accounts table is hydrated via `select('*')` so
@@ -91,13 +92,32 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       let accountsData: Account[] = [];
-      let isAgencyOwner = false;
+      const primaryOwnerAccountIds = new Set<string>();
 
-      // Check if user is an agency owner
+      // Memberships are the source of truth for regular users and co-owners.
+      // A co-owner may have isAgencyOwner=true, but still receives explicit
+      // account_users rows and must not fall into the primary-owner shortcut.
+      const { data: memberships, error: membershipsError } = await supabase
+        .from('account_users')
+        .select('account_id, role, joined_at')
+        .eq('user_id', user.id);
+
+      if (membershipsError) throw membershipsError;
+
+      if (memberships?.length) {
+        const accountIds = memberships.map((membership: AccountMembership) => membership.account_id);
+        const { data, error: accountsError } = await supabase
+          .from('accounts')
+          .select('*')
+          .in('id', accountIds);
+
+        if (accountsError) throw accountsError;
+        accountsData = data || [];
+      }
+
+      // The primary owner legitimately has agency-wide access even if legacy
+      // accounts do not contain a matching account_users row.
       if (user.isAgencyOwner) {
-        console.log('[AccountContext] User is agency owner');
-        isAgencyOwner = true;
-        // Agency owners can access all accounts under their agency
         const { data: agency } = await supabase
           .from('agencies')
           .select('id')
@@ -105,40 +125,19 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           .maybeSingle();
 
         if (agency) {
-          const { data, error } = await supabase
+          const { data: ownerAccounts, error: ownerAccountsError } = await supabase
             .from('accounts')
             .select('*')
             .eq('agency_id', agency.id);
 
-          if (error) throw error;
-          accountsData = data || [];
-          console.log('[AccountContext] Loaded accounts for agency owner:', accountsData.length);
-        }
-      } else {
-        // Regular users - get accounts they belong to
-        console.log('[AccountContext] Loading memberships for regular user');
-        const { data: memberships, error: membershipsError } = await supabase
-          .from('account_users')
-          .select('account_id, role, joined_at')
-          .eq('user_id', user.id);
+          if (ownerAccountsError) throw ownerAccountsError;
+          for (const account of ownerAccounts || []) {
+            primaryOwnerAccountIds.add(account.id);
+          }
 
-        console.log('[AccountContext] Memberships query result:', { memberships, error: membershipsError });
-
-        if (membershipsError) throw membershipsError;
-
-        if (memberships && memberships.length > 0) {
-          const accountIds = memberships.map((m: AccountMembership) => m.account_id);
-          console.log('[AccountContext] Loading accounts for IDs:', accountIds);
-          const { data, error: accountsError } = await supabase
-            .from('accounts')
-            .select('*')
-            .in('id', accountIds);
-
-          if (accountsError) throw accountsError;
-          accountsData = data || [];
-          console.log('[AccountContext] Loaded accounts:', accountsData.length);
-        } else {
-          console.log('[AccountContext] No memberships found for user');
+          accountsData = Array.from(
+            new Map([...accountsData, ...(ownerAccounts || [])].map((account) => [account.id, account])).values(),
+          );
         }
       }
 
@@ -166,20 +165,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
       if (selectedAccount) {
         setCurrentAccount(selectedAccount);
-        // Agency owners get full admin access
-        if (isAgencyOwner) {
-          setAccountRole('account_admin');
-        } else {
-          // Look up membership role for regular users
-          const { data: membership } = await supabase
-            .from('account_users')
-            .select('role')
-            .eq('account_id', selectedAccount.id)
-            .eq('user_id', user.id)
-            .maybeSingle();
-          console.log('[AccountContext] Membership role:', membership?.role);
-          setAccountRole(membership?.role || null);
-        }
+        const selectedMembership = memberships?.find(
+          (membership: AccountMembership) => membership.account_id === selectedAccount.id,
+        );
+        setAccountRole(
+          selectedMembership?.role
+          || (primaryOwnerAccountIds.has(selectedAccount.id) ? 'account_admin' : null),
+        );
         localStorage.setItem('currentAccountId', selectedAccount.id);
       }
       console.log('[AccountContext] Finished loading accounts');
@@ -194,42 +186,31 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   async function selectAccount(accountId: string) {
     if (!user) return false;
 
-    let account = accounts.find(a => a.id === accountId);
-
-    if (!account) {
-      const { data, error } = await supabase
-        .from('accounts')
-        .select('*')
-        .eq('id', accountId)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) return false;
-
-      account = data;
-      setAccounts(prev => (
-        prev.some(existing => existing.id === data.id)
-          ? prev
-          : [data, ...prev]
-      ));
-    }
+    const account = accounts.find(a => a.id === accountId);
 
     if (!account) return false;
 
     setCurrentAccount(account);
 
-    // Agency owners get full admin access
-    if (user.isAgencyOwner) {
-      setAccountRole('account_admin');
-    } else {
-      // Look up membership role for regular users
-      const { data: membership } = await supabase
-        .from('account_users')
-        .select('role')
-        .eq('account_id', accountId)
-        .eq('user_id', user.id)
+    const { data: membership } = await supabase
+      .from('account_users')
+      .select('role')
+      .eq('account_id', accountId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (membership?.role) {
+      setAccountRole(membership.role);
+    } else if (user.isAgencyOwner && account.agency_id) {
+      const { data: primaryAgency } = await supabase
+        .from('agencies')
+        .select('id')
+        .eq('id', account.agency_id)
+        .eq('owner_email', user.email)
         .maybeSingle();
-      setAccountRole(membership?.role || null);
+      setAccountRole(primaryAgency ? 'account_admin' : null);
+    } else {
+      setAccountRole(null);
     }
 
     localStorage.setItem('currentAccountId', accountId);
