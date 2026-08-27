@@ -32,7 +32,7 @@ interface Invitation {
 }
 
 export default function TeamManagement() {
-  const { currentAccount } = useAccount();
+  const { currentAccount, isAgencyAdmin } = useAccount();
   const { user: authUser } = useAuth();
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [agencyId, setAgencyId] = useState<string | null>(null);
@@ -475,13 +475,13 @@ export default function TeamManagement() {
     const { id: userId, email } = memberToRemove;
 
     try {
-      const { error } = await supabase
-        .from('account_users')
-        .delete()
-        .eq('account_id', currentAccount.id)
-        .eq('user_id', userId);
+      const { data, error } = await supabase.rpc('remove_account_member', {
+        target_account_id: currentAccount.id,
+        target_user_id: userId,
+      });
 
       if (error) throw error;
+      if (!data?.success) throw new Error('Failed to remove team member');
 
       setSuccess(`${email} has been removed from the account`);
       await loadTeamData();
@@ -497,13 +497,14 @@ export default function TeamManagement() {
     if (!currentAccount) return;
 
     try {
-      const { error } = await supabase
-        .from('account_users')
-        .update({ role: newRole })
-        .eq('account_id', currentAccount.id)
-        .eq('user_id', userId);
+      const { data, error } = await supabase.rpc('update_account_member_role', {
+        target_account_id: currentAccount.id,
+        target_user_id: userId,
+        new_role: newRole,
+      });
 
       if (error) throw error;
+      if (!data?.success) throw new Error('Failed to update role');
 
       setSuccess('Role updated successfully');
       await loadTeamData();
@@ -726,7 +727,7 @@ export default function TeamManagement() {
                           )}
                         </div>
                         <p className="text-xs text-gray-600 dark:text-gray-400">
-                          {invite.role === 'account_admin' ? 'Admin' : 'User'} •
+                          {invite.role === 'account_admin' ? 'Account administrator' : 'Team member'} •
                           {isPending && ` Expires ${new Date(invite.expires_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
                           {isAccepted && ` Accepted ${new Date(invite.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
                           {isExpired && ` Expired ${new Date(invite.expires_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
@@ -861,11 +862,13 @@ export default function TeamManagement() {
                     <td className="px-6 py-4">
                       <select
                         value={member.role}
+                        disabled={member.id === authUser?.id || member.is_agency_owner}
                         onChange={(e) => handleChangeRole(member.id, e.target.value as 'account_admin' | 'user')}
-                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white dark:text-white transition-colors duration-200"
+                        title={member.is_agency_owner ? 'Agency owner roles are managed at the agency level' : member.id === authUser?.id ? 'You cannot change your own role' : 'Change account role'}
+                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white dark:text-white disabled:opacity-60 transition-colors duration-200"
                       >
-                        <option value="user">User</option>
-                        <option value="account_admin">Admin</option>
+                        <option value="user">Team member</option>
+                        <option value="account_admin">Account administrator</option>
                       </select>
                     </td>
                     <td className="px-6 py-4">
@@ -891,7 +894,7 @@ export default function TeamManagement() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {authUser?.isAgencyOwner && (
+                        {isAgencyAdmin && (
                           <button
                             onClick={() => openManageAccounts(member)}
                             className="inline-flex items-center justify-center p-1.5 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900 rounded transition-colors"
@@ -901,7 +904,7 @@ export default function TeamManagement() {
                             <Layers className="w-4 h-4" />
                           </button>
                         )}
-                        {member.email !== agencyOwnerEmail && (
+                        {member.email !== agencyOwnerEmail && !member.is_agency_owner && member.id !== authUser?.id && (
                           <button
                             onClick={() => handleRemoveMember(member.id, member.email)}
                             className="inline-flex items-center gap-1 px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded transition-colors"
@@ -967,9 +970,12 @@ export default function TeamManagement() {
                   onChange={(e) => setNewMemberRole(e.target.value as 'account_admin' | 'user')}
                   className="form-select"
                 >
-                  <option value="user">User</option>
-                  <option value="account_admin">Admin</option>
+                  <option value="user">Team member</option>
+                  <option value="account_admin">Account administrator</option>
                 </select>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Team members handle assigned field work. Account administrators can also manage this account's team, settings, branding, and backups. Neither role grants access to another account.
+                </p>
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
@@ -1239,10 +1245,11 @@ export default function TeamManagement() {
                 <div className="space-y-2">
                   {manageAccountsList.map((acc) => {
                     const saving = manageAccountsSavingFor === acc.account_id;
-                    const isOwnerSelf =
+                    const isOwnerSelf = manageAccountsMember.is_agency_owner || Boolean(
                       agencyOwnerEmail &&
                       manageAccountsMember.email &&
-                      manageAccountsMember.email.toLowerCase() === agencyOwnerEmail.toLowerCase();
+                      manageAccountsMember.email.toLowerCase() === agencyOwnerEmail.toLowerCase()
+                    );
                     return (
                       <div
                         key={acc.account_id}
@@ -1270,8 +1277,8 @@ export default function TeamManagement() {
                             className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                           >
                             <option value="none">No access</option>
-                            <option value="user">User</option>
-                            <option value="account_admin">Admin</option>
+                            <option value="user">Team member</option>
+                            <option value="account_admin">Account administrator</option>
                           </select>
                           {saving && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
                         </div>

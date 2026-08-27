@@ -667,7 +667,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                               <span className="font-medium">Account:</span> {invitation.account_name}
                             </p>
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Role:</span> {invitation.role === 'account_admin' ? 'Administrator' : 'User'}
+                              <span className="font-medium">Role:</span> {invitation.role === 'account_admin' ? 'Account administrator' : 'Team member'}
                             </p>
                             <p className="text-sm text-gray-600">
                               <span className="font-medium">Expires:</span> {new Date(invitation.expires_at).toLocaleDateString()}
@@ -1094,11 +1094,11 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                   onChange={(e) => setNewUserRole(e.target.value as 'account_admin' | 'user')}
                   className="form-select"
                 >
-                  <option value="user">User</option>
-                  <option value="account_admin">Admin</option>
+                  <option value="user">Team member</option>
+                  <option value="account_admin">Account administrator</option>
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
-                  Admins can manage team members and settings
+                  Team members handle field work. Account administrators can also manage the selected account's team, settings, branding, and backups. Neither role grants access to another account.
                 </p>
               </div>
 

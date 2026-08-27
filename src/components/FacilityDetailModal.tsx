@@ -58,6 +58,7 @@ import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 
 interface FacilityDetailModalProps {
   facility: Facility;
@@ -140,6 +141,7 @@ export default function FacilityDetailModal({
   scrollToComments = false,
 }: FacilityDetailModalProps) {
   const { user } = useAuth();
+  const { isAgencyAdmin } = useAccount();
   // Brand-aware facility-id label (e.g. "Camino Facility ID" /
   // "Validus Facility ID" / generic "Facility ID"). See hook src.
   const facilityIdLabel = useFacilityIdLabel();
@@ -2133,7 +2135,7 @@ export default function FacilityDetailModal({
                     const isOwner = comment.user_id === myUserId;
                     const isResolved = !!comment.resolved_at;
                     // The author or an agency owner may check a comment off.
-                    const canResolve = isOwner || !!user?.isAgencyOwner;
+                    const canResolve = isOwner || isAgencyAdmin;
                     return (
                       <li key={comment.id} className="group py-3 first:pt-0 last:pb-0">
                         <div className="flex items-start">
@@ -2826,7 +2828,7 @@ export default function FacilityDetailModal({
           half the modal empty. */}
       <div
         className={`grid gap-6 items-start ${
-          user?.isAgencyOwner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'
+          isAgencyAdmin ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'
         }`}
       >
         <LDARSitePlanSection

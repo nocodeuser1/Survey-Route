@@ -42,7 +42,7 @@ import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { getCoords } from '../utils/coordinates';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
-import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -280,9 +280,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // users still get a responsive local-only UI for their session, but the
   // team-wide default they see on a fresh load is whatever the owner
   // curated. See the docstring on useFacilitiesPreferences for details.
-  const { user } = useAuth();
-  const isAgencyOwner = !!user?.isAgencyOwner;
-  const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId, isAgencyOwner);
+  const { isAgencyAdmin } = useAccount();
+  const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId, isAgencyAdmin);
 
   // Brand-aware label for the external facility-id field. Camino-specific
   // for the Camino account; "Validus Facility ID" for Validus; generic

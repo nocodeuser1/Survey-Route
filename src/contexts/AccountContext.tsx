@@ -50,6 +50,7 @@ interface AccountContextType {
   currentAccount: Account | null;
   accounts: Account[];
   accountRole: 'account_admin' | 'user' | null;
+  isAgencyAdmin: boolean;
   loading: boolean;
   selectAccount: (accountId: string) => Promise<boolean>;
   refreshAccounts: () => Promise<void>;
@@ -71,6 +72,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }, [currentAccount?.id, currentAccount?.timezone]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountRole, setAccountRole] = useState<'account_admin' | 'user' | null>(null);
+  const [isAgencyAdmin, setIsAgencyAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -80,6 +82,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       setCurrentAccount(null);
       setAccounts([]);
       setAccountRole(null);
+      setIsAgencyAdmin(false);
       setLoading(false);
     }
   }, [user]);
@@ -90,6 +93,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     try {
       console.log('[AccountContext] Loading accounts for user:', user.id);
       setLoading(true);
+      setIsAgencyAdmin(false);
 
       let accountsData: Account[] = [];
       const primaryOwnerAccountIds = new Set<string>();
@@ -146,6 +150,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         setAccounts([]);
         setCurrentAccount(null);
         setAccountRole(null);
+        setIsAgencyAdmin(false);
         setLoading(false);
         return;
       }
@@ -172,6 +177,10 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           selectedMembership?.role
           || (primaryOwnerAccountIds.has(selectedAccount.id) ? 'account_admin' : null),
         );
+        const { data: agencyAdmin } = await supabase.rpc('is_agency_admin_for_account', {
+          target_account_id: selectedAccount.id,
+        });
+        setIsAgencyAdmin(agencyAdmin === true);
         localStorage.setItem('currentAccountId', selectedAccount.id);
       }
       console.log('[AccountContext] Finished loading accounts');
@@ -190,6 +199,10 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
     if (!account) return false;
 
+    // Clear agency-wide authority before changing account context so controls
+    // from the previous account cannot flash while the scoped check runs.
+    setIsAgencyAdmin(false);
+    setAccountRole(null);
     setCurrentAccount(account);
 
     const { data: membership } = await supabase
@@ -213,6 +226,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       setAccountRole(null);
     }
 
+    const { data: agencyAdmin } = await supabase.rpc('is_agency_admin_for_account', {
+      target_account_id: accountId,
+    });
+    setIsAgencyAdmin(agencyAdmin === true);
+
     localStorage.setItem('currentAccountId', accountId);
     return true;
   }
@@ -226,10 +244,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     currentAccount,
     accounts,
     accountRole,
+    isAgencyAdmin,
     loading,
     selectAccount,
     refreshAccounts,
-  }), [currentAccount, accounts, accountRole, loading]);
+  }), [currentAccount, accounts, accountRole, isAgencyAdmin, loading]);
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
 }

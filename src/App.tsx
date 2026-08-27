@@ -4326,7 +4326,7 @@ function App() {
               userId={currentAccount.id}
               teamNumber={1}
               accountId={currentAccount.id}
-              userRole={user?.isAgencyOwner ? 'owner' : accountRole === 'account_admin' ? 'admin' : 'user'}
+              userRole={accountRole === 'account_admin' ? 'admin' : 'user'}
               surveyType={surveyType}
               onSurveyTypeChange={setSurveyType}
               dbSurveyTypes={dbSurveyTypes}
@@ -4406,7 +4406,7 @@ function App() {
                       ),
                     },
                     // — Compliance —
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                    ...(accountRole === 'account_admin' ? [{
                       id: 'survey-types',
                       label: 'Survey Types',
                       section: 'compliance',
@@ -4415,7 +4415,7 @@ function App() {
                         <SurveyTypesSettings accountId={currentAccount.id} />
                       ),
                     }] : []),
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                    ...(accountRole === 'account_admin' ? [{
                       id: 'spcc-extraction',
                       label: 'SPCC Extraction',
                       section: 'compliance',
@@ -4427,7 +4427,7 @@ function App() {
                         />
                       ),
                     }] : []),
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                    ...(accountRole === 'account_admin' ? [{
                       id: 'report-display',
                       label: 'Report Display',
                       section: 'compliance',
@@ -4449,7 +4449,7 @@ function App() {
                       content: <ManagementSignatureSettings />,
                     },
                     // — Administration —
-                    ...((user?.isAgencyOwner || accountRole === 'account_admin') ? [{
+                    ...(accountRole === 'account_admin' ? [{
                       id: 'account',
                       label: 'Account & Branding',
                       section: 'admin',
@@ -4466,25 +4466,13 @@ function App() {
                           </div>
                         </div>
                       ),
-                    }] : [{
-                      id: 'account',
-                      label: 'Data Management',
-                      section: 'admin',
-                      icon: getSettingsIcon('account'),
-                      content: (
-                        <DataBackup
-                          accountId={currentAccount.id}
-                          facilities={facilities}
-                          onFacilitiesChange={loadData}
-                        />
-                      ),
-                    }]),
+                    }] : []),
                     {
                       id: 'team',
                       label: 'Team Management',
                       section: 'admin',
                       icon: getSettingsIcon('team'),
-                      content: (user?.isAgencyOwner || accountRole === 'account_admin') ? (
+                      content: accountRole === 'account_admin' ? (
                         <div className="space-y-8">
                           <div>
                             <UserSignatureManagement />
@@ -4513,22 +4501,19 @@ function App() {
                                   onChange={async (e) => {
                                     const newTeam = e.target.value ? parseInt(e.target.value) : null;
                                     try {
-                                      const { data: userProfile } = await supabase
-                                        .from('users')
-                                        .select('id')
-                                        .eq('auth_user_id', user?.authUserId)
-                                        .maybeSingle();
+                                      const { data, error: assignmentError } = await supabase.rpc(
+                                        'update_my_team_assignment',
+                                        {
+                                          target_account_id: currentAccount.id,
+                                          target_team_assignment: newTeam,
+                                        },
+                                      );
 
-                                      if (userProfile) {
-                                        await supabase
-                                          .from('account_users')
-                                          .update({ team_assignment: newTeam })
-                                          .eq('user_id', userProfile.id)
-                                          .eq('account_id', currentAccount.id);
+                                      if (assignmentError) throw assignmentError;
+                                      if (!data?.success) throw new Error('Failed to update team assignment');
 
-                                        setUserTeamAssignment(newTeam);
-                                        alert('Team assignment updated successfully!');
-                                      }
+                                      setUserTeamAssignment(newTeam);
+                                      alert('Team assignment updated successfully!');
                                     } catch (err) {
                                       console.error('Error updating team assignment:', err);
                                       alert('Failed to update team assignment');

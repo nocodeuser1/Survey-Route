@@ -28,7 +28,7 @@ function userDisplayLabel(u?: { full_name?: string | null; email?: string | null
 
 export default function UserSignatureManagement() {
   const { user, reloadUserProfile } = useAuth();
-  const { currentAccount, accountRole } = useAccount();
+  const { currentAccount, accountRole, isAgencyAdmin } = useAccount();
   const { darkMode } = useDarkMode();
   const sigCanvas = useRef<SignatureCanvas>(null);
 
@@ -42,8 +42,8 @@ export default function UserSignatureManagement() {
   const [isLandscape, setIsLandscape] = useState(false);
   const [showFullscreenSignature, setShowFullscreenSignature] = useState(false);
 
-  // Team-signature features (agency owners + account admins).
-  // Reassign is still agency-owner-only; Delete is open to admins.
+  // Team-signature features are scoped to the currently selected account.
+  // Reassign remains agency-admin-only; delete is open to account admins.
   const [allSignatures, setAllSignatures] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [reassignModal, setReassignModal] = useState<{signatureId: string; currentUserId: string; currentUserName: string} | null>(null);
@@ -54,21 +54,18 @@ export default function UserSignatureManagement() {
   // user info needed to render a friendly label in the dialog body.
   const [pendingDeleteSig, setPendingDeleteSig] = useState<any | null>(null);
 
-  // Anyone who can administer the team can see the team-signatures panel.
-  // (Reassign button itself stays gated on isAgencyOwner inside the row.)
-  const canManageTeamSignatures = !!user?.isAgencyOwner || accountRole === 'account_admin';
+  const canManageTeamSignatures = accountRole === 'account_admin';
 
   useEffect(() => {
     if (user && currentAccount) {
       loadSignature();
       if (canManageTeamSignatures) {
         loadAllSignatures();
-        // Only load the team roster when we'll actually render the
-        // Reassign picker — that's still agency-owner-only.
-        if (user.isAgencyOwner) loadAllUsers();
+        // Only load the team roster when the current agency can be managed.
+        if (isAgencyAdmin) loadAllUsers();
       }
     }
-  }, [user, currentAccount, canManageTeamSignatures]);
+  }, [user, currentAccount, canManageTeamSignatures, isAgencyAdmin]);
 
   // Device and orientation detection
   useEffect(() => {
@@ -164,24 +161,23 @@ export default function UserSignatureManagement() {
   }
 
   async function loadAllUsers() {
-    if (!user?.isAgencyOwner || !currentAccount) return;
+    if (!isAgencyAdmin || !currentAccount) return;
 
     try {
-      const { data, error } = await supabase
-        .from('account_users')
-        .select(`
-          user_id,
-          role,
-          users:user_id (
-            id,
-            full_name,
-            email
-          )
-        `)
-        .eq('account_id', currentAccount.id);
+      const { data, error } = await supabase.rpc('get_account_team_members', {
+        target_account_id: currentAccount.id,
+      });
 
       if (error) throw error;
-      setAllUsers(data || []);
+      setAllUsers((data || []).map((member: any) => ({
+        user_id: member.user_id,
+        role: member.role,
+        users: {
+          id: member.user_id,
+          full_name: member.full_name,
+          email: member.email,
+        },
+      })));
     } catch (err: any) {
       console.error('Error loading all users:', err);
     }
@@ -242,7 +238,7 @@ export default function UserSignatureManagement() {
   }
 
   async function handleReassignSignature(newUserId: string) {
-    if (!reassignModal || !user?.isAgencyOwner) return;
+    if (!reassignModal || !isAgencyAdmin) return;
 
     setReassigning(true);
     setError('');
@@ -568,7 +564,7 @@ export default function UserSignatureManagement() {
                 Manage Team Signatures
               </h3>
               <p className="text-sm text-gray-600 mt-1">
-                {user?.isAgencyOwner
+                {isAgencyAdmin
                   ? 'Reassign signatures to different team members or delete unwanted ones.'
                   : 'Delete unassigned or stale team signatures.'}
               </p>
@@ -614,7 +610,7 @@ export default function UserSignatureManagement() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 flex-shrink-0">
-                      {user?.isAgencyOwner && (
+                      {isAgencyAdmin && (
                         <button
                           onClick={() => setReassignModal({
                             signatureId: sig.id,

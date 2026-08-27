@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Upload, Trash2, AlertCircle, CheckCircle, FileImage, RefreshCw, ShieldAlert, Crop, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
-import { useAuth } from '../contexts/AuthContext';
 import { autocropSignature } from '../utils/signatureAutocrop';
 
 /**
@@ -18,7 +17,6 @@ import { autocropSignature } from '../utils/signatureAutocrop';
  */
 export default function ManagementSignatureSettings() {
   const { currentAccount, accountRole, refreshAccounts } = useAccount();
-  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(true);
@@ -37,7 +35,7 @@ export default function ManagementSignatureSettings() {
   // Manual crop modal state
   const [showCropper, setShowCropper] = useState(false);
 
-  const isAdmin = !!user?.isAgencyOwner || accountRole === 'account_admin';
+  const isAdmin = accountRole === 'account_admin';
 
   function onDragEnter(e: React.DragEvent) {
     if (!isAdmin || uploading || removing) return;
