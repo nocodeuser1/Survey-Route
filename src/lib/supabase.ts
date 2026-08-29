@@ -79,6 +79,20 @@ export interface PhotoVisitEvent {
   metadata: Record<string, unknown>;
 }
 
+export interface PhotoVisitEventRevision {
+  id: string;
+  account_id: string;
+  event_id: string;
+  action: 'edit' | 'delete';
+  occurred_at?: string | null;
+  occurred_on?: string | null;
+  occurred_time?: string | null;
+  reason?: string | null;
+  previous_values: Record<string, unknown>;
+  changed_at: string;
+  changed_by?: string | null;
+}
+
 /**
  * Walking-path overlay drawn on top of the LDAR site plan PDF. All coords
  * are normalized 0..1 to the source page so the overlay scales with any

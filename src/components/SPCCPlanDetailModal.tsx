@@ -10,6 +10,7 @@ import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
 import LDARSitePlanSection from './LDARSitePlanSection';
 import LDARObservationPathSection from './LDARObservationPathSection';
+import PhotoHistoryManager from './PhotoHistoryManager';
 
 interface SPCCPlanDetailModalProps {
   facility: Facility;
@@ -1310,6 +1311,8 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
               }}
             />
           )}
+
+          <PhotoHistoryManager facility={facility} />
 
           {/* Berm Measurements */}
           {(facility.berm_depth_inches != null || facility.berm_length != null || facility.berm_width != null) && (
