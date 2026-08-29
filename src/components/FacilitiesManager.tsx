@@ -82,78 +82,33 @@ interface FacilitiesManagerProps {
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 /* ── TouchTooltipButton ──────────────────────────────────────────────
-   On mobile: first tap shows the tooltip label, second tap fires the
-   action. Scrolling or tapping elsewhere dismisses the tooltip.
-   On desktop: click fires the action immediately (no change).
+   This compact-toolbar wrapper only supplies concise help text. The shared
+   ContextualHelpProvider owns hover, keyboard focus, and press-and-hold
+   behavior everywhere in the app, so a normal tap always activates here.
    ──────────────────────────────────────────────────────────────────── */
 function TouchTooltipButton({
   id,
   tooltip,
-  activeTooltipId,
-  onTooltipShow,
   onClick,
   className,
   children,
 }: {
   id: string;
   tooltip: string;
-  activeTooltipId: string | null;
-  onTooltipShow: (id: string | null) => void;
   onClick: () => void;
   className?: string;
   children: React.ReactNode;
 }) {
-  const isActive = activeTooltipId === id;
-  const btnRef = useRef<HTMLButtonElement>(null);
-
   return (
-    <div className="relative">
-      <button
-        ref={btnRef}
-        className={className}
-        title={tooltip}
-        // data-touch-tooltip-button is read by the parent's dismiss handler so
-        // tapping the same button a second time doesn't trigger the outside-
-        // touch dismissal before onTouchEnd can run with isActive=true. Without
-        // this attribute the second tap would dismiss the tooltip via the
-        // window touchstart listener, React would flush that state update before
-        // touchend, and isActive would read false again — looking to the user
-        // like the button was never clickable.
-        data-touch-tooltip-button="true"
-        onTouchEnd={(e) => {
-          if (!isActive) {
-            // First tap → show tooltip, prevent action
-            e.preventDefault();
-            onTooltipShow(id);
-          } else {
-            // Second tap → fire action (let onClick handle it)
-            onTooltipShow(null);
-            onClick();
-            e.preventDefault();
-          }
-        }}
-        onClick={() => {
-          // Desktop click — always fire
-          // On touch devices the onTouchEnd already handled it,
-          // but we guard against double-firing by checking if touch initiated
-          if (activeTooltipId !== null) {
-            // Touch sequence in progress; already handled by onTouchEnd
-            return;
-          }
-          onClick();
-        }}
-      >
-        {children}
-      </button>
-      {isActive && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 pointer-events-none">
-          <div className="px-2.5 py-1.5 text-xs font-medium text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg whitespace-nowrap animate-[fadeIn_0.15s_ease-out]">
-            {tooltip}
-            <div className="absolute left-1/2 -translate-x-1/2 -top-1 w-2 h-2 bg-gray-900 dark:bg-gray-700 rotate-45" />
-          </div>
-        </div>
-      )}
-    </div>
+    <button
+      className={className}
+      data-contextual-help={tooltip}
+      id={id}
+      title={tooltip}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1027,7 +982,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     warnings: string[];
     isUpdateOnly: boolean;
   } | null>(null);
-  const [mobileTooltipId, setMobileTooltipId] = useState<string | null>(null);
   const [surveyViewFacility, setSurveyViewFacility] = useState<Facility | null>(null);
   const effectiveReportType = spccMode === 'plan'
     ? 'spcc_plan'
@@ -1037,37 +991,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const headerSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss mobile tooltip on scroll or outside touch.
-  //
-  // Important: a touchstart on ANOTHER TouchTooltipButton is NOT an "outside"
-  // touch in the sense we care about. The button's own onTouchEnd handles
-  // switching tooltips / firing the action, so dismissing here would race
-  // with that — React would flush the null-state from this handler before
-  // the button's touchend runs, the button would see isActive=false, and
-  // the second tap would re-show its tooltip instead of activating. The
-  // `data-touch-tooltip-button` attribute on each button lets us recognize
-  // and skip those events; everything else still dismisses normally.
-  useEffect(() => {
-    if (!mobileTooltipId) return;
-    const dismissOnScroll = () => setMobileTooltipId(null);
-    const dismissOnTouch = (e: TouchEvent) => {
-      const target = e.target as Element | null;
-      if (target && target.closest && target.closest('[data-touch-tooltip-button]')) {
-        return;
-      }
-      setMobileTooltipId(null);
-    };
-    window.addEventListener('scroll', dismissOnScroll, true);
-    // Delay adding touchstart listener so the current tap doesn't immediately dismiss
-    const timer = setTimeout(() => {
-      window.addEventListener('touchstart', dismissOnTouch, true);
-    }, 50);
-    return () => {
-      window.removeEventListener('scroll', dismissOnScroll, true);
-      window.removeEventListener('touchstart', dismissOnTouch, true);
-      clearTimeout(timer);
-    };
-  }, [mobileTooltipId]);
 
   // Clear optimistic notes overrides when facilities prop refreshes
   useEffect(() => {
@@ -4889,8 +4812,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <TouchTooltipButton
                     id="tb-filters"
                     tooltip="Toggle Filters"
-                    activeTooltipId={mobileTooltipId}
-                    onTooltipShow={setMobileTooltipId}
                     onClick={() => setShowFilters(!showFilters)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium ${showFilters
                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
@@ -5125,8 +5046,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <TouchTooltipButton
                     id="tb-columns"
                     tooltip="Column Visibility"
-                    activeTooltipId={mobileTooltipId}
-                    onTooltipShow={setMobileTooltipId}
                     onClick={openColumnSelector}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
                   >
@@ -5141,8 +5060,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 <TouchTooltipButton
                   id="tb-fit"
                   tooltip="Fit columns to screen"
-                  activeTooltipId={mobileTooltipId}
-                  onTooltipShow={setMobileTooltipId}
                   onClick={() => fitColumnsToDisplay()}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
                 >
@@ -5158,8 +5075,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 <TouchTooltipButton
                   id="tb-add"
                   tooltip="Add Facility"
-                  activeTooltipId={mobileTooltipId}
-                  onTooltipShow={setMobileTooltipId}
                   onClick={() => setShowAddForm(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 >
@@ -5169,8 +5084,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 <TouchTooltipButton
                   id="tb-import"
                   tooltip="Import CSV"
-                  activeTooltipId={mobileTooltipId}
-                  onTooltipShow={setMobileTooltipId}
                   onClick={() => setShowUpload(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 >
@@ -5182,8 +5095,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <TouchTooltipButton
                       id="tb-bulk"
                       tooltip="Bulk Upload SPCC Plans"
-                      activeTooltipId={mobileTooltipId}
-                      onTooltipShow={setMobileTooltipId}
                       onClick={() => setShowBulkSPCCUpload(true)}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
                     >
@@ -5203,8 +5114,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     <TouchTooltipButton
                       id="tb-csv"
                       tooltip="Export Facilities to CSV"
-                      activeTooltipId={mobileTooltipId}
-                      onTooltipShow={setMobileTooltipId}
                       onClick={handleExportFacilities}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                     >
@@ -5229,8 +5138,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             ? 'Export Inspection Reports'
                             : 'Export Reports'
                       }
-                      activeTooltipId={mobileTooltipId}
-                      onTooltipShow={setMobileTooltipId}
                       onClick={() => {
                         if (isBulkDownloading) return;
                         // Plans mode used to download directly; now opens the
@@ -5274,8 +5181,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             ? 'Inspections Overview'
                             : 'Overview'
                       }
-                      activeTooltipId={mobileTooltipId}
-                      onTooltipShow={setMobileTooltipId}
                       onClick={() => {
                         if (spccMode === 'plan') {
                           setShowPlansOverview(true);

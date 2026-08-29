@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import AppRouter from './AppRouter.tsx';
 import { registerServiceWorker } from './lib/registerSW';
 import { initAutoSync } from './lib/syncQueue';
+import ContextualHelpProvider from './components/ContextualHelpProvider';
 import './index.css';
 
 // Which build is this browser actually running? Logged first thing and
@@ -19,5 +20,7 @@ registerServiceWorker();
 initAutoSync();
 
 createRoot(document.getElementById('root')!).render(
-  <AppRouter />
+  <ContextualHelpProvider>
+    <AppRouter />
+  </ContextualHelpProvider>
 );
