@@ -8,17 +8,9 @@ import {
 } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { formatDate, getAccountTimeZone, instantToZonedParts, nowInAccountTimeZone } from '../utils/dateUtils';
+import { formatDate, getAccountTimeZone, nowInAccountTimeZone } from '../utils/dateUtils';
 import { formatVisitTimeDisplay, parseVisitTimeInput } from '../utils/spccPlans';
-
-interface EffectivePhotoHistoryItem {
-  event: PhotoVisitEvent;
-  latestRevision: PhotoVisitEventRevision | null;
-  occurredOn: string;
-  occurredTime: string | null;
-  deleted: boolean;
-  corrected: boolean;
-}
+import { resolveEffectivePhotoHistory, type EffectivePhotoHistoryItem } from '../utils/photoHistory';
 
 function parseDateInput(input: string): string | null {
   const match = input.trim().match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})$/);
@@ -62,7 +54,13 @@ function eventNote(event: PhotoVisitEvent): string | null {
   return typeof note === 'string' && note.trim() ? note : null;
 }
 
-export default function PhotoHistoryManager({ facility }: { facility: Facility }) {
+export default function PhotoHistoryManager({
+  facility,
+  onHistoryChange,
+}: {
+  facility: Facility;
+  onHistoryChange?: () => void | Promise<void>;
+}) {
   const { currentAccount, accountRole, isAgencyAdmin } = useAccount();
   const { darkMode } = useDarkMode();
   const canManage = accountRole === 'account_admin' || isAgencyAdmin;
@@ -123,51 +121,10 @@ export default function PhotoHistoryManager({ facility }: { facility: Facility }
     void loadHistory();
   }, [loadHistory]);
 
-  const historyItems = useMemo<EffectivePhotoHistoryItem[]>(() => {
-    const supersededIds = new Set(
-      events.map(event => event.supersedes_event_id).filter((id): id is string => Boolean(id)),
-    );
-    const latestByEvent = new Map<string, PhotoVisitEventRevision>();
-    for (const revision of revisions) {
-      if (!latestByEvent.has(revision.event_id)) latestByEvent.set(revision.event_id, revision);
-    }
-
-    return events
-      .filter(event => !supersededIds.has(event.id))
-      .map(event => {
-        const latestRevision = latestByEvent.get(event.id) || null;
-        let occurredOn = event.occurred_on || '';
-        let occurredTime = event.occurred_time || null;
-        if (!occurredOn && event.occurred_at) {
-          const parts = instantToZonedParts(event.occurred_at, event.account_timezone || undefined);
-          occurredOn = parts.date;
-          occurredTime = occurredTime || parts.time;
-        }
-        if (!occurredOn) occurredOn = event.recorded_at.slice(0, 10);
-        if (latestRevision?.action === 'edit') {
-          occurredOn = latestRevision.occurred_on || occurredOn;
-          occurredTime = latestRevision.occurred_time || null;
-        } else if (latestRevision?.action === 'delete') {
-          const previousOn = latestRevision.previous_values?.occurred_on;
-          const previousTime = latestRevision.previous_values?.occurred_time;
-          if (typeof previousOn === 'string' && previousOn) occurredOn = previousOn;
-          occurredTime = typeof previousTime === 'string' && previousTime ? previousTime : null;
-        }
-        return {
-          event,
-          latestRevision,
-          occurredOn,
-          occurredTime,
-          deleted: latestRevision?.action === 'delete',
-          corrected: latestRevision?.action === 'edit',
-        };
-      })
-      .sort((a, b) => {
-        const aKey = `${a.occurredOn}T${a.occurredTime || '00:00'}`;
-        const bKey = `${b.occurredOn}T${b.occurredTime || '00:00'}`;
-        return bKey.localeCompare(aKey) || b.event.recorded_at.localeCompare(a.event.recorded_at);
-      });
-  }, [events, revisions]);
+  const historyItems = useMemo(
+    () => resolveEffectivePhotoHistory(events, revisions),
+    [events, revisions],
+  );
 
   const resetEditor = () => {
     const now = nowInAccountTimeZone();
@@ -222,6 +179,7 @@ export default function PhotoHistoryManager({ facility }: { facility: Facility }
       }
       resetEditor();
       await loadHistory();
+      await onHistoryChange?.();
     } catch (err: any) {
       console.error('[PhotoHistoryManager] Failed to save history:', err);
       setError(err?.message || 'The photo history record could not be saved.');
@@ -246,6 +204,7 @@ export default function PhotoHistoryManager({ facility }: { facility: Facility }
       });
       if (rpcError) throw rpcError;
       await loadHistory();
+      await onHistoryChange?.();
     } catch (err: any) {
       console.error('[PhotoHistoryManager] Failed to delete history:', err);
       setError(err?.message || 'The photo history record could not be removed.');

@@ -16,6 +16,7 @@ interface SPCCPlanDetailModalProps {
   facility: Facility;
   onClose: () => void;
   onFacilitiesChange: () => void;
+  onPhotoHistoryChange?: () => void | Promise<void>;
   onViewInspectionDetails?: () => void;
   onViewFacilityDetails?: () => void;
 }
@@ -410,7 +411,7 @@ function formatDateDisplay(isoDate: string): string {
   return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${String(year).padStart(2, '0')}`;
 }
 
-export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onViewInspectionDetails, onViewFacilityDetails }: SPCCPlanDetailModalProps) {
+export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesChange, onPhotoHistoryChange, onViewInspectionDetails, onViewFacilityDetails }: SPCCPlanDetailModalProps) {
   const { darkMode } = useDarkMode();
   const [editingIpDate, setEditingIpDate] = useState(false);
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDateDisplay(facility.first_prod_date) : '');
@@ -1312,7 +1313,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
             />
           )}
 
-          <PhotoHistoryManager facility={facility} />
+          <PhotoHistoryManager facility={facility} onHistoryChange={onPhotoHistoryChange} />
 
           {/* Berm Measurements */}
           {(facility.berm_depth_inches != null || facility.berm_length != null || facility.berm_width != null) && (

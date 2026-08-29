@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal } from 'lucide-react';
 import JSZip from 'jszip';
-import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, supabase } from '../lib/supabase';
+import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, type PhotoVisitEvent, type PhotoVisitEventRevision, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
 // merged into the All/Plans/Inspections + custom-type pill toggle in the
 // Facilities header (see setSpccMode / setCustomSurveyType below). The
@@ -43,6 +43,7 @@ import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { getCoords } from '../utils/coordinates';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 import { useAccount } from '../contexts/AccountContext';
+import { getLatestPhotoDatesByFacility } from '../utils/photoHistory';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -115,7 +116,7 @@ function TouchTooltipButton({
 type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'historical_name' |
   'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
-  'photos_taken' | 'field_visit_date' | 'estimated_oil_per_day' |
+  'photos_taken' | 'latest_photo_date' | 'field_visit_date' | 'estimated_oil_per_day' |
   'berm_depth_inches' | 'berm_length' | 'berm_width' |
   'initial_inspection_completed' | 'company_signature_date' | 'recertified_date' | 'recertification_due_date' |
   'day_assignment' | 'team_assignment' | 'status' | 'created_at' |
@@ -147,7 +148,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'status', 'day_assignment', 'team_assignment',
   'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
-  'photos_taken', 'field_visit_date', 'estimated_oil_per_day',
+  'photos_taken', 'latest_photo_date', 'field_visit_date', 'estimated_oil_per_day',
   'berm_depth_inches', 'berm_length', 'berm_width',
   'initial_inspection_completed', 'company_signature_date', 'recertified_date', 'recertification_due_date',
   'matched_facility_name', 'api_numbers_combined',
@@ -186,6 +187,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   spcc_inspection_date: 'Last SPCC Inspection',
   spcc_completion_type: 'Inspection Completion Type',
   photos_taken: 'Photos Taken',
+  latest_photo_date: 'Latest Photos Date',
   field_visit_date: 'Field Visit',
   estimated_oil_per_day: 'Est. Oil/Day (bbl)',
   berm_depth_inches: 'Berm Depth (in)',
@@ -252,6 +254,61 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
+  const [latestPhotoDates, setLatestPhotoDates] = useState<Map<string, string>>(new Map());
+
+  const loadLatestPhotoDates = useCallback(async () => {
+    try {
+      const [eventsResult, revisionsResult] = await Promise.all([
+        supabase
+          .from('photo_visit_events')
+          .select('*')
+          .eq('account_id', accountId),
+        supabase
+          .from('photo_visit_event_revisions')
+          .select('*')
+          .eq('account_id', accountId),
+      ]);
+
+      if (eventsResult.error) throw eventsResult.error;
+      if (revisionsResult.error) throw revisionsResult.error;
+
+      setLatestPhotoDates(getLatestPhotoDatesByFacility(
+        (eventsResult.data || []) as PhotoVisitEvent[],
+        (revisionsResult.data || []) as PhotoVisitEventRevision[],
+      ));
+    } catch (historyError) {
+      console.warn('[FacilitiesManager] Latest photo dates unavailable:', historyError);
+      setLatestPhotoDates(new Map());
+    }
+  }, [accountId]);
+
+  useEffect(() => {
+    void loadLatestPhotoDates();
+
+    const channel = supabase
+      .channel(`facility_latest_photo_dates_${accountId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'photo_visit_events', filter: `account_id=eq.${accountId}` },
+        () => void loadLatestPhotoDates(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'photo_visit_event_revisions', filter: `account_id=eq.${accountId}` },
+        () => void loadLatestPhotoDates(),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [accountId, loadLatestPhotoDates]);
+
+  const getLatestPhotoDate = useCallback(
+    (facility: Facility): string | null =>
+      latestPhotoDates.get(facility.id) || facility.field_visit_date || null,
+    [latestPhotoDates],
+  );
 
   const [editForm, setEditForm] = useState({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
   const [showAddForm, setShowAddForm] = useState(false);
@@ -531,7 +588,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
   const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
     const missing = ALL_COLUMNS_ORDER.filter(id => !saved.includes(id));
-    return missing.length > 0 ? [...saved, ...missing] : saved;
+    if (missing.length === 0) return saved;
+
+    const merged = [...saved];
+    missing.forEach(id => {
+      // Keep the new history-backed date beside Photos Taken for existing
+      // saved layouts instead of burying it at the bottom of the chooser.
+      if (id === 'latest_photo_date') {
+        const photosIndex = merged.indexOf('photos_taken');
+        if (photosIndex >= 0) {
+          merged.splice(photosIndex + 1, 0, id);
+          return;
+        }
+      }
+      merged.push(id);
+    });
+    return merged;
   };
 
   const getDefaultVisibleColumns = (mode: string): ColumnId[] => {
@@ -1920,6 +1992,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.spcc_pe_stamp_date ? parseLocalDate(facility.spcc_pe_stamp_date).getTime() : 0;
           case 'field_visit_date':
             return facility.field_visit_date ? parseLocalDate(facility.field_visit_date).getTime() : 0;
+          case 'latest_photo_date': {
+            const latestPhotoDate = getLatestPhotoDate(facility);
+            return latestPhotoDate ? parseLocalDate(latestPhotoDate).getTime() : 0;
+          }
           case 'initial_inspection_completed':
             return facility.initial_inspection_completed ? parseLocalDate(facility.initial_inspection_completed).getTime() : 0;
           case 'company_signature_date':
@@ -2803,6 +2879,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return notes ? `${base} — ${notes}` : base;
       }
       return 'Pending Decision';
+    }
+    if (columnId === 'latest_photo_date') {
+      const latestPhotoDate = getLatestPhotoDate(facility);
+      return latestPhotoDate ? formatDate(latestPhotoDate) : '';
     }
     if (
       columnId === 'spcc_due_date' || columnId === 'spcc_inspection_date' ||
@@ -3821,6 +3901,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return <PhotosTakenStatusBadge facility={facility} variant="icon" />;
       case 'field_visit_date':
         return facility.field_visit_date || '-';
+      case 'latest_photo_date': {
+        const latestPhotoDate = getLatestPhotoDate(facility);
+        return latestPhotoDate ? formatDate(latestPhotoDate) : '-';
+      }
       case 'estimated_oil_per_day':
         return facility.estimated_oil_per_day != null ? String(facility.estimated_oil_per_day) : '-';
       case 'berm_depth_inches':
@@ -6053,6 +6137,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             facility={spccPlanDetailFacility}
             onClose={() => setSpccPlanDetailFacility(null)}
             onFacilitiesChange={onFacilitiesChange}
+            onPhotoHistoryChange={loadLatestPhotoDates}
             onViewInspectionDetails={() => {
               setForcedTab('inspections');
               setSelectedFacility(spccPlanDetailFacility);
