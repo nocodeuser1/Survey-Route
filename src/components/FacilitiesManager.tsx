@@ -499,6 +499,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
     setSpccModeInternal(mode);
     userChangedMode.current = true;
+    // Plans is an urgency-first work queue. Always enter it sorted by the
+    // computed SPCC plan status (ascending = overdue first), matching the
+    // status column's severity order while still allowing a manual re-sort.
+    if (mode === 'plan') {
+      setSortColumn('spcc_status');
+      setSortDirection('asc');
+    }
     // Leaving the current mode always drops the invoice sub-view + any open
     // tab dropdown — invoice view is entered fresh per mode.
     setInvoiceView(false);
@@ -1234,7 +1241,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
     }
 
-    // Sort is now sticky across mode changes — no reset
+    // Sort stays sticky across mode changes except when Plans is explicitly
+    // activated, where setSpccMode applies its urgency-first default.
     if (userChangedMode.current) {
       userChangedMode.current = false;
     }
