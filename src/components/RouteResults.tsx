@@ -4,7 +4,7 @@ import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
-import { UserSettings, Facility, Inspection, RouteVisitEvent, supabase } from '../lib/supabase';
+import { UserSettings, Facility, Inspection, RouteVisitEvent, PlanRouteRunStop, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
@@ -68,13 +68,26 @@ interface RouteResultsProps {
    * compat with callers that haven't been updated.
    */
   surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
+  planRouteProgress?: {
+    runId: string | null;
+    stopsByFacilityId: Map<string, PlanRouteRunStop>;
+    completedCount: number;
+    totalCount: number;
+    loading: boolean;
+    savingFacilityId: string | null;
+    error: string | null;
+    schemaUnavailable: boolean;
+    startRun: () => Promise<unknown>;
+    startNewRun: () => Promise<unknown>;
+    setFacilityCompleted: (facilityId: string, completed: boolean) => Promise<boolean>;
+  };
 }
 
 // Survey type for route planning filtering.
 // String to allow either the legacy SPCC enum members OR a survey_types.id UUID.
 type SurveyType = string;
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind, planRouteProgress }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [routeVisitEvents, setRouteVisitEvents] = useState<RouteVisitEvent[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
@@ -1026,6 +1039,34 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    * Day 2, which is the exact off-by-one this panel is meant to stop telling.
    */
   const routeVisitSummary = (() => {
+    if (effectiveKind === 'spcc_plan') {
+      if (!planRouteProgress?.runId) return [];
+      const completedStops = Array.from(planRouteProgress.stopsByFacilityId.values())
+        .filter(stop => stop.status === 'completed' && stop.completed_at && stop.facility_id)
+        .sort(
+          (a, b) =>
+            new Date(a.completed_at as string).getTime() - new Date(b.completed_at as string).getTime(),
+        );
+      const dayByDate = new Map<string, number>();
+      return completedStops
+        .map(stop => ({
+          event: {
+            id: stop.id,
+            facility_id: stop.facility_id as string,
+            account_id: stop.account_id,
+            visited_at: stop.completed_at as string,
+          } as RouteVisitEvent,
+          facility: facilities.find(facility => facility.id === stop.facility_id),
+        }))
+        .filter((entry): entry is { event: RouteVisitEvent; facility: Facility } => Boolean(entry.facility))
+        .map(entry => {
+          const visitDate =
+            instantToZonedParts(entry.event.visited_at).date || entry.event.visited_at.slice(0, 10);
+          if (!dayByDate.has(visitDate)) dayByDate.set(visitDate, dayByDate.size + 1);
+          return { ...entry, visitDate, observedDay: dayByDate.get(visitDate) as number };
+        });
+    }
+
     const inRoute = getRouteFacilityNames();
     const latestByFacility = new Map<string, RouteVisitEvent>();
     for (const event of routeVisitEvents) {
@@ -1115,8 +1156,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   };
 
   /** Photos on file = someone has physically been to the site. */
-  const isFacilityVisited = (facility: Facility): boolean =>
-    getFacilityPhotosState(facility) === 'all';
+  const isFacilityVisited = (facility: Facility): boolean => {
+    if (effectiveKind === 'spcc_plan') {
+      return planRouteProgress?.stopsByFacilityId.get(facility.id)?.status === 'completed';
+    }
+    return getFacilityPhotosState(facility) === 'all';
+  };
 
   /**
    * The "done" panel under the day cards.
@@ -2618,6 +2663,78 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
 
+      {effectiveKind === 'spcc_plan' && planRouteProgress && (
+        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 p-4 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <h2 className="font-semibold text-gray-900 dark:text-white">This Route's Photo Progress</h2>
+              </div>
+              {planRouteProgress.runId ? (
+                <>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    {planRouteProgress.completedCount} of {planRouteProgress.totalCount} stops completed on this outing.
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Reopening or starting a new outing changes only this route checklist. Facility photo status and every recorded photo event remain intact.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                  Start an outing to track these stops separately from the Facilities tab.
+                </p>
+              )}
+              {planRouteProgress.error && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400">{planRouteProgress.error}</p>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:items-end gap-2 shrink-0">
+              {planRouteProgress.runId && planRouteProgress.totalCount > 0 && (
+                <div className="w-full sm:w-48 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                  <div
+                    className="h-full bg-green-600 text-white transition-all"
+                    style={{
+                      width: `${Math.round((planRouteProgress.completedCount / planRouteProgress.totalCount) * 100)}%`,
+                    }}
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={
+                  planRouteProgress.loading ||
+                  planRouteProgress.schemaUnavailable ||
+                  !currentRouteId
+                }
+                onClick={async () => {
+                  if (!planRouteProgress.runId) {
+                    await planRouteProgress.startRun();
+                    return;
+                  }
+                  const confirmed = window.confirm(
+                    'Start a new outing for this saved route? This resets only the route checklist. Facility photo status and photo history will not be cleared.',
+                  );
+                  if (confirmed) await planRouteProgress.startNewRun();
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed px-4 py-2 text-sm font-medium transition-colors"
+              >
+                {planRouteProgress.loading ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Route className="w-4 h-4" />
+                )}
+                {planRouteProgress.runId ? 'Start New Outing' : 'Start This Outing'}
+              </button>
+              {!currentRouteId && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">Save the route first to track progress.</span>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       {listSelectionMode && selectedFacilityNames.size > 0 && (
         <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg p-4 flex items-center justify-between transition-colors duration-200">
           <div className="flex items-center gap-4">
@@ -2661,7 +2778,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 Visit Route Summary
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Actual order recorded from Photos Taken, independent of planned days
+                {effectiveKind === 'spcc_plan'
+                  ? 'Actual completion order for this outing, independent of planned days'
+                  : 'Actual order recorded from Photos Taken, independent of planned days'}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -3108,7 +3227,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         const facilityName = segment.to;
                         const isSelected = selectedFacilityNames.has(facilityName);
                         const facility = isHomeBaseSegment ? undefined : getFacilityForStop(facilityName);
-                        const photosTaken = Boolean(facility?.photos_taken);
+                        const routeStop = facility
+                          ? planRouteProgress?.stopsByFacilityId.get(facility.id)
+                          : undefined;
+                        const photosTaken = effectiveKind === 'spcc_plan'
+                          ? routeStop?.status === 'completed'
+                          : Boolean(facility?.photos_taken);
 
                         return (
                           <div
@@ -3205,8 +3329,43 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       if (!facility) return null;
                                       return <SPCCStatusBadge facility={facility} showMessage />;
                                     })()}
-                                    {/* Photos taken indicator - keep visible in every day-list mode. */}
+                                    {/* In Plans mode this is route-run progress, not the
+                                        account-wide facility snapshot. Reopening it cannot
+                                        erase the Facilities-tab record or photo history. */}
                                     {segment.to !== 'Home Base' && facility && (() => {
+                                      if (effectiveKind === 'spcc_plan' && planRouteProgress) {
+                                        const completedOnRoute = routeStop?.status === 'completed';
+                                        const isSaving = planRouteProgress.savingFacilityId === facility.id;
+                                        return (
+                                          <button
+                                            type="button"
+                                            disabled={isSaving || planRouteProgress.loading || planRouteProgress.schemaUnavailable}
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              void planRouteProgress.setFacilityCompleted(facility.id, !completedOnRoute);
+                                            }}
+                                            title={
+                                              completedOnRoute
+                                                ? 'Completed on this outing. Click to reopen this route stop only.'
+                                                : facility.photos_taken
+                                                  ? 'Photos are already on file. Click to complete this stop for the current outing.'
+                                                  : 'Mark photos complete for this outing and add them to the facility record.'
+                                            }
+                                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                                              completedOnRoute
+                                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                                : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                                            }`}
+                                          >
+                                            {isSaving ? (
+                                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <Camera className="w-3.5 h-3.5" />
+                                            )}
+                                            {completedOnRoute ? 'Done this outing' : 'Route pending'}
+                                          </button>
+                                        );
+                                      }
                                       return (
                                         <span
                                           title={facility.photos_taken ? 'Photos taken' : 'Photos not taken'}

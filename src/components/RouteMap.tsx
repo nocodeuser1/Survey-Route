@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet-rotate';
 import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
-import { HomeBase, supabase, UserSettings, Inspection, Facility } from '../lib/supabase';
+import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, minutesTo12Hour } from '../utils/sunset';
@@ -70,6 +70,9 @@ interface RouteMapProps {
    */
   surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
   showOnlyRouteFacilities?: boolean;
+  planRouteStopsByFacilityId?: Map<string, PlanRouteRunStop>;
+  onPlanRouteStopChange?: (facilityId: string, completed: boolean) => Promise<boolean>;
+  planRouteSavingFacilityId?: string | null;
 }
 
 const COLORS = [
@@ -99,7 +102,7 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
   // to the legacy enum-string equality check so older callers keep working.
@@ -997,8 +1000,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const markerBgColor = isManuallyRemoved ? '#9CA3AF' : color;
           const markerFinalOpacity = isManuallyRemoved ? '0.6' : markerOpacity;
 
-          // Add camera badge when photos are taken in SPCC plan mode
-          const showPhotoBadge = effectiveKind === 'spcc_plan' && latestFacilityData?.photos_taken;
+          // The route marker badge is outing-specific. The facility snapshot
+          // remains available in the popup, but historical photos must not make
+          // a fresh route look completed before the crew visits it this time.
+          const showPhotoBadge =
+            effectiveKind === 'spcc_plan' &&
+            latestFacilityData?.id &&
+            planRouteStopsByFacilityId?.get(latestFacilityData.id)?.status === 'completed';
           const photoBadgeHtml = showPhotoBadge
             ? `<div style="position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: #059669; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -1224,8 +1232,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             // Build field visit quick-actions for Plans mode
             let fieldVisitHtml = '';
             if (effectiveKind === 'spcc_plan' && fullFacility) {
-              const photosTaken = fullFacility.photos_taken || false;
+              const routeStop = planRouteStopsByFacilityId?.get(fullFacility.id);
+              const photosTaken = routeStop?.status === 'completed';
               const visitDate = fullFacility.field_visit_date || '';
+              const hasFacilityPhotos = fullFacility.photos_taken || false;
+              const historyLine = hasFacilityPhotos
+                ? `Facility record: photos on file${visitDate ? ` since ${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`
+                : 'Facility record: no photos on file yet';
 
               fieldVisitHtml = `
                 <div style="margin-top: 4px;">
@@ -1238,14 +1251,16 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       padding: 8px 10px; border-radius: 6px; border: 1px solid ${photosTaken ? '#059669' : '#D1D5DB'};
                       background: ${photosTaken ? '#ECFDF5' : '#F9FAFB'}; cursor: pointer;
                       font-size: 12px; text-align: left;
+                      opacity: ${planRouteSavingFacilityId === fullFacility.id ? '0.6' : '1'};
                     "
+                    ${planRouteSavingFacilityId === fullFacility.id ? 'disabled' : ''}
                   >
                     <span style="font-size: 16px;">${photosTaken ? '✅' : '📷'}</span>
                     <div>
                       <div style="color: ${photosTaken ? '#059669' : '#6B7280'}; font-weight: 600;">
-                        ${photosTaken ? 'Photos Taken' : 'Mark Photos Taken'}
+                        ${photosTaken ? 'Done on This Outing' : 'Complete This Route Stop'}
                       </div>
-                      ${visitDate ? `<div style="font-size: 10px; color: #6B7280; margin-top: 1px;">Visited: ${new Date(visitDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : ''}
+                      <div style="font-size: 10px; color: #6B7280; margin-top: 1px;">${historyLine}</div>
                     </div>
                   </button>
                 </div>
@@ -1620,6 +1635,32 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   const newVal = !current;
                   const today = new Date().toISOString().split('T')[0];
                   try {
+                    if (effectiveKind === 'spcc_plan' && onPlanRouteStopChange && facId) {
+                      togglePhotosBtn.setAttribute('disabled', 'true');
+                      togglePhotosBtn.style.opacity = '0.6';
+                      const saved = await onPlanRouteStopChange(facId, newVal);
+                      if (!saved) return;
+                      togglePhotosBtn.dataset.current = String(newVal);
+                      togglePhotosBtn.style.border = `1px solid ${newVal ? '#059669' : '#D1D5DB'}`;
+                      togglePhotosBtn.style.background = newVal ? '#ECFDF5' : '#F9FAFB';
+                      const latestFacility = facilities.find(candidate => candidate.id === facId);
+                      const facilityHistoryLine = latestFacility?.photos_taken
+                        ? `Facility record: photos on file${latestFacility.field_visit_date ? ` since ${new Date(latestFacility.field_visit_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`
+                        : newVal
+                          ? 'Facility record: photos on file'
+                          : 'Facility record: no photos on file yet';
+                      togglePhotosBtn.innerHTML = `
+                        <span style="font-size: 16px;">${newVal ? '✅' : '📷'}</span>
+                        <div>
+                          <div style="color: ${newVal ? '#059669' : '#6B7280'}; font-weight: 600;">
+                            ${newVal ? 'Done on This Outing' : 'Complete This Route Stop'}
+                          </div>
+                          <div style="font-size: 10px; color: #6B7280; margin-top: 1px;">${facilityHistoryLine}</div>
+                        </div>
+                      `;
+                      return;
+                    }
+
                     // When marking photos taken, also set visit date to today
                     const updateData: any = { photos_taken: newVal };
                     if (newVal) {
@@ -1653,6 +1694,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     }
                   } catch (err) {
                     console.error('Error toggling photos_taken:', err);
+                  } finally {
+                    togglePhotosBtn.removeAttribute('disabled');
+                    togglePhotosBtn.style.opacity = '1';
                   }
                 });
               }
@@ -2346,7 +2390,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
     }
-  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen]);
+  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {

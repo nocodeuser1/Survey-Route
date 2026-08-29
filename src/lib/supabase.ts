@@ -25,6 +25,60 @@ export interface RouteVisitEvent {
   visited_at: string;
 }
 
+export type PlanRouteRunStatus = 'active' | 'completed' | 'abandoned';
+export type PlanRouteStopStatus = 'pending' | 'completed' | 'removed' | 'skipped';
+
+export interface PlanRouteRun {
+  id: string;
+  account_id: string;
+  route_plan_id: string | null;
+  survey_type: 'spcc_plan';
+  team_number: number;
+  status: PlanRouteRunStatus;
+  started_at: string;
+  started_by?: string | null;
+  ended_at?: string | null;
+  ended_by?: string | null;
+  created_at: string;
+}
+
+export interface PlanRouteRunStop {
+  id: string;
+  account_id: string;
+  route_run_id: string;
+  facility_id: string | null;
+  facility_name_snapshot: string;
+  planned_day?: number | null;
+  planned_position?: number | null;
+  status: PlanRouteStopStatus;
+  completed_at?: string | null;
+  completed_by?: string | null;
+  removed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PhotoVisitEvent {
+  id: string;
+  account_id: string;
+  facility_id?: string | null;
+  facility_name_snapshot: string;
+  spcc_plan_id?: string | null;
+  berm_index?: number | null;
+  route_run_id?: string | null;
+  route_stop_id?: string | null;
+  event_type: 'photos_recorded' | 'route_reopened' | 'timestamp_corrected' | 'legacy';
+  occurred_at?: string | null;
+  occurred_on?: string | null;
+  occurred_time?: string | null;
+  account_timezone?: string | null;
+  recorded_at: string;
+  recorded_by?: string | null;
+  source: string;
+  supersedes_event_id?: string | null;
+  metadata: Record<string, unknown>;
+}
+
 /**
  * Walking-path overlay drawn on top of the LDAR site plan PDF. All coords
  * are normalized 0..1 to the source page so the overlay scales with any

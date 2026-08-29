@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp } from 'lucide-react';
+import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { Facility, Inspection, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
+import { Facility, Inspection, PlanRouteRunStop, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
@@ -56,6 +56,9 @@ interface SurveyModeProps {
   /** All survey types loaded for this account. Used to map UUID surveyType values
    *  back to view modes via system_kind. Optional for backward compatibility. */
   dbSurveyTypes?: DBSurveyType[];
+  planRouteStopsByFacilityId?: Map<string, PlanRouteRunStop>;
+  onPlanRouteStopChange?: (facilityId: string, completed: boolean) => Promise<boolean>;
+  planRouteSavingFacilityId?: string | null;
 }
 
 interface FacilityWithDistance extends Facility {
@@ -69,7 +72,7 @@ type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
 type ViewModeType = 'all' | 'inspections' | 'plans';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes }: SurveyModeProps) {
+export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: SurveyModeProps) {
   // Helper: normalize a surveyType prop (which can be 'all', a legacy SPCC enum
   // string, or a survey_types.id UUID) to an internal ViewModeType.
   const mapSurveyTypeToViewMode = (st: string | undefined): 'all' | 'inspections' | 'plans' | null => {
@@ -1170,6 +1173,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
               const isOffRoute = isCustomRouteActive && !routeFacilityIdSet.has(facility.id);
               const isOnRouteHighlighted = isCustomRouteActive && !isOffRoute && showOffRoute;
               const isSelected = selectedFacilityId === facility.id;
+              const planRouteStop = planRouteStopsByFacilityId?.get(facility.id);
+              const isCompletedOnThisOuting = planRouteStop?.status === 'completed';
+              const isSavingRouteStop = planRouteSavingFacilityId === facility.id;
               const showInspectionHistory = (viewMode === 'inspections' || viewMode === 'all') && facilityInspections.length > 0;
               const showPlanHistory = (viewMode === 'plans' || viewMode === 'all') && facilityPlans.some(p => p.pe_stamp_date || p.recertified_date || p.plan_url);
               const hasAnyHistory = showInspectionHistory || showPlanHistory;
@@ -1305,6 +1311,36 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
 
                           {(viewMode === 'plans' || viewMode === 'all') && (
                             <SPCCStatusBadge facility={facility} className="text-[10px]" />
+                          )}
+
+                          {viewMode === 'plans' && !isOffRoute && onPlanRouteStopChange && (
+                            <button
+                              type="button"
+                              disabled={isSavingRouteStop}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void onPlanRouteStopChange(facility.id, !isCompletedOnThisOuting);
+                              }}
+                              title={
+                                isCompletedOnThisOuting
+                                  ? 'Reopen this route stop only. Facility photo history stays intact.'
+                                  : facility.photos_taken
+                                    ? 'Photos are on file from an earlier visit. Complete this stop for the current outing.'
+                                    : 'Complete this stop and record the photo visit.'
+                              }
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 ${
+                                isCompletedOnThisOuting
+                                  ? 'bg-green-600 text-white hover:bg-green-700'
+                                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                              }`}
+                            >
+                              {isSavingRouteStop ? (
+                                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                              ) : (
+                                <Camera className="w-2.5 h-2.5" />
+                              )}
+                              {isCompletedOnThisOuting ? 'Done This Outing' : 'Route Pending'}
+                            </button>
                           )}
 
                           {/* "Last:" mini-label adapts to mode — in plans

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList, User } from 'lucide-react';
 import OfflineIndicator from './components/OfflineIndicator';
 import AIAssistantBubble from './components/AIAssistantBubble';
@@ -43,6 +43,7 @@ import { resolveSurveyTypeIcon } from './utils/surveyTypeIcons';
 import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
+import { usePlanRouteRun } from './hooks/usePlanRouteRun';
 import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -338,7 +339,7 @@ function App() {
     // N facilities selected" banner above it, not the survey-filtered
     // subset, so the user sees the route's actual size regardless of which
     // survey tab they're currently looking at.
-    if (showOnlyRouteFacilities && routeFacilityIds) {
+    if (routeFacilityIds) {
       let count = 0;
       optimizationResult.routes.forEach(route => {
         count += route.facilities.length;
@@ -1512,6 +1513,7 @@ function App() {
 
         const teamDistMatrix = await calculateDistanceMatrix(teamLocations);
         const teamFacilitiesWithIndex: FacilityWithIndex[] = teamFacs.map((f, idx) => ({
+          id: f.id,
           index: idx + 1,
           name: f.name,
           latitude: Number(f.latitude),
@@ -1558,6 +1560,7 @@ function App() {
       const distanceMatrix = await calculateDistanceMatrix(locations);
 
       const facilitiesWithIndex: FacilityWithIndex[] = facilitiesForRouting.map((f, idx) => ({
+        id: f.id,
         index: idx + 1,
         name: f.name,
         latitude: Number(f.latitude),
@@ -1579,7 +1582,12 @@ function App() {
     return { result, usePerTeamOptimization, teamHomeBases, currentTeamCount };
   };
 
-  const handleGenerateRoutes = async (settings: UserSettings) => {
+  type RoutePersistenceMode = 'new' | 'update-current';
+
+  const handleGenerateRoutes = async (
+    settings: UserSettings,
+    persistenceMode: RoutePersistenceMode = 'new',
+  ) => {
     if (!homeBase) {
       promptForHomeBase(
         { kind: 'generate', settings },
@@ -1927,29 +1935,55 @@ function App() {
 
       // Preserve user's visibility settings across route updates - don't reset them
 
-      await supabase
+      let clearLastViewedQuery = supabase
         .from('route_plans')
         .update({ is_last_viewed: false })
         .eq('account_id', currentAccount.id)
         .eq('is_last_viewed', true);
+      if (persistenceMode === 'update-current' && currentRouteId) {
+        clearLastViewedQuery = clearLastViewedQuery.neq('id', currentRouteId);
+      }
+      const { error: clearLastViewedError } = await clearLastViewedQuery;
+      if (clearLastViewedError) throw clearLastViewedError;
 
-      const { data: newRoute } = await supabase.from('route_plans').insert({
-        user_id: DEMO_USER_ID,
-        account_id: currentAccount.id,
-        upload_batch_id: facilities[0].upload_batch_id,
-        plan_data: result,
-        total_days: result.totalDays,
-        total_miles: result.totalMiles,
-        total_facilities: result.totalFacilities,
-        name: `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
-        is_last_viewed: true,
-        settings: settings,
-        home_base_data: homeBase,
-      }).select().single();
+      if (persistenceMode === 'update-current' && currentRouteId) {
+        const { data: updatedRoute, error: updateRouteError } = await supabase
+          .from('route_plans')
+          .update({
+            plan_data: result,
+            total_days: result.totalDays,
+            total_miles: result.totalMiles,
+            total_facilities: result.totalFacilities,
+            is_last_viewed: true,
+            settings,
+            home_base_data: homeBase,
+          })
+          .eq('id', currentRouteId)
+          .eq('account_id', currentAccount.id)
+          .select()
+          .single();
+        if (updateRouteError) throw updateRouteError;
+        if (updatedRoute) setCurrentRouteName(updatedRoute.name ?? currentRouteName);
+      } else {
+        const { data: newRoute, error: insertRouteError } = await supabase.from('route_plans').insert({
+          user_id: DEMO_USER_ID,
+          account_id: currentAccount.id,
+          upload_batch_id: facilities[0].upload_batch_id,
+          plan_data: result,
+          total_days: result.totalDays,
+          total_miles: result.totalMiles,
+          total_facilities: result.totalFacilities,
+          name: `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+          is_last_viewed: true,
+          settings: settings,
+          home_base_data: homeBase,
+        }).select().single();
+        if (insertRouteError) throw insertRouteError;
 
-      if (newRoute) {
-        setCurrentRouteId(newRoute.id);
-        setCurrentRouteName(newRoute.name ?? null);
+        if (newRoute) {
+          setCurrentRouteId(newRoute.id);
+          setCurrentRouteName(newRoute.name ?? null);
+        }
       }
     } catch (err: any) {
       console.error('Error generating routes:', err);
@@ -1959,7 +1993,11 @@ function App() {
     }
   };
 
-  const handleCreateRouteFromSelection = async (facilityIds: string[], sourceSurveyType: string) => {
+  const handleCreateRouteFromSelection = async (
+    facilityIds: string[],
+    sourceSurveyType: string,
+    persistenceMode: RoutePersistenceMode = 'new',
+  ) => {
     if (!homeBase) {
       promptForHomeBase(
         { kind: 'fromSelection', facilityIds, sourceSurveyType },
@@ -2085,35 +2123,62 @@ function App() {
         routeName = `Selected Facilities Route ${dateStr}`;
       }
 
-      // Clear previous last_viewed
+      // Keep one canonical last-viewed route. Updating a route preserves its
+      // id so an active outing and completed stop history stay attached.
       if (currentAccount) {
-        await supabase
+        let clearLastViewedQuery = supabase
           .from('route_plans')
           .update({ is_last_viewed: false })
           .eq('account_id', currentAccount.id)
           .eq('is_last_viewed', true);
+        if (persistenceMode === 'update-current' && currentRouteId) {
+          clearLastViewedQuery = clearLastViewedQuery.neq('id', currentRouteId);
+        }
+        const { error: clearLastViewedError } = await clearLastViewedQuery;
+        if (clearLastViewedError) throw clearLastViewedError;
       }
-
-      // Save the route (include facility selection in plan_data)
-      const { data: newRoute } = await supabase.from('route_plans').insert({
-        user_id: DEMO_USER_ID,
-        account_id: currentAccount?.id,
-        upload_batch_id: facilities[0]?.upload_batch_id,
-        plan_data: { ...result, _routeFacilityIds: facilityIds },
-        total_days: result.totalDays,
-        total_miles: result.totalMiles,
-        total_facilities: result.totalFacilities,
-        name: routeName,
-        is_last_viewed: true,
-        settings: settings,
-        home_base_data: homeBase,
-      }).select().single();
 
       setOptimizationResult(result);
       setRouteVersion(prev => prev + 1);
-      if (newRoute) {
-        setCurrentRouteId(newRoute.id);
-        setCurrentRouteName(newRoute.name ?? null);
+
+      const planData = { ...result, _routeFacilityIds: facilityIds };
+      if (persistenceMode === 'update-current' && currentRouteId && currentAccount) {
+        const { data: updatedRoute, error: updateRouteError } = await supabase
+          .from('route_plans')
+          .update({
+            plan_data: planData,
+            total_days: result.totalDays,
+            total_miles: result.totalMiles,
+            total_facilities: result.totalFacilities,
+            is_last_viewed: true,
+            settings,
+            home_base_data: homeBase,
+          })
+          .eq('id', currentRouteId)
+          .eq('account_id', currentAccount.id)
+          .select()
+          .single();
+        if (updateRouteError) throw updateRouteError;
+        if (updatedRoute) setCurrentRouteName(updatedRoute.name ?? currentRouteName);
+      } else {
+        const { data: newRoute, error: insertRouteError } = await supabase.from('route_plans').insert({
+          user_id: DEMO_USER_ID,
+          account_id: currentAccount?.id,
+          upload_batch_id: facilities[0]?.upload_batch_id,
+          plan_data: planData,
+          total_days: result.totalDays,
+          total_miles: result.totalMiles,
+          total_facilities: result.totalFacilities,
+          name: routeName,
+          is_last_viewed: true,
+          settings: settings,
+          home_base_data: homeBase,
+        }).select().single();
+        if (insertRouteError) throw insertRouteError;
+        if (newRoute) {
+          setCurrentRouteId(newRoute.id);
+          setCurrentRouteName(newRoute.name ?? null);
+        }
       }
     } catch (err: any) {
       console.error('Error creating route from selection:', err);
@@ -2246,9 +2311,9 @@ function App() {
     if (latestSettings) {
       // If we have a selected facility list, re-optimize with only those facilities
       if (routeFacilityIds && routeFacilityIds.length > 0) {
-        await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+        await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
       } else {
-        await handleGenerateRoutes(latestSettings);
+        await handleGenerateRoutes(latestSettings, 'update-current');
       }
     }
   };
@@ -2399,7 +2464,7 @@ function App() {
     const merged = Array.from(new Set([...baseIds, ...facilityIds]));
     setRouteFacilityIds(merged);
     setShowOnlyRouteFacilities(true);
-    await handleCreateRouteFromSelection(merged, surveyType);
+    await handleCreateRouteFromSelection(merged, surveyType, 'update-current');
   };
 
   const handleAddFacilityToRoute = async (facilityId: string, _day: number) => {
@@ -2415,11 +2480,11 @@ function App() {
         if (!routeFacilityIds.includes(facilityId)) {
           const newIds = [...routeFacilityIds, facilityId];
           setRouteFacilityIds(newIds);
-          await handleCreateRouteFromSelection(newIds, surveyType);
+          await handleCreateRouteFromSelection(newIds, surveyType, 'update-current');
         }
       } else {
         // Full route mode — full regeneration will include all assigned facilities.
-        await handleGenerateRoutes(settings);
+        await handleGenerateRoutes(settings, 'update-current');
       }
     } catch (err) {
       console.error('[handleAddFacilityToRoute] Failed:', err);
@@ -2429,9 +2494,45 @@ function App() {
   // Silent, optimistic facility patch — updates a single facility in local state
   // without triggering a full loadData() / routeVersion bump. Used by RouteMap's
   // photo-toggle so the user's map view, zoom, and open popup stay intact.
-  const handleFacilityPatch = (id: string, patch: Record<string, any>) => {
+  const handleFacilityPatch = useCallback((id: string, patch: Record<string, any>) => {
     setFacilities(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
-  };
+  }, []);
+
+  const planRouteRun = usePlanRouteRun({
+    accountId: currentAccount?.id,
+    routePlanId: currentRouteId ?? undefined,
+    teamNumber: effectiveUserTeam ?? 1,
+    result: filteredOptimizationResult,
+    facilities: filteredFacilities,
+    enabled: surveyTypeKind === 'spcc_plan',
+    onFacilityPatch: handleFacilityPatch,
+  });
+
+  const planRouteProgressProps = useMemo(() => ({
+    runId: planRouteRun.run?.id ?? null,
+    stopsByFacilityId: planRouteRun.stopsByFacilityId,
+    completedCount: planRouteRun.completedCount,
+    totalCount: planRouteRun.totalCount,
+    loading: planRouteRun.loading,
+    savingFacilityId: planRouteRun.savingFacilityId,
+    error: planRouteRun.error,
+    schemaUnavailable: planRouteRun.schemaUnavailable,
+    startRun: () => planRouteRun.startRun(false),
+    startNewRun: planRouteRun.startNewRun,
+    setFacilityCompleted: planRouteRun.setFacilityCompleted,
+  }), [
+    planRouteRun.run?.id,
+    planRouteRun.stopsByFacilityId,
+    planRouteRun.completedCount,
+    planRouteRun.totalCount,
+    planRouteRun.loading,
+    planRouteRun.savingFacilityId,
+    planRouteRun.error,
+    planRouteRun.schemaUnavailable,
+    planRouteRun.startRun,
+    planRouteRun.startNewRun,
+    planRouteRun.setFacilityCompleted,
+  ]);
 
   const handleReassignFacility = async (facilityIndex: number, fromDay: number, toDay: number) => {
     if (!optimizationResult || !homeBase || !lastUsedSettings) return;
@@ -2483,6 +2584,7 @@ function App() {
       const distanceMatrix = await calculateDistanceMatrix(locations);
 
       const facilitiesWithIndex: FacilityWithIndex[] = activeFacilities.map((f, idx) => ({
+        id: f.id,
         index: idx + 1,
         name: f.name,
         latitude: Number(f.latitude),
@@ -2708,6 +2810,7 @@ function App() {
 
       const distanceMatrix = await calculateDistanceMatrix(locations);
       const facilitiesWithIndex: FacilityWithIndex[] = activeFacilities.map((f, idx) => ({
+        id: f.id,
         index: idx + 1,
         name: f.name,
         latitude: Number(f.latitude),
@@ -2912,6 +3015,7 @@ function App() {
 
       // Build facilities with index for distance calculation
       const facilitiesWithIndex: FacilityWithIndex[] = updatedFacilities.map(f => ({
+        id: f.id,
         index: f.index,
         name: f.name,
         latitude: f.latitude,
@@ -3732,31 +3836,48 @@ function App() {
                     />
                   )}
 
-                  {/* Custom Route callout sits ABOVE the toolbar so the
-                      "you're scoped to a selection" context registers
-                      before the user reaches for any Update / Save /
-                      Export action. Reset-to-All uses a soft blue chip
-                      instead of a solid CTA blue so it doesn't compete
-                      with the Update Route button below. */}
-                  {showOnlyRouteFacilities && routeFacilityIds && (
-                    <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-2.5">
-                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
-                        <CheckCircle className="w-4 h-4" />
-                        <span>Custom Route: {routeFacilityIds.length} facilities selected</span>
+                  {/* Route membership and map visibility are deliberately
+                      separate. Showing extra markers must never silently
+                      rewrite an active outing. */}
+                  {routeFacilityIds && (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
+                          <CheckCircle className="w-4 h-4" />
+                          <span>Current Route: {routeFacilityIds.length} stops</span>
+                        </div>
+                        <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">
+                          {showOnlyRouteFacilities
+                            ? 'The map is showing only route stops.'
+                            : `All facility markers are visible. The route remains ${routeFacilityIds.length} stops until you explicitly rebuild it.`}
+                        </p>
                       </div>
-                      <button
-                        onClick={async () => {
-                          setRouteFacilityIds(null);
-                          setShowOnlyRouteFacilities(false);
-                          if (lastUsedSettings) {
-                            await handleGenerateRoutes(lastUsedSettings);
-                          }
-                        }}
-                        className="flex items-center gap-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-medium px-2.5 py-1 rounded transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                        Reset to All
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowOnlyRouteFacilities(current => !current)}
+                          className="flex items-center gap-1.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-medium px-3 py-1.5 rounded transition-colors"
+                        >
+                          {showOnlyRouteFacilities ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                          {showOnlyRouteFacilities ? 'Show All Markers' : 'Show Route Only'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!lastUsedSettings}
+                          onClick={async () => {
+                            const confirmed = window.confirm(
+                              'Replace the current route with all facilities eligible for this survey mode? Completed stops from this outing will remain in its history, and any added stops will start pending.',
+                            );
+                            if (confirmed && lastUsedSettings) {
+                              await handleGenerateRoutes(lastUsedSettings, 'update-current');
+                            }
+                          }}
+                          className="flex items-center gap-1.5 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed text-xs font-medium px-3 py-1.5 rounded transition-colors"
+                        >
+                          <Route className="w-3.5 h-3.5" />
+                          Use All Eligible
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -3772,6 +3893,7 @@ function App() {
                       onLoadRoute={handleLoadRoute}
                       currentRouteId={currentRouteId || undefined}
                       currentRouteName={currentRouteName || undefined}
+                      planRouteProgress={planRouteProgressProps}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                       homeBase={homeBase || undefined}
                       onUpdateResult={(newResult) => {
@@ -3806,9 +3928,9 @@ function App() {
                           return;
                         }
                         if (routeFacilityIds && routeFacilityIds.length > 0) {
-                          await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+                          await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
                         } else {
-                          handleGenerateRoutes(settingsToUse);
+                          handleGenerateRoutes(settingsToUse, 'update-current');
                         }
                       }}
                       onFacilitiesUpdated={loadData}
@@ -4077,6 +4199,9 @@ function App() {
                         surveyTypeKind={surveyTypeKind}
                         onToggleHideCompleted={() => setShowVisibilityModal(true)}
                         showOnlyRouteFacilities={showOnlyRouteFacilities}
+                        planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                        onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
+                        planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                       />
                     </div>
                   )}
@@ -4092,6 +4217,7 @@ function App() {
                       onLoadRoute={handleLoadRoute}
                       currentRouteId={currentRouteId || undefined}
                       currentRouteName={currentRouteName || undefined}
+                      planRouteProgress={planRouteProgressProps}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
                       showRefreshOptions={showRefreshOptions}
                       onShowRefreshOptions={setShowRefreshOptions}
@@ -4121,17 +4247,17 @@ function App() {
                           console.log('Loaded latest settings, calling route generation');
                           // If we have a selected facility list, re-optimize with only those
                           if (routeFacilityIds && routeFacilityIds.length > 0) {
-                            await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+                            await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
                           } else {
-                            handleGenerateRoutes(latestSettings);
+                            handleGenerateRoutes(latestSettings, 'update-current');
                           }
                         } else {
                           console.warn('No settings found in database, using current settings');
                           if (lastUsedSettings) {
                             if (routeFacilityIds && routeFacilityIds.length > 0) {
-                              await handleCreateRouteFromSelection(routeFacilityIds, surveyType);
+                              await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
                             } else {
-                              handleGenerateRoutes(lastUsedSettings);
+                              handleGenerateRoutes(lastUsedSettings, 'update-current');
                             }
                           } else {
                             alert('Settings not found. Please configure settings first.');
@@ -4242,6 +4368,9 @@ function App() {
                             surveyType={surveyType}
                             surveyTypeKind={surveyTypeKind}
                             showOnlyRouteFacilities={showOnlyRouteFacilities}
+                            planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                            onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
+                            planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                           />
                         </div>
                       </div>
@@ -4319,8 +4448,8 @@ function App() {
                 return filteredFacilities.filter(f => f.status !== 'sold');
               })()}
               routeFacilityIds={
-                showOnlyRouteFacilities && routeFacilityIds && routeFacilityIds.length > 0
-                  ? routeFacilityIds
+                currentRouteFacilityIds.size > 0
+                  ? Array.from(currentRouteFacilityIds)
                   : null
               }
               userId={currentAccount.id}
@@ -4330,6 +4459,9 @@ function App() {
               surveyType={surveyType}
               onSurveyTypeChange={setSurveyType}
               dbSurveyTypes={dbSurveyTypes}
+              planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+              onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
+              planRouteSavingFacilityId={planRouteRun.savingFacilityId}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;
                 if (batchId) {
@@ -4600,9 +4732,9 @@ function App() {
                 .eq('account_id', currentAccount.id)
                 .maybeSingle();
               if (latestSettings) {
-                handleGenerateRoutes(latestSettings);
+                handleGenerateRoutes(latestSettings, 'update-current');
               } else if (lastUsedSettings) {
-                handleGenerateRoutes(lastUsedSettings);
+                handleGenerateRoutes(lastUsedSettings, 'update-current');
               }
             }
           }}

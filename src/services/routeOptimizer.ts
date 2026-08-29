@@ -15,6 +15,8 @@ import {
 } from '../utils/geoClustering';
 
 export interface FacilityWithIndex {
+  /** Stable database id. Older saved routes may omit it, so name remains the fallback. */
+  id?: string;
   index: number;
   name: string;
   latitude: number;
