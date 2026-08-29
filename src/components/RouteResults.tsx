@@ -2080,7 +2080,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           // labels make the row feel intentional instead of four faint
           // icons drifting in space, and the matched chip / button
           // heights balance the bar visually.
-          <div className="bg-white/90 dark:bg-gray-800/80 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-3 py-2 transition-all duration-200 overflow-visible relative z-10">
+          <div className="px-1 py-0 transition-all duration-200 overflow-visible relative z-10">
             <div className="flex flex-wrap items-center justify-between gap-3">
               {/* Action toolset — chip-grouped on a subtle gray pill so
                   the four buttons read as a connected unit rather than

@@ -3826,27 +3826,32 @@ function App() {
                     />
                   )}
 
+                  <section
+                    id="main-stats-cards"
+                    className="grid grid-cols-1 xl:grid-cols-12 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-visible"
+                  >
+
                   {/* Route membership and map visibility are deliberately
                       separate. Showing extra markers must never silently
                       rewrite an active outing. */}
                   {routeFacilityIds && (
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg px-4 py-3">
+                    <div className="order-1 xl:col-span-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
                       <div>
-                        <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 text-sm font-medium">
-                          <CheckCircle className="w-4 h-4" />
+                        <div className="flex items-center gap-2 text-gray-900 dark:text-white text-sm font-semibold">
+                          <CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                           <span>Current Route: {routeFacilityIds.length} stops</span>
                         </div>
-                        <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">
+                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {showOnlyRouteFacilities
-                            ? 'The map is showing only route stops.'
-                            : `All facility markers are visible. The route remains ${routeFacilityIds.length} stops until you explicitly rebuild it.`}
+                            ? 'Route stops only on the map'
+                            : `All markers shown · route remains ${routeFacilityIds.length} stops`}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => setShowOnlyRouteFacilities(current => !current)}
-                          className="flex items-center gap-1.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-medium px-3 py-1.5 rounded transition-colors"
+                          className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 dark:hover:border-blue-500 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
                         >
                           {showOnlyRouteFacilities ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                           {showOnlyRouteFacilities ? 'Show All Markers' : 'Show Route Only'}
@@ -3872,25 +3877,25 @@ function App() {
                   )}
 
                   {surveyTypeKind === 'spcc_plan' && (
-                    <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 px-4 py-3 sm:px-5">
+                    <div className="order-4 xl:col-span-5 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <Image className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                            <h2 className="font-semibold text-gray-900 dark:text-white">This Route's Photo Progress</h2>
+                            <Image className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Outing Photo Progress</h2>
                           </div>
                           {planRouteRun.run ? (
                             <>
-                              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                              <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
                                 {planRouteRun.completedCount} of {planRouteRun.totalCount} stops completed on this outing.
                               </p>
-                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                Route progress can reset. Facility photo status and every historical photo event stay intact.
+                              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                Resetting an outing keeps facility status and photo history.
                               </p>
                             </>
                           ) : (
-                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                              Start an outing to track these stops separately from the Facilities tab.
+                            <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
+                              Not started · tracked separately from Facilities
                             </p>
                           )}
                           {planRouteRun.error && (
@@ -3933,10 +3938,11 @@ function App() {
                           </button>
                         </div>
                       </div>
-                    </section>
+                    </div>
                   )}
 
                   {!isFullScreenMap && (
+                    <div className="order-5 xl:col-span-12 px-3 py-2">
                     <RouteResults
                       result={optimizationResult}
                       settings={lastUsedSettings}
@@ -3993,15 +3999,12 @@ function App() {
                       showOnlySettings={true}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                     />
+                    </div>
                   )}
 
-                  {/* Stat-card set. All four cards share the same shape and
-                      height (flex column with the headline number vertically
-                      centred), differentiated by a colored left-edge accent
-                      strip and a tinted icon chip in the top-right. Keeps
-                      the eye scanning across cleanly instead of being
-                      thrown off by the taller Days card. */}
-                  <div id="main-stats-cards" className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                  {/* Compact metrics share the command-center surface instead
+                      of pushing the map down with four separate cards. */}
+                  <div className={`${surveyTypeKind === 'spcc_plan' ? 'xl:col-span-7' : 'xl:col-span-12'} order-3 grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-200 dark:divide-gray-700 border-b xl:border-r border-gray-200 dark:border-gray-700`}>
                     {(() => {
                       const totalTime = filteredOptimizationResult?.totalTime || 0;
                       const driveTime = filteredOptimizationResult?.totalDriveTime || 0;
@@ -4014,8 +4017,6 @@ function App() {
                         label: string;
                         value: string;
                         sub?: string;
-                        accent: string;
-                        iconBg: string;
                         iconColor: string;
                         Icon: typeof Calendar;
                       }> = [
@@ -4024,8 +4025,6 @@ function App() {
                           label: 'Total Days',
                           value: `${filteredOptimizationResult?.totalDays || 0}`,
                           sub: `${fmtHM(totalTime)} • ${fmtHM(driveTime)} drive + ${fmtHM(visitTime)} onsite`,
-                          accent: 'before:bg-blue-500',
-                          iconBg: 'bg-blue-100 dark:bg-blue-900/40',
                           iconColor: 'text-blue-600 dark:text-blue-400',
                           Icon: Calendar,
                         },
@@ -4033,8 +4032,6 @@ function App() {
                           key: 'facilities',
                           label: 'Total Facilities',
                           value: `${visibleFacilityCount}`,
-                          accent: 'before:bg-emerald-500',
-                          iconBg: 'bg-emerald-100 dark:bg-emerald-900/40',
                           iconColor: 'text-emerald-600 dark:text-emerald-400',
                           Icon: MapPin,
                         },
@@ -4042,8 +4039,6 @@ function App() {
                           key: 'miles',
                           label: 'Total Miles',
                           value: (filteredOptimizationResult?.totalMiles || 0).toFixed(1),
-                          accent: 'before:bg-orange-500',
-                          iconBg: 'bg-orange-100 dark:bg-orange-900/40',
                           iconColor: 'text-orange-600 dark:text-orange-400',
                           Icon: TrendingUp,
                         },
@@ -4051,36 +4046,24 @@ function App() {
                           key: 'drive',
                           label: 'Drive Time',
                           value: `${Math.round(driveTime / 60)}h`,
-                          accent: 'before:bg-purple-500',
-                          iconBg: 'bg-purple-100 dark:bg-purple-900/40',
                           iconColor: 'text-purple-600 dark:text-purple-400',
                           Icon: Clock,
                         },
                       ];
 
-                      return cards.map(({ key, label, value, sub, accent, iconBg, iconColor, Icon }) => (
+                      return cards.map(({ key, label, value, sub, iconColor, Icon }) => (
                         <div
                           key={key}
-                          className={`relative flex flex-col min-h-[112px] bg-white/85 dark:bg-gray-900/70 backdrop-blur-xl rounded-xl shadow-sm border border-gray-200/60 dark:border-white/10 px-4 py-3 transition-all hover:shadow-md hover:-translate-y-px overflow-hidden before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 ${accent}`}
+                          className="min-w-0 px-3 py-2.5"
+                          title={sub}
                         >
-                          <div className="flex items-start justify-between mb-1.5 pl-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          <div className="flex items-center gap-1.5">
+                            <Icon className={`w-3.5 h-3.5 shrink-0 ${iconColor}`} />
+                            <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                               {label}
                             </span>
-                            <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconBg}`}>
-                              <Icon className={`w-4 h-4 ${iconColor}`} />
-                            </span>
                           </div>
-                          <div className="pl-1 flex-1 flex flex-col justify-center">
-                            <p className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white leading-none">
-                              {value}
-                            </p>
-                            {sub && (
-                              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1.5 leading-snug">
-                                {sub}
-                              </p>
-                            )}
-                          </div>
+                          <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white leading-none">{value}</p>
                         </div>
                       ));
                     })()}
@@ -4142,24 +4125,20 @@ function App() {
 
                     const allActive = surveyType === 'all';
                     return (
-                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4 transition-colors duration-200">
+                      <div className={`order-2 ${routeFacilityIds ? 'xl:col-span-7' : 'xl:col-span-12'} px-4 py-3 border-b border-gray-200 dark:border-gray-700`}>
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            <ClipboardList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                            <span className="font-medium text-gray-800 dark:text-white">Survey Type</span>
+                            <ClipboardList className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Survey</span>
                           </div>
-                          {/* Segmented slider — same visual model as the
-                              All/Plans/Inspections switcher on the Facilities
-                              tab. Active option floats on a white pill with
-                              soft shadow; inactive options are muted text
-                              that pop on hover. Count badges sit inside
-                              each option without breaking the row. */}
-                          <div className="inline-flex flex-wrap rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 gap-0.5">
+                          {/* Compact mode switcher. The active option uses the
+                              same high-contrast brand treatment in every mode. */}
+                          <div className="inline-flex flex-wrap rounded-lg border border-gray-200 dark:border-gray-600 p-0.5 gap-0.5">
                             {/* All Facilities tab — always first */}
                             <button
                               onClick={() => setSurveyType('all')}
                               className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${allActive
-                                ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                                ? 'bg-blue-600 text-white shadow-sm'
                                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                 }`}
                             >
@@ -4181,14 +4160,9 @@ function App() {
                                   onClick={() => setSurveyType(type.id)}
                                   title={type.description || type.name}
                                   className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 ${isActive
-                                    ? 'bg-white dark:bg-gray-800 shadow-sm'
+                                    ? 'bg-blue-600 text-white shadow-sm'
                                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                     }`}
-                                  // Active tab uses the type's own color for
-                                  // the icon + text — keeps the segmented
-                                  // chrome uniform while still letting each
-                                  // type carry its identity.
-                                  style={isActive ? { color: type.color } : undefined}
                                 >
                                   <Icon className="w-4 h-4" />
                                   <span>{type.name}</span>
@@ -4200,7 +4174,7 @@ function App() {
                                       counts are still one click away. */}
                                   {isActive && inRouteCount > 0 && (
                                     <span
-                                      className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+                                      className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap bg-white/20 text-white"
                                     >
                                       {inRouteCount}
                                     </span>
@@ -4218,6 +4192,8 @@ function App() {
                       </div>
                     );
                   })()}
+
+                  </section>
 
                   {!isFullScreenMap && (
                     <div className="relative">
