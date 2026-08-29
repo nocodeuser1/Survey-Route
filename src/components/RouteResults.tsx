@@ -71,14 +71,9 @@ interface RouteResultsProps {
   planRouteProgress?: {
     runId: string | null;
     stopsByFacilityId: Map<string, PlanRouteRunStop>;
-    completedCount: number;
-    totalCount: number;
     loading: boolean;
     savingFacilityId: string | null;
-    error: string | null;
     schemaUnavailable: boolean;
-    startRun: () => Promise<unknown>;
-    startNewRun: () => Promise<unknown>;
     setFacilityCompleted: (facilityId: string, completed: boolean) => Promise<boolean>;
   };
 }
@@ -2661,78 +2656,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </button>
           </div>
         </div>
-      )}
-
-      {effectiveKind === 'spcc_plan' && planRouteProgress && (
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 p-4 sm:p-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <h2 className="font-semibold text-gray-900 dark:text-white">This Route's Photo Progress</h2>
-              </div>
-              {planRouteProgress.runId ? (
-                <>
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                    {planRouteProgress.completedCount} of {planRouteProgress.totalCount} stops completed on this outing.
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Reopening or starting a new outing changes only this route checklist. Facility photo status and every recorded photo event remain intact.
-                  </p>
-                </>
-              ) : (
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                  Start an outing to track these stops separately from the Facilities tab.
-                </p>
-              )}
-              {planRouteProgress.error && (
-                <p className="mt-2 text-xs text-red-600 dark:text-red-400">{planRouteProgress.error}</p>
-              )}
-            </div>
-
-            <div className="flex flex-col sm:items-end gap-2 shrink-0">
-              {planRouteProgress.runId && planRouteProgress.totalCount > 0 && (
-                <div className="w-full sm:w-48 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                  <div
-                    className="h-full bg-green-600 text-white transition-all"
-                    style={{
-                      width: `${Math.round((planRouteProgress.completedCount / planRouteProgress.totalCount) * 100)}%`,
-                    }}
-                  />
-                </div>
-              )}
-              <button
-                type="button"
-                disabled={
-                  planRouteProgress.loading ||
-                  planRouteProgress.schemaUnavailable ||
-                  !currentRouteId
-                }
-                onClick={async () => {
-                  if (!planRouteProgress.runId) {
-                    await planRouteProgress.startRun();
-                    return;
-                  }
-                  const confirmed = window.confirm(
-                    'Start a new outing for this saved route? This resets only the route checklist. Facility photo status and photo history will not be cleared.',
-                  );
-                  if (confirmed) await planRouteProgress.startNewRun();
-                }}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed px-4 py-2 text-sm font-medium transition-colors"
-              >
-                {planRouteProgress.loading ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Route className="w-4 h-4" />
-                )}
-                {planRouteProgress.runId ? 'Start New Outing' : 'Start This Outing'}
-              </button>
-              {!currentRouteId && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">Save the route first to track progress.</span>
-              )}
-            </div>
-          </div>
-        </section>
       )}
 
       {listSelectionMode && selectedFacilityNames.size > 0 && (

@@ -2511,26 +2511,16 @@ function App() {
   const planRouteProgressProps = useMemo(() => ({
     runId: planRouteRun.run?.id ?? null,
     stopsByFacilityId: planRouteRun.stopsByFacilityId,
-    completedCount: planRouteRun.completedCount,
-    totalCount: planRouteRun.totalCount,
     loading: planRouteRun.loading,
     savingFacilityId: planRouteRun.savingFacilityId,
-    error: planRouteRun.error,
     schemaUnavailable: planRouteRun.schemaUnavailable,
-    startRun: () => planRouteRun.startRun(false),
-    startNewRun: planRouteRun.startNewRun,
     setFacilityCompleted: planRouteRun.setFacilityCompleted,
   }), [
     planRouteRun.run?.id,
     planRouteRun.stopsByFacilityId,
-    planRouteRun.completedCount,
-    planRouteRun.totalCount,
     planRouteRun.loading,
     planRouteRun.savingFacilityId,
-    planRouteRun.error,
     planRouteRun.schemaUnavailable,
-    planRouteRun.startRun,
-    planRouteRun.startNewRun,
     planRouteRun.setFacilityCompleted,
   ]);
 
@@ -3879,6 +3869,71 @@ function App() {
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  {surveyTypeKind === 'spcc_plan' && (
+                    <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 px-4 py-3 sm:px-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Image className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            <h2 className="font-semibold text-gray-900 dark:text-white">This Route's Photo Progress</h2>
+                          </div>
+                          {planRouteRun.run ? (
+                            <>
+                              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                                {planRouteRun.completedCount} of {planRouteRun.totalCount} stops completed on this outing.
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                Route progress can reset. Facility photo status and every historical photo event stay intact.
+                              </p>
+                            </>
+                          ) : (
+                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                              Start an outing to track these stops separately from the Facilities tab.
+                            </p>
+                          )}
+                          {planRouteRun.error && (
+                            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{planRouteRun.error}</p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                          {planRouteRun.run && planRouteRun.totalCount > 0 && (
+                            <div className="w-full sm:w-48 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                              <div
+                                className="h-full bg-green-600 text-white transition-all"
+                                style={{
+                                  width: `${Math.round((planRouteRun.completedCount / planRouteRun.totalCount) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            disabled={planRouteRun.loading || planRouteRun.schemaUnavailable || !currentRouteId}
+                            onClick={async () => {
+                              if (!planRouteRun.run) {
+                                await planRouteRun.startRun(false);
+                                return;
+                              }
+                              const confirmed = window.confirm(
+                                'Start a new outing for this saved route? This resets only the route checklist. Facility photo status and photo history will not be cleared.',
+                              );
+                              if (confirmed) await planRouteRun.startNewRun();
+                            }}
+                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed px-4 py-2 text-sm font-medium transition-colors"
+                          >
+                            {planRouteRun.loading ? (
+                              <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                            ) : (
+                              <Route className="w-4 h-4" />
+                            )}
+                            {planRouteRun.run ? 'Start New Outing' : 'Start This Outing'}
+                          </button>
+                        </div>
+                      </div>
+                    </section>
                   )}
 
                   {!isFullScreenMap && (
