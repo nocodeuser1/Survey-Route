@@ -3,15 +3,15 @@ export function registerServiceWorker(): void {
 
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', {
+      // A commit-specific script URL forces an install check on every deploy,
+      // even when sw.js itself did not change. That install atomically caches
+      // the new index.html plus its exact hashed Vite assets.
+      const workerUrl = `/sw.js?v=${encodeURIComponent(__BUILD_COMMIT__)}`;
+      const registration = await navigator.serviceWorker.register(workerUrl, {
         scope: '/',
+        updateViaCache: 'none',
       });
       console.log('[SW] Registered:', registration.scope);
-
-      // Check for updates periodically
-      setInterval(() => {
-        registration.update();
-      }, 60 * 60 * 1000); // Every hour
     } catch (err) {
       console.warn('[SW] Registration failed:', err);
     }

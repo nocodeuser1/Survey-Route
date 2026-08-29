@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, SurveyType, SurveyField, FacilitySurveyData } from '../lib/supabase';
+import { useOnlineStatus } from './useOnlineStatus';
 
 interface UseSurveyTypesResult {
   surveyTypes: SurveyType[];
@@ -15,6 +16,7 @@ interface UseSurveyTypesResult {
 }
 
 export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
+  const { isOnline } = useOnlineStatus();
   const [surveyTypes, setSurveyTypes] = useState<SurveyType[]>([]);
   const [allFields, setAllFields] = useState<Map<string, SurveyField[]>>(new Map());
   const [allSurveyData, setAllSurveyData] = useState<FacilitySurveyData[]>([]);
@@ -23,6 +25,10 @@ export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
 
   const loadSurveyTypes = useCallback(async () => {
     if (!accountId) {
+      setLoading(false);
+      return;
+    }
+    if (!isOnline) {
       setLoading(false);
       return;
     }
@@ -66,10 +72,10 @@ export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
     } finally {
       setLoading(false);
     }
-  }, [accountId]);
+  }, [accountId, isOnline]);
 
   const loadSurveyData = useCallback(async () => {
-    if (!accountId) return;
+    if (!accountId || !isOnline) return;
     try {
       const { data, error: dataError } = await supabase
         .from('facility_survey_data')
@@ -80,7 +86,7 @@ export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
     } catch (err: any) {
       console.error('[useSurveyTypes] Error loading survey data:', err);
     }
-  }, [accountId]);
+  }, [accountId, isOnline]);
 
   useEffect(() => {
     loadSurveyTypes();

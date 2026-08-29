@@ -6,6 +6,7 @@ import {
   type PlanRouteRun,
   type PlanRouteRunStop,
 } from '../lib/supabase';
+import { useOnlineStatus } from './useOnlineStatus';
 
 export interface PlannedRouteStopInput {
   facility_id: string;
@@ -50,6 +51,7 @@ export function usePlanRouteRun({
   enabled,
   onFacilityPatch,
 }: UsePlanRouteRunOptions) {
+  const { isOnline } = useOnlineStatus();
   const [run, setRun] = useState<PlanRouteRun | null>(null);
   const [stops, setStops] = useState<PlanRouteRunStop[]>([]);
   const [loading, setLoading] = useState(false);
@@ -107,6 +109,10 @@ export function usePlanRouteRun({
       setError(null);
       return;
     }
+    if (!isOnline) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -150,7 +156,7 @@ export function usePlanRouteRun({
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [accountId, enabled, loadStops, plannedStopsSignature, routePlanId, teamNumber]);
+  }, [accountId, enabled, isOnline, loadStops, plannedStopsSignature, routePlanId, teamNumber]);
 
   useEffect(() => {
     void loadActiveRun();
@@ -159,6 +165,10 @@ export function usePlanRouteRun({
   const startRun = useCallback(
     async (forceNew = false): Promise<PlanRouteRun | null> => {
       if (!enabled || !accountId || !routePlanId || plannedStops.length === 0) return null;
+      if (!isOnline) {
+        setError('Route progress changes need a connection.');
+        return null;
+      }
       setLoading(true);
       setError(null);
       try {
@@ -192,7 +202,7 @@ export function usePlanRouteRun({
         setLoading(false);
       }
     },
-    [accountId, enabled, loadStops, plannedStops, routePlanId, teamNumber],
+    [accountId, enabled, isOnline, loadStops, plannedStops, routePlanId, teamNumber],
   );
 
   const setFacilityCompleted = useCallback(

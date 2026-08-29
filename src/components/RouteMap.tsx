@@ -17,6 +17,7 @@ import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SpeedDisplay from './SpeedDisplay';
 import { getCoords } from '../utils/coordinates';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 
 interface RouteMapProps {
   result: OptimizationResult | null;
@@ -103,6 +104,7 @@ const COLORS = [
 ];
 
 export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+  const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
   // to the legacy enum-string equality check so older callers keep working.
@@ -278,7 +280,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   // Load road routes preference from user settings
   useEffect(() => {
     const loadRoadRoutesPreference = async () => {
-      if (!accountId) return;
+      if (!accountId || !isOnline) return;
 
       try {
         const { data, error } = await supabase
@@ -298,13 +300,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     };
 
     loadRoadRoutesPreference();
-  }, [accountId]);
+  }, [accountId, isOnline]);
 
   // Check if coordinates were updated when component becomes visible
   useEffect(() => {
     const checkAndReload = () => {
       const lastUpdate = localStorage.getItem('facilities_coords_updated');
-      if (lastUpdate && onFacilitiesChange) {
+      if (lastUpdate && onFacilitiesChange && isOnline) {
         onFacilitiesChange();
         localStorage.removeItem('facilities_coords_updated');
       }
@@ -321,7 +323,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [onFacilitiesChange]);
+  }, [onFacilitiesChange, isOnline]);
 
   // Stable refs so the delegated day-assign handler always sees fresh props.
   const onFacilityPatchRef = useRef(onFacilityPatch);

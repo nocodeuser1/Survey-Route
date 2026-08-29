@@ -42,13 +42,34 @@ import { parseLocalDate } from './utils/dateUtils';
 import { resolveSurveyTypeIcon } from './utils/surveyTypeIcons';
 import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
 import { usePlanRouteRun } from './hooks/usePlanRouteRun';
-import { saveFacilities as cacheOfflineFacilities, getFacilitiesByAccount as getOfflineFacilities, saveRoutePlans as cacheOfflineRoutePlans, getRoutePlansByUser as getOfflineRoutePlans, saveHomeBases as cacheOfflineHomeBases, getHomeBasesByUser as getOfflineHomeBases } from './lib/offlineDb';
+import {
+  replaceFacilitiesForAccount as cacheOfflineFacilitiesForAccount,
+  getFacilitiesByAccount as getOfflineFacilities,
+  saveRoutePlans as cacheOfflineRoutePlans,
+  saveHomeBases as cacheOfflineHomeBases,
+  saveAccountSnapshot,
+  getAccountSnapshot,
+  deleteAccountSnapshot,
+  type OfflineAccountSnapshot,
+} from './lib/offlineDb';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 type View = 'facilities' | 'configure' | 'route-planning' | 'survey' | 'settings';
+
+type DataLoadMode = 'cold-hydrate' | 'background-revalidate';
+
+interface DataLoadOptions {
+  accountId?: string;
+  userId?: string;
+  mode?: DataLoadMode;
+}
+
+const getOfflineScopeKey = (userId: string, accountId: string): string =>
+  `${userId}:${accountId}`;
 
 const isActiveFacility = (facility: Facility): boolean => {
   return facility.day_assignment !== -1 && facility.day_assignment !== -2 && facility.status !== 'sold';
@@ -161,6 +182,7 @@ const filterFacilitiesByTeam = (
 function App() {
   const { user, signOut } = useAuth();
   const { currentAccount, accounts, accountRole, loading: accountLoading, selectAccount } = useAccount();
+  const { isOnline } = useOnlineStatus();
 
   // Facility opened from the AI assistant bubble's linkified bold mentions.
   // Rendered as a top-level FacilityDetailModal so it works regardless of
@@ -190,6 +212,20 @@ function App() {
   const [currentRouteName, setCurrentRouteName] = useState<string | null>(null);
   const [routeVersion, setRouteVersion] = useState(0);
   const loadedAccountRef = useRef<string | null>(null);
+  const loadedUserRef = useRef<string | null>(null);
+  // Selection and data ownership are deliberately separate. During an account
+  // switch React still renders the prior account's arrays for one commit; only
+  // stateOwnerScopeRef says which account those arrays actually belong to.
+  const selectedScopeRef = useRef<string | null>(null);
+  const stateOwnerScopeRef = useRef<string | null>(null);
+  const loadGenerationRef = useRef(0);
+  const activeDataLoadRef = useRef<{
+    generation: number;
+    scopeKey: string;
+  } | null>(null);
+  selectedScopeRef.current = currentAccount && user
+    ? getOfflineScopeKey(user.id, currentAccount.id)
+    : null;
   const [isFullScreenMap, setIsFullScreenMap] = useState(() => {
     const savedFullScreenMap = localStorage.getItem('isFullScreenMap');
     return savedFullScreenMap === 'true';
@@ -565,21 +601,21 @@ function App() {
 
   // Log user login when component mounts and user is authenticated
   useEffect(() => {
-    if (user && currentAccount?.id) {
+    if (user && currentAccount?.id && isOnline) {
       logActivity({
         accountId: currentAccount.id,
         actionType: 'user_login',
         metadata: { login_time: new Date().toISOString() }
       });
     }
-  }, [user, currentAccount, logActivity]);
+  }, [user, currentAccount, logActivity, isOnline]);
 
   // Log tab views when currentView changes
   useEffect(() => {
-    if (currentAccount?.id) {
+    if (currentAccount?.id && isOnline) {
       logTabView(currentAccount.id, currentView);
     }
-  }, [currentView, currentAccount, logTabView]);
+  }, [currentView, currentAccount, logTabView, isOnline]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -617,6 +653,12 @@ function App() {
       return;
     }
 
+    // The IndexedDB snapshot is the authority while offline. Do not wake the
+    // radio or issue a doomed Supabase write after Safari restores that route.
+    // Including isOnline in the dependencies makes this same local route save
+    // once a real browser connectivity transition occurs.
+    if (!isOnline) return;
+
     const handle = setTimeout(async () => {
       try {
         const planDataToSave = routeFacilityIds
@@ -641,13 +683,123 @@ function App() {
     }, 800);
 
     return () => clearTimeout(handle);
-  }, [optimizationResult, currentRouteId, currentAccount, routeFacilityIds]);
+  }, [optimizationResult, currentRouteId, currentAccount, routeFacilityIds, isOnline]);
+
+  // Persist one cohesive, account-scoped recovery point as route state changes.
+  // iOS can terminate Safari's WebContent process without firing unload, so
+  // saving only in pagehide/beforeunload is not reliable enough. IndexedDB is
+  // written during normal use and pagehide merely requests one final checkpoint.
+  const persistOfflineAccountSnapshot = useCallback(async () => {
+    if (!currentAccount || !user) return;
+
+    const scopeKey = getOfflineScopeKey(user.id, currentAccount.id);
+    if (stateOwnerScopeRef.current !== scopeKey) return;
+
+    // A stale realtime callback or superseded request must never make another
+    // account's rows durable under the selected account's snapshot key.
+    const hasForeignRows = facilities.some(
+      (facility) => facility.account_id && facility.account_id !== currentAccount.id
+    ) || inspections.some(
+      (inspection) => inspection.account_id !== currentAccount.id
+    ) || (
+      lastUsedSettings?.account_id
+      && lastUsedSettings.account_id !== currentAccount.id
+    );
+    if (hasForeignRows) {
+      console.error('[offline] Refusing to persist a mixed-account recovery snapshot');
+      return;
+    }
+
+    const planData = optimizationResult
+      ? (routeFacilityIds
+        ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
+        : optimizationResult)
+      : null;
+
+    const routePlan: RoutePlan | null = currentRouteId && planData
+      ? {
+          id: currentRouteId,
+          user_id: user.id,
+          upload_batch_id: facilities[0]?.upload_batch_id ?? '',
+          plan_data: planData,
+          total_days: optimizationResult?.totalDays ?? 0,
+          total_miles: optimizationResult?.totalMiles ?? 0,
+          total_facilities: optimizationResult?.totalFacilities ?? 0,
+          name: currentRouteName || 'Current Route',
+          is_last_viewed: true,
+          settings: lastUsedSettings,
+          home_base_data: homeBase,
+          created_at: new Date().toISOString(),
+        }
+      : null;
+
+    const snapshot: OfflineAccountSnapshot = {
+      accountId: currentAccount.id,
+      userId: user.id,
+      facilities,
+      homeBases,
+      inspections,
+      routePlan,
+      settings: lastUsedSettings,
+      teamCount,
+      userTeamAssignment,
+      routeFacilityIds,
+      showOnlyRouteFacilities,
+      savedAt: Date.now(),
+    };
+
+    await saveAccountSnapshot(snapshot);
+  }, [
+    currentAccount?.id,
+    user?.id,
+    facilities,
+    homeBases,
+    inspections,
+    optimizationResult,
+    currentRouteId,
+    currentRouteName,
+    lastUsedSettings,
+    homeBase,
+    teamCount,
+    userTeamAssignment,
+    routeFacilityIds,
+    showOnlyRouteFacilities,
+  ]);
+
+  useEffect(() => {
+    const checkpointTimer = window.setTimeout(() => {
+      persistOfflineAccountSnapshot().catch((snapshotError) => {
+        console.warn('[offline] Unable to save account recovery snapshot:', snapshotError);
+      });
+    }, 300);
+
+    return () => window.clearTimeout(checkpointTimer);
+  }, [persistOfflineAccountSnapshot]);
 
 
   useEffect(() => {
-    if (currentAccount && currentAccount.id !== loadedAccountRef.current) {
-      const isAccountSwitch = loadedAccountRef.current !== null;
+    if (
+      currentAccount
+      && user
+      && (
+        currentAccount.id !== loadedAccountRef.current
+        || user.id !== loadedUserRef.current
+      )
+    ) {
+      const isAccountSwitch = loadedAccountRef.current !== null || loadedUserRef.current !== null;
+      const accountId = currentAccount.id;
+      const userId = user.id;
+
+      // Invalidate every prior async load before clearing state. A superseded
+      // request may still finish at the transport layer, but it can no longer
+      // apply setters, clear a newer loading flag, or write another account's
+      // cache.
+      loadGenerationRef.current += 1;
+      activeDataLoadRef.current = null;
+      isLoadingDataRef.current = false;
+      stateOwnerScopeRef.current = null;
       loadedAccountRef.current = currentAccount.id;
+      loadedUserRef.current = user.id;
       lastLoadTimeRef.current = Date.now();
 
       // CRITICAL on account switch: clear per-account state immediately.
@@ -665,6 +817,9 @@ function App() {
         setInspections([]);
         setHomeBases([]);
         setHomeBase(null);
+        setTeamCount(1);
+        setUserTeamAssignment(null);
+        setLastUsedSettings(null);
         setOptimizationResult(null);
         setCurrentRouteId(null);
         setCurrentRouteName(null);
@@ -681,9 +836,9 @@ function App() {
 
       // Set loading state when switching accounts
       setIsLoadingFacilities(true);
-      loadData();
+      loadData({ accountId, userId, mode: 'cold-hydrate' });
     }
-  }, [currentAccount?.id]);
+  }, [currentAccount?.id, user?.id]);
 
   // Reload data when returning to the app (e.g., from agency dashboard)
   useEffect(() => {
@@ -693,30 +848,36 @@ function App() {
       currentView
     });
 
-    if (currentAccount && !optimizationResult) {
+    if (currentAccount && user && !optimizationResult && isOnline && !isLoadingDataRef.current) {
+      const accountId = currentAccount.id;
+      const scopeKey = getOfflineScopeKey(user.id, accountId);
       // Check if we should have a route loaded
       const checkAndLoad = async () => {
         const { data: lastRoutePlan } = await supabase
           .from('route_plans')
           .select('id')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .eq('is_last_viewed', true)
           .maybeSingle();
 
+        if (selectedScopeRef.current !== scopeKey) return;
         console.log('[useEffect-reload] Query result:', { hasLastRoute: !!lastRoutePlan });
 
         // If there's a saved route but we don't have it loaded, reload data
         if (lastRoutePlan) {
           console.log('[useEffect-reload] Detected saved route not loaded, reloading data');
-          loadData();
+          loadData({ mode: 'background-revalidate' });
         }
       };
       checkAndLoad();
     }
-  }, [currentAccount, optimizationResult]);
+  }, [currentAccount, user?.id, optimizationResult, isOnline]);
 
   useEffect(() => {
-    if (!currentAccount?.id) return;
+    if (!currentAccount?.id || !user || !isOnline) return;
+
+    const subscriptionAccountId = currentAccount.id;
+    const subscriptionScopeKey = getOfflineScopeKey(user.id, subscriptionAccountId);
 
     console.log('[App] Setting up real-time subscription for inspections');
 
@@ -728,7 +889,7 @@ function App() {
           event: '*',
           schema: 'public',
           table: 'inspections',
-          filter: `account_id=eq.${currentAccount.id}`
+          filter: `account_id=eq.${subscriptionAccountId}`
         },
         async (payload) => {
           console.log('[App] Real-time inspection change:', payload);
@@ -743,10 +904,10 @@ function App() {
           const { data: updatedInspections } = await supabase
             .from('inspections')
             .select('*')
-            .eq('account_id', currentAccount.id)
+            .eq('account_id', subscriptionAccountId)
             .order('conducted_at', { ascending: false });
 
-          if (updatedInspections) {
+          if (updatedInspections && selectedScopeRef.current === subscriptionScopeKey) {
             console.log('[App] Updating inspections from real-time:', updatedInspections.length);
             setInspections(updatedInspections);
             setRouteVersion(prev => prev + 1);
@@ -759,11 +920,14 @@ function App() {
       console.log('[App] Cleaning up real-time subscription');
       supabase.removeChannel(channel);
     };
-  }, [currentAccount?.id, isInspectionFormActive, navigationMode]);
+  }, [currentAccount?.id, user?.id, isInspectionFormActive, navigationMode, isOnline]);
 
   // Real-time subscription for facility changes (SPCC plan uploads, status updates, new/deleted)
   useEffect(() => {
-    if (!currentAccount?.id) return;
+    if (!currentAccount?.id || !user || !isOnline) return;
+
+    const subscriptionAccountId = currentAccount.id;
+    const subscriptionScopeKey = getOfflineScopeKey(user.id, subscriptionAccountId);
 
     const facilitiesChannel = supabase
       .channel('facilities-changes')
@@ -773,9 +937,10 @@ function App() {
           event: '*',
           schema: 'public',
           table: 'facilities',
-          filter: `account_id=eq.${currentAccount.id}`,
+          filter: `account_id=eq.${subscriptionAccountId}`,
         },
         (payload) => {
+          if (selectedScopeRef.current !== subscriptionScopeKey) return;
           if (payload.eventType === 'INSERT') {
             console.log('[App] Real-time facility INSERT:', payload.new.id);
             setFacilities(prev => {
@@ -804,7 +969,7 @@ function App() {
     return () => {
       supabase.removeChannel(facilitiesChannel);
     };
-  }, [currentAccount?.id]);
+  }, [currentAccount?.id, user?.id, isOnline]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -824,16 +989,27 @@ function App() {
         // case is now handled by the stale-while-revalidate cache restore
         // at the top of loadData(). Here we just keep data fresh over
         // long sessions without interrupting active field work.
-        if (timeSinceLastLoad > 4 * 60 * 60 * 1000) {
+        if (isOnline && timeSinceLastLoad > 4 * 60 * 60 * 1000) {
           console.log('[App] Tab visible after 4h+ absence, background refresh');
           lastLoadTimeRef.current = now;
-          loadData();
+          loadData({ mode: 'background-revalidate' });
         } else {
           console.log('[App] Tab visible, state preserved (no reload)');
         }
       } else if (document.hidden) {
         console.log('[App] Tab hidden, preserving all state including inspections');
+        persistOfflineAccountSnapshot().catch((snapshotError) => {
+          console.warn('[offline] Final hidden-state checkpoint failed:', snapshotError);
+        });
       }
+    };
+
+    const handlePageHide = () => {
+      // Best effort only. The regular debounced snapshot above is the primary
+      // protection because mobile Safari may terminate without an unload event.
+      persistOfflineAccountSnapshot().catch((snapshotError) => {
+        console.warn('[offline] Final pagehide checkpoint failed:', snapshotError);
+      });
     };
 
     const handlePageShow = (event: PageTransitionEvent) => {
@@ -859,37 +1035,48 @@ function App() {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('pageshow', handlePageShow);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('pageshow', handlePageShow as EventListener);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [currentAccount?.id, currentView]);
+  }, [currentAccount?.id, currentView, isOnline, persistOfflineAccountSnapshot]);
 
   useEffect(() => {
     localStorage.setItem('currentView', currentView);
 
     // Set loading state and load data when switching to route-planning if we don't have results yet
-    if (currentView === 'route-planning' && !optimizationResult && facilities.length > 0) {
+    if (
+      isOnline &&
+      currentView === 'route-planning' &&
+      !optimizationResult &&
+      facilities.length > 0 &&
+      !isLoadingDataRef.current
+    ) {
       // Check if we actually have a saved route before showing loading
       const checkForSavedRoute = async () => {
-        if (currentAccount) {
+        if (currentAccount && user) {
+          const accountId = currentAccount.id;
+          const scopeKey = getOfflineScopeKey(user.id, accountId);
           const { data: lastRoutePlan } = await supabase
             .from('route_plans')
             .select('id')
-            .eq('account_id', currentAccount.id)
+            .eq('account_id', accountId)
             .eq('is_last_viewed', true)
             .maybeSingle();
 
+          if (selectedScopeRef.current !== scopeKey) return;
           // If there's a route to load, show loading and trigger loadData
           if (lastRoutePlan) {
             setIsLoadingRoutes(true);
-            loadData();
+            loadData({ mode: 'background-revalidate' });
           }
         }
       };
@@ -897,10 +1084,10 @@ function App() {
     }
 
     // Check if coordinates were updated and reload if switching to route-planning
-    if (currentView === 'route-planning') {
+    if (isOnline && currentView === 'route-planning') {
       const lastUpdate = localStorage.getItem('facilities_coords_updated');
       if (lastUpdate) {
-        loadData();
+        loadData({ mode: 'background-revalidate' });
         localStorage.removeItem('facilities_coords_updated');
       }
     }
@@ -913,7 +1100,7 @@ function App() {
         setTriggerMapLocation(prev => prev + 1);
       }, 500);
     }
-  }, [currentView, optimizationResult, currentAccount, isFullScreenMap, mapTargetCoords, facilities.length]);
+  }, [currentView, optimizationResult, currentAccount, user?.id, isFullScreenMap, mapTargetCoords, facilities.length, isOnline]);
 
   // Clear facility viewing state when navigation mode is activated
   useEffect(() => {
@@ -942,17 +1129,21 @@ function App() {
 
   // Load user's team assignment and account team count
   const loadTeamSettings = async () => {
-    if (!currentAccount || !user) return;
+    if (!currentAccount || !user || !isOnline) return;
+
+    const accountId = currentAccount.id;
+    const authUserId = user.authUserId;
+    const scopeKey = getOfflineScopeKey(user.id, accountId);
 
     try {
       // Load team count from settings
       const { data: settings } = await supabase
         .from('user_settings')
         .select('team_count')
-        .eq('account_id', currentAccount.id)
+        .eq('account_id', accountId)
         .maybeSingle();
 
-      if (settings) {
+      if (settings && selectedScopeRef.current === scopeKey) {
         setTeamCount(settings.team_count || 1);
       }
 
@@ -960,18 +1151,20 @@ function App() {
       const { data: userProfile } = await supabase
         .from('users')
         .select('id')
-        .eq('auth_user_id', user.authUserId)
+        .eq('auth_user_id', authUserId)
         .maybeSingle();
+
+      if (selectedScopeRef.current !== scopeKey) return;
 
       if (userProfile) {
         const { data: accountUser } = await supabase
           .from('account_users')
           .select('team_assignment')
           .eq('user_id', userProfile.id)
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .maybeSingle();
 
-        if (accountUser) {
+        if (accountUser && selectedScopeRef.current === scopeKey) {
           setUserTeamAssignment(accountUser.team_assignment);
         }
       }
@@ -983,107 +1176,173 @@ function App() {
   // Load team settings when account changes
   useEffect(() => {
     loadTeamSettings();
-  }, [currentAccount, user]);
+  }, [currentAccount, user, isOnline]);
 
-  const loadData = async () => {
-    if (!currentAccount) {
-      console.log('[loadData] Skipped: no currentAccount');
+  const loadData = async (options: DataLoadOptions = {}) => {
+    const accountId = options.accountId ?? currentAccount?.id;
+    const userId = options.userId ?? user?.id;
+    if (!accountId || !userId) {
+      console.log('[loadData] Skipped: no current account/user scope');
       return;
     }
 
-    // Prevent multiple simultaneous loads
-    if (isLoadingDataRef.current) {
-      console.log('[loadData] Already loading, skipping duplicate call');
+    const scopeKey = getOfflineScopeKey(userId, accountId);
+    // An async callback from an effect belonging to the prior account can run
+    // after selection changes. Reject it before it can supersede the new load.
+    if (selectedScopeRef.current !== scopeKey) {
+      console.log('[loadData] Skipped stale account request:', accountId);
       return;
     }
 
+    const loadMode: DataLoadMode = options.mode
+      ?? (stateOwnerScopeRef.current === scopeKey
+        ? 'background-revalidate'
+        : 'cold-hydrate');
+    const activeLoad = activeDataLoadRef.current;
+    if (activeLoad?.scopeKey === scopeKey) {
+      console.log('[loadData] Already loading this account, skipping duplicate call');
+      return;
+    }
+
+    const generation = ++loadGenerationRef.current;
+    activeDataLoadRef.current = { generation, scopeKey };
     isLoadingDataRef.current = true;
+
+    const requestIsCurrent = () => (
+      activeDataLoadRef.current?.generation === generation
+      && loadGenerationRef.current === generation
+      && selectedScopeRef.current === scopeKey
+    );
+    const finishRequest = () => {
+      if (activeDataLoadRef.current?.generation !== generation) return;
+      activeDataLoadRef.current = null;
+      isLoadingDataRef.current = false;
+      // The "Set Your Home Base" prompt is gated on this so it does not flash
+      // during either the local-hydration or network-revalidation window.
+      setHasLoadedFromNetwork(true);
+    };
+
     const loadStartTime = Date.now();
-    console.log('[loadData] Starting data load for account:', currentAccount.id);
+    console.log(`[loadData] Starting ${loadMode} for account:`, accountId);
 
-    // ── Freshness-gated cache-first display ──────────────────────────────────
-    // Show IndexedDB cache instantly ONLY if it was written within the last
-    // CACHE_FRESHNESS_MS. Otherwise wait for the fresh Supabase fetch below
-    // so the user doesn't see stale facility lists / stale SPCC statuses on
-    // sign-in (the previous unconditional cache-first display caused a 5s
-    // flash from 158 facilities + "Upcoming" to 150 facilities + "Inspected").
-    //
-    // The freshness window covers the iOS Capacitor page-eviction case (a
-    // resume happens seconds after the last fetch, so the cache is fresh) but
-    // not the sign-in-after-a-while case (cache is hours/days old). Timestamp
-    // is set after every successful fresh fetch below.
-    const CACHE_FRESHNESS_MS = 60_000;
-    const cacheTsKey = `cache-ts-${currentAccount.id}`;
-    const cacheTsRaw = localStorage.getItem(cacheTsKey);
-    const cacheTs = cacheTsRaw ? parseInt(cacheTsRaw, 10) : 0;
-    const cacheAgeMs = Date.now() - cacheTs;
-    const cacheIsFresh = cacheTs > 0 && cacheAgeMs < CACHE_FRESHNESS_MS;
+    // ── Account snapshot recovery ─────────────────────────────────────────────
+    // A route/survey view is an active field session. Restore its last atomic
+    // IndexedDB checkpoint regardless of age, then revalidate only when online.
+    // This replaces the old 60-second gate that failed after a 15-minute lock.
+    let hydratedLocally = false;
+    let preserveActiveRoute = loadMode === 'background-revalidate'
+      && stateOwnerScopeRef.current === scopeKey
+      && !!optimizationResult;
 
-    if (facilities.length === 0) {
-      if (cacheIsFresh) {
-        try {
-          const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
-            getOfflineFacilities(currentAccount.id).catch(() => []),
-            getOfflineHomeBases(user?.id ?? '').catch(() => []),
-            getOfflineRoutePlans(user?.id ?? '').catch(() => []),
-          ]);
+    const applySnapshot = (snapshot: OfflineAccountSnapshot) => {
+      stateOwnerScopeRef.current = scopeKey;
+      setFacilities(snapshot.facilities);
+      setHomeBases(snapshot.homeBases);
+      setInspections(snapshot.inspections);
+      setTeamCount(snapshot.teamCount || snapshot.homeBases.length || 1);
+      setUserTeamAssignment(snapshot.userTeamAssignment);
 
-          if (cachedFacilities.length > 0) {
-            console.log('[loadData] Fresh cache (age', cacheAgeMs, 'ms) — showing', cachedFacilities.length, 'facilities instantly');
-            setFacilities(cachedFacilities);
+      const snapshotRoute = snapshot.routePlan;
+      if (snapshotRoute?.plan_data) {
+        setOptimizationResult(snapshotRoute.plan_data);
+        setCurrentRouteId(snapshotRoute.id);
+        setCurrentRouteName(snapshotRoute.name ?? null);
+        setRouteVersion(prev => prev + 1);
 
-            if (cachedHomeBases.length > 0) {
-              setHomeBases(cachedHomeBases);
-              setHomeBase(cachedHomeBases[0]);
-              setTeamCount(cachedHomeBases.length);
-            }
-
-            const lastViewed = cachedRoutePlans.find((p: any) => p.is_last_viewed);
-            if (lastViewed && !optimizationResult) {
-              setOptimizationResult(lastViewed.plan_data);
-              setCurrentRouteId(lastViewed.id);
-              setCurrentRouteName(lastViewed.name ?? null);
-              setRouteVersion(prev => prev + 1);
-
-              const savedIds = lastViewed.plan_data?._routeFacilityIds;
-              if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
-                setRouteFacilityIds(savedIds);
-                setShowOnlyRouteFacilities(true);
-              } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
-                const routeFacIds: string[] = [];
-                lastViewed.plan_data.routes.forEach((route: any) => {
-                  route.facilities?.forEach((rf: any) => {
-                    const match = cachedFacilities.find((f: any) => f.name === rf.name);
-                    if (match) routeFacIds.push(match.id);
-                  });
-                });
-                if (routeFacIds.length > 0) {
-                  setRouteFacilityIds(routeFacIds);
-                  setShowOnlyRouteFacilities(true);
-                }
-              }
-            }
-
-            setIsLoadingFacilities(false);
-            setIsLoadingRoutes(false);
-          } else {
-            setIsLoadingFacilities(true);
-          }
-        } catch (cacheErr) {
-          console.warn('[loadData] Cache restore failed, proceeding with network load:', cacheErr);
-          setIsLoadingFacilities(true);
-        }
+        const savedIds = snapshot.routeFacilityIds
+          ?? snapshotRoute.plan_data?._routeFacilityIds
+          ?? null;
+        setRouteFacilityIds(savedIds);
+        setShowOnlyRouteFacilities(snapshot.showOnlyRouteFacilities);
       } else {
-        console.log('[loadData] Cache stale or missing (age', cacheAgeMs, 'ms) — waiting for fresh fetch');
-        setIsLoadingFacilities(true);
+        setOptimizationResult(null);
+        setCurrentRouteId(null);
+        setCurrentRouteName(null);
+        setRouteFacilityIds(null);
+        setShowOnlyRouteFacilities(false);
       }
-    } else {
-      console.log('[loadData] Background refresh (facilities already in memory)');
+
+      const routeHomeBaseId = snapshotRoute?.home_base_data?.id;
+      const restoredHomeBase = (
+        routeHomeBaseId
+          ? snapshot.homeBases.find((base) => base.id === routeHomeBaseId)
+          : null
+      ) ?? snapshot.homeBases[0];
+      setHomeBase(restoredHomeBase ?? null);
+      setLastUsedSettings(snapshot.settings ?? snapshotRoute?.settings ?? null);
+      setIsLoadingFacilities(false);
+      setIsLoadingRoutes(false);
+    };
+
+    const shouldHydrateSnapshot = loadMode === 'cold-hydrate'
+      && (!isOnline || currentView === 'route-planning' || currentView === 'survey');
+
+    if (shouldHydrateSnapshot) {
+      try {
+        const snapshot = await getAccountSnapshot(accountId, userId);
+        if (!requestIsCurrent()) {
+          finishRequest();
+          return;
+        }
+        if (snapshot) {
+          console.log('[loadData] Restoring account snapshot from', new Date(snapshot.savedAt).toISOString());
+          applySnapshot(snapshot);
+          hydratedLocally = true;
+          preserveActiveRoute = !!snapshot.routePlan?.plan_data;
+        }
+      } catch (snapshotError) {
+        console.warn('[loadData] Account snapshot restore failed:', snapshotError);
+      }
+    }
+
+    if (!requestIsCurrent()) {
+      finishRequest();
+      return;
+    }
+
+    // Backward-compatible first-run fallback for devices that still only have
+    // the v1 normalized facility cache. New route sessions use the atomic v2
+    // snapshot because legacy home-base/route user ids were not consistently
+    // keyed and cannot be trusted for account recovery.
+    if (loadMode === 'cold-hydrate' && !hydratedLocally && !isOnline) {
+      try {
+        const cachedFacilities = await getOfflineFacilities(accountId);
+        if (!requestIsCurrent()) {
+          finishRequest();
+          return;
+        }
+        if (cachedFacilities.length > 0) {
+          stateOwnerScopeRef.current = scopeKey;
+          setFacilities(cachedFacilities);
+          hydratedLocally = true;
+        }
+      } catch (cacheError) {
+        console.warn('[loadData] Legacy facility cache restore failed:', cacheError);
+      }
+      if (!requestIsCurrent()) {
+        finishRequest();
+        return;
+      }
+      if (requestIsCurrent()) {
+        setIsLoadingFacilities(false);
+        setIsLoadingRoutes(false);
+      }
+    } else if (loadMode === 'cold-hydrate' && !hydratedLocally) {
+      // Online Facilities-tab loads retain the prior no-stale-flash behavior.
+      setIsLoadingFacilities(true);
+    } else if (loadMode === 'background-revalidate') {
+      console.log('[loadData] Background refresh; preserving the active workspace');
+    }
+
+    if (!isOnline) {
+      console.log('[loadData] Offline cold start restored locally; skipping Supabase refresh');
+      finishRequest();
+      return;
     }
     // ─────────────────────────────────────────────────────────────────────────
 
     // Show loading state if we're on route-planning view and don't have results yet
-    if (currentView === 'route-planning' && !optimizationResult && homeBase) {
+    if (!preserveActiveRoute && currentView === 'route-planning' && !optimizationResult && homeBase) {
       setIsLoadingRoutes(true);
     }
 
@@ -1099,30 +1358,41 @@ function App() {
         supabase
           .from('user_settings')
           .select('*')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .maybeSingle(),
         supabase
           .from('facilities')
           .select('*')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .order('created_at', { ascending: true }),
         supabase
           .from('home_base')
           .select('*')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .order('team_number', { ascending: true }),
         supabase
           .from('inspections')
           .select('*')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .order('conducted_at', { ascending: false }),
         supabase
           .from('route_plans')
           .select('*')
-          .eq('account_id', currentAccount.id)
+          .eq('account_id', accountId)
           .eq('is_last_viewed', true)
           .maybeSingle()
       ]);
+
+      if (!requestIsCurrent()) return;
+
+      const loadError = settingsResult.error
+        || facilitiesResult.error
+        || homeBaseResult.error
+        || inspectionsResult.error
+        || routePlanResult.error;
+      if (loadError) {
+        throw loadError;
+      }
 
       const settingsData = settingsResult.data;
       const facilitiesData = facilitiesResult.data;
@@ -1130,20 +1400,23 @@ function App() {
       const inspectionsData = inspectionsResult.data;
       const lastRoutePlan = routePlanResult.data;
 
-      // Mark cache as fresh (read by the freshness-gated cache-first path on next mount)
-      try {
-        localStorage.setItem(`cache-ts-${currentAccount.id}`, Date.now().toString());
-      } catch { /* ignore quota errors */ }
-
       const autoRefresh = settingsData?.auto_refresh_route ?? false;
       const currentSettings = settingsData;
 
+      // From this point every setter is owned by the validated request. Mark
+      // even an empty successful response as hydrated so [] can be persisted
+      // as authoritative state instead of being mistaken for "not loaded".
+      stateOwnerScopeRef.current = scopeKey;
+
+      cacheOfflineFacilitiesForAccount(accountId, facilitiesData ?? []).catch((cacheError) => {
+        console.warn('[offline] Unable to replace account facility cache:', cacheError);
+      });
+
       if (facilitiesData && facilitiesData.length > 0) {
         setFacilities(facilitiesData);
-        // Cache to IndexedDB for offline use
-        cacheOfflineFacilities(facilitiesData).catch(() => {});
-      } else {
-        // Set empty array if no facilities
+      } else if (!preserveActiveRoute) {
+        // A successful, empty online response is authoritative on a normal
+        // load. Never let it erase an active route restored for field use.
         setFacilities([]);
       }
 
@@ -1176,7 +1449,11 @@ function App() {
         facilityCount: facilitiesData?.length || 0
       });
 
-      if (lastRoutePlan && facilitiesData && facilitiesData.length > 0) {
+      if (lastRoutePlan) {
+        cacheOfflineRoutePlans([lastRoutePlan]).catch(() => {});
+      }
+
+      if (lastRoutePlan && facilitiesData && facilitiesData.length > 0 && !preserveActiveRoute) {
         console.log('[loadData] Loading route plan:', lastRoutePlan.name);
         // Load the route plan data
         let loadedResult = lastRoutePlan.plan_data;
@@ -1270,9 +1547,6 @@ function App() {
           }
         }
 
-        // Cache route plan to IndexedDB for offline use
-        cacheOfflineRoutePlans([lastRoutePlan]).catch(() => {});
-
         // Always use current settings from database, not saved settings from route plan
         if (currentSettings) {
           setLastUsedSettings(currentSettings);
@@ -1292,6 +1566,9 @@ function App() {
         // Clear loading state since we have a route
         setIsLoadingRoutes(false);
       } else if (currentSettings) {
+        if (preserveActiveRoute && lastRoutePlan) {
+          console.log('[loadData] Kept the active local route during background revalidation');
+        }
         // If no route plan, still set the current settings
         setLastUsedSettings(currentSettings);
         // Only clear loading state if we're not expecting a route
@@ -1320,7 +1597,12 @@ function App() {
         if (remainingWait > 0) {
           console.log(`[loadData] No facilities found. Waiting ${remainingWait}ms before showing empty state.`);
           setTimeout(() => {
-            setIsLoadingFacilities(false);
+            if (
+              selectedScopeRef.current === scopeKey
+              && loadGenerationRef.current === generation
+            ) {
+              setIsLoadingFacilities(false);
+            }
           }, remainingWait);
         } else {
           setIsLoadingFacilities(false);
@@ -1330,47 +1612,27 @@ function App() {
     } catch (err) {
       console.error('Error loading data:', err);
 
-      // Fallback to IndexedDB when offline or on error
-      if (!navigator.onLine && currentAccount && user) {
-        console.log('[loadData] Offline - loading from IndexedDB cache');
-        try {
-          const [cachedFacilities, cachedHomeBases, cachedRoutePlans] = await Promise.all([
-            getOfflineFacilities(currentAccount.id),
-            getOfflineHomeBases(user.id),
-            getOfflineRoutePlans(user.id),
-          ]);
-          if (cachedFacilities.length > 0) {
-            setFacilities(cachedFacilities);
-          }
-          if (cachedHomeBases.length > 0) {
-            setHomeBases(cachedHomeBases);
-            setHomeBase(cachedHomeBases[0]);
-            setTeamCount(cachedHomeBases.length);
-          }
-          const lastViewed = cachedRoutePlans.find(p => p.is_last_viewed);
-          if (lastViewed) {
-            setOptimizationResult(lastViewed.plan_data);
-            setCurrentRouteId(lastViewed.id);
-            setCurrentRouteName(lastViewed.name ?? null);
-            setRouteVersion(prev => prev + 1);
+      if (!requestIsCurrent()) return;
 
-            // Restore custom facility selection from cached route
-            const savedIds = lastViewed.plan_data?._routeFacilityIds;
-            if (savedIds && Array.isArray(savedIds) && savedIds.length > 0) {
-              setRouteFacilityIds(savedIds);
-              setShowOnlyRouteFacilities(true);
-            } else if (lastViewed.plan_data?.routes && cachedFacilities.length > 0) {
-              const routeFacIds: string[] = [];
-              lastViewed.plan_data.routes.forEach((route: any) => {
-                route.facilities?.forEach((rf: any) => {
-                  const match = cachedFacilities.find((f: any) => f.name === rf.name);
-                  if (match) routeFacIds.push(match.id);
-                });
-              });
-              if (routeFacIds.length > 0) {
-                setRouteFacilityIds(routeFacIds);
-                setShowOnlyRouteFacilities(true);
-              }
+      // Supabase/PostgREST network failures normally resolve as { data, error }
+      // instead of rejecting. Those errors are promoted above, and every
+      // cold-start failure can restore local state regardless of navigator.onLine
+      // (which is unreliable on weak/captive connections). A background failure
+      // deliberately leaves the newer in-memory workspace untouched.
+      if (loadMode === 'cold-hydrate' && !hydratedLocally) {
+        try {
+          const snapshot = await getAccountSnapshot(accountId, userId);
+          if (!requestIsCurrent()) return;
+          if (snapshot) {
+            applySnapshot(snapshot);
+            hydratedLocally = true;
+          } else {
+            const cachedFacilities = await getOfflineFacilities(accountId);
+            if (!requestIsCurrent()) return;
+            if (cachedFacilities.length > 0) {
+              stateOwnerScopeRef.current = scopeKey;
+              setFacilities(cachedFacilities);
+              hydratedLocally = true;
             }
           }
         } catch (cacheErr) {
@@ -1379,29 +1641,71 @@ function App() {
       }
 
       // On error, clear loading state
-      setIsLoadingRoutes(false);
-      setIsLoadingFacilities(false);
+      if (requestIsCurrent()) {
+        setIsLoadingRoutes(false);
+        setIsLoadingFacilities(false);
+      }
     } finally {
-      // Always clear the loading flag
-      isLoadingDataRef.current = false;
-      // Mark that the first Supabase fetch has completed (success or failure).
-      // The "Set Your Home Base" prompt is gated on this so it doesn't flash
-      // during the cache-restore window.
-      setHasLoadedFromNetwork(true);
+      finishRequest();
     }
   };
+
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    const reconnected = isOnline && !wasOnlineRef.current;
+    wasOnlineRef.current = isOnline;
+
+    if (reconnected && currentAccount) {
+      console.log('[loadData] Connectivity restored; revalidating the local workspace');
+      lastLoadTimeRef.current = Date.now();
+      loadData({ mode: 'background-revalidate' });
+    }
+    // loadData intentionally remains outside the dependency list. It is scoped
+    // to the current render and this effect should run only on connectivity or
+    // account changes, not on every state update during a refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, currentAccount?.id, user?.id]);
 
 
 
   const handleClearFacilities = async () => {
-    if (!currentAccount || !confirm('Are you sure you want to clear all facilities?')) {
+    if (!currentAccount || !user || !confirm('Are you sure you want to clear all facilities?')) {
       return;
     }
 
+    const accountId = currentAccount.id;
+    const userId = user.id;
+    const scopeKey = getOfflineScopeKey(userId, accountId);
+
     try {
-      await supabase.from('facilities').delete().eq('account_id', currentAccount.id);
+      const { error: clearError } = await supabase
+        .from('facilities')
+        .delete()
+        .eq('account_id', accountId);
+      if (clearError) throw clearError;
+
+      if (selectedScopeRef.current !== scopeKey) return;
+
+      // Invalidate an overlapping refresh before making the empty result
+      // durable. Otherwise its late response could repopulate the cleared UI.
+      loadGenerationRef.current += 1;
+      activeDataLoadRef.current = null;
+      isLoadingDataRef.current = false;
+      stateOwnerScopeRef.current = null;
+
+      await Promise.all([
+        cacheOfflineFacilitiesForAccount(accountId, []),
+        deleteAccountSnapshot(accountId, userId),
+      ]);
+
+      if (selectedScopeRef.current !== scopeKey) return;
+      stateOwnerScopeRef.current = scopeKey;
       setFacilities([]);
       setOptimizationResult(null);
+      setCurrentRouteId(null);
+      setCurrentRouteName(null);
+      setRouteFacilityIds(null);
+      setShowOnlyRouteFacilities(false);
       localStorage.setItem('currentView', 'facilities');
       setCurrentView('facilities');
     } catch (err) {
@@ -2999,7 +3303,7 @@ function App() {
 
         setOptimizationResult(newResult);
         setRouteVersion(prev => prev + 1);
-        await loadData();
+        await loadData({ mode: 'background-revalidate' });
         return;
       }
 
@@ -3079,7 +3383,7 @@ function App() {
       }
 
       // Reload data to sync with database
-      await loadData();
+      await loadData({ mode: 'background-revalidate' });
 
       console.log('Facility removed and route re-optimized:', {
         facilityIndex,
@@ -4780,7 +5084,7 @@ function App() {
           onTeamCountChange={setTeamCount}
           onSaved={() => {
             homeBaseJustSavedRef.current = true;
-            loadData();
+            loadData({ mode: 'background-revalidate' });
           }}
           contextMessage={homeBaseModalContext || undefined}
           onClose={() => {

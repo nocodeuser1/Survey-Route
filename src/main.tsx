@@ -3,6 +3,7 @@ import AppRouter from './AppRouter.tsx';
 import { registerServiceWorker } from './lib/registerSW';
 import { initAutoSync } from './lib/syncQueue';
 import ContextualHelpProvider from './components/ContextualHelpProvider';
+import 'leaflet/dist/leaflet.css';
 import './index.css';
 
 // Which build is this browser actually running? Logged first thing and
@@ -11,7 +12,7 @@ import './index.css';
 console.log(`[build] survey-route @ ${__BUILD_COMMIT__}`);
 (window as unknown as { __BUILD_COMMIT__: string }).__BUILD_COMMIT__ = __BUILD_COMMIT__;
 
-// Register service worker for map tile caching
+// Register the offline app shell, static assets, and map tile caches.
 registerServiceWorker();
 
 // Start automatic sync queue processing.

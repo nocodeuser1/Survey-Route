@@ -248,7 +248,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
 
       if (!document.hidden) {
         // Only reload if it's been more than 30 minutes (1800000ms)
-        if (timeSinceLastLoad > 1800000) {
+        if (timeSinceLastLoad > 1800000 && navigator.onLine !== false) {
           console.log('[SurveyMode] Tab visible after 30+ min absence, reloading data');
           lastInspectionLoadRef.current = now;
           loadInspections();
@@ -335,6 +335,21 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facilitiesIdKey, accountId]);
 
+  useEffect(() => {
+    const handleOnline = () => {
+      lastInspectionLoadRef.current = Date.now();
+      void loadUserSettings();
+      void loadInspections();
+      void loadPlans();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+    // Rebind when the active account or route facility set changes so the
+    // reconnect refresh cannot apply data to a previous field workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, facilitiesIdKey, userId]);
+
   function checkForInProgressInspection() {
     try {
       // Check localStorage for any inspection drafts
@@ -391,6 +406,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   async function loadUserSettings() {
+    if (navigator.onLine === false) return;
     try {
       const { data, error } = await supabase
         .from('user_settings')
@@ -407,6 +423,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   async function loadInspections() {
+    if (navigator.onLine === false) return;
     try {
       const { data, error } = await supabase
         .from('inspections')
@@ -426,6 +443,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   // when surveyType === 'spcc_plan' or 'all'. Keep it cheap by only
   // selecting the columns we actually render in the dropdown.
   async function loadPlans() {
+    if (navigator.onLine === false) return;
     try {
       const facilityIds = facilities.map(f => f.id);
       if (facilityIds.length === 0) {

@@ -1,14 +1,14 @@
 /// <reference lib="webworker" />
 
+const BUILD_VERSION = '__SURVEY_ROUTE_BUILD__';
+const SAFE_BUILD_VERSION = BUILD_VERSION.replace(/[^A-Za-z0-9_-]/g, '_');
 const TILE_CACHE = 'map-tiles-v1';
-const STATIC_CACHE = 'static-assets-v2';
-const APP_SHELL_CACHE = 'app-shell-v2';
+const STATIC_CACHE = 'static-assets-' + SAFE_BUILD_VERSION;
+const APP_SHELL_CACHE = 'app-shell-' + SAFE_BUILD_VERSION;
 const TILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MAX_TILE_CACHE_ENTRIES = 2000;
 
-// Minimal app shell — index.html is the SPA entrypoint. Hashed JS/CSS get
-// cached opportunistically on first fetch (see handleStaticRequest below).
-const APP_SHELL_URLS = ['/', '/index.html', '/favicon.svg'];
+const APP_SHELL_URLS = ['/favicon.svg'];
 
 // Tile URL patterns to cache
 const TILE_PATTERNS = [
@@ -27,22 +27,70 @@ function isTileRequest(url) {
   });
 }
 
-// Install: precache the app shell so iOS can re-render the SPA even when the
-// WebKit process was purged after backgrounding and the network is offline.
+// Install an atomic app shell. Caching index.html by itself is not enough: the
+// first page load happens before a new worker controls the tab, so its hashed
+// JS/CSS may never pass through this worker. Parse the built HTML and cache the
+// exact Vite assets it references before activating.
 self.addEventListener('install', function (event) {
-  event.waitUntil(
-    caches
-      .open(APP_SHELL_CACHE)
-      .then(function (cache) {
-        return cache.addAll(APP_SHELL_URLS).catch(function () {
-          // Non-fatal: missing assets shouldn't block SW install.
-        });
-      })
-      .then(function () {
-        return self.skipWaiting();
-      })
-  );
+  // Do not call skipWaiting(). An older open page may still need one of its
+  // content-hashed lazy chunks. Let the new worker activate only after those
+  // clients close so activation can safely remove the prior build caches.
+  event.waitUntil(precacheAppShell());
 });
+
+async function precacheAppShell() {
+  var indexResponse = await fetch('/index.html', { cache: 'no-store' });
+  if (!indexResponse || !indexResponse.ok) {
+    throw new Error('Unable to fetch the app shell');
+  }
+
+  var html = await indexResponse.clone().text();
+  var assetUrls = [];
+  var attributePattern = /(?:src|href)=["']([^"']+)["']/gi;
+  var match;
+
+  while ((match = attributePattern.exec(html))) {
+    try {
+      var assetUrl = new URL(match[1], self.location.origin);
+      if (
+        assetUrl.origin === self.location.origin &&
+        isCacheableStatic(assetUrl.pathname)
+      ) {
+        assetUrls.push(assetUrl.pathname + assetUrl.search);
+      }
+    } catch (_e) {
+      // Ignore malformed or non-URL attributes.
+    }
+  }
+
+  if (!assetUrls.some(function (url) { return /\.js(?:\?|$)/i.test(url); })) {
+    throw new Error('Built JavaScript asset was not found in index.html');
+  }
+
+  var staticCache = await caches.open(STATIC_CACHE);
+  var shellAssetUrls = Array.from(new Set(APP_SHELL_URLS.concat(assetUrls)));
+  await Promise.all(
+    shellAssetUrls.map(async function (assetUrl) {
+      // Hashed build assets are immutable and may already be in Safari's HTTP
+      // cache from the page that registered this worker. Reuse that copy when
+      // available instead of downloading the multi-megabyte bundle twice.
+      var assetRequest = new Request(assetUrl);
+      var assetResponse = await fetch(assetRequest);
+      if (!isValidStaticResponse(assetRequest, assetResponse)) {
+        throw new Error('Invalid app-shell asset response for ' + assetUrl);
+      }
+      await staticCache.put(assetRequest, assetResponse);
+    })
+  );
+
+  // Publish the new HTML only after every referenced build asset exists. If a
+  // deploy is mid-flight or the connection fails, the prior shell stays intact.
+  var shellCache = await caches.open(APP_SHELL_CACHE);
+  await Promise.all([
+    shellCache.put('/', indexResponse.clone()),
+    shellCache.put('/index.html', indexResponse.clone()),
+  ]);
+}
 
 // Activate: clean up old caches
 self.addEventListener('activate', function (event) {
@@ -72,10 +120,10 @@ self.addEventListener('activate', function (event) {
 
 // Fetch routing:
 //  - Tiles: cache-first with 7-day staleness window.
-//  - SPA navigations (Accept: text/html): network-first, fall back to cached
-//    index.html so a backgrounded → offline reopen doesn't blank the app.
-//  - Same-origin static assets (JS/CSS/images/wasm/pdf): stale-while-revalidate
-//    so cached bundles render instantly while a newer copy refreshes in bg.
+//  - SPA navigations (Accept: text/html): cached shell first. A navigation must
+//    never wait for the network when iOS cold-restarts a locked Safari tab.
+//  - Content-hashed Vite assets: cache-first. Other same-origin static assets
+//    use stale-while-revalidate after rejecting Netlify HTML fallbacks.
 //  - Everything else (Supabase, Google APIs, ORS): pass through untouched so
 //    we never serve stale auth or route data.
 self.addEventListener('fetch', function (event) {
@@ -95,7 +143,7 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // SPA navigations — always try network first, fall back to cached shell.
+  // SPA navigations — restore immediately from the atomic cached shell.
   var isNavigation =
     request.mode === 'navigate' ||
     (request.headers.get('accept') || '').indexOf('text/html') !== -1;
@@ -106,7 +154,9 @@ self.addEventListener('fetch', function (event) {
 
   // Same-origin static assets — stale-while-revalidate.
   if (url.origin === self.location.origin && isCacheableStatic(url.pathname)) {
-    event.respondWith(handleStaticRequest(request));
+    event.respondWith(
+      handleStaticRequest(request, url.pathname.indexOf('/assets/') === 0)
+    );
     return;
   }
 
@@ -119,20 +169,51 @@ function isCacheableStatic(pathname) {
   );
 }
 
+function isValidStaticResponse(request, response) {
+  if (!response || !response.ok || response.type !== 'basic') return false;
+
+  // Netlify's SPA fallback can return index.html with status 200 for a missing
+  // hashed asset. Never cache that response under a JS/CSS/image/wasm URL.
+  var contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (contentType.indexOf('text/html') !== -1) return false;
+
+  try {
+    var requestUrl = new URL(request.url);
+    var responseUrl = response.url ? new URL(response.url) : null;
+    if (
+      responseUrl &&
+      responseUrl.origin === requestUrl.origin &&
+      responseUrl.pathname !== requestUrl.pathname
+    ) {
+      return false;
+    }
+  } catch (_e) {
+    return false;
+  }
+
+  return true;
+}
+
 async function handleNavigationRequest(request) {
+  var cache = await caches.open(APP_SHELL_CACHE);
+  var cached = await cache.match('/index.html');
+  if (!cached) cached = await cache.match('/');
+  if (cached) {
+    // A locked-phone resume must not redownload the app bundle. The stamped
+    // service-worker registration performs deploy discovery after the cached
+    // app is already usable.
+    return cached;
+  }
+
+  // First-ever visit before installation completed: network is the only
+  // source available. A successful response seeds the navigation fallback.
   try {
     var response = await fetch(request);
     if (response && response.ok) {
-      var cache = await caches.open(APP_SHELL_CACHE);
       cache.put('/index.html', response.clone()).catch(function () {});
     }
     return response;
   } catch (_e) {
-    var cache2 = await caches.open(APP_SHELL_CACHE);
-    var cached = await cache2.match('/index.html');
-    if (cached) return cached;
-    var fallback = await cache2.match('/');
-    if (fallback) return fallback;
     return new Response(
       '<!doctype html><meta charset="utf-8"><title>Offline</title><body style="font-family:system-ui;padding:24px"><h1>Offline</h1><p>Survey Route is offline and the cached app shell is unavailable. Reconnect to load.</p></body>',
       { status: 503, headers: { 'Content-Type': 'text/html' } }
@@ -140,16 +221,21 @@ async function handleNavigationRequest(request) {
   }
 }
 
-async function handleStaticRequest(request) {
+async function handleStaticRequest(request, immutableBuildAsset) {
   var cache = await caches.open(STATIC_CACHE);
   var cached = await cache.match(request);
 
+  // Vite filenames are content-hashed. If this exact URL is cached, a network
+  // revalidation cannot produce a newer version and only wastes connectivity.
+  if (cached && immutableBuildAsset) return cached;
+
   var networkFetch = fetch(request)
     .then(function (response) {
-      if (response && response.ok && response.type === 'basic') {
+      if (isValidStaticResponse(request, response)) {
         cache.put(request, response.clone()).catch(function () {});
+        return response;
       }
-      return response;
+      return null;
     })
     .catch(function () {
       return null;

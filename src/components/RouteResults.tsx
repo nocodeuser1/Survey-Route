@@ -622,6 +622,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   }, [facilities]);
 
   const loadRouteVisitEvents = async () => {
+    if (navigator.onLine === false) return;
     const facilityIds = facilities.map(f => f.id);
     if (facilityIds.length === 0) {
       setRouteVisitEvents([]);
@@ -949,6 +950,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   };
 
   const loadInspections = async () => {
+    if (navigator.onLine === false) return;
     try {
       const facilityIds = facilities.map(f => f.id);
       const { data, error } = await supabase

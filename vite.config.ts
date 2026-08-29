@@ -1,5 +1,31 @@
-import { defineConfig } from 'vite';
+import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+
+const buildCommit = (process.env.COMMIT_REF || 'local-dev').slice(0, 7);
+
+function stampServiceWorker(): Plugin {
+  return {
+    name: 'stamp-service-worker',
+    apply: 'build',
+    async closeBundle() {
+      const workerPath = resolve(process.cwd(), 'dist/sw.js');
+      const workerSource = await readFile(workerPath, 'utf8');
+      const buildToken = '__SURVEY_ROUTE_BUILD__';
+
+      if (!workerSource.includes(buildToken)) {
+        throw new Error('Service worker build token is missing');
+      }
+
+      await writeFile(
+        workerPath,
+        workerSource.replaceAll(buildToken, buildCommit),
+        'utf8'
+      );
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -7,11 +33,9 @@ export default defineConfig({
   // into the bundle and logged at startup so "which code is this browser
   // actually running?" is a console check, not a forensic exercise.
   define: {
-    __BUILD_COMMIT__: JSON.stringify(
-      (process.env.COMMIT_REF || 'local-dev').slice(0, 7)
-    ),
+    __BUILD_COMMIT__: JSON.stringify(buildCommit),
   },
-  plugins: [react()],
+  plugins: [react(), stampServiceWorker()],
   optimizeDeps: {
     // mupdf ships its WASM via `new URL('mupdf-wasm.wasm', import.meta.url)`.
     // Excluding it keeps Vite from pre-bundling and breaking the WASM path.
