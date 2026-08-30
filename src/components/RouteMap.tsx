@@ -3920,9 +3920,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
   return (
     <div className={isFullScreen ? "h-full flex flex-col relative" : "bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"}>
-      <div className={isFullScreen ? "shrink-0 px-3 sm:px-6 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 relative z-40 transition-colors duration-200" : "px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
+      <div className={isFullScreen ? "relative z-40 shrink-0 border-b border-gray-200 bg-gray-50 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] transition-colors duration-200 dark:border-gray-700 dark:bg-gray-800 sm:px-5 sm:py-3" : "relative z-40 border-b border-gray-200 bg-gray-50 px-3 py-2.5 transition-colors duration-200 dark:border-gray-600 dark:bg-gray-700 sm:px-5 sm:py-3"}>
         <div className="flex items-center justify-between">
-          <div className={isFullScreen ? "hidden shrink-0 sm:block" : "shrink-0"}>
+          <div className="hidden shrink-0 sm:block">
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">Route Map</h2>
             {selectionMode && (
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
@@ -4316,7 +4316,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
       <div
         ref={mapWrapperRef}
-        className={isFullScreen ? "w-full flex-1 relative min-h-0" : `w-full h-96 relative rounded-b-lg transition-shadow duration-300 ${isMapActive ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/50 animate-[map-pulse_2s_ease-in-out_infinite]' : ''}`}
+        className={isFullScreen ? "w-full flex-1 relative min-h-0" : `relative h-96 w-full rounded-b-lg transition-shadow duration-300 xl:h-[28rem] ${isMapActive ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/50 animate-[map-pulse_2s_ease-in-out_infinite]' : ''}`}
         style={{
           position: 'relative',
           zIndex: 0,

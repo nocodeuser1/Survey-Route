@@ -4154,7 +4154,7 @@ function App() {
       )}
       {!isFullScreenMap && (
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 transition-colors duration-200" style={{ marginTop: showSignatureBanner ? '60px' : '0' }}>
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-4">
+          <div className="mx-auto max-w-screen-2xl px-3 py-2 sm:px-6 sm:py-4 lg:px-8">
             <div className="flex items-center justify-between">
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <Route className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 dark:text-blue-400 flex-shrink-0" />
@@ -4305,7 +4305,7 @@ function App() {
 
       {(!isFullScreenMap || (currentView !== 'route-planning' && currentView !== 'survey')) && (
         <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-[70] transition-colors duration-200">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-screen-2xl px-3 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center gap-2 py-1 sm:py-2">
               {/* Desktop navigation - hidden on mobile */}
               <div className="hidden md:flex gap-1 overflow-x-auto scrollbar-hide">
@@ -4553,8 +4553,8 @@ function App() {
         {/* Legacy configure view handled by useEffect redirect */}
 
         {currentView === 'route-planning' && (
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 md:py-6">
-            <div className="space-y-2 md:space-y-6">
+          <div className="mx-auto max-w-screen-2xl px-3 py-3 sm:px-6 md:py-5 lg:px-8">
+            <div className="space-y-3 md:space-y-5">
               {!optimizationResult && !isLoadingRoutes && homeBase && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <RoutePlanningControls
@@ -4648,12 +4648,12 @@ function App() {
 
                   <section
                     id="main-stats-cards"
-                    className="relative z-50 grid grid-cols-1 xl:grid-cols-12 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-visible"
+                    className="relative z-50 grid grid-cols-1 overflow-visible rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 lg:grid-cols-12"
                   >
 
                   {/* Route membership and marker visibility stay separate. The
                       map control can reveal markers without changing this stop list. */}
-                  <div className="order-1 xl:col-span-4 flex items-center px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
+                  <div className="order-1 flex min-h-[68px] items-center border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:col-span-5 lg:border-r xl:col-span-4">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 text-gray-900 dark:text-white text-sm font-semibold">
                         <CheckCircle className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
@@ -4669,8 +4669,8 @@ function App() {
                   </div>
 
                   {surveyTypeKind === 'spcc_plan' && (
-                    <div className="order-4 xl:order-5 xl:col-span-5 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center justify-between gap-3">
+                    <div className="order-4 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-5 lg:col-span-5 xl:order-5">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <Image className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -4694,7 +4694,7 @@ function App() {
                           )}
                         </div>
 
-                        <div className="w-24 sm:w-40 shrink-0">
+                        <div className="w-full shrink-0 sm:w-40">
                           {planRouteRun.run && planRouteRun.totalCount > 0 && (
                             <div
                               className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
@@ -4720,7 +4720,7 @@ function App() {
                   {(!isFullScreenMap || showRefreshOptions) && (
                     <div className={isFullScreenMap
                       ? 'fixed inset-0 z-[9999]'
-                      : 'order-5 xl:order-3 xl:col-span-3 px-3 py-2 border-b border-gray-200 dark:border-gray-700'}>
+                      : 'order-5 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-2 lg:col-span-7 xl:order-3 xl:col-span-3'}>
                     <RouteResults
                       result={optimizationResult}
                       settings={lastUsedSettings}
@@ -4798,7 +4798,7 @@ function App() {
 
                   {/* Compact metrics share the command-center surface instead
                       of pushing the map down with four separate cards. */}
-                  <div className={`${surveyTypeKind === 'spcc_plan' ? 'xl:col-span-7 xl:border-r' : 'xl:col-span-12'} order-3 xl:order-4 grid grid-cols-4 divide-x divide-gray-200 dark:divide-gray-700 border-b border-gray-200 dark:border-gray-700`}>
+                  <div className={`${surveyTypeKind === 'spcc_plan' ? 'lg:col-span-7 lg:border-r' : 'lg:col-span-12'} order-3 grid grid-cols-4 divide-x divide-gray-200 border-b border-gray-200 dark:divide-gray-700 dark:border-gray-700 lg:order-4`}>
                     {(() => {
                       const totalTime = filteredOptimizationResult?.totalTime || 0;
                       const driveTime = filteredOptimizationResult?.totalDriveTime || 0;
@@ -4847,7 +4847,7 @@ function App() {
                       return cards.map(({ key, label, value, sub, iconColor, Icon }) => (
                         <div
                           key={key}
-                          className="min-w-0 px-2 sm:px-3 py-2.5"
+                          className="min-w-0 px-2 py-2.5 sm:px-3"
                           title={sub || `${label}: ${value}`}
                           aria-label={`${label}: ${value}${sub ? `. ${sub}` : ''}`}
                         >
@@ -4945,13 +4945,13 @@ function App() {
 
                     const allActive = surveyType === 'all';
                     return (
-                      <div className="order-2 xl:col-span-5 px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
+                      <div className="order-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-3 lg:col-span-12 xl:order-2 xl:col-span-5 xl:border-r">
+                        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="flex shrink-0 items-center gap-2">
                             <ClipboardList className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Survey</span>
                           </div>
-                          <div className="flex w-full flex-wrap gap-0.5 rounded-lg border border-gray-200 p-0.5 dark:border-gray-600 sm:w-auto">
+                          <div className="grid w-full grid-cols-1 gap-0.5 rounded-lg border border-gray-200 p-0.5 min-[375px]:grid-cols-2 dark:border-gray-600 sm:flex sm:w-auto sm:max-w-full sm:flex-nowrap sm:overflow-x-auto">
                             <button
                               type="button"
                               onClick={() => {
@@ -4959,7 +4959,7 @@ function App() {
                                 setOpenOverdueTypeId(null);
                               }}
                               aria-pressed={allActive}
-                              className={`min-h-11 w-full rounded-md px-3.5 py-2 text-xs font-medium transition-all sm:w-auto sm:text-sm ${allActive
+                              className={`min-h-11 w-full rounded-md px-3.5 py-2 text-xs font-medium transition-all sm:w-auto sm:shrink-0 sm:text-sm ${allActive
                                 ? 'bg-blue-600 text-white shadow-sm'
                                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                 }`}
@@ -4985,7 +4985,7 @@ function App() {
                                 <div
                                   key={type.id}
                                   data-route-overdue-popover
-                                  className="relative flex min-w-0 flex-1 gap-0.5 sm:flex-none"
+                                  className="relative flex min-w-0 gap-0.5 sm:shrink-0"
                                 >
                                   <button
                                     type="button"

@@ -23,13 +23,6 @@
     max-width: 100vw;
   }
 
-  /* Improve touch targets for mobile */
-  button,
-  a {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
   /* Better mobile input styling */
   input,
   textarea,
@@ -125,6 +118,14 @@ table.sr-measuring td {
 /* Leaflet defaults to 30px controls, which is too small for route work on a
    phone. Keep desktop density while giving touch users a reliable 44px target. */
 @media (pointer: coarse) {
+  /* Keep reliable touch targets on phones and tablets without forcing every
+     compact desktop control, inline chip, and text link into a 44px box. */
+  button,
+  a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
   .leaflet-bar a {
     width: 44px !important;
     height: 44px !important;

@@ -2205,18 +2205,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
         {settings && (
-          <div className="px-1 py-0 transition-all duration-200 overflow-visible relative z-[60]">
-            <div className="flex items-center justify-between gap-2">
-              <div className="relative" ref={routeActionsRef}>
+          <div className="relative z-[60] overflow-visible transition-all duration-200">
+            <div className="grid grid-cols-1 items-center gap-2 min-[360px]:grid-cols-2 sm:flex sm:justify-end">
+              <div className="relative min-w-0" ref={routeActionsRef}>
                 <button
                   type="button"
                   onClick={() => setShowRouteActionsMenu(current => !current)}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700 sm:w-auto"
                   aria-haspopup="menu"
                   aria-expanded={showRouteActionsMenu}
                 >
                   <Route className="h-4 w-4" />
-                  <span>Route actions</span>
+                  <span className="sm:hidden">Actions</span>
+                  <span className="hidden sm:inline">Route actions</span>
                   <ChevronDown className={`h-4 w-4 transition-transform ${showRouteActionsMenu ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -2287,7 +2288,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 ref={refreshDialogTriggerRef}
                 type="button"
                 onClick={() => setShowRefreshOptions(true)}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98]"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
               >
                 <Settings className="h-4 w-4" />
                 <span>Update route</span>
@@ -2880,7 +2881,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   }
 
   return (
-    <div className="space-y-6 relative">
+    <div className="relative space-y-4 lg:space-y-5">
       {isRefreshing && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-[2000] flex items-center justify-center">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-8 max-w-sm mx-4 text-center transition-colors duration-200">
@@ -2922,33 +2923,35 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       )}
 
       {listSelectionMode && selectedFacilityNames.size > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg p-4 flex items-center justify-between transition-colors duration-200">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 transition-colors duration-200 dark:border-blue-700 dark:bg-blue-900/30 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
               {selectedFacilityNames.size} facilit{selectedFacilityNames.size === 1 ? 'y' : 'ies'} selected
             </p>
             <select
               value={bulkReassignTargetDay}
               onChange={(e) => setBulkReassignTargetDay(parseInt(e.target.value))}
-              className="px-3 py-1 border border-blue-300 dark:border-blue-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full rounded-md border border-blue-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-blue-600 dark:bg-gray-700 dark:text-white sm:w-auto"
             >
               {result.routes.map(r => (
                 <option key={r.day} value={r.day} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to Day {r.day}</option>
               ))}
               <option value={nextAvailableRouteDay} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to New Day {nextAvailableRouteDay}</option>
             </select>
-            <button
-              onClick={handleBulkReassign}
-              className="px-4 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-            >
-              Apply
-            </button>
-            <button
-              onClick={() => setSelectedFacilityNames(new Set())}
-              className="px-4 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm font-medium"
-            >
-              Clear Selection
-            </button>
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <button
+                onClick={handleBulkReassign}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                Apply
+              </button>
+              <button
+                onClick={() => setSelectedFacilityNames(new Set())}
+                className="whitespace-nowrap rounded-md bg-gray-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600"
+              >
+                Clear Selection
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2957,8 +2960,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
           {/* Wraps rather than crushes: the header carries a title, a count
               and an action, which is more than a phone-width row holds. */}
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-            <div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-5 sm:py-4">
+            <div className="min-w-0">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Route className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 Visit Route Summary
@@ -2969,7 +2972,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   : 'Actual order recorded from Photos Taken, independent of planned days'}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
               <span className="rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
                 {routeVisitSummary.length} visited
               </span>
@@ -2980,7 +2983,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 onClick={applyVisitOrderToDayLists}
                 disabled={isApplyingVisitDays || isReoptimizing}
                 title="Rewrite the day lists so each stop sits on the day it was actually visited, in the order the photos were taken"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 dark:border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 transition-all hover:bg-blue-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700 transition-all hover:bg-blue-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/20 dark:text-blue-300 sm:flex-none"
               >
                 {isApplyingVisitDays ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -2991,7 +2994,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </button>
             </div>
           </div>
-          <div className="px-4 sm:px-6 py-5 overflow-x-auto">
+          <div className="overflow-x-auto px-4 py-4 sm:px-5 sm:py-5">
             <div className="flex flex-col md:flex-row md:min-w-max">
               {routeVisitSummary.map(({ event, facility, observedDay }, index) => (
                 <div key={event.id} className="flex md:flex-1 md:min-w-[180px] items-start gap-3 md:gap-0">
@@ -3156,11 +3159,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
+      <div
+        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+        role="toolbar"
+        aria-label="Route day tools"
+      >
         <div className="flex gap-2">
           <button
             onClick={handleToggleListSelectionMode}
-            className={`flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 rounded-md transition-colors group relative ${listSelectionMode
+            className={`group relative flex min-h-10 min-w-10 items-center justify-center rounded-md p-2 transition-colors sm:gap-2 sm:px-4 sm:py-2 ${listSelectionMode
               ? 'bg-blue-600 text-white hover:bg-blue-700'
               : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
               }`}
@@ -3172,7 +3179,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           <button
             onClick={handleReoptimizeDays}
             disabled={isReoptimizing}
-            className="flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 bg-teal-600 dark:bg-teal-700 text-white rounded-md hover:bg-teal-700 dark:hover:bg-teal-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors group relative"
+            className="group relative flex min-h-10 min-w-10 items-center justify-center rounded-md bg-teal-600 p-2 text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-gray-400 dark:bg-teal-700 dark:hover:bg-teal-600 sm:gap-2 sm:px-4 sm:py-2"
             title="Refresh times and route order within each day, keeping day assignments and removing completed facilities"
           >
             {isReoptimizing ? (
@@ -3185,7 +3192,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         </div>
         <button
           onClick={handleAddDay}
-          className="flex items-center justify-center p-2 sm:px-4 sm:py-2 sm:gap-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors group relative"
+          className="group relative flex min-h-10 min-w-10 items-center justify-center rounded-md bg-green-600 p-2 text-white transition-colors hover:bg-green-700 sm:gap-2 sm:px-4 sm:py-2"
           title="Add Day"
         >
           <Plus className="w-5 h-5 sm:w-4 sm:h-4" />
@@ -3213,11 +3220,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               onDrop={() => handleDrop(route.day)}
             >
               <div
-                className="relative px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white cursor-pointer hover:from-blue-600 hover:to-blue-700 transition-colors"
+                className="relative cursor-pointer bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3 text-white transition-colors hover:from-blue-600 hover:to-blue-700 sm:px-5 sm:py-4"
                 onClick={() => toggleDayCollapse(route.day)}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <h3 className="text-lg font-semibold">Day {route.day}</h3>
                     <button
                       onClick={(e) => {
@@ -3232,7 +3239,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         setTempDayStartTimes(times);
                         setShowStartTimeModal(true);
                       }}
-                      className="flex items-center gap-1 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded-md text-xs font-medium transition-colors"
+                      className="flex items-center gap-1 rounded-md bg-white/20 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-white/30"
                       title="Set day start times"
                     >
                       <Clock className="w-3 h-3" />
@@ -3248,7 +3255,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           e.stopPropagation();
                           handleDeleteDay(route.day);
                         }}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-red-500/20 hover:bg-red-500/40 text-white rounded-md text-xs font-medium transition-colors whitespace-nowrap"
+                        className="flex items-center gap-1 whitespace-nowrap rounded-md bg-red-500/20 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-500/40"
                         title={`Delete Day ${route.day}`}
                       >
                         <Trash2 className="w-3 h-3" />
@@ -3262,31 +3269,34 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     )}
                   </div>
 
-                  <div className="flex items-center gap-4 text-sm">
-                    <span className="flex items-center gap-1">
+                  <div className="grid w-full grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-3 lg:flex lg:w-auto lg:flex-wrap lg:items-center lg:justify-end lg:gap-x-4 lg:gap-y-1 lg:text-sm">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
                       <MapPin className="w-4 h-4" />
-                      {route.facilities.filter(f => isFacilityVisible(f.name, f.id)).length} stops
+                      {(() => {
+                        const visibleStopCount = route.facilities.filter(f => isFacilityVisible(f.name, f.id)).length;
+                        return `${visibleStopCount} ${visibleStopCount === 1 ? 'stop' : 'stops'}`;
+                      })()}
                     </span>
-                    <span className="flex items-center gap-1">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
                       <TrendingUp className="w-4 h-4" />
                       {route.totalMiles.toFixed(1)} mi
                     </span>
-                    <span className="flex items-center gap-1" title="Driving time">
+                    <span className="flex items-center gap-1 whitespace-nowrap" title="Driving time">
                       <Navigation className="w-4 h-4" />
                       {Math.round(route.totalDriveTime / 60)}h {Math.round(route.totalDriveTime % 60)}m drive
                     </span>
-                    <span className="flex items-center gap-1" title="Visit/inspection time">
+                    <span className="flex items-center gap-1 whitespace-nowrap" title="Visit/inspection time">
                       <CheckCircle className="w-4 h-4" />
                       {Math.round(route.totalVisitTime / 60)}h {Math.round(route.totalVisitTime % 60)}m visits
                     </span>
-                    <span className="flex items-center gap-1" title="Total workday time (drive + visits + breaks)">
+                    <span className="flex items-center gap-1 whitespace-nowrap" title="Total workday time (drive + visits + breaks)">
                       <Clock className="w-4 h-4" />
                       {Math.round(route.totalTime / 60)}h {Math.round(route.totalTime % 60)}m total
                     </span>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="mt-3 flex flex-col gap-2 border-t border-white/15 pt-3 sm:flex-row sm:items-center">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
                     {(() => {
                       // Get departure time from last facility (for sunset calculation)
                       // and the home-base arrival time (for the displayed end of day —
@@ -3300,14 +3310,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                       return (
                         <>
-                          <div className="text-sm text-blue-100 flex items-center gap-1" title={`Leave home ${formatTimeTo12Hour(route.startTime)} → leave last facility ${formatTimeTo12Hour(lastDepartureTime)} → home by ${formatTimeTo12Hour(homeArrivalTime)}`}>
+                          <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm text-blue-100" title={`Leave home ${formatTimeTo12Hour(route.startTime)} → leave last facility ${formatTimeTo12Hour(lastDepartureTime)} → home by ${formatTimeTo12Hour(homeArrivalTime)}`}>
                             <span>{formatTimeTo12Hour(route.startTime)} –</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openReturnByModal(route.day);
                               }}
-                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${dayReturnByTimes[route.day] ? 'bg-white/25 font-semibold' : 'hover:bg-white/20'}`}
+                              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-white transition-colors ${dayReturnByTimes[route.day] ? 'bg-white/25 font-semibold' : 'hover:bg-white/20'}`}
                               title={`Set the latest Day ${route.day} may leave its last site for home base`}
                             >
                               <span>home by {formatTimeTo12Hour(homeArrivalTime)}</span>
@@ -3378,14 +3388,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       );
                     })()}
                   </div>
-                  <div className="px-3 py-1 bg-blue-700 text-white rounded-md font-bold text-xs border-2 border-blue-400">
-                    {route.facilities.length} {route.facilities.length === 1 ? 'Facility' : 'Facilities'}
-                  </div>
                 </div>
               </div>
 
               {!collapsedDays.has(route.day) && (
-                <div className="p-6">
+                <div className="px-4 py-4 sm:p-6">
                   {route.facilities.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                       <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
@@ -3435,7 +3442,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         return (
                           <div
                             key={index}
-                            className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+                            className={`flex items-start gap-2 sm:gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                             draggable={!isHomeBaseSegment && Boolean(facility)}
                             onDragStart={() => facility && handleDragStart(facility, route.day)}
                             onClick={() => {
@@ -3464,9 +3471,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                               )}
                             </div>
 
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex-1">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {segment.to === 'Home Base' ? (
                                       /* The return-to-home row doubles as the
@@ -3605,7 +3612,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     </span>
                                   </p>
                                 </div>
-                                <div className="text-right text-sm">
+                                <div className="shrink-0 text-left text-xs sm:text-right sm:text-sm">
                                   <p className="text-gray-600 dark:text-gray-400">Arrive: {formatTimeTo12Hour(segment.arrivalTime)}</p>
                                   {segment.to !== 'Home Base' && (
                                     <p className="text-gray-600 dark:text-gray-400">Leave: {formatTimeTo12Hour(segment.departureTime)}</p>
@@ -3624,14 +3631,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           ))}
 
         {removedFacilities.length > 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden mt-4 transition-colors duration-200">
+          <div className="overflow-hidden rounded-lg bg-white shadow-md transition-colors duration-200 dark:bg-gray-800">
             <div
-              className="relative px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 text-white cursor-pointer hover:from-gray-600 hover:to-gray-700 transition-colors"
+              className="relative cursor-pointer bg-gradient-to-r from-gray-500 to-gray-600 px-4 py-3 text-white transition-colors hover:from-gray-600 hover:to-gray-700 sm:px-6"
               onClick={() => setRemovedCollapsed(!removedCollapsed)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold">Removed Facilities</h3>
+                  <h3 className="text-base font-semibold sm:text-lg">Removed Facilities</h3>
                   {removedCollapsed ? (
                     <ChevronDown className="w-5 h-5" />
                   ) : (
@@ -3639,7 +3646,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   )}
                 </div>
 
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-3 text-xs sm:gap-4 sm:text-sm">
                   <span className="flex items-center gap-1">
                     <XIcon className="w-4 h-4" />
                     {removedFacilities.length} removed
@@ -3649,11 +3656,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
 
             {!removedCollapsed && (
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 <div className="mb-4">
                   <button
                     onClick={handleRestoreAllRemoved}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 sm:w-auto"
                   >
                     <Undo2 className="w-4 h-4" />
                     Restore All Removed Facilities
@@ -3665,10 +3672,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       key={index}
                       className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500 transition-all"
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 flex-1">
+                      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
                           <XIcon className="w-5 h-5 text-gray-600 dark:text-gray-400 flex-shrink-0" />
-                          <div className="flex-1">
+                          <div className="min-w-0 flex-1">
                             <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               {(() => {
@@ -3680,7 +3687,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         </div>
                         <button
                           onClick={() => handleRestoreRemovedFacility(facility.id)}
-                          className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-md text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors flex items-center gap-1"
+                          className="flex w-full items-center justify-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 sm:w-auto"
                         >
                           <Undo2 className="w-3 h-3" />
                           Restore
@@ -3695,14 +3702,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         )}
 
         {getCompletedFacilities().length > 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden mt-4 transition-colors duration-200">
+          <div className="overflow-hidden rounded-lg bg-white shadow-md transition-colors duration-200 dark:bg-gray-800">
             <div
-              className="relative px-6 py-4 bg-gradient-to-r from-green-500 to-green-600 text-white cursor-pointer hover:from-green-600 hover:to-green-700 transition-colors"
+              className="relative cursor-pointer bg-gradient-to-r from-green-500 to-green-600 px-4 py-3 text-white transition-colors hover:from-green-600 hover:to-green-700 sm:px-6"
               onClick={() => setCompletedCollapsed(!completedCollapsed)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold">
+                  <h3 className="text-base font-semibold sm:text-lg">
                     {effectiveKind === 'spcc_plan' ? 'Visited Facilities' : 'Completed Facilities'}
                   </h3>
                   {completedCollapsed ? (
@@ -3712,7 +3719,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   )}
                 </div>
 
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-3 text-xs sm:gap-4 sm:text-sm">
                   <span className="flex items-center gap-1">
                     {effectiveKind === 'spcc_plan' ? (
                       <Camera className="w-4 h-4" />
@@ -3727,7 +3734,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
 
             {!completedCollapsed && (
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 <div className="space-y-3">
                   {getCompletedFacilities().map((facility, index) => {
                     const inspection = inspections.get(facility.id);
@@ -3745,8 +3752,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           else handleFacilityClick(facility.name, undefined, facility.id);
                         }}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-1">
+                        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 flex-1 items-center gap-3">
                             {listSelectionMode && (
                               <button
                                 onClick={(e) => {
@@ -3767,7 +3774,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ) : (
                               <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
                             )}
-                            <div className="flex-1">
+                            <div className="min-w-0 flex-1">
                               <div className="font-medium text-gray-900 dark:text-white">{facility.name}</div>
                               {effectiveKind === 'spcc_plan' ? (
                                 facility.field_visit_date && (
@@ -3794,7 +3801,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                               e.stopPropagation();
                               setSelectedFacility(facility);
                             }}
-                            className="px-3 py-1.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-md text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/70 transition-colors flex items-center gap-1"
+                            className="flex w-full items-center justify-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 sm:w-auto"
                           >
                             <FileText className="w-3 h-3" />
                             View Details

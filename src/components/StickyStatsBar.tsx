@@ -52,7 +52,7 @@ export default function StickyStatsBar({
       className={`hidden md:block fixed top-[60px] left-0 right-0 z-50 transition-all duration-300 pointer-events-none ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
         }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
         <div className={`bg-white/35 dark:bg-gray-900/30 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.08)] border border-white/40 dark:border-white/[0.08] px-4 py-3 transition-colors duration-200 ${isVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
           <div className="flex items-center justify-around gap-4 text-sm sm:text-base">
             <div className="flex items-center gap-2">
