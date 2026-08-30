@@ -4,7 +4,7 @@ import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
-import { UserSettings, Facility, Inspection, RouteVisitEvent, PlanRouteRunStop, supabase } from '../lib/supabase';
+import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
@@ -38,15 +38,30 @@ interface RouteResultsProps {
   showOnlyRouteList?: boolean;
   homeBase?: any;
   onSaveCurrentRoute?: (name: string, mode: 'update' | 'new') => Promise<boolean | void> | void;
-  onLoadRoute?: (route: any) => void;
+  onLoadRoute?: (route: RoutePlan) => Promise<boolean | void> | boolean | void;
   currentRouteId?: string;
+  onRouteRenamed?: (routeId: string, name: string) => void;
+  nextRouteDayNumber?: number;
   /** Name of the currently-loaded route, surfaced in the Save dialog
    *  to make the "Update <name>" choice concrete. */
   currentRouteName?: string;
+  /** Stable number of stops that belong to the route. Map visibility must not
+   *  change this value. */
+  routeStopCount?: number;
+  /** True when the route was built from an explicit facility selection. */
+  routeScopeIsSubset?: boolean;
+  /** Explicit route-membership replacement. Kept separate from marker
+   *  visibility so showing markers can never silently rewrite a route. */
+  onUseAllEligible?: (settings: UserSettings, facilitiesOverride?: Facility[]) => Promise<boolean | void> | boolean | void;
+  onRegenerateAllEligible?: (settings: UserSettings, facilitiesOverride?: Facility[]) => Promise<boolean | void> | boolean | void;
   onConfigureHomeBase?: () => void;
   showRefreshOptions?: boolean;
   onShowRefreshOptions?: (show: boolean) => void;
   onUpdateResult?: (newResult: OptimizationResult) => void;
+  onPersistRouteResult?: (newResult: OptimizationResult) => Promise<boolean>;
+  onMoveFacility?: (facilityId: string, fromDay: number, toDay: number) => Promise<boolean>;
+  onMoveFacilities?: (facilityKeys: string[], toDay: number) => Promise<boolean>;
+  onAddFacilitiesToRoute?: (facilityIds: string[]) => Promise<void> | void;
   completedVisibility?: {
     hideAllCompleted: boolean;
     hideInternallyCompleted: boolean;
@@ -71,9 +86,13 @@ interface RouteResultsProps {
   planRouteProgress?: {
     runId: string | null;
     stopsByFacilityId: Map<string, PlanRouteRunStop>;
+    completedCount?: number;
+    totalCount?: number;
     loading: boolean;
     savingFacilityId: string | null;
     schemaUnavailable: boolean;
+    error?: string | null;
+    startNewRun?: () => Promise<unknown>;
     setFacilityCompleted: (facilityId: string, completed: boolean) => Promise<boolean>;
   };
 }
@@ -82,7 +101,7 @@ interface RouteResultsProps {
 // String to allow either the legacy SPCC enum members OR a survey_types.id UUID.
 type SurveyType = string;
 
-export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, currentRouteName, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind, planRouteProgress }: RouteResultsProps) {
+export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onRouteRenamed, currentRouteName, nextRouteDayNumber, routeStopCount, routeScopeIsSubset = false, onUseAllEligible, onRegenerateAllEligible, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, onPersistRouteResult, onMoveFacility, onMoveFacilities, onAddFacilitiesToRoute, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind, planRouteProgress }: RouteResultsProps) {
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [routeVisitEvents, setRouteVisitEvents] = useState<RouteVisitEvent[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
@@ -108,6 +127,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       : surveyType === 'spcc_inspection'
         ? 'spcc_inspection'
         : 'all');
+  const nextAvailableRouteDay = nextRouteDayNumber
+    ?? Math.max(0, ...result.routes.map(route => route.day)) + 1;
+  const persistEditedResult = async (newResult: OptimizationResult): Promise<boolean> => {
+    if (onPersistRouteResult) return onPersistRouteResult(newResult);
+    if (onUpdateResult) {
+      onUpdateResult(newResult);
+      return true;
+    }
+    return false;
+  };
 
   const showRefreshOptions = externalShowRefreshOptions !== undefined ? externalShowRefreshOptions : internalShowRefreshOptions;
   const setShowRefreshOptions = onShowRefreshOptions || setInternalShowRefreshOptions;
@@ -122,7 +151,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   });
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [tempSettings, setTempSettings] = useState<UserSettings | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showRouteActionsMenu, setShowRouteActionsMenu] = useState(false);
+  const [routeScopeChoice, setRouteScopeChoice] = useState<'current' | 'all'>('current');
+  const [isResettingOuting, setIsResettingOuting] = useState(false);
+  const routeActionsRef = useRef<HTMLDivElement>(null);
+  const refreshDialogRef = useRef<HTMLDivElement>(null);
+  const refreshDialogTriggerRef = useRef<HTMLButtonElement>(null);
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showSaveRoutePopup, setShowSaveRoutePopup] = useState(false);
   const [showLoadRoutePopup, setShowLoadRoutePopup] = useState(false);
@@ -132,7 +167,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [listSelectionMode, setListSelectionMode] = useState(false);
   const [selectedFacilityNames, setSelectedFacilityNames] = useState<Set<string>>(new Set());
   const [bulkReassignTargetDay, setBulkReassignTargetDay] = useState<number>(1);
-  const [draggedFacility, setDraggedFacility] = useState<{ name: string, fromDay: number } | null>(null);
+  const [draggedFacility, setDraggedFacility] = useState<{
+    facilityId?: string;
+    facilityName: string;
+    fromDay: number;
+  } | null>(null);
   const [pendingReoptimize, setPendingReoptimize] = useState(false);
   const [isReoptimizing, setIsReoptimizing] = useState(false);
   // Guards the "Apply to Day Lists" action in the Visit Route Summary — it
@@ -143,7 +182,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // that the next re-optimize pass must honor. handleReoptimizeDays groups
   // facilities from the CURRENTLY DISPLAYED result.routes — not the DB —
   // so without this the DB write lands but the on-screen lists never change.
-  const pendingDayMovesRef = useRef<Array<{ facilityName: string; targetDay: number }>>([]);
+  const pendingDayMovesRef = useRef<Array<{ facilityId?: string; facilityName: string; targetDay: number }>>([]);
   // Names of facilities that just landed on a new day — drives a brief
   // highlight so the user sees where the row went instead of a silent redraw.
   const [recentlyMovedNames, setRecentlyMovedNames] = useState<Set<string>>(new Set());
@@ -275,8 +314,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const getDayStartTime = (day: number) => dayStartTimes[day] || settings?.start_time || '08:00';
 
   /** Re-clock every day from the given per-day start times. */
-  const applyDayStartTimes = (startTimes: Record<number, string>) => {
-    if (!result || !onUpdateResult) return;
+  const applyDayStartTimes = async (startTimes: Record<number, string>) => {
+    if (!result) return false;
 
     const updatedRoutes = result.routes.map(route =>
       rescheduleRoute(route, computeStartTime(route, startTimes))
@@ -288,8 +327,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + (r.totalVisitTime || 0), 0);
     const totalTime = totalDriveTime + totalVisitTime;
 
-    onUpdateResult({ ...result, routes: updatedRoutes, totalDriveTime, totalVisitTime, totalTime });
-    setDayStartTimes(startTimes);
+    const saved = await persistEditedResult({
+      ...result,
+      routes: updatedRoutes,
+      totalDriveTime,
+      totalVisitTime,
+      totalTime,
+    });
+    if (saved) setDayStartTimes(startTimes);
+    return saved;
   };
 
   const openReturnByModal = (day: number) => {
@@ -328,7 +374,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    *  own copy if the facility has since been deleted (same rule as Refresh
    *  Times: never silently drop a site from the plan). */
   const resolveRouteFacility = (rf: DayRoute['facilities'][number]): Facility =>
-    facilities.find(f => f.name === rf.name) ?? ({
+    facilities.find(f => rf.id ? f.id === rf.id : f.name === rf.name) ?? ({
       id: `route-only-${rf.name}`,
       name: rf.name,
       latitude: rf.latitude,
@@ -363,7 +409,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     // Everything before the first constrained day is left exactly as it is —
     // a deadline on day 3 must not reshuffle days 1 and 2. The account-wide
     // fill has no "day the user flagged" to anchor on, so it starts at day 1.
-    const firstDay = fillAll ? 1 : Math.min(...deadlineDays);
+    const firstDay = fillAll ? (routes[0]?.day ?? 1) : Math.min(...deadlineDays);
     const untouched = routes.filter(r => r.day < firstDay);
     const repackDays = routes.filter(r => r.day >= firstDay);
     if (repackDays.length === 0) return false;
@@ -399,12 +445,27 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     ]);
 
     const calcFacilities = pool.map((f, idx) => ({
+      id: f.id,
       index: idx + 1,
       name: f.name,
       latitude: Number(f.latitude),
       longitude: Number(f.longitude),
       visitDuration: f.visit_duration_minutes || settings.default_visit_duration_minutes || 30,
     }));
+    const stableIndexByLocal = new Map(
+      calcFacilities.map(calcFacility => {
+        const recordIndex = facilities.findIndex(facility => facility.id === calcFacility.id);
+        return [calcFacility.index, recordIndex >= 0 ? recordIndex + 1 : calcFacility.index];
+      }),
+    );
+    const restoreStableRouteIndexes = (route: DayRoute): DayRoute => ({
+      ...route,
+      facilities: route.facilities.map(routeFacility => ({
+        ...routeFacility,
+        index: stableIndexByLocal.get(routeFacility.index) ?? routeFacility.index,
+      })),
+      sequence: route.sequence.map(index => stableIndexByLocal.get(index) ?? index),
+    });
     const durations = distanceMatrix.durations;
 
     const lunchBreak = settings.lunch_break_minutes || 0;
@@ -495,9 +556,17 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       }
 
       if (seq.length > 0) {
+        const rebuiltRoute = rebuildDayRoute(
+          calcFacilities,
+          seq,
+          distanceMatrix,
+          0,
+          startTime,
+          lunchBreak,
+        );
         built.push({
           slot: dayNum,
-          route: { ...rebuildDayRoute(calcFacilities, seq, distanceMatrix, 0, startTime, lunchBreak), day: dayNum },
+          route: { ...restoreStableRouteIndexes(rebuiltRoute), day: dayNum },
         });
       }
       dayNum++;
@@ -515,13 +584,17 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     // Empty days drop out and the survivors renumber, so the plan always reads
     // Day 1..N with no gaps.
+    const assignedDayNumbers = built.map((_, index) =>
+      repackDays[index]?.day
+      ?? nextAvailableRouteDay + (index - repackDays.length)
+    );
     const finalRoutes: DayRoute[] = [
       ...untouched,
-      ...built.map((b, idx) => ({ ...b.route, day: untouched.length + idx + 1 })),
+      ...built.map((b, idx) => ({ ...b.route, day: assignedDayNumbers[idx] })),
     ];
 
     const dayRemap = new Map<number, number>();
-    built.forEach((b, idx) => dayRemap.set(b.slot, untouched.length + idx + 1));
+    built.forEach((b, idx) => dayRemap.set(b.slot, assignedDayNumbers[idx]));
     const remapDays = (src: Record<number, string>): Record<number, string> => {
       const out: Record<number, string> = {};
       Object.entries(src).forEach(([key, value]) => {
@@ -538,27 +611,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       return out;
     };
 
-    // Persist the new membership the same way drag-and-drop does, so the plan
-    // survives a reload and the map/exports agree with the list.
-    const assignmentUpdates = finalRoutes
-      .filter(route => route.day > untouched.length)
-      .flatMap(route => route.facilities.map(rf => {
-        const live = pool.find(f => f.name === rf.name);
-        if (!live || live.id.startsWith('route-only-')) return null;
-        if (live.day_assignment === route.day) return null;
-        return supabase.from('facilities').update({ day_assignment: route.day }).eq('id', live.id);
-      }))
-      .filter(Boolean);
-
-    if (assignmentUpdates.length > 0) {
-      await Promise.all(assignmentUpdates);
-    }
-
     const totalMiles = finalRoutes.reduce((sum, r) => sum + (r.totalMiles || 0), 0);
     const totalDriveTime = finalRoutes.reduce((sum, r) => sum + (r.totalDriveTime || 0), 0);
     const totalVisitTime = finalRoutes.reduce((sum, r) => sum + (r.totalVisitTime || 0), 0);
 
-    onUpdateResult({
+    const saved = await persistEditedResult({
       routes: finalRoutes,
       totalDays: finalRoutes.length,
       totalMiles,
@@ -567,12 +624,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       totalVisitTime,
       totalTime: totalDriveTime + totalVisitTime,
     });
+    if (!saved) return false;
     setDayStartTimes(prev => remapDays(prev));
     setDayReturnByTimes(remapDays(returnByTimes));
-
-    if (assignmentUpdates.length > 0 && onFacilitiesUpdated) {
-      await onFacilitiesUpdated();
-    }
     return true;
   };
 
@@ -675,6 +729,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   useEffect(() => {
     if (showRefreshOptions && settings) {
+      setRouteScopeChoice('current');
+      setShowAdvanced(false);
       setTempSettings({
         ...settings,
         account_id: accountId,
@@ -689,21 +745,94 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
   }, [showRefreshOptions, settings, accountId, seasonalReturnBy]);
 
+  useEffect(() => {
+    if (!showRouteActionsMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!routeActionsRef.current?.contains(event.target as Node)) {
+        setShowRouteActionsMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowRouteActionsMenu(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showRouteActionsMenu]);
+
+  // Keep the canonical Update Route dialog keyboard-contained and return
+  // focus to the toolbar trigger when it closes. The fullscreen-map entry
+  // point may unmount before this dialog opens, so restoration is conditional.
+  useEffect(() => {
+    if (!showRefreshOptions) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = refreshDialogRef.current;
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]';
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      const firstFocusable = dialog?.querySelector<HTMLElement>(focusableSelector);
+      firstFocusable?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowRefreshOptions(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', handleKeyDown);
+      const restoreTarget = previouslyFocused?.isConnected
+        ? previouslyFocused
+        : refreshDialogTriggerRef.current;
+      if (restoreTarget?.isConnected) restoreTarget.focus();
+    };
+  }, [showRefreshOptions]);
+
   // Lock body scroll when route settings modal is open
   useEffect(() => {
     if (showRefreshOptions) {
       const scrollY = window.scrollY;
+      const previousBodyStyles = {
+        position: document.body.style.position,
+        top: document.body.style.top,
+        left: document.body.style.left,
+        right: document.body.style.right,
+        overflow: document.body.style.overflow,
+      };
       document.body.style.position = 'fixed';
       document.body.style.top = `-${scrollY}px`;
       document.body.style.left = '0';
       document.body.style.right = '0';
       document.body.style.overflow = 'hidden';
       return () => {
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.overflow = '';
+        document.body.style.position = previousBodyStyles.position;
+        document.body.style.top = previousBodyStyles.top;
+        document.body.style.left = previousBodyStyles.left;
+        document.body.style.right = previousBodyStyles.right;
+        document.body.style.overflow = previousBodyStyles.overflow;
         window.scrollTo(0, scrollY);
       };
     }
@@ -716,14 +845,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
   const handleRestoreRemovedFacility = async (facilityId: string) => {
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: null })
-        .eq('id', facilityId);
-
-      if (error) throw error;
-
-      if (onFacilitiesUpdated) onFacilitiesUpdated();
+      if (!onAddFacilitiesToRoute) {
+        throw new Error('Route editing is not available from this view.');
+      }
+      await onAddFacilitiesToRoute([facilityId]);
     } catch (err) {
       console.error('Error restoring removed facility:', err);
       alert(`Failed to restore facility: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -736,14 +861,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
 
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: null })
-        .in('id', removedFacilities.map(f => f.id));
-
-      if (error) throw error;
-
-      if (onFacilitiesUpdated) onFacilitiesUpdated();
+      if (!onAddFacilitiesToRoute) {
+        throw new Error('Route editing is not available from this view.');
+      }
+      await onAddFacilitiesToRoute(removedFacilities.map(facility => facility.id));
     } catch (err) {
       console.error('Error restoring all removed facilities:', err);
       alert(`Failed to restore facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -823,7 +944,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         // conveyor) to run over the freshly optimized result — which undid
         // the optimization it had just waited for. One packing logic, run
         // once, in the optimizer.
-        await onRefresh();
+        if (routeScopeChoice === 'all' && onUseAllEligible) {
+          await onUseAllEligible(tempSettings);
+        } else {
+          await onRefresh();
+        }
         console.log('Route update complete');
       } catch (err) {
         console.error('Error in handleRefreshWithSettings:', err);
@@ -837,6 +962,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       console.warn('Missing required data for time refresh');
       return;
     }
+    if (routeScopeChoice !== 'current') {
+      return;
+    }
 
     // Close modal IMMEDIATELY so loading state shows right away
     setShowRefreshOptions(false);
@@ -847,7 +975,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       try {
         console.log('Saving settings and refreshing times only...');
 
-        // Save the updated settings (keeping visit duration and sunset offset from current settings)
+        // Save every editable timing value. Previously this path discarded
+        // edited SPCC durations, so the button claimed to refresh times while
+        // quietly recalculating with the old visit lengths.
         const { error } = await supabase
           .from('user_settings')
           .upsert({
@@ -868,8 +998,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
             max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
             return_by_time: tempSettings.return_by_time || null,
-            inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
-            plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
+            inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
+            plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'account_id',
@@ -898,6 +1028,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }, 0);
   };
 
+  const handleResetPlanOuting = async () => {
+    if (!planRouteProgress?.runId || !planRouteProgress.startNewRun || isResettingOuting) return;
+    const confirmed = window.confirm(
+      'Reset route progress for a new outing? The current outing remains in history. Facilities photo status and every photo-history record stay unchanged.',
+    );
+    if (!confirmed) return;
+
+    setIsResettingOuting(true);
+    try {
+      await planRouteProgress.startNewRun();
+    } finally {
+      setIsResettingOuting(false);
+    }
+  };
+
   const handleRestoreExcluded = async () => {
     if (!confirm('This will restore all excluded facilities to the route and regenerate it. Continue?')) {
       return;
@@ -911,38 +1056,24 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         return;
       }
 
-      // Use account-level query to avoid URL length issues with many facility IDs
-      if (accountId) {
-        const { error } = await supabase
-          .from('facilities')
-          .update({ day_assignment: null })
-          .eq('account_id', accountId)
-          .eq('day_assignment', -1);
+      const restoredFacilities = facilities.map(facility =>
+        facility.day_assignment === -1
+          ? { ...facility, day_assignment: null }
+          : facility
+      );
 
-        if (error) throw error;
+      // The parent persists the restored eligibility and replacement route in
+      // one transaction. Do not clear -1 first: a failed optimize/save must
+      // leave both the prior route and marker eligibility untouched.
+      let restored: boolean | void;
+      if (settings && onRegenerateAllEligible) {
+        restored = await onRegenerateAllEligible(settings, restoredFacilities);
+      } else if (settings && onUseAllEligible) {
+        restored = await onUseAllEligible(settings, restoredFacilities);
       } else {
-        // Fallback: batch updates to avoid URL length limits
-        const batchSize = 50;
-        for (let i = 0; i < excludedFacilities.length; i += batchSize) {
-          const batch = excludedFacilities.slice(i, i + batchSize);
-          const { error } = await supabase
-            .from('facilities')
-            .update({ day_assignment: null })
-            .in('id', batch.map(f => f.id));
-
-          if (error) throw error;
-        }
+        throw new Error('Route regeneration is not available from this view.');
       }
-
-      // Wait for facilities to reload before refreshing route
-      if (onFacilitiesUpdated) {
-        await onFacilitiesUpdated();
-      }
-
-      // Small delay to ensure state updates
-      setTimeout(() => {
-        onRefresh();
-      }, 100);
+      if (restored === false) throw new Error('The route could not be regenerated.');
     } catch (err) {
       console.error('Error restoring facilities:', err);
       alert(`Failed to restore facilities: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -974,8 +1105,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
   };
 
-  const getFacilityForStop = (facilityName: string): Facility | undefined => {
-    return facilities.find(f => f.name === facilityName);
+  const getFacilityForStop = (facilityName: string, facilityId?: string): Facility | undefined => {
+    return facilityId
+      ? facilities.find(facility => facility.id === facilityId)
+      : facilities.find(facility => facility.name === facilityName);
   };
 
   // Account timezone, not the viewer's — a visit belongs to where the work
@@ -996,12 +1129,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     day: 'numeric',
   }).format(new Date(timestamp));
 
-  /** Names of every facility in the route currently being planned. */
-  const getRouteFacilityNames = (): Set<string> => {
-    const names = new Set<string>();
-    result.routes.forEach(route => route.facilities.forEach(f => names.add(f.name)));
-    return names;
+  /** Stable IDs for current stops, plus names only for older ID-less saves. */
+  const getRouteFacilityIdentity = (): { ids: Set<string>; legacyNames: Set<string> } => {
+    const ids = new Set<string>();
+    const legacyNames = new Set<string>();
+    result.routes.forEach(route => route.facilities.forEach(facility => {
+      if (facility.id) ids.add(facility.id);
+      else legacyNames.add(facility.name);
+    }));
+    return { ids, legacyNames };
   };
+
+  const routeContainsFacility = (
+    facility: Facility,
+    routeIdentity: { ids: Set<string>; legacyNames: Set<string> },
+  ): boolean => routeIdentity.ids.has(facility.id) || routeIdentity.legacyNames.has(facility.name);
 
   /**
    * One stop per facility, in the order they were actually visited.
@@ -1064,7 +1206,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         });
     }
 
-    const inRoute = getRouteFacilityNames();
+    const inRoute = getRouteFacilityIdentity();
     const latestByFacility = new Map<string, RouteVisitEvent>();
     for (const event of routeVisitEvents) {
       const existing = latestByFacility.get(event.facility_id);
@@ -1085,7 +1227,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       // membership here — that's what makes clearing the flag drop the
       // facility out of the summary.
       .filter(({ facility }) => Boolean(facility.photos_taken))
-      .filter(({ facility }) => inRoute.has(facility.name));
+      .filter(({ facility }) => routeContainsFacility(facility, inRoute));
 
     // Number the distinct calendar dates in the order they were driven. The
     // list is already sorted by instant and the zone is fixed, so first-seen
@@ -1099,8 +1241,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     });
   })();
 
-  const hasValidInspection = (facilityName: string): boolean => {
-    const facility = getFacilityForStop(facilityName);
+  const hasValidInspection = (facilityName: string, facilityId?: string): boolean => {
+    const facility = getFacilityForStop(facilityName, facilityId);
     if (!facility) return false;
 
     // Check for external completion
@@ -1113,8 +1255,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return isInspectionValid(inspection);
   };
 
-  const shouldHideFacility = (facilityName: string): boolean => {
-    const facility = getFacilityForStop(facilityName);
+  const shouldHideFacility = (facilityName: string, facilityId?: string): boolean => {
+    const facility = getFacilityForStop(facilityName, facilityId);
     if (!facility) return false;
 
     const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
@@ -1179,9 +1321,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    */
   const getCompletedFacilities = (): Facility[] => {
     if (effectiveKind === 'spcc_plan') {
-      const inRoute = getRouteFacilityNames();
+      const inRoute = getRouteFacilityIdentity();
       return facilities.filter(
-        f => f.status !== 'sold' && inRoute.has(f.name) && isFacilityVisited(f)
+        f => f.status !== 'sold' && routeContainsFacility(f, inRoute) && isFacilityVisited(f)
       );
     }
 
@@ -1202,8 +1344,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     });
   };
 
-  const getInspection = (facilityName: string): Inspection | undefined => {
-    const facility = getFacilityForStop(facilityName);
+  const getInspection = (facilityName: string, facilityId?: string): Inspection | undefined => {
+    const facility = getFacilityForStop(facilityName, facilityId);
     return facility ? inspections.get(facility.id) : undefined;
   };
 
@@ -1225,49 +1367,53 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     { facility: Facility; anchorEl: HTMLElement; visitedAt: string | null } | null
   >(null);
 
-  const openDayActionsPopover = (facilityName: string, e: React.MouseEvent) => {
-    const facility = getFacilityForStop(facilityName);
-    if (!facility) return;
+  const openDayActionsPopoverForFacility = (facility: Facility, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDayActionsPopover({ facility, x: e.clientX, y: e.clientY });
   };
 
+  const openDayActionsPopover = (facilityName: string, e: React.MouseEvent, facilityId?: string) => {
+    const facility = getFacilityForStop(facilityName, facilityId);
+    if (facility) openDayActionsPopoverForFacility(facility, e);
+  };
+
   const reassignFacilityToDay = async (facility: Facility, targetDay: number) => {
     if (!accountId) return;
-    if (facility.day_assignment === targetDay) {
+    const currentRoute = result.routes.find(route => route.facilities.some(routeFacility =>
+      routeFacility.id
+        ? routeFacility.id === facility.id
+        : routeFacility.name === facility.name
+    ));
+    const currentDay = currentRoute?.day ?? facility.day_assignment;
+    if (currentDay === targetDay) {
       setDayActionsPopover(null);
       return;
     }
     try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: targetDay })
-        .eq('id', facility.id);
-      if (error) throw error;
+      if (!onMoveFacility || currentDay == null) {
+        throw new Error('Route editing is not available from this view.');
+      }
+      const moved = await onMoveFacility(facility.id, currentDay, targetDay);
+      if (!moved) throw new Error('The route could not be updated.');
       setDayActionsPopover(null);
-      pendingDayMovesRef.current.push({ facilityName: facility.name, targetDay });
-      if (onFacilitiesUpdated) await onFacilitiesUpdated();
-      // Same re-optimize trigger the drag-and-drop path uses so the day's
-      // stop order/timing reflects the new membership.
-      setPendingReoptimize(true);
     } catch (err) {
       console.error('Error reassigning facility:', err);
       alert('Failed to reassign facility');
     }
   };
 
-  const handleFacilityClick = (facilityName: string, e?: React.MouseEvent) => {
+  const handleFacilityClick = (facilityName: string, e?: React.MouseEvent, facilityId?: string) => {
     // Default click on a list-view facility row opens the day-actions
     // popover (the user's primary intent on the route-planning tab is
     // managing day assignments, not editing facility metadata). The
     // popover's "View details" button still opens the heavier modal.
     if (e) {
-      openDayActionsPopover(facilityName, e);
+      openDayActionsPopover(facilityName, e, facilityId);
       return;
     }
     // Fallback for callsites that don't pass the event (legacy paths).
-    const facility = getFacilityForStop(facilityName);
+    const facility = getFacilityForStop(facilityName, facilityId);
     if (facility) {
       if (effectiveKind === 'spcc_plan') {
         setSpccPlanDetailFacility(facility);
@@ -1287,10 +1433,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   };
 
   // Filter facility based on survey type selection
-  const matchesSurveyTypeFilter = (facilityName: string): boolean => {
+  const matchesSurveyTypeFilter = (facilityName: string, facilityId?: string): boolean => {
     if (surveyType === 'all') return true;
 
-    const facility = getFacilityForStop(facilityName);
+    const facility = getFacilityForStop(facilityName, facilityId);
     if (!facility) return true;
 
     if (effectiveKind === 'spcc_plan') {
@@ -1308,13 +1454,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // In specific survey modes, facilities that need attention are always shown
   // regardless of visibility settings (which hide completed items).
   // Visibility settings only apply in 'all' mode or to hide non-relevant facilities.
-  const isFacilityVisible = (facilityName: string): boolean => {
-    if (!matchesSurveyTypeFilter(facilityName)) return false;
+  const isFacilityVisible = (facilityName: string, facilityId?: string): boolean => {
+    if (!matchesSurveyTypeFilter(facilityName, facilityId)) return false;
     // In specific modes, if a facility needs attention, don't let
     // visibility settings hide it (e.g. an old external completion
     // that still has spcc_completion_type set but needs re-inspection)
     if (surveyType !== 'all') return true;
-    return !shouldHideFacility(facilityName);
+    return !shouldHideFacility(facilityName, facilityId);
   };
 
   // Get counts for survey type badges
@@ -1328,16 +1474,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     let planPastDueInRouteCount = 0;
     let inspectionPastDueInRouteCount = 0;
 
-    // Get all facility names that are in the current route
-    const facilitiesInRoute = new Set<string>();
-    result.routes.forEach(route => {
-      route.facilities.forEach(f => {
-        facilitiesInRoute.add(f.name);
-      });
-    });
+    const facilitiesInRoute = getRouteFacilityIdentity();
 
     facilities.forEach(f => {
-      const isInRoute = facilitiesInRoute.has(f.name);
+      const isInRoute = routeContainsFacility(f, facilitiesInRoute);
 
       if (facilityNeedsSPCCPlan(f)) {
         planCount++;
@@ -1405,9 +1545,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     });
   };
 
-  const handleAddDay = () => {
+  const handleAddDay = async () => {
     if (!result || !settings) return;
-    const newDayNumber = result.routes.length + 1;
+    const newDayNumber = nextAvailableRouteDay;
 
     const newRoute = {
       day: newDayNumber,
@@ -1426,12 +1566,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const updatedResult = {
       ...result,
       routes: [...result.routes, newRoute],
-      totalDays: newDayNumber
+      totalDays: result.routes.length + 1,
     };
 
-    if (onUpdateResult) {
-      onUpdateResult(updatedResult);
-    }
+    const saved = await persistEditedResult(updatedResult);
+    if (!saved) return;
 
     setCollapsedDays(prev => {
       const newSet = new Set(prev);
@@ -1446,18 +1585,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // down by 1 so there are no gaps (e.g. delete Day 2 from [1,2,3] → [1,2]).
   // The map view reads the same `result.routes` so its "Move to Day N"
   // options update automatically.
-  const handleDeleteDay = (dayToDelete: number) => {
-    if (!result || !onUpdateResult) return;
+  const handleDeleteDay = async (dayToDelete: number) => {
+    if (!result) return;
     const target = result.routes.find(r => r.day === dayToDelete);
     if (!target || target.facilities.length > 0) return;
 
     const remaining = result.routes
       .filter(r => r.day !== dayToDelete)
-      // Renumber so days are contiguous after the gap.
-      .sort((a, b) => a.day - b.day)
-      .map((r, idx) => ({ ...r, day: idx + 1 }));
+      .sort((a, b) => a.day - b.day);
 
-    onUpdateResult({
+    await persistEditedResult({
       ...result,
       routes: remaining,
       totalDays: remaining.length,
@@ -1471,13 +1608,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
   };
 
-  const handleToggleFacilitySelection = (facilityName: string) => {
+  const handleToggleFacilitySelection = (facility: Facility) => {
+    const facilityKey = `id:${facility.id}`;
     setSelectedFacilityNames(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(facilityName)) {
-        newSet.delete(facilityName);
+      if (newSet.has(facilityKey)) {
+        newSet.delete(facilityKey);
       } else {
-        newSet.add(facilityName);
+        newSet.add(facilityKey);
       }
       return newSet;
     });
@@ -1487,65 +1625,28 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     if (selectedFacilityNames.size === 0 || !accountId) return;
 
     try {
-      const facilityNamesToReassign = Array.from(selectedFacilityNames);
-      const facilitiesToUpdate = facilities.filter(f => facilityNamesToReassign.includes(f.name));
-
-      // Check if we're creating a new day
-      const isNewDay = bulkReassignTargetDay === result.routes.length + 1;
-
-      if (isNewDay && settings) {
-        // Create the new empty day first
-        const newRoute = {
-          day: bulkReassignTargetDay,
-          facilities: [],
-          sequence: [],
-          totalMiles: 0,
-          totalDriveTime: 0,
-          totalVisitTime: 0,
-          totalTime: 0,
-          startTime: settings.start_time || '08:00',
-          endTime: settings.start_time || '08:00',
-          lastFacilityDepartureTime: settings.start_time || '08:00',
-          segments: []
-        };
-
-        const updatedResult = {
-          ...result,
-          routes: [...result.routes, newRoute]
-        };
-
-        if (onUpdateResult) {
-          onUpdateResult(updatedResult);
-        }
+      if (!onMoveFacilities) {
+        throw new Error('Route editing is not available from this view.');
       }
-
-      // Now assign the facilities to the target day
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: bulkReassignTargetDay })
-        .in('id', facilitiesToUpdate.map(f => f.id));
-
-      if (error) throw error;
-
-      facilitiesToUpdate.forEach(f =>
-        pendingDayMovesRef.current.push({ facilityName: f.name, targetDay: bulkReassignTargetDay })
+      const moved = await onMoveFacilities(
+        Array.from(selectedFacilityNames),
+        bulkReassignTargetDay,
       );
+      if (!moved) throw new Error('The route could not be updated.');
       setSelectedFacilityNames(new Set());
       setListSelectionMode(false);
-
-      if (onFacilitiesUpdated) {
-        await onFacilitiesUpdated();
-      }
-      // Auto re-optimize affected days instead of full page refresh
-      setPendingReoptimize(true);
     } catch (err) {
       console.error('Error bulk reassigning facilities:', err);
       alert('Failed to reassign facilities');
     }
   };
 
-  const handleDragStart = (facilityName: string, fromDay: number) => {
-    setDraggedFacility({ name: facilityName, fromDay });
+  const handleDragStart = (facility: Facility, fromDay: number) => {
+    setDraggedFacility({
+      facilityId: facility.id,
+      facilityName: facility.name,
+      fromDay,
+    });
   };
 
   const handleReoptimizeDays = async () => {
@@ -1573,17 +1674,32 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       const facilitiesByDay = new Map<number, typeof facilities>();
       const dayOrderedRouteFacilities: typeof facilities = [];
       const seenFacilityIds = new Set<string>();
+      const facilitiesByName = new Map<string, Facility[]>();
+      for (const facility of facilities) {
+        const matches = facilitiesByName.get(facility.name) || [];
+        matches.push(facility);
+        facilitiesByName.set(facility.name, matches);
+      }
       for (const route of result.routes) {
         const dayList: typeof facilities = [];
         for (const rf of route.facilities) {
-          // Look up the live facility row by name to pick up the latest
+          // Look up the live facility row by stable ID to pick up the latest
           // lat/lng/visit-duration. If the facility was deleted between the
           // route's creation and now, fall back to the route copy so we
           // don't drop it (better to re-optimize a stale entry than to
           // change the route's facility count under the user's feet).
-          const live = facilities.find(f => f.name === rf.name);
+          const legacyMatches = rf.id ? [] : facilitiesByName.get(rf.name) || [];
+          if (!rf.id && legacyMatches.length > 1) {
+            throw new Error(
+              `The legacy stop "${rf.name}" matches more than one facility. `
+              + 'Give those facilities unique names before refreshing this route.',
+            );
+          }
+          const live = rf.id
+            ? facilities.find(facility => facility.id === rf.id)
+            : legacyMatches[0];
           const item = live ?? ({
-            id: `route-only-${rf.name}`,
+            id: rf.id || `legacy-route-only:${route.day}:${rf.index}:${rf.name}`,
             name: rf.name,
             latitude: rf.latitude,
             longitude: rf.longitude,
@@ -1608,7 +1724,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       for (const move of movesToApply) {
         let moved: (typeof facilities)[number] | undefined;
         for (const [, dayList] of facilitiesByDay) {
-          const idx = dayList.findIndex(f => f.name === move.facilityName);
+          const idx = dayList.findIndex(facility =>
+            move.facilityId
+              ? facility.id === move.facilityId
+              : facility.name === move.facilityName
+          );
           if (idx !== -1) {
             moved = dayList.splice(idx, 1)[0];
             break;
@@ -1617,7 +1737,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         if (!moved) {
           // Not on the displayed route (e.g. restored facility) — pull the
           // live row so the move still lands.
-          const live = facilities.find(f => f.name === move.facilityName);
+          const legacyMatches = move.facilityId
+            ? []
+            : facilitiesByName.get(move.facilityName) || [];
+          const live = move.facilityId
+            ? facilities.find(facility => facility.id === move.facilityId)
+            : legacyMatches.length === 1
+              ? legacyMatches[0]
+              : undefined;
           if (!live) continue;
           moved = live;
           if (!seenFacilityIds.has(live.id)) {
@@ -1685,6 +1812,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         const facilitiesWithIndex = dayFacilities.map((f) => {
           const matrixIndex = allFacilitiesForMatrix.findIndex(af => af.id === f.id) + 1;
           return {
+            id: f.id,
             index: matrixIndex,
             name: f.name,
             latitude: Number(f.latitude),
@@ -1699,6 +1827,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         // Facilities array indexed by matrix position — rebuildDayRoute
         // expects facilities[sequence[i] - 1] to return the right facility.
         const facilitiesForCalculation = allFacilitiesForMatrix.map(f => ({
+          id: f.id,
           index: allFacilitiesForMatrix.indexOf(f) + 1,
           name: f.name,
           latitude: Number(f.latitude),
@@ -1748,9 +1877,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       };
 
       console.log('[RouteResults] Re-optimization complete, updating result');
-      if (onUpdateResult) {
-        onUpdateResult(newResult);
-      }
+      const saved = await persistEditedResult(newResult);
+      if (!saved) return;
       flashMovedFacilities(movedNames);
 
       // Re-ordering a day changes its drive time, which changes what fits
@@ -1791,7 +1919,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    */
   const applyVisitOrderToDayLists = async () => {
     if (isApplyingVisitDays || isReoptimizing) return;
-    if (!accountId || !settings || !homeBase || !onUpdateResult) {
+    if (!accountId || !settings || !homeBase || (!onPersistRouteResult && !onUpdateResult)) {
       alert('Rearranging the day lists needs the route settings and home base loaded. Try again once the route has finished loading.');
       return;
     }
@@ -1810,24 +1938,32 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
     const visitedDayEntries = Array.from(visitedDays.entries()).sort((a, b) => a[0] - b[0]);
     const visitedDayCount = visitedDayEntries.length;
-    const visitedNames = new Set(routeVisitSummary.map(entry => entry.facility.name));
+    const visitedIds = new Set(routeVisitSummary.map(entry => entry.facility.id));
+    const existingDayNumbers = result.routes.map(route => route.day).sort((a, b) => a - b);
+    const dayForOrdinal = (ordinal: number) => existingDayNumbers[ordinal - 1]
+      ?? nextAvailableRouteDay + (ordinal - existingDayNumbers.length - 1);
 
     // Unvisited stops, grouped exactly as the current plan groups them.
     // Planned days that end up empty collapse out rather than leaving holes.
-    const remainingDays: string[][] = [];
+    const remainingDays: FacilityWithIndex[][] = [];
     for (const route of result.routes) {
-      const names = route.facilities.map(f => f.name).filter(name => !visitedNames.has(name));
-      if (names.length > 0) remainingDays.push(names);
+      const routeStops = route.facilities.filter(routeFacility => {
+        const live = routeFacility.id
+          ? facilities.find(facility => facility.id === routeFacility.id)
+          : facilities.find(facility => facility.name === routeFacility.name);
+        return !live || !visitedIds.has(live.id);
+      });
+      if (routeStops.length > 0) remainingDays.push(routeStops);
     }
-    const remainingCount = remainingDays.reduce((sum, names) => sum + names.length, 0);
+    const remainingCount = remainingDays.reduce((sum, stops) => sum + stops.length, 0);
 
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    const lines = visitedDayEntries.map(([day, list]) =>
-      `  Day ${day} · ${formatVisitDate(list[0].event.visited_at)} — ${plural(list.length, 'visited stop')}, in the order the photos were taken`
+    const lines = visitedDayEntries.map(([, list], index) =>
+      `  Day ${dayForOrdinal(index + 1)} · ${formatVisitDate(list[0].event.visited_at)} — ${plural(list.length, 'visited stop')}, in the order the photos were taken`
     );
     if (remainingCount > 0) {
-      const first = visitedDayCount + 1;
-      const last = visitedDayCount + remainingDays.length;
+      const first = dayForOrdinal(visitedDayCount + 1);
+      const last = dayForOrdinal(visitedDayCount + remainingDays.length);
       lines.push(`  Day ${first}${last > first ? `–${last}` : ''} — ${plural(remainingCount, 'stop')} not visited yet, re-optimized`);
     }
 
@@ -1840,10 +1976,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     setIsApplyingVisitDays(true);
     try {
-      const newDayByName = new Map<string, number>();
-      visitedDayEntries.forEach(([day, list]) => list.forEach(entry => newDayByName.set(entry.facility.name, day)));
-      remainingDays.forEach((names, i) => names.forEach(name => newDayByName.set(name, visitedDayCount + i + 1)));
-
       // Rebuild the displayed plan first, and only write the assignments once
       // it exists. Same matrix-then-day-route path handleReoptimizeDays uses;
       // the difference is which builder each day gets (see the doc comment).
@@ -1853,45 +1985,56 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       // one, with nothing on screen but "failed" — a reshuffle the user
       // wouldn't discover until the next reload.
       const defaultVisitDuration = settings.default_visit_duration_minutes || 30;
-      const dayLists: Array<{ day: number; names: string[]; preserveOrder: boolean }> = [
-        ...visitedDayEntries.map(([day, list]) => ({
-          day,
-          names: list.map(entry => entry.facility.name),
+      const dayLists: Array<{
+        day: number;
+        stops: Array<{ id?: string; name: string }>;
+        preserveOrder: boolean;
+      }> = [
+        ...visitedDayEntries.map(([, list], index) => ({
+          day: dayForOrdinal(index + 1),
+          stops: list.map(entry => ({ id: entry.facility.id, name: entry.facility.name })),
           preserveOrder: true,
         })),
-        ...remainingDays.map((names, i) => ({ day: visitedDayCount + i + 1, names, preserveOrder: false })),
+        ...remainingDays.map((stops, index) => ({
+          day: dayForOrdinal(visitedDayCount + index + 1),
+          stops: stops.map(stop => ({ id: stop.id, name: stop.name })),
+          preserveOrder: false,
+        })),
       ];
 
       // Route copies are the fallback for coordinates/visit duration when a
       // facility row has since been deleted — same reasoning as the
       // re-optimize path: better a stale entry than a stop that vanishes.
-      const routeCopyByName = new Map<string, FacilityWithIndex>();
+      const routeCopyByKey = new Map<string, FacilityWithIndex>();
       for (const route of result.routes) {
         for (const rf of route.facilities) {
-          if (!routeCopyByName.has(rf.name)) routeCopyByName.set(rf.name, rf);
+          const key = rf.id ? `id:${rf.id}` : `name:${rf.name}`;
+          if (!routeCopyByKey.has(key)) routeCopyByKey.set(key, rf);
         }
       }
 
       const matrixFacilities: FacilityWithIndex[] = [];
-      const matrixIndexByName = new Map<string, number>();
+      const matrixIndexByKey = new Map<string, number>();
       const uncharted: string[] = [];
-      for (const { names } of dayLists) {
-        for (const name of names) {
-          if (matrixIndexByName.has(name)) continue;
-          const live = facilities.find(f => f.name === name);
-          const copy = routeCopyByName.get(name);
+      for (const { stops } of dayLists) {
+        for (const stop of stops) {
+          const key = stop.id ? `id:${stop.id}` : `name:${stop.name}`;
+          if (matrixIndexByKey.has(key)) continue;
+          const live = stop.id
+            ? facilities.find(facility => facility.id === stop.id)
+            : facilities.find(facility => facility.name === stop.name);
+          const copy = routeCopyByKey.get(key);
           const latitude = Number(live?.latitude ?? copy?.latitude);
           const longitude = Number(live?.longitude ?? copy?.longitude);
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-            // Nothing to route to. Its day_assignment is still written below,
-            // so it lands in the right list on the next full regenerate.
-            uncharted.push(name);
+            uncharted.push(stop.name);
             continue;
           }
-          matrixIndexByName.set(name, matrixFacilities.length + 1);
+          matrixIndexByKey.set(key, matrixFacilities.length + 1);
           matrixFacilities.push({
+            id: live?.id ?? copy?.id,
             index: matrixFacilities.length + 1,
-            name,
+            name: live?.name ?? copy?.name ?? stop.name,
             latitude,
             longitude,
             visitDuration: live?.visit_duration_minutes || copy?.visitDuration || defaultVisitDuration,
@@ -1899,6 +2042,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         }
       }
 
+      if (uncharted.length > 0) {
+        throw new Error(`Add coordinates before rebuilding the visit order: ${uncharted.join(', ')}.`);
+      }
       if (matrixFacilities.length === 0) {
         throw new Error('None of these stops have coordinates to route with.');
       }
@@ -1907,8 +2053,18 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
         ...matrixFacilities.map(f => ({ latitude: f.latitude, longitude: f.longitude })),
       ]);
+      const stableIndexByLocal = new Map(
+        matrixFacilities.map(matrixFacility => {
+          const recordIndex = facilities.findIndex(facility =>
+            matrixFacility.id
+              ? facility.id === matrixFacility.id
+              : facility.name === matrixFacility.name
+          );
+          return [matrixFacility.index, recordIndex >= 0 ? recordIndex + 1 : matrixFacility.index];
+        }),
+      );
 
-      const newRoutes = dayLists.map(({ day, names, preserveOrder }) => {
+      const newRoutes = dayLists.map(({ day, stops, preserveOrder }) => {
         // Whatever this day slot already runs on: its per-day override if the
         // user set one, else the clock the day is currently displaying (a
         // saved route restores route.startTime without ever seeding
@@ -1920,8 +2076,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           || result.routes.find(r => r.day === day)?.startTime
           || settings.start_time
           || '08:00';
-        const indices = names
-          .map(name => matrixIndexByName.get(name))
+        const indices = stops
+          .map(stop => matrixIndexByKey.get(stop.id ? `id:${stop.id}` : `name:${stop.name}`))
           .filter((index): index is number => typeof index === 'number');
 
         if (indices.length === 0) {
@@ -1944,7 +2100,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           ? calculateDayRoute(matrixFacilities, indices, distanceMatrix, 0, startTime, settings.lunch_break_minutes || 0)
           : rebuildDayRoute(matrixFacilities, indices, distanceMatrix, 0, startTime, settings.lunch_break_minutes || 0);
 
-        return { ...dayRoute, day };
+        return {
+          ...dayRoute,
+          day,
+          facilities: dayRoute.facilities.map(routeFacility => ({
+            ...routeFacility,
+            index: stableIndexByLocal.get(routeFacility.index) ?? routeFacility.index,
+          })),
+          sequence: dayRoute.sequence.map(index => stableIndexByLocal.get(index) ?? index),
+        };
       }).sort((a, b) => a.day - b.day);
 
       const totalMiles = newRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
@@ -1952,33 +2116,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       const totalVisitTime = newRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
       const totalTime = newRoutes.reduce((sum, r) => sum + r.totalTime, 0);
 
-      // The plan exists — now persist it, grouped by target day so this is a
-      // handful of writes rather than one per facility. Chunked because a
-      // long id list would blow the URL length limit on PostgREST's `in`.
-      const idsByDay = new Map<number, string[]>();
-      const movedNames: string[] = [];
-      for (const [name, day] of newDayByName) {
-        const live = facilities.find(f => f.name === name);
-        if (!live) continue;
-        if (live.day_assignment !== day) movedNames.push(name);
-        const ids = idsByDay.get(day) ?? [];
-        ids.push(live.id);
-        idsByDay.set(day, ids);
-      }
-      for (const [day, ids] of idsByDay) {
-        for (let i = 0; i < ids.length; i += 50) {
-          const { error } = await supabase
-            .from('facilities')
-            .update({ day_assignment: day })
-            .in('id', ids.slice(i, i + 50));
-          if (error) throw error;
-        }
-      }
-
-      // A move queued from an earlier click would be replayed against the
-      // lists we just rewrote and undo part of this. The DB already holds
-      // every assignment, so drop them.
-      pendingDayMovesRef.current.length = 0;
+      const movedNames = newRoutes.flatMap(route => route.facilities.flatMap(routeFacility => {
+        const live = routeFacility.id
+          ? facilities.find(facility => facility.id === routeFacility.id)
+          : facilities.find(facility => facility.name === routeFacility.name);
+        return live && live.day_assignment !== route.day ? [live.name] : [];
+      }));
 
       // Pre-arm the passive deadline guard with this exact plan. A day that
       // was really driven 7 AM to 8 PM overruns almost any "leave for home
@@ -1992,9 +2135,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         dayReturnByTimes,
       ]);
 
-      if (onFacilitiesUpdated) await onFacilitiesUpdated();
-
-      onUpdateResult({
+      const saved = await persistEditedResult({
         routes: newRoutes,
         totalDays: newRoutes.length,
         totalMiles,
@@ -2003,13 +2144,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         totalVisitTime,
         totalTime,
       });
+      if (!saved) throw new Error('The route could not be saved.');
       flashMovedFacilities(movedNames);
-
-      if (uncharted.length > 0) {
-        alert(
-          `Day lists rebuilt from the visit log.\n\n${plural(uncharted.length, 'stop')} had no coordinates and could not be placed on a day route: ${uncharted.join(', ')}. Their day assignment was still saved.`
-        );
-      }
     } catch (err) {
       console.error('[RouteResults] Error applying visit order to day lists:', err);
       alert(`Failed to rebuild the day lists: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -2026,7 +2162,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     if (!draggedFacility || !accountId) return;
 
     try {
-      const facility = facilities.find(f => f.name === draggedFacility.name);
+      const facility = draggedFacility.facilityId
+        ? facilities.find(candidate => candidate.id === draggedFacility.facilityId)
+        : facilities.find(candidate => candidate.name === draggedFacility.facilityName);
       if (!facility) return;
 
       // Skip if dropping on the same day
@@ -2035,21 +2173,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         return;
       }
 
-      const { error } = await supabase
-        .from('facilities')
-        .update({ day_assignment: targetDay })
-        .eq('id', facility.id);
-
-      if (error) throw error;
-
-      setDraggedFacility(null);
-      pendingDayMovesRef.current.push({ facilityName: facility.name, targetDay });
-
-      if (onFacilitiesUpdated) {
-        await onFacilitiesUpdated();
+      if (!onMoveFacility) {
+        throw new Error('Route editing is not available from this view.');
       }
-      // Auto re-optimize affected days instead of full page refresh
-      setPendingReoptimize(true);
+      const moved = await onMoveFacility(facility.id, draggedFacility.fromDay, targetDay);
+      if (!moved) throw new Error('The route could not be updated.');
+      setDraggedFacility(null);
     } catch (err) {
       console.error('Error reassigning facility:', err);
       alert('Failed to reassign facility');
@@ -2076,109 +2205,218 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </div>
         )}
         {settings && (
-          // Toolbar redesign: actions now read as a labelled chip cluster
-          // sitting in a soft tinted pill on the left ("Route" toolset),
-          // with Update Route as the primary action on the right. The
-          // labels make the row feel intentional instead of four faint
-          // icons drifting in space, and the matched chip / button
-          // heights balance the bar visually.
-          <div className="px-1 py-0 transition-all duration-200 overflow-visible relative z-10">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* Action toolset — chip-grouped on a subtle gray pill so
-                  the four buttons read as a connected unit rather than
-                  loose icons. */}
-              <div className="inline-flex items-center gap-0.5 bg-gray-50 dark:bg-gray-900/40 rounded-lg p-0.5">
-                {onConfigureHomeBase && (
-                  <button
-                    onClick={onConfigureHomeBase}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
-                    title="Set where each team's route starts & ends"
-                  >
-                    <Home className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Home Base</span>
-                  </button>
-                )}
-                {onLoadRoute && (
-                  <button
-                    onClick={() => {
-                      console.log('[showOnlySettings] Load Route button clicked');
-                      setShowLoadRoutePopup(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
-                    title="Open a previously saved route plan"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Load</span>
-                  </button>
-                )}
-                {onSaveCurrentRoute && (
-                  <button
-                    onClick={() => {
-                      console.log('[showOnlySettings] Save Route button clicked');
-                      setShowSaveRoutePopup(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
-                    title="Save the current route plan for later use"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Save</span>
-                  </button>
-                )}
+          <div className="px-1 py-0 transition-all duration-200 overflow-visible relative z-[60]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="relative" ref={routeActionsRef}>
                 <button
-                  onClick={() => {
-                    console.log('[showOnlySettings] Export Routes button clicked');
-                    setShowExportPopup(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-md transition-all"
-                  title="Download route schedule as a CSV file"
+                  type="button"
+                  onClick={() => setShowRouteActionsMenu(current => !current)}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+                  aria-haspopup="menu"
+                  aria-expanded={showRouteActionsMenu}
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Export</span>
+                  <Route className="h-4 w-4" />
+                  <span>Route actions</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${showRouteActionsMenu ? 'rotate-180' : ''}`} />
                 </button>
+
+                {showRouteActionsMenu && (
+                  <div
+                    role="menu"
+                    aria-label="Route actions"
+                    className="absolute left-0 top-full z-[100] mt-2 w-60 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    {onSaveCurrentRoute && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setShowRouteActionsMenu(false);
+                          setShowSaveRoutePopup(true);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        <Save className="h-4 w-4" /> Save route
+                      </button>
+                    )}
+                    {onLoadRoute && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setShowRouteActionsMenu(false);
+                          setShowLoadRoutePopup(true);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        <FolderOpen className="h-4 w-4" /> Load saved route
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowRouteActionsMenu(false);
+                        setShowExportPopup(true);
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                    >
+                      <Download className="h-4 w-4" /> Export route
+                    </button>
+                    {onConfigureHomeBase && (
+                      <>
+                        <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setShowRouteActionsMenu(false);
+                            onConfigureHomeBase();
+                          }}
+                          className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          <Home className="h-4 w-4" /> Home base
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
-                {excludedCount > 0 && (
-                  <button
-                    onClick={handleRestoreExcluded}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20 transition-all"
-                    title={`Restore ${excludedCount} excluded facilit${excludedCount === 1 ? 'y' : 'ies'}`}
-                  >
-                    <Undo2 className="w-3.5 h-3.5" />
-                    <span>Restore {excludedCount}</span>
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowRefreshOptions(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg hover:from-blue-700 hover:to-blue-800 shadow-[0_2px_8px_rgba(59,130,246,0.25)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.35)] transition-all active:scale-[0.98]"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Update Route</span>
-                </button>
-              </div>
+              <button
+                ref={refreshDialogTriggerRef}
+                type="button"
+                onClick={() => setShowRefreshOptions(true)}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98]"
+              >
+                <Settings className="h-4 w-4" />
+                <span>Update route</span>
+              </button>
             </div>
           </div>
         )}
         {showRefreshOptions && tempSettings && (
           <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 overflow-y-auto"
+            className="fixed inset-0 z-[9999] flex items-end justify-center overflow-hidden bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
             onClick={() => {
               setShowRefreshOptions(false);
               setShowAdvanced(false);
             }}
           >
             <div
-              className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-2xl backdrop-saturate-150 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-white/50 dark:border-white/[0.08] max-w-2xl w-full my-8 transition-colors duration-200"
+              ref={refreshDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="update-route-dialog-title"
+              className="flex max-h-[100dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-white/50 bg-white shadow-2xl transition-colors duration-200 dark:border-white/[0.08] dark:bg-gray-800 sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-6 border-b border-gray-200/60 dark:border-gray-700/60">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Update Route Settings</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  Adjust route optimization constraints and onsite visit durations.
-                </p>
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200/60 p-4 dark:border-gray-700/60 sm:p-6">
+                <div>
+                  <h3 id="update-route-dialog-title" className="text-xl font-bold text-gray-900 dark:text-white">Update route</h3>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    Choose the stops and timing rules for this route.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRefreshOptions(false)}
+                  className="grid min-h-11 min-w-11 place-items-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+                  aria-label="Close Update route"
+                >
+                  <XIcon className="h-5 w-5" />
+                </button>
               </div>
 
-              <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
+                <section aria-labelledby="route-stop-scope-heading" className="space-y-3">
+                  <div>
+                    <h4 id="route-stop-scope-heading" className="text-sm font-semibold text-gray-900 dark:text-white">Included stops</h4>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Marker visibility never changes route membership. Replacing stops happens only when you apply this dialog.
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className={`flex min-h-14 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${routeScopeChoice === 'current' ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/20' : 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/50'}`}>
+                      <input
+                        type="radio"
+                        name="route-stop-scope"
+                        value="current"
+                        checked={routeScopeChoice === 'current'}
+                        onChange={() => setRouteScopeChoice('current')}
+                        className="mt-0.5 h-4 w-4 text-blue-600"
+                      />
+                      <span>
+                        <strong className="block text-sm text-gray-900 dark:text-white">
+                          {routeScopeIsSubset ? 'Keep current stops' : 'Use all eligible facilities'}
+                        </strong>
+                        <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                          {routeScopeIsSubset
+                            ? `${routeStopCount ?? result.totalFacilities} stops from your selected list`
+                            : `${routeStopCount ?? result.totalFacilities} current stops. Eligibility is checked again when you rebuild.`}
+                        </span>
+                      </span>
+                    </label>
+                    {onUseAllEligible && (
+                      <label className={`flex min-h-14 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${routeScopeChoice === 'all' ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/20' : 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/50'}`}>
+                        <input
+                          type="radio"
+                          name="route-stop-scope"
+                          value="all"
+                          checked={routeScopeChoice === 'all'}
+                          onChange={() => setRouteScopeChoice('all')}
+                          className="mt-0.5 h-4 w-4 text-blue-600"
+                        />
+                        <span>
+                          <strong className="block text-sm text-gray-900 dark:text-white">Use all eligible</strong>
+                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">Rebuild from every facility eligible for this survey mode</span>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                  {excludedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setShowRefreshOptions(false);
+                        await handleRestoreExcluded();
+                      }}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-emerald-300 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                    >
+                      <Undo2 className="h-4 w-4" /> Restore {excludedCount} excluded
+                    </button>
+                  )}
+                </section>
+
+                {effectiveKind === 'spcc_plan' && planRouteProgress && (
+                  <section aria-labelledby="outing-progress-heading" className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h4 id="outing-progress-heading" className="text-sm font-semibold text-gray-900 dark:text-white">Outing progress</h4>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {planRouteProgress.runId
+                            ? `${planRouteProgress.completedCount ?? 0} of ${planRouteProgress.totalCount ?? routeStopCount ?? 0} current stops completed`
+                            : currentRouteId
+                              ? 'Starts automatically when the first stop is marked done'
+                              : 'Save this route before tracking an outing'}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Facility photo status and photo history are never reset here.</p>
+                      </div>
+                      {planRouteProgress.runId && planRouteProgress.startNewRun && (
+                        <button
+                          type="button"
+                          disabled={isResettingOuting || planRouteProgress.loading}
+                          onClick={handleResetPlanOuting}
+                          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${isResettingOuting ? 'animate-spin' : ''}`} />
+                          Reset for new outing
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
                     <input
@@ -2247,7 +2485,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                 <div className="border-t pt-4 space-y-4">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Onsite Visit Duration</p>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className={`grid grid-cols-1 gap-4 ${effectiveKind === 'all' || effectiveKind === 'custom' ? 'sm:grid-cols-2' : ''}`}>
+                    {effectiveKind !== 'spcc_plan' && (
                     <div>
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         <Clock className="inline w-4 h-4 mr-1" />
@@ -2266,6 +2505,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Inspections mode</p>
                     </div>
+                    )}
+                    {effectiveKind !== 'spcc_inspection' && (
                     <div>
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         <Clock className="inline w-4 h-4 mr-1" />
@@ -2284,6 +2525,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Plans mode</p>
                     </div>
+                    )}
                   </div>
                 </div>
 
@@ -2394,8 +2636,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                 <div className="border-t pt-4">
                   <button
+                    type="button"
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 dark:text-gray-200 hover:text-blue-600 transition-colors"
+                    className="flex min-h-11 w-full items-center justify-between text-left text-sm font-medium text-gray-700 transition-colors hover:text-blue-600 dark:text-gray-200"
+                    aria-expanded={showAdvanced}
                   >
                     <span>Advanced Clustering Options</span>
                     {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -2505,30 +2749,42 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
               </div>
 
-              <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowRefreshOptions(false);
-                    setShowAdvanced(false);
-                  }}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleRefreshTimesOnly}
-                  className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
-                  title="Quickly update times without regenerating routes"
-                >
-                  Apply & Refresh Times
-                </button>
-                <button
-                  onClick={handleRefreshWithSettings}
-                  className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
-                  title="Fully re-optimize routes with new constraints"
-                >
-                  Apply & Re-optimize
-                </button>
+              <div className="shrink-0 border-t border-gray-200/60 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] dark:border-gray-700/60 dark:bg-gray-800 sm:p-6">
+                <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                  {routeScopeChoice === 'all'
+                    ? 'Rebuilds the route with all currently eligible facilities. Existing outing accomplishments and photo history remain preserved.'
+                    : routeScopeIsSubset
+                      ? 'Re-optimizing keeps these selected stops and preserves outing accomplishments and photo history.'
+                      : 'Rebuilds from all facilities currently eligible for this survey mode. Existing outing accomplishments and photo history remain preserved.'}
+                </p>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRefreshOptions(false);
+                      setShowAdvanced(false);
+                    }}
+                    className="min-h-11 rounded-lg px-4 text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={routeScopeChoice !== 'current'}
+                    onClick={handleRefreshTimesOnly}
+                    className="min-h-11 rounded-lg border border-blue-300 px-5 font-medium text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/20 dark:disabled:border-gray-700 dark:disabled:text-gray-500"
+                    title={routeScopeChoice === 'current' ? 'Refresh timing without changing stops or order' : 'Choose Keep current stops to refresh timing only'}
+                  >
+                    Refresh schedule only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefreshWithSettings}
+                    className="min-h-11 rounded-lg bg-blue-600 px-5 font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+                  >
+                    {routeScopeChoice === 'all' || !routeScopeIsSubset ? 'Rebuild eligible route' : 'Re-optimize route'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2602,11 +2858,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <SavedRoutesManager
                   accountId={accountId}
                   currentRouteId={currentRouteId}
-                  onLoadRoute={(route) => {
-                    onLoadRoute(route);
+                  onRouteRenamed={onRouteRenamed}
+                  onLoadRoute={async (route) => {
+                    const loaded = await onLoadRoute(route);
+                    if (loaded === false) return false;
                     setShowLoadRoutePopup(false);
+                    return true;
                   }}
-                  onSaveCurrentRoute={onSaveCurrentRoute}
+                  onSaveCurrentRoute={onSaveCurrentRoute
+                    ? (name) => onSaveCurrentRoute(name, 'update')
+                    : undefined}
                   autoOpen={true}
                   hideButtons={true}
                 />
@@ -2674,7 +2935,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               {result.routes.map(r => (
                 <option key={r.day} value={r.day} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to Day {r.day}</option>
               ))}
-              <option value={result.routes.length + 1} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to New Day {result.routes.length + 1}</option>
+              <option value={nextAvailableRouteDay} className="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">Move to New Day {nextAvailableRouteDay}</option>
             </select>
             <button
               onClick={handleBulkReassign}
@@ -2942,7 +3203,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           .filter(route =>
             route.facilities.length === 0 ||
             surveyType === 'all' ||
-            route.facilities.some(f => isFacilityVisible(f.name))
+            route.facilities.some(f => isFacilityVisible(f.name, f.id))
           )
           .map((route) => (
             <div
@@ -3004,7 +3265,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   <div className="flex items-center gap-4 text-sm">
                     <span className="flex items-center gap-1">
                       <MapPin className="w-4 h-4" />
-                      {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
+                      {route.facilities.filter(f => isFacilityVisible(f.name, f.id)).length} stops
                     </span>
                     <span className="flex items-center gap-1">
                       <TrendingUp className="w-4 h-4" />
@@ -3133,15 +3394,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {route.segments.filter(segment => {
+                      {route.segments.map((segment, segmentIndex) => ({
+                        segment,
+                        routeFacility: segment.to === 'Home Base'
+                          ? undefined
+                          : route.facilities[segmentIndex],
+                      })).filter(({ segment, routeFacility }) => {
                         // Always show home base segments
                         if (segment.from === 'Home Base' || segment.to === 'Home Base') {
                           return true;
                         }
                         // Filter based on visibility settings and survey type
                         const facilityName = segment.to;
-                        return isFacilityVisible(facilityName);
-                      }).map((segment, index) => {
+                        return isFacilityVisible(facilityName, routeFacility?.id);
+                      }).map(({ segment, routeFacility }, index) => {
                         // Only the return-home row lacks a facility. The first
                         // stop's row has from === 'Home Base' but its
                         // DESTINATION is a real facility — treating it as a
@@ -3149,9 +3415,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         // first stop never got the photos-taken strikethrough,
                         // camera icon, drag handle, or selection checkbox.
                         const isHomeBaseSegment = segment.to === 'Home Base';
-                        const facilityName = segment.to;
-                        const isSelected = selectedFacilityNames.has(facilityName);
-                        const facility = isHomeBaseSegment ? undefined : getFacilityForStop(facilityName);
+                        const facility = isHomeBaseSegment || !routeFacility
+                          ? undefined
+                          : facilities.find(candidate =>
+                              routeFacility.id
+                                ? candidate.id === routeFacility.id
+                                : candidate.name === routeFacility.name
+                            );
+                        const isSelected = facility
+                          ? selectedFacilityNames.has(`id:${facility.id}`)
+                          : false;
                         const routeStop = facility
                           ? planRouteProgress?.stopsByFacilityId.get(facility.id)
                           : undefined;
@@ -3163,20 +3436,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           <div
                             key={index}
                             className={`flex items-start gap-3 ${!isHomeBaseSegment && listSelectionMode ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
-                            draggable={!isHomeBaseSegment}
-                            onDragStart={() => !isHomeBaseSegment && handleDragStart(facilityName, route.day)}
+                            draggable={!isHomeBaseSegment && Boolean(facility)}
+                            onDragStart={() => facility && handleDragStart(facility, route.day)}
                             onClick={() => {
-                              if (listSelectionMode && !isHomeBaseSegment) {
-                                handleToggleFacilitySelection(facilityName);
+                              if (listSelectionMode && facility) {
+                                handleToggleFacilitySelection(facility);
                               }
                             }}
                           >
-                            {listSelectionMode && !isHomeBaseSegment && (
+                            {listSelectionMode && facility && (
                               <div className="flex-shrink-0 mt-1" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
-                                  onChange={() => handleToggleFacilitySelection(facilityName)}
+                                  onChange={() => handleToggleFacilitySelection(facility)}
                                   className="w-5 h-5 text-blue-600 rounded cursor-pointer"
                                 />
                               </div>
@@ -3215,8 +3488,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     ) : (
                                       <p
                                         className={`font-medium text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-500 ${photosTaken ? 'line-through text-gray-500 dark:text-gray-400' : ''} ${recentlyMovedNames.has(segment.to) ? 'bg-yellow-100 dark:bg-yellow-900/50 rounded px-1.5 -mx-1.5 animate-pulse' : ''}`}
-                                        onClick={(e) => handleFacilityClick(segment.to, e)}
-                                        onContextMenu={(e) => openDayActionsPopover(segment.to, e)}
+                                        onClick={(e) => {
+                                          if (facility) openDayActionsPopoverForFacility(facility, e);
+                                        }}
+                                        onContextMenu={(e) => {
+                                          if (facility) openDayActionsPopoverForFacility(facility, e);
+                                        }}
                                         title="Click to reassign or view details"
                                       >
                                         {segment.to}
@@ -3249,11 +3526,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       </span>
                                     )}
                                     {/* SPCC Plan Status Badge - show when spcc_plan filter active */}
-                                    {effectiveKind === 'spcc_plan' && segment.to !== 'Home Base' && (() => {
-                                      const facility = getFacilityForStop(segment.to);
-                                      if (!facility) return null;
-                                      return <SPCCStatusBadge facility={facility} showMessage />;
-                                    })()}
+                                    {effectiveKind === 'spcc_plan' && facility && (
+                                      <SPCCStatusBadge facility={facility} showMessage />
+                                    )}
                                     {/* In Plans mode this is route-run progress, not the
                                         account-wide facility snapshot. Reopening it cannot
                                         erase the Facilities-tab record or photo history. */}
@@ -3302,17 +3577,17 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     })()}
 
                                     {/* Standard inspection icons - show when not filtering by spcc_plan */}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to) && (
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to, facility?.id) && (
                                       <span title="Verified - Inspection within last year">
                                         <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to) && getInspection(segment.to) && (
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to, facility?.id) && getInspection(segment.to, facility?.id) && (
                                       <span title="Inspection expired - Reinspection needed">
                                         <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to) && (
+                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to, facility?.id) && (
                                       <span title="No inspection yet">
                                         <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
                                       </span>
@@ -3456,16 +3731,19 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 <div className="space-y-3">
                   {getCompletedFacilities().map((facility, index) => {
                     const inspection = inspections.get(facility.id);
-                    const isSelected = selectedFacilityNames.has(facility.name);
+                    const isSelected = selectedFacilityNames.has(`id:${facility.id}`);
 
                     return (
                       <div
-                        key={index}
+                        key={facility.id || index}
                         className={`p-4 border rounded-lg transition-all ${isSelected
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-md'
                           : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
-                        onClick={() => handleFacilityClick(facility.name)}
+                        onClick={() => {
+                          if (listSelectionMode) handleToggleFacilitySelection(facility);
+                          else handleFacilityClick(facility.name, undefined, facility.id);
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3 flex-1">
@@ -3473,7 +3751,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleFacilityClick(facility.name);
+                                  handleToggleFacilitySelection(facility);
                                 }}
                                 className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                               >
@@ -3565,6 +3843,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           x={dayActionsPopover.x}
           y={dayActionsPopover.y}
           routes={result.routes}
+          nextRouteDayNumber={nextAvailableRouteDay}
           onReassign={(targetDay) => reassignFacilityToDay(dayActionsPopover.facility, targetDay)}
           onViewDetails={() => {
             const f = dayActionsPopover.facility;
@@ -4020,11 +4299,16 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               <SavedRoutesManager
                 accountId={accountId}
                 currentRouteId={currentRouteId}
-                onLoadRoute={(route) => {
-                  onLoadRoute(route);
+                onRouteRenamed={onRouteRenamed}
+                onLoadRoute={async (route) => {
+                  const loaded = await onLoadRoute(route);
+                  if (loaded === false) return false;
                   setShowLoadRoutePopup(false);
+                  return true;
                 }}
-                onSaveCurrentRoute={onSaveCurrentRoute}
+                onSaveCurrentRoute={onSaveCurrentRoute
+                  ? (name) => onSaveCurrentRoute(name, 'update')
+                  : undefined}
                 autoOpen={true}
                 hideButtons={true}
               />
@@ -4074,7 +4358,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     <div>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">Day {route.day}</span>
                       <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                        {route.facilities.filter(f => isFacilityVisible(f.name)).length} stops
+                        {route.facilities.filter(f => isFacilityVisible(f.name, f.id)).length} stops
                       </span>
                       {dayReturnByTimes[route.day] && (
                         <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
@@ -4113,13 +4397,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    applyDayStartTimes(tempDayStartTimes);
+                  onClick={async () => {
+                    const saved = await applyDayStartTimes(tempDayStartTimes);
+                    if (!saved) return;
                     setShowStartTimeModal(false);
                     // A later start eats into a deadline day's window, so
                     // re-pack anything that no longer fits.
                     if (Object.values(dayReturnByTimes).some(Boolean)) {
-                      void runRefit(dayReturnByTimes);
+                      await runRefit(dayReturnByTimes);
                     }
                   }}
                   className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg shadow-sm transition-all"
@@ -4290,6 +4575,7 @@ interface DayActionsPopoverProps {
   x: number;
   y: number;
   routes: { day: number; facilities: { name: string }[] }[];
+  nextRouteDayNumber: number;
   onReassign: (targetDay: number) => void;
   onViewDetails: () => void;
   onClose: () => void;
@@ -4302,7 +4588,7 @@ const DAY_COLORS = [
   '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
 ];
 
-function DayActionsPopover({ facility, x, y, routes, onReassign, onViewDetails, onClose }: DayActionsPopoverProps) {
+function DayActionsPopover({ facility, x, y, routes, nextRouteDayNumber, onReassign, onViewDetails, onClose }: DayActionsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement | null>(null);
   // Final coords after viewport clamping. Calculated post-render so we
   // can measure the popover's own size and shift it back inside the
@@ -4351,7 +4637,7 @@ function DayActionsPopover({ facility, x, y, routes, onReassign, onViewDetails, 
   }, []);
 
   const currentDay = facility.day_assignment ?? null;
-  const newDayNumber = routes.length + 1;
+  const newDayNumber = nextRouteDayNumber;
 
   return (
     <div

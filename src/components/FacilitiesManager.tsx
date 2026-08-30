@@ -38,12 +38,12 @@ import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DA
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
-import { formatDate, parseLocalDate } from '../utils/dateUtils';
+import { formatDate, nowInAccountTimeZone, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { getCoords } from '../utils/coordinates';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 import { useAccount } from '../contexts/AccountContext';
-import { getLatestPhotoDatesByFacility } from '../utils/photoHistory';
+import { getFacilitiesWithPhotoHistory, getLatestPhotoDatesByFacility } from '../utils/photoHistory';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -255,30 +255,61 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [latestPhotoDates, setLatestPhotoDates] = useState<Map<string, string>>(new Map());
+  const [facilitiesWithPhotoHistory, setFacilitiesWithPhotoHistory] = useState<Set<string>>(new Set());
+  const latestPhotoLoadSequence = useRef(0);
 
   const loadLatestPhotoDates = useCallback(async () => {
+    const sequence = ++latestPhotoLoadSequence.current;
     try {
-      const [eventsResult, revisionsResult] = await Promise.all([
-        supabase
-          .from('photo_visit_events')
-          .select('*')
-          .eq('account_id', accountId),
-        supabase
-          .from('photo_visit_event_revisions')
-          .select('*')
-          .eq('account_id', accountId),
+      const pageSize = 1000;
+      const [photoEvents, photoRevisions] = await Promise.all([
+        (async () => {
+          const rows: PhotoVisitEvent[] = [];
+          for (let from = 0; ; from += pageSize) {
+            const { data, error: pageError } = await supabase
+              .from('photo_visit_events')
+              .select('*')
+              .eq('account_id', accountId)
+              .order('recorded_at', { ascending: true })
+              .order('id', { ascending: true })
+              .range(from, from + pageSize - 1);
+            if (pageError) throw pageError;
+            const page = (data || []) as PhotoVisitEvent[];
+            rows.push(...page);
+            if (page.length < pageSize) break;
+          }
+          return rows;
+        })(),
+        (async () => {
+          const rows: PhotoVisitEventRevision[] = [];
+          for (let from = 0; ; from += pageSize) {
+            const { data, error: pageError } = await supabase
+              .from('photo_visit_event_revisions')
+              .select('*')
+              .eq('account_id', accountId)
+              .order('changed_at', { ascending: true })
+              .order('id', { ascending: true })
+              .range(from, from + pageSize - 1);
+            if (pageError) throw pageError;
+            const page = (data || []) as PhotoVisitEventRevision[];
+            rows.push(...page);
+            if (page.length < pageSize) break;
+          }
+          return rows;
+        })(),
       ]);
 
-      if (eventsResult.error) throw eventsResult.error;
-      if (revisionsResult.error) throw revisionsResult.error;
-
+      if (sequence !== latestPhotoLoadSequence.current) return;
       setLatestPhotoDates(getLatestPhotoDatesByFacility(
-        (eventsResult.data || []) as PhotoVisitEvent[],
-        (revisionsResult.data || []) as PhotoVisitEventRevision[],
+        photoEvents,
+        photoRevisions,
       ));
+      setFacilitiesWithPhotoHistory(getFacilitiesWithPhotoHistory(photoEvents));
     } catch (historyError) {
+      if (sequence !== latestPhotoLoadSequence.current) return;
       console.warn('[FacilitiesManager] Latest photo dates unavailable:', historyError);
       setLatestPhotoDates(new Map());
+      setFacilitiesWithPhotoHistory(new Set());
     }
   }, [accountId]);
 
@@ -305,9 +336,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [accountId, loadLatestPhotoDates]);
 
   const getLatestPhotoDate = useCallback(
-    (facility: Facility): string | null =>
-      latestPhotoDates.get(facility.id) || facility.field_visit_date || null,
-    [latestPhotoDates],
+    (facility: Facility): string | null => {
+      const ledgerDate = latestPhotoDates.get(facility.id);
+      if (ledgerDate) return ledgerDate;
+
+      // A facility that has ledger rows but no active effective date reached
+      // this state through an admin tombstone. Falling back to the snapshot's
+      // field_visit_date would immediately resurrect the deleted history row
+      // in this history-backed column. The fallback remains for genuinely
+      // pre-ledger facilities and for deployments where history is unavailable.
+      if (facilitiesWithPhotoHistory.has(facility.id)) return null;
+      return facility.field_visit_date || null;
+    },
+    [facilitiesWithPhotoHistory, latestPhotoDates],
   );
 
   const [editForm, setEditForm] = useState({ name: '', latitude: '', longitude: '', visitDuration: 30, originalLatitude: '', originalLongitude: '' });
@@ -2212,6 +2253,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         ? parseFloat(mobileEditFormData.berm_length) : null;
       const bermWidth = mobileEditFormData.berm_width?.trim()
         ? parseFloat(mobileEditFormData.berm_width) : null;
+      const photosTaken = mobileEditFormData.photos_taken === 'true';
+      const submittedVisitDate = mobileEditFormData.field_visit_date?.trim() || null;
+      const fieldVisitDate = photosTaken && !mobileEditingFacility.photos_taken && !submittedVisitDate
+        ? nowInAccountTimeZone().date
+        : submittedVisitDate;
 
       const { error: updateError } = await supabase
         .from('facilities')
@@ -2222,8 +2268,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           visit_duration_minutes: visitDuration,
           county: mobileEditFormData.county?.trim() || null,
           camino_facility_id: mobileEditFormData.camino_facility_id?.trim() || null,
-          photos_taken: mobileEditFormData.photos_taken === 'true',
-          field_visit_date: mobileEditFormData.field_visit_date?.trim() || null,
+          photos_taken: photosTaken,
+          field_visit_date: fieldVisitDate,
           estimated_oil_per_day: estimatedOil,
           berm_depth_inches: bermDepth,
           berm_length: bermLength,
@@ -6104,7 +6150,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           <FacilityDetailModal
             facility={selectedFacility}
             userId={userId}
-            teamNumber={1}
+            teamNumber={selectedFacility.team_assignment || 1}
             accountId={accountId}
             initialTab={forcedTab || (spccMode === 'inspection' ? 'inspections' : spccMode === 'plan' ? 'spcc' : 'general')}
             scrollToComments={openToComments}

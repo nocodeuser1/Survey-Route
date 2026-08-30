@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, Camera, Edit2, History, Loader2, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import {
   type Facility,
@@ -8,7 +8,7 @@ import {
 } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { formatDate, getAccountTimeZone, nowInAccountTimeZone } from '../utils/dateUtils';
+import { formatDate, getAccountTimeZone, instantToZonedParts, nowInAccountTimeZone } from '../utils/dateUtils';
 import { formatVisitTimeDisplay, parseVisitTimeInput } from '../utils/spccPlans';
 import { resolveEffectivePhotoHistory, type EffectivePhotoHistoryItem } from '../utils/photoHistory';
 
@@ -43,6 +43,7 @@ function sourceLabel(source: string): string {
     facility_toggle: 'Facilities tab',
     spcc_plan_toggle: 'Plan record',
     route_run: 'Route outing',
+    route_planning: 'Route outing',
     legacy_route_visit_event: 'Prior route visit',
     legacy_facility_state: 'Legacy facility status',
   };
@@ -52,6 +53,23 @@ function sourceLabel(source: string): string {
 function eventNote(event: PhotoVisitEvent): string | null {
   const note = event.metadata?.note;
   return typeof note === 'string' && note.trim() ? note : null;
+}
+
+function originalEventParts(event: PhotoVisitEvent): { date: string | null; time: string | null } {
+  if (event.occurred_on) {
+    return { date: event.occurred_on, time: event.occurred_time || null };
+  }
+  if (event.occurred_at) {
+    const parts = instantToZonedParts(event.occurred_at, event.account_timezone || undefined);
+    return { date: parts.date, time: event.occurred_time || parts.time };
+  }
+  return { date: null, time: event.occurred_time || null };
+}
+
+function auditValueLabel(date: unknown, time: unknown): string {
+  if (typeof date !== 'string' || !date) return 'No dated value';
+  const formattedTime = typeof time === 'string' && time ? formatVisitTimeDisplay(time) : '';
+  return `${formatDate(date)}${formattedTime ? ` at ${formattedTime}` : ''}`;
 }
 
 export default function PhotoHistoryManager({
@@ -77,22 +95,32 @@ export default function PhotoHistoryManager({
   const [dateInput, setDateInput] = useState(formatDateInput(initialNow.date));
   const [timeInput, setTimeInput] = useState(formatVisitTimeDisplay(initialNow.time));
   const [noteInput, setNoteInput] = useState('');
+  const loadSequence = useRef(0);
 
   const loadHistory = useCallback(async () => {
     if (!accountId) return;
+    const sequence = ++loadSequence.current;
     setLoading(true);
     setError(null);
     try {
-      const { data: eventRows, error: eventError } = await supabase
-        .from('photo_visit_events')
-        .select('*')
-        .eq('account_id', accountId)
-        .eq('facility_id', facility.id)
-        .neq('event_type', 'route_reopened')
-        .order('recorded_at', { ascending: false });
-      if (eventError) throw eventError;
-
-      const typedEvents = (eventRows || []) as PhotoVisitEvent[];
+      const pageSize = 1000;
+      const typedEvents: PhotoVisitEvent[] = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data: eventRows, error: eventError } = await supabase
+          .from('photo_visit_events')
+          .select('*')
+          .eq('account_id', accountId)
+          .eq('facility_id', facility.id)
+          .neq('event_type', 'route_reopened')
+          .order('recorded_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (eventError) throw eventError;
+        const page = (eventRows || []) as PhotoVisitEvent[];
+        typedEvents.push(...page);
+        if (page.length < pageSize) break;
+      }
+      if (sequence !== loadSequence.current) return;
       setEvents(typedEvents);
 
       if (typedEvents.length === 0) {
@@ -100,20 +128,37 @@ export default function PhotoHistoryManager({
         return;
       }
 
-      const { data: revisionRows, error: revisionError } = await supabase
-        .from('photo_visit_event_revisions')
-        .select('*')
-        .eq('account_id', accountId)
-        .in('event_id', typedEvents.map(event => event.id))
-        .order('changed_at', { ascending: false })
-        .order('id', { ascending: false });
-      if (revisionError) throw revisionError;
-      setRevisions((revisionRows || []) as PhotoVisitEventRevision[]);
+      const revisionRows: PhotoVisitEventRevision[] = [];
+      const eventIds = typedEvents.map(event => event.id);
+      const idChunkSize = 100;
+      for (let idOffset = 0; idOffset < eventIds.length; idOffset += idChunkSize) {
+        const eventIdChunk = eventIds.slice(idOffset, idOffset + idChunkSize);
+        for (let from = 0; ; from += pageSize) {
+          const { data, error: revisionError } = await supabase
+            .from('photo_visit_event_revisions')
+            .select('*')
+            .eq('account_id', accountId)
+            .in('event_id', eventIdChunk)
+            .order('changed_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, from + pageSize - 1);
+          if (revisionError) throw revisionError;
+          const page = (data || []) as PhotoVisitEventRevision[];
+          revisionRows.push(...page);
+          if (page.length < pageSize) break;
+        }
+      }
+      if (sequence !== loadSequence.current) return;
+      revisionRows.sort(
+        (a, b) => b.changed_at.localeCompare(a.changed_at) || b.id.localeCompare(a.id),
+      );
+      setRevisions(revisionRows);
     } catch (err: any) {
+      if (sequence !== loadSequence.current) return;
       console.error('[PhotoHistoryManager] Failed to load history:', err);
       setError(err?.message || 'Photo history could not be loaded.');
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, [accountId, facility.id]);
 
@@ -125,6 +170,20 @@ export default function PhotoHistoryManager({
     () => resolveEffectivePhotoHistory(events, revisions),
     [events, revisions],
   );
+  const revisionsByEvent = useMemo(() => {
+    const grouped = new Map<string, PhotoVisitEventRevision[]>();
+    for (const revision of revisions) {
+      const eventRevisions = grouped.get(revision.event_id) || [];
+      eventRevisions.push(revision);
+      grouped.set(revision.event_id, eventRevisions);
+    }
+    for (const eventRevisions of grouped.values()) {
+      eventRevisions.sort(
+        (a, b) => a.changed_at.localeCompare(b.changed_at) || a.id.localeCompare(b.id),
+      );
+    }
+    return grouped;
+  }, [revisions]);
 
   const resetEditor = () => {
     const now = nowInAccountTimeZone();
@@ -351,6 +410,24 @@ export default function PhotoHistoryManager({
         <div className="max-h-80 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
           {historyItems.map(item => {
             const note = item.latestRevision?.reason || eventNote(item.event);
+            const auditSteps = item.chainEvents.flatMap((event, index) => {
+              const eventStep = {
+                kind: 'event' as const,
+                id: event.id,
+                timestamp: event.recorded_at,
+                event,
+                isOriginal: index === 0,
+              };
+              const revisionSteps = (revisionsByEvent.get(event.id) || []).map(revision => ({
+                  kind: 'revision' as const,
+                  id: revision.id,
+                  timestamp: revision.changed_at,
+                  revision,
+                }));
+              // Preserve parent -> child order even when PostgreSQL gives every
+              // automatic correction in one transaction the same timestamp.
+              return [eventStep, ...revisionSteps];
+            });
             return (
               <div
                 key={item.event.id}
@@ -360,7 +437,7 @@ export default function PhotoHistoryManager({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`text-sm font-semibold ${item.deleted ? 'line-through' : ''} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        {formatDate(item.occurredOn)}
+                        {item.occurredOn ? formatDate(item.occurredOn) : 'Date unknown'}
                         {item.occurredTime ? ` at ${formatVisitTimeDisplay(item.occurredTime)}` : ''}
                       </span>
                       {item.deleted && (
@@ -384,6 +461,65 @@ export default function PhotoHistoryManager({
                       <p className={`mt-1 text-xs italic ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                         {note}
                       </p>
+                    )}
+                    {auditSteps.length > 1 && (
+                      <details className={`mt-2 rounded-lg border ${darkMode ? 'border-gray-700 bg-gray-900/30' : 'border-gray-200 bg-gray-50'}`}>
+                        <summary className={`cursor-pointer select-none px-2.5 py-1.5 text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                          Audit trail · {auditSteps.length} entries
+                        </summary>
+                        <ol className={`border-t px-3 py-2 space-y-2 text-[11px] ${darkMode ? 'border-gray-700 text-gray-300' : 'border-gray-200 text-gray-600'}`}>
+                          {auditSteps.map((step, stepIndex) => {
+                            if (step.kind === 'event') {
+                              const parts = originalEventParts(step.event);
+                              const eventAuditNote = eventNote(step.event);
+                              return (
+                                <li key={`event-${step.id}`} className={stepIndex === 0 ? '' : `border-t pt-2 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                                  <p className="font-semibold">
+                                    {step.isOriginal ? 'Original' : 'Recorded correction'} · {auditValueLabel(parts.date, parts.time)}
+                                  </p>
+                                  <p>
+                                    {sourceLabel(step.event.source)} · {new Date(step.event.recorded_at).toLocaleString('en-US', {
+                                      timeZone: step.event.account_timezone || getAccountTimeZone(),
+                                    })}
+                                    {step.event.recorded_by ? (
+                                      <span title={step.event.recorded_by}> · Actor {step.event.recorded_by.slice(0, 8)}</span>
+                                    ) : null}
+                                  </p>
+                                  {eventAuditNote && <p className="italic">{eventAuditNote}</p>}
+                                </li>
+                              );
+                            }
+
+                            const revision = step.revision;
+                            const wasDeleted = revision.previous_values?.was_deleted === true;
+                            const previousLabel = auditValueLabel(
+                              revision.previous_values?.occurred_on,
+                              revision.previous_values?.occurred_time,
+                            );
+                            const nextLabel = revision.action === 'edit'
+                              ? auditValueLabel(revision.occurred_on, revision.occurred_time)
+                              : null;
+                            return (
+                              <li key={`revision-${step.id}`} className={stepIndex === 0 ? '' : `border-t pt-2 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                                <p className="font-semibold">
+                                  {revision.action === 'delete'
+                                    ? `Removed · previous value ${previousLabel}`
+                                    : `${wasDeleted ? 'Restored and corrected' : 'Corrected'} · ${previousLabel} → ${nextLabel}`}
+                                </p>
+                                <p>
+                                  {new Date(revision.changed_at).toLocaleString('en-US', {
+                                    timeZone: item.event.account_timezone || getAccountTimeZone(),
+                                  })}
+                                  {revision.changed_by ? (
+                                    <span title={revision.changed_by}> · Actor {revision.changed_by.slice(0, 8)}</span>
+                                  ) : null}
+                                </p>
+                                {revision.reason && <p className="italic">{revision.reason}</p>}
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </details>
                     )}
                   </div>
                   {canManage && (

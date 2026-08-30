@@ -49,7 +49,7 @@ export default function StickyStatsBar({
 
   return (
     <div
-      className={`fixed top-[60px] left-0 right-0 z-50 transition-all duration-300 pointer-events-none ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
+      className={`hidden md:block fixed top-[60px] left-0 right-0 z-50 transition-all duration-300 pointer-events-none ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
         }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

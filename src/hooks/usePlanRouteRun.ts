@@ -25,6 +25,82 @@ interface UsePlanRouteRunOptions {
   onFacilityPatch?: (facilityId: string, patch: Partial<Facility>) => void;
 }
 
+interface CachedPlanRouteRun {
+  version: 1;
+  accountId: string;
+  routePlanId: string;
+  teamNumber: number;
+  savedAt: string;
+  run: PlanRouteRun;
+  stops: PlanRouteRunStop[];
+}
+
+const routeRunCacheKey = (accountId: string, routePlanId: string, teamNumber: number) =>
+  `surveyroute:plan-route-run:v1:${accountId}:${routePlanId}:${teamNumber}`;
+
+function readCachedRouteRun(
+  accountId: string,
+  routePlanId: string,
+  teamNumber: number,
+): CachedPlanRouteRun | null {
+  try {
+    const raw = window.localStorage.getItem(routeRunCacheKey(accountId, routePlanId, teamNumber));
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as Partial<CachedPlanRouteRun>;
+    if (
+      cached.version !== 1 ||
+      cached.accountId !== accountId ||
+      cached.routePlanId !== routePlanId ||
+      cached.teamNumber !== teamNumber ||
+      !cached.run ||
+      cached.run.account_id !== accountId ||
+      cached.run.route_plan_id !== routePlanId ||
+      cached.run.team_number !== teamNumber ||
+      cached.run.status !== 'active' ||
+      !Array.isArray(cached.stops) ||
+      cached.stops.some(stop => stop.route_run_id !== cached.run?.id || stop.account_id !== accountId)
+    ) {
+      window.localStorage.removeItem(routeRunCacheKey(accountId, routePlanId, teamNumber));
+      return null;
+    }
+    return cached as CachedPlanRouteRun;
+  } catch (cacheError) {
+    console.warn('[PlanRouteRun] Unable to read cached outing progress:', cacheError);
+    return null;
+  }
+}
+
+function writeCachedRouteRun(
+  accountId: string,
+  routePlanId: string,
+  teamNumber: number,
+  run: PlanRouteRun,
+  stops: PlanRouteRunStop[],
+) {
+  try {
+    const cached: CachedPlanRouteRun = {
+      version: 1,
+      accountId,
+      routePlanId,
+      teamNumber,
+      savedAt: new Date().toISOString(),
+      run,
+      stops,
+    };
+    window.localStorage.setItem(routeRunCacheKey(accountId, routePlanId, teamNumber), JSON.stringify(cached));
+  } catch (cacheError) {
+    console.warn('[PlanRouteRun] Unable to cache outing progress:', cacheError);
+  }
+}
+
+function clearCachedRouteRun(accountId: string, routePlanId: string, teamNumber: number) {
+  try {
+    window.localStorage.removeItem(routeRunCacheKey(accountId, routePlanId, teamNumber));
+  } catch (cacheError) {
+    console.warn('[PlanRouteRun] Unable to clear cached outing progress:', cacheError);
+  }
+}
+
 const isMissingSchemaError = (error: { code?: string; message?: string } | null | undefined) =>
   Boolean(
     error &&
@@ -60,10 +136,15 @@ export function usePlanRouteRun({
   const [schemaUnavailable, setSchemaUnavailable] = useState(false);
   const loadSequence = useRef(0);
 
-  const facilityByName = useMemo(
-    () => new Map(facilities.map(facility => [facility.name, facility])),
-    [facilities],
-  );
+  const facilitiesByName = useMemo(() => {
+    const grouped = new Map<string, Facility[]>();
+    for (const facility of facilities) {
+      const matches = grouped.get(facility.name) || [];
+      matches.push(facility);
+      grouped.set(facility.name, matches);
+    }
+    return grouped;
+  }, [facilities]);
 
   const plannedStops = useMemo<PlannedRouteStopInput[]>(() => {
     if (!result) return [];
@@ -72,7 +153,11 @@ export function usePlanRouteRun({
 
     for (const route of result.routes) {
       route.facilities.forEach((routeFacility, position) => {
-        const facilityId = routeFacility.id ?? facilityByName.get(routeFacility.name)?.id;
+        const legacyMatches = routeFacility.id
+          ? []
+          : facilitiesByName.get(routeFacility.name) || [];
+        const facilityId = routeFacility.id
+          ?? (legacyMatches.length === 1 ? legacyMatches[0].id : undefined);
         if (!facilityId || seen.has(facilityId)) return;
         seen.add(facilityId);
         next.push({
@@ -85,7 +170,7 @@ export function usePlanRouteRun({
     }
 
     return next;
-  }, [facilityByName, result]);
+  }, [facilitiesByName, result]);
 
   const plannedStopsSignature = useMemo(() => JSON.stringify(plannedStops), [plannedStops]);
 
@@ -98,7 +183,7 @@ export function usePlanRouteRun({
       .order('planned_position', { ascending: true, nullsFirst: false });
 
     if (stopsError) throw stopsError;
-    setStops((data ?? []) as PlanRouteRunStop[]);
+    return (data ?? []) as PlanRouteRunStop[];
   }, []);
 
   const loadActiveRun = useCallback(async () => {
@@ -108,6 +193,18 @@ export function usePlanRouteRun({
       setStops([]);
       setError(null);
       return;
+    }
+
+    // Hydrate the exact account/route/team scope before touching the network.
+    // Offline state is intentionally read-only; online success below is the
+    // only path that refreshes this cache.
+    const cached = readCachedRouteRun(accountId, routePlanId, teamNumber);
+    if (cached) {
+      setRun(cached.run);
+      setStops(cached.stops);
+    } else {
+      setRun(null);
+      setStops([]);
     }
     if (!isOnline) {
       setLoading(false);
@@ -138,15 +235,24 @@ export function usePlanRouteRun({
           target_stops: plannedStops,
         });
         if (syncError) throw syncError;
-        await loadStops(activeRun.id);
+        const loadedStops = await loadStops(activeRun.id);
+        if (sequence !== loadSequence.current) return;
+        setStops(loadedStops);
+        writeCachedRouteRun(accountId, routePlanId, teamNumber, activeRun, loadedStops);
       } else {
         setStops([]);
+        clearCachedRouteRun(accountId, routePlanId, teamNumber);
       }
     } catch (loadError: any) {
       console.warn('[PlanRouteRun] Unable to load route progress:', loadError?.message ?? loadError);
       if (sequence !== loadSequence.current) return;
-      setRun(null);
-      setStops([]);
+      if (cached) {
+        setRun(cached.run);
+        setStops(cached.stops);
+      } else {
+        setRun(null);
+        setStops([]);
+      }
       setSchemaUnavailable(isMissingSchemaError(loadError));
       setError(
         isMissingSchemaError(loadError)
@@ -169,8 +275,13 @@ export function usePlanRouteRun({
         setError('Route progress changes need a connection.');
         return null;
       }
+      // Explicit starts/resets supersede any background load already in flight.
+      // A later load may in turn supersede this request, but an older load can
+      // never overwrite the run returned by Reset for new outing.
+      const sequence = ++loadSequence.current;
       setLoading(true);
       setError(null);
+      let committedRunId: string | null = null;
       try {
         const { data: runId, error: startError } = await supabase.rpc('start_plan_route_run', {
           target_account_id: accountId,
@@ -180,6 +291,21 @@ export function usePlanRouteRun({
           force_new: forceNew,
         });
         if (startError) throw startError;
+        if (sequence !== loadSequence.current) return null;
+        if (typeof runId !== 'string' || !runId) {
+          throw new Error('The route outing started, but no outing ID was returned.');
+        }
+        committedRunId = runId;
+
+        // A forced reset is committed inside start_plan_route_run before these
+        // follow-up reads occur. Retire the ended outing immediately so a
+        // transient read failure can never leave its stale checklist visible
+        // or cached as if it were still active.
+        if (forceNew) {
+          setRun(null);
+          setStops([]);
+          clearCachedRouteRun(accountId, routePlanId, teamNumber);
+        }
 
         const { data: runData, error: runError } = await supabase
           .from('plan_route_runs')
@@ -187,26 +313,41 @@ export function usePlanRouteRun({
           .eq('id', runId)
           .single();
         if (runError) throw runError;
+        if (sequence !== loadSequence.current) return null;
 
         const activeRun = runData as PlanRouteRun;
         setRun(activeRun);
         setSchemaUnavailable(false);
-        await loadStops(activeRun.id);
+        const loadedStops = await loadStops(activeRun.id);
+        if (sequence !== loadSequence.current) return null;
+        setStops(loadedStops);
+        writeCachedRouteRun(accountId, routePlanId, teamNumber, activeRun, loadedStops);
         return activeRun;
       } catch (startError: any) {
+        if (sequence !== loadSequence.current) return null;
         console.error('[PlanRouteRun] Unable to start route:', startError);
         setSchemaUnavailable(isMissingSchemaError(startError));
         setError(startError?.message ?? 'Unable to start this route.');
+        if (committedRunId) {
+          // Recover the committed outing through the normal active-run loader.
+          // This also repopulates the durable cache when the transient read
+          // that followed the RPC was the only failed step.
+          void loadActiveRun();
+        }
         return null;
       } finally {
-        setLoading(false);
+        if (sequence === loadSequence.current) setLoading(false);
       }
     },
-    [accountId, enabled, isOnline, loadStops, plannedStops, routePlanId, teamNumber],
+    [accountId, enabled, isOnline, loadActiveRun, loadStops, plannedStops, routePlanId, teamNumber],
   );
 
   const setFacilityCompleted = useCallback(
     async (facilityId: string, completed: boolean) => {
+      if (!isOnline) {
+        setError('Route progress changes need a connection. Saved progress is available read-only.');
+        return false;
+      }
       let activeRun = run;
       if (!activeRun) activeRun = await startRun(false);
       if (!activeRun) return false;
@@ -225,20 +366,34 @@ export function usePlanRouteRun({
         });
         if (saveError) throw saveError;
 
-        setStops(current =>
-          current.map(stop =>
+        const savedStatus: PlanRouteRunStop['status'] =
+          data?.status === 'completed' || data?.status === 'pending'
+            ? data.status
+            : completed
+              ? 'completed'
+              : 'pending';
+        const savedCompletedAt = savedStatus === 'completed'
+          ? data?.completed_at || occurredAt
+          : null;
+
+        setStops(current => {
+          const nextStops: PlanRouteRunStop[] = current.map(stop =>
             stop.facility_id === facilityId
               ? {
                   ...stop,
-                  status: completed ? 'completed' : 'pending',
-                  completed_at: completed ? occurredAt : null,
+                  status: savedStatus,
+                  completed_at: savedCompletedAt,
                   updated_at: new Date().toISOString(),
                 }
               : stop,
-          ),
-        );
+          );
+          if (accountId && routePlanId && activeRun) {
+            writeCachedRouteRun(accountId, routePlanId, teamNumber, activeRun, nextStops);
+          }
+          return nextStops;
+        });
 
-        if (completed && data && onFacilityPatch) {
+        if (savedStatus === 'completed' && data && onFacilityPatch) {
           onFacilityPatch(facilityId, {
             photos_taken: true,
             field_visit_date: data.field_visit_date ?? undefined,
@@ -249,20 +404,35 @@ export function usePlanRouteRun({
       } catch (saveError: any) {
         console.error('[PlanRouteRun] Unable to update stop:', saveError);
         setError(saveError?.message ?? 'Unable to update route progress.');
+        // Another administrator may have reset this outing while this tab was
+        // open. Rebind to the current active run so the next tap does not keep
+        // retrying the ended run. The server sync derives membership from the
+        // locked saved route, so this recovery cannot replay stale local stops.
+        void loadActiveRun();
         return false;
       } finally {
         setSavingFacilityId(null);
       }
     },
-    [onFacilityPatch, run, startRun],
+    [accountId, isOnline, loadActiveRun, onFacilityPatch, routePlanId, run, startRun, teamNumber],
   );
 
   const stopsByFacilityId = useMemo(
-    () => new Map(stops.filter(stop => stop.facility_id).map(stop => [stop.facility_id as string, stop])),
+    () => new Map(
+      stops
+        .filter(stop => stop.facility_id && !stop.removed_at && stop.status !== 'removed')
+        .map(stop => [stop.facility_id as string, stop]),
+    ),
     [stops],
   );
-  const activeStops = useMemo(() => stops.filter(stop => stop.status !== 'removed'), [stops]);
+  const activeStops = useMemo(
+    () => stops.filter(stop =>
+      Boolean(stop.facility_id) && !stop.removed_at && stop.status !== 'removed'
+    ),
+    [stops],
+  );
   const completedCount = activeStops.filter(stop => stop.status === 'completed').length;
+  const startNewRun = useCallback(() => startRun(true), [startRun]);
 
   return {
     run,
@@ -276,7 +446,7 @@ export function usePlanRouteRun({
     error,
     schemaUnavailable,
     startRun,
-    startNewRun: () => startRun(true),
+    startNewRun,
     setFacilityCompleted,
     reload: loadActiveRun,
   };

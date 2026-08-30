@@ -122,6 +122,16 @@ table.sr-measuring td {
   z-index: 10 !important;
 }
 
+/* Leaflet defaults to 30px controls, which is too small for route work on a
+   phone. Keep desktop density while giving touch users a reliable 44px target. */
+@media (pointer: coarse) {
+  .leaflet-bar a {
+    width: 44px !important;
+    height: 44px !important;
+    line-height: 44px !important;
+  }
+}
+
 /* Z-index hierarchy for application layers:
    1-10: Map elements (leaflet panes, controls)
    20-50: Base UI elements (buttons, headers)

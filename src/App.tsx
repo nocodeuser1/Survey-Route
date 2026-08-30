@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { MapPin, Home, Settings, Upload, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, Maximize2, X, Image, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Search, Crosshair, Sun, Moon, Car, Menu, FileText, FileCheck, ClipboardList, User } from 'lucide-react';
+import { MapPin, Home, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, X, Image, CheckCircle, Crosshair, Sun, Moon, Car, Menu, ClipboardList, User } from 'lucide-react';
 import OfflineIndicator from './components/OfflineIndicator';
 import AIAssistantBubble from './components/AIAssistantBubble';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
@@ -10,7 +10,6 @@ import RouteMap from './components/RouteMap';
 import SurveyMode from './components/SurveyMode';
 import StickyStatsBar from './components/StickyStatsBar';
 import { supabase, Facility, HomeBase as HomeBaseType, UserSettings, RoutePlan, Inspection, SurveyType } from './lib/supabase';
-import RouteSettings from './components/RouteSettings';
 import TeamManagement from './components/TeamManagement';
 import UserSignatureManagement from './components/UserSignatureManagement';
 import SignaturePromptBar from './components/SignaturePromptBar';
@@ -30,15 +29,14 @@ import CompletedFacilitiesVisibilityModal, { CompletedVisibility } from './compo
 import HomeBaseModal from './components/HomeBaseModal';
 import LoadingScreen from './components/LoadingScreen';
 import { calculateDistanceMatrix } from './services/osrm';
-import { optimizeRoutes, OptimizationResult, OptimizationConstraints, FacilityWithIndex, rebuildDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
+import { optimizeRoutes, OptimizationResult, OptimizationConstraints, FacilityWithIndex, rebuildDayRoute, calculateDayRoute, recalculateRouteTimes, DailyRoute } from './services/routeOptimizer';
 import { useAuth } from './contexts/AuthContext';
 import { useAccount, getAccountDisplayName } from './contexts/AccountContext';
 import { useDarkMode } from './contexts/DarkModeContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { isInspectionValid, getFacilityInspectionExpiry } from './utils/inspectionUtils';
+import { getFacilityInspectionExpiry } from './utils/inspectionUtils';
 import { facilityNeedsSPCCPlan, getSPCCPlanStatus } from './utils/spccStatus';
 import { haversineDistance } from './utils/geoClustering';
-import { parseLocalDate } from './utils/dateUtils';
 import { resolveSurveyTypeIcon } from './utils/surveyTypeIcons';
 import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
@@ -73,6 +71,11 @@ const getOfflineScopeKey = (userId: string, accountId: string): string =>
 
 const isActiveFacility = (facility: Facility): boolean => {
   return facility.day_assignment !== -1 && facility.day_assignment !== -2 && facility.status !== 'sold';
+};
+
+const formatHoursAndMinutes = (minutes: number): string => {
+  const roundedMinutes = Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0;
+  return `${Math.floor(roundedMinutes / 60)}h ${roundedMinutes % 60}m`;
 };
 
 /**
@@ -118,7 +121,10 @@ const getVisitDuration = (
   return facility?.visit_duration_minutes || settings.default_visit_duration_minutes;
 };
 
-// Helper function to filter optimization result by team and renumber days
+// Helper function to filter optimization results by team. Keep the saved day
+// numbers intact: those numbers are persisted assignment keys, not display-only
+// positions. Renumbering a filtered Team 2 view made a click on its visible
+// "Day 1" mutate the real account-wide Day 1 instead of Team 2's saved day.
 const filterOptimizationResultByTeam = (
   result: OptimizationResult | null,
   facilities: Facility[],
@@ -129,36 +135,45 @@ const filterOptimizationResultByTeam = (
   // If user has no team assignment (admin/view all), return full result
   if (userTeam === null) return result;
 
-  // Create a map of facility name to team assignment
+  // Stable IDs are authoritative. Names are only a compatibility fallback for
+  // old saved routes created before route stops carried facility IDs.
+  const facilityTeamById = new Map<string, number>();
   const facilityTeamMap = new Map<string, number>();
+  const facilitiesByName = new Map<string, Facility[]>();
   facilities.forEach(f => {
     if (f.team_assignment) {
-      facilityTeamMap.set(f.name, f.team_assignment);
+      facilityTeamById.set(f.id, f.team_assignment);
     }
+    const matches = facilitiesByName.get(f.name) || [];
+    matches.push(f);
+    facilitiesByName.set(f.name, matches);
   });
+  for (const [name, matches] of facilitiesByName) {
+    if (matches.length === 1 && matches[0].team_assignment) {
+      facilityTeamMap.set(name, matches[0].team_assignment);
+    }
+  }
 
   // Filter routes to only include those with facilities assigned to this team
   const teamRoutes = result.routes.filter(route => {
     // Check if any facility in this route belongs to the user's team
-    return route.facilities.some(f => facilityTeamMap.get(f.name) === userTeam);
+    return route.facilities.some(f => (
+      f.id
+        ? facilityTeamById.get(f.id) === userTeam
+        : facilityTeamMap.get(f.name) === userTeam
+    ));
   });
 
-  // Renumber days starting from 1 for this team
-  const renumberedRoutes = teamRoutes.map((route, index) => ({
-    ...route,
-    day: index + 1
-  }));
-
   // Recalculate totals for this team only
-  const totalMiles = renumberedRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
-  const totalDriveTime = renumberedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
-  const totalVisitTime = renumberedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
-  const totalTime = renumberedRoutes.reduce((sum, r) => sum + r.totalTime, 0);
-  const totalFacilities = renumberedRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
+  const totalMiles = teamRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
+  const totalDriveTime = teamRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
+  const totalVisitTime = teamRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
+  const totalTime = teamRoutes.reduce((sum, r) => sum + r.totalTime, 0);
+  const totalFacilities = teamRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
 
   return {
-    routes: renumberedRoutes,
-    totalDays: renumberedRoutes.length,
+    routes: teamRoutes,
+    totalDays: teamRoutes.length,
     totalMiles,
     totalFacilities,
     totalDriveTime,
@@ -177,6 +192,312 @@ const filterFacilitiesByTeam = (
 
   // Filter to only facilities assigned to this team
   return facilities.filter(f => f.team_assignment === userTeam);
+};
+
+type RouteAssignment = {
+  facility_id: string;
+  day_assignment: number | null;
+  team_assignment: number;
+};
+
+type SavedRoutePlanData = OptimizationResult & { _routeFacilityIds?: string[] };
+
+type ActivatedRoutePlan = {
+  id: string;
+  name: string | null;
+  plan_data: SavedRoutePlanData;
+  settings: UserSettings | null;
+  home_base_data: HomeBaseType | null;
+  assignments: RouteAssignment[];
+};
+
+const parseActivatedRoutePlan = (payload: unknown): ActivatedRoutePlan => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('The activated route response was invalid.');
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.id !== 'string' || !record.plan_data || typeof record.plan_data !== 'object') {
+    throw new Error('The activated route response did not include a saved plan.');
+  }
+  if (!Array.isArray(record.assignments)) {
+    throw new Error('The activated route response did not include assignments.');
+  }
+
+  const assignments = record.assignments.map((value): RouteAssignment => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('The activated route returned an invalid assignment.');
+    }
+    const assignment = value as Record<string, unknown>;
+    if (
+      typeof assignment.facility_id !== 'string'
+      || !Number.isInteger(assignment.day_assignment)
+      || Number(assignment.day_assignment) < 1
+      || !Number.isInteger(assignment.team_assignment)
+      || Number(assignment.team_assignment) < 1
+    ) {
+      throw new Error('The activated route returned an invalid assignment.');
+    }
+    return {
+      facility_id: assignment.facility_id,
+      day_assignment: Number(assignment.day_assignment),
+      team_assignment: Number(assignment.team_assignment),
+    };
+  });
+
+  return {
+    id: record.id,
+    name: typeof record.name === 'string' ? record.name : null,
+    plan_data: record.plan_data as SavedRoutePlanData,
+    settings: (record.settings as UserSettings | null) ?? null,
+    home_base_data: (record.home_base_data as HomeBaseType | null) ?? null,
+    assignments,
+  };
+};
+
+const mergeDeletedRouteStops = (
+  ...groups: Array<Array<{ name: string; day: number }>>
+): Array<{ name: string; day: number }> => {
+  const unique = new Map<string, { name: string; day: number }>();
+  for (const stop of groups.flat()) {
+    unique.set(`${stop.day}:${stop.name}`, stop);
+  }
+  return Array.from(unique.values());
+};
+
+const canonicalizeHydratedRoute = async (
+  result: SavedRoutePlanData,
+  assignments: RouteAssignment[],
+  configuredHomeBases: HomeBaseType[],
+  fallbackHomeBase: HomeBaseType | null,
+  lunchBreakMinutes: number,
+): Promise<{
+  result: SavedRoutePlanData;
+  dropped: Array<{ name: string; day: number }>;
+}> => {
+  const assignmentByFacilityId = new Map(
+    assignments.map(assignment => [assignment.facility_id, assignment]),
+  );
+  const dropped: Array<{ name: string; day: number }> = [];
+
+  const routes = await Promise.all(result.routes.map(async routeDay => {
+    const routeStartTime = routeDay.startTime || '08:00';
+    const retainedFacilities = routeDay.facilities.flatMap(routeFacility => {
+      const assignment = routeFacility.id
+        ? assignmentByFacilityId.get(routeFacility.id)
+        : undefined;
+      if (!assignment) {
+        dropped.push({ name: routeFacility.name, day: routeDay.day });
+        return [];
+      }
+      return [{ ...routeFacility, teamAssignment: assignment.team_assignment }];
+    });
+
+    if (retainedFacilities.length === routeDay.facilities.length) {
+      return { ...routeDay, facilities: retainedFacilities };
+    }
+    if (retainedFacilities.length === 0) {
+      return {
+        ...routeDay,
+        facilities: [],
+        sequence: [],
+        segments: [],
+        totalMiles: 0,
+        totalDriveTime: 0,
+        totalVisitTime: 0,
+        totalTime: 0,
+        startTime: routeStartTime,
+        endTime: routeStartTime,
+        lastFacilityDepartureTime: routeStartTime,
+      };
+    }
+
+    const teamNumber = retainedFacilities[0].teamAssignment || 1;
+    const routeHomeBase = configuredHomeBases.find(base => base.team_number === teamNumber)
+      ?? fallbackHomeBase
+      ?? configuredHomeBases[0];
+    if (!routeHomeBase) {
+      throw new Error(`Home base for Team ${teamNumber} is missing.`);
+    }
+
+    const locations = [routeHomeBase, ...retainedFacilities].map(location => ({
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+    }));
+    if (locations.some(location => !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude))) {
+      throw new Error(`Day ${routeDay.day} contains invalid route coordinates.`);
+    }
+
+    let distanceMatrix;
+    try {
+      distanceMatrix = await calculateDistanceMatrix(locations);
+    } catch (matrixError) {
+      console.warn('[RouteActivation] Road matrix unavailable while removing a deleted stop; using a local estimate.', matrixError);
+      const distances = locations.map(from => locations.map(to =>
+        haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude)
+      ));
+      distanceMatrix = {
+        distances,
+        durations: distances.map(row => row.map(distance => Math.round((distance / 45) * 60))),
+      };
+    }
+
+    const localFacilities = retainedFacilities.map((facility, index) => ({
+      ...facility,
+      index: index + 1,
+    }));
+    const stableIndexByLocal = new Map(
+      localFacilities.map((facility, index) => [facility.index, retainedFacilities[index].index]),
+    );
+    const rebuiltRoute = calculateDayRoute(
+      localFacilities,
+      localFacilities.map(facility => facility.index),
+      distanceMatrix,
+      0,
+      routeStartTime,
+      lunchBreakMinutes,
+    );
+    return {
+      ...rebuiltRoute,
+      day: routeDay.day,
+      facilities: rebuiltRoute.facilities.map(facility => ({
+        ...facility,
+        index: stableIndexByLocal.get(facility.index) ?? facility.index,
+      })),
+      sequence: rebuiltRoute.sequence.map(index => stableIndexByLocal.get(index) ?? index),
+    };
+  }));
+
+  const authoritativeFacilityIds = new Set(assignments.map(assignment => assignment.facility_id));
+  return {
+    dropped,
+    result: {
+      ...result,
+      routes,
+      totalMiles: routes.reduce((sum, route) => sum + route.totalMiles, 0),
+      totalFacilities: routes.reduce((sum, route) => sum + route.facilities.length, 0),
+      totalDriveTime: routes.reduce((sum, route) => sum + route.totalDriveTime, 0),
+      totalVisitTime: routes.reduce((sum, route) => sum + route.totalVisitTime, 0),
+      totalTime: routes.reduce((sum, route) => sum + route.totalTime, 0),
+      _routeFacilityIds: Array.isArray(result._routeFacilityIds)
+        ? result._routeFacilityIds.filter(facilityId => authoritativeFacilityIds.has(facilityId))
+        : undefined,
+    },
+  };
+};
+
+const hydrateSavedRoutePlan = (
+  planData: SavedRoutePlanData,
+  currentFacilities: Facility[],
+  configuredHomeBases: HomeBaseType[],
+): {
+  result: SavedRoutePlanData;
+  assignments: RouteAssignment[];
+  deleted: Array<{ name: string; day: number }>;
+} => {
+  if (!planData || !Array.isArray(planData.routes)) {
+    throw new Error('This saved route does not contain a valid stop list.');
+  }
+
+  const facilityById = new Map(currentFacilities.map(facility => [facility.id, facility]));
+  const facilitiesByName = new Map<string, Facility[]>();
+  for (const facility of currentFacilities) {
+    const matches = facilitiesByName.get(facility.name) || [];
+    matches.push(facility);
+    facilitiesByName.set(facility.name, matches);
+  }
+  const deleted: Array<{ name: string; day: number }> = [];
+
+  const hydratedRoutes = planData.routes.map(routeDay => {
+    if (!Array.isArray(routeDay.facilities) || !Number.isInteger(routeDay.day) || routeDay.day < 1) {
+      throw new Error('This saved route contains an invalid day or stop list.');
+    }
+    const hydratedFacilities = routeDay.facilities.map(routeFacility => {
+      let currentFacility: Facility | undefined;
+      if (routeFacility.id) {
+        currentFacility = facilityById.get(routeFacility.id);
+      } else {
+        const nameMatches = facilitiesByName.get(routeFacility.name) || [];
+        if (nameMatches.length > 1) {
+          throw new Error(
+            `The legacy saved stop "${routeFacility.name}" matches more than one facility. `
+            + 'Give those facilities unique names before loading this route.',
+          );
+        }
+        currentFacility = nameMatches[0];
+      }
+
+      if (!currentFacility) {
+        deleted.push({ name: routeFacility.name, day: routeDay.day });
+        return routeFacility;
+      }
+      return {
+        ...routeFacility,
+        id: currentFacility.id,
+        name: currentFacility.name,
+        latitude: Number(currentFacility.latitude),
+        longitude: Number(currentFacility.longitude),
+        visitDuration: currentFacility.visit_duration_minutes,
+      };
+    });
+
+    const savedTeam = hydratedFacilities.find(routeFacility =>
+      Number.isInteger(routeFacility.teamAssignment)
+      && (routeFacility.teamAssignment as number) > 0
+    )?.teamAssignment;
+    const referenceStop = hydratedFacilities.find(routeFacility =>
+      Number.isFinite(Number(routeFacility.latitude))
+      && Number.isFinite(Number(routeFacility.longitude))
+    );
+    let inferredTeam = savedTeam || configuredHomeBases[0]?.team_number || 1;
+    if (!savedTeam && referenceStop && configuredHomeBases.length > 1) {
+      let nearestDistance = Infinity;
+      for (const candidateHomeBase of configuredHomeBases) {
+        const distance = haversineDistance(
+          Number(referenceStop.latitude),
+          Number(referenceStop.longitude),
+          Number(candidateHomeBase.latitude),
+          Number(candidateHomeBase.longitude),
+        );
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          inferredTeam = candidateHomeBase.team_number;
+        }
+      }
+    }
+
+    return {
+      ...routeDay,
+      facilities: hydratedFacilities.map(routeFacility => ({
+        ...routeFacility,
+        teamAssignment:
+          Number.isInteger(routeFacility.teamAssignment)
+          && (routeFacility.teamAssignment as number) > 0
+            ? routeFacility.teamAssignment
+            : inferredTeam,
+      })),
+    };
+  });
+
+  const assignmentsByFacilityId = new Map<string, RouteAssignment>();
+  for (const routeDay of hydratedRoutes) {
+    for (const routeFacility of routeDay.facilities) {
+      if (!routeFacility.id || !facilityById.has(routeFacility.id)) continue;
+      if (assignmentsByFacilityId.has(routeFacility.id)) {
+        throw new Error(`${routeFacility.name} appears more than once in this saved route.`);
+      }
+      assignmentsByFacilityId.set(routeFacility.id, {
+        facility_id: routeFacility.id,
+        day_assignment: routeDay.day,
+        team_assignment: routeFacility.teamAssignment || 1,
+      });
+    }
+  }
+
+  return {
+    result: { ...planData, routes: hydratedRoutes },
+    assignments: Array.from(assignmentsByFacilityId.values()),
+    deleted,
+  };
 };
 
 function App() {
@@ -265,9 +586,15 @@ function App() {
   // for them once the home base saves. The intent is stored as data (not a
   // closure) so the resume runs against the freshly-loaded home base rather
   // than the stale one captured when the action was blocked.
+  type RoutePersistenceMode = 'new' | 'update-current';
   type PendingRouteAction =
-    | { kind: 'generate'; settings: UserSettings }
-    | { kind: 'fromSelection'; facilityIds: string[]; sourceSurveyType: string };
+    | { kind: 'generate'; settings: UserSettings; persistenceMode: RoutePersistenceMode }
+    | {
+        kind: 'fromSelection';
+        facilityIds: string[];
+        sourceSurveyType: string;
+        persistenceMode: RoutePersistenceMode;
+      };
   const [pendingRouteAction, setPendingRouteAction] = useState<PendingRouteAction | null>(null);
   const [homeBaseModalContext, setHomeBaseModalContext] = useState<string | null>(null);
   // The modal auto-closes ~600ms after a successful save, which can beat the
@@ -295,6 +622,10 @@ function App() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
+  const [openOverdueTypeId, setOpenOverdueTypeId] = useState<string | null>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   // surveyType is the active route mode. Values:
   //   'all'                          → no filter
@@ -306,6 +637,38 @@ function App() {
   });
   const [routeFacilityIds, setRouteFacilityIds] = useState<string[] | null>(null);
   const [showOnlyRouteFacilities, setShowOnlyRouteFacilities] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    setOpenOverdueTypeId(null);
+  }, [surveyType]);
+
+  useEffect(() => {
+    if (!openOverdueTypeId) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-route-overdue-popover]')) {
+        setOpenOverdueTypeId(null);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenOverdueTypeId(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openOverdueTypeId]);
 
   // Persist surveyType to localStorage
   useEffect(() => {
@@ -362,122 +725,6 @@ function App() {
     if (match) setSurveyType(match.id);
   }, [dbSurveyTypes, surveyType]);
 
-  // Calculate visible facility count based on completedVisibility settings and surveyType
-  const visibleFacilityCount = useMemo(() => {
-    if (!optimizationResult) {
-      return 0;
-    }
-
-    // Custom-route mode: total = whatever the route actually covers, full
-    // stop. The survey-type tabs (e.g. "SPCC Plan 4") below the stats card
-    // already report how many of the route need that kind of work — the
-    // headline "Total Facilities" count should match the "Custom Route:
-    // N facilities selected" banner above it, not the survey-filtered
-    // subset, so the user sees the route's actual size regardless of which
-    // survey tab they're currently looking at.
-    if (routeFacilityIds) {
-      let count = 0;
-      optimizationResult.routes.forEach(route => {
-        count += route.facilities.length;
-      });
-      return count;
-    }
-
-    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
-
-    // Helper: check if a facility needs SPCC inspection (expired, expiring within 90d, or pending)
-    const facilityNeedsInspection = (facility: Facility): boolean => {
-      const insp = inspections.find(i => i.facility_id === facility.id);
-      const expiry = getFacilityInspectionExpiry(facility, insp);
-      return expiry.status !== 'valid';
-    };
-
-    // Collect facility IDs to hide based on visibility settings
-    const hiddenFacilityIds = new Set<string>();
-
-    // Only apply visibility-based hiding in 'all' mode
-    // In specific modes, the survey type filter handles what's shown
-    if (surveyType === 'all') {
-      // Inspection-based hiding
-      if (hideAllCompleted) {
-        inspections
-          .filter(insp => isInspectionValid(insp))
-          .forEach(insp => hiddenFacilityIds.add(insp.facility_id));
-        facilities
-          .filter(f => f.spcc_completion_type === 'internal')
-          .forEach(f => hiddenFacilityIds.add(f.id));
-        facilities
-          .filter(f => f.spcc_completion_type === 'external')
-          .forEach(f => hiddenFacilityIds.add(f.id));
-      } else {
-        if (hideInternallyCompleted) {
-          // Facilities with valid inspections from inspections table
-          inspections
-            .filter(insp => isInspectionValid(insp))
-            .forEach(insp => hiddenFacilityIds.add(insp.facility_id));
-          // Facilities with spcc_completion_type === 'internal'
-          facilities
-            .filter(f => f.spcc_completion_type === 'internal')
-            .forEach(f => hiddenFacilityIds.add(f.id));
-          // Facilities with a valid spcc_inspection_date (within last year)
-          const oneYearAgo = new Date();
-          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-          facilities
-            .filter(f => f.spcc_inspection_date && parseLocalDate(f.spcc_inspection_date) >= oneYearAgo)
-            .forEach(f => hiddenFacilityIds.add(f.id));
-        }
-        if (hideExternallyCompleted) {
-          facilities
-            .filter(f => f.spcc_completion_type === 'external')
-            .forEach(f => hiddenFacilityIds.add(f.id));
-        }
-      }
-
-      // Plan-based hiding
-      if (hideValidPlans || hideExpiringPlans) {
-        facilities.forEach(f => {
-          const planStatus = getSPCCPlanStatus(f);
-          if (hideValidPlans && (planStatus.status === 'valid' || planStatus.status === 'recertified')) {
-            hiddenFacilityIds.add(f.id);
-          }
-          if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
-            hiddenFacilityIds.add(f.id);
-          }
-        });
-      }
-    }
-
-    // Count facilities in routes that match the current mode
-    let visibleCount = 0;
-    optimizationResult.routes.forEach(route => {
-      route.facilities.forEach(facility => {
-        const facilityData = facilities.find(f => f.name === facility.name);
-        if (!facilityData) return;
-
-        // Skip excluded/removed facilities (only in 'all' mode; survey modes route regardless of day_assignment)
-        if (surveyType === 'all' && (facilityData.day_assignment === -1 || facilityData.day_assignment === -2)) return;
-        if (facilityData.day_assignment === -2) return;
-
-        // Apply visibility hiding (only populated in 'all' mode)
-        if (hiddenFacilityIds.has(facilityData.id)) return;
-
-        // Apply survey type filter
-        if (surveyTypeKind === 'spcc_inspection' && !facilityNeedsInspection(facilityData)) return;
-        if (surveyTypeKind === 'spcc_plan' && !facilityNeedsSPCCPlan(facilityData)) return;
-        if (surveyTypeKind === 'custom' && activeSurveyTypeRow) {
-          // Custom modes: only show facilities that need this survey done
-          // (incomplete data for this type).
-          const status = getCompletionStatus(facilityData.id, activeSurveyTypeRow.id);
-          if (status.total > 0 && status.percent >= 100) return;
-        }
-
-        visibleCount++;
-      });
-    });
-
-    return visibleCount;
-  }, [optimizationResult, completedVisibility, inspections, facilities, surveyType, surveyTypeKind, activeSurveyTypeRow, getCompletionStatus, showOnlyRouteFacilities, routeFacilityIds]);
-
   // Apply team filtering to optimization results and facilities
   // Default to team 1 if user has no assignment
   const effectiveUserTeam = userTeamAssignment || (teamCount > 1 ? 1 : null);
@@ -486,11 +733,24 @@ function App() {
     return filterOptimizationResultByTeam(optimizationResult, facilities, effectiveUserTeam);
   }, [optimizationResult, facilities, effectiveUserTeam]);
 
+  const nextRouteDayNumber = useMemo(
+    () => Math.max(0, ...(optimizationResult?.routes.map(route => route.day) ?? [])) + 1,
+    [optimizationResult],
+  );
+
   const filteredFacilities = useMemo(() => {
     // For Route Planning and Survey Mode, filter by team
     // For Facilities tab, we want to show all facilities
     return filterFacilitiesByTeam(facilities, effectiveUserTeam);
   }, [facilities, effectiveUserTeam]);
+  const visibleHomeBase = useMemo(
+    () => (
+      effectiveUserTeam !== null
+        ? homeBases.find(base => base.team_number === effectiveUserTeam) ?? homeBase
+        : homeBase
+    ),
+    [effectiveUserTeam, homeBases, homeBase],
+  );
 
   useEffect(() => {
     console.log('[App] Account loading state changed:', {
@@ -553,7 +813,9 @@ function App() {
       const routeWithUpdatedDurations = {
         ...route,
         facilities: route.facilities.map(f => {
-          const facilityRecord = facilities.find(fac => fac.name === f.name);
+          const facilityRecord = f.id
+            ? facilities.find(facility => facility.id === f.id)
+            : facilities.find(facility => facility.name === f.name);
           return {
             ...f,
             visitDuration: getVisitDuration(facilityRecord, lastUsedSettings, surveyType, dbSurveyTypes),
@@ -637,54 +899,6 @@ function App() {
     }
   }, [optimizationResult]);
 
-  // Auto-save optimizationResult to route_plans.plan_data whenever it changes,
-  // so per-day start times (and any other in-memory route edits) persist
-  // across reloads / forced refreshes. Debounced 800ms to batch rapid edits.
-  // Skips the very first run after a route is loaded so we don't re-save
-  // the exact data we just read.
-  const lastSavedRouteIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!currentRouteId || !optimizationResult || !currentAccount) return;
-
-    // When the route id flips (load/new route), reset the baseline and skip
-    // the immediate auto-save triggered by setOptimizationResult during load.
-    if (lastSavedRouteIdRef.current !== currentRouteId) {
-      lastSavedRouteIdRef.current = currentRouteId;
-      return;
-    }
-
-    // The IndexedDB snapshot is the authority while offline. Do not wake the
-    // radio or issue a doomed Supabase write after Safari restores that route.
-    // Including isOnline in the dependencies makes this same local route save
-    // once a real browser connectivity transition occurs.
-    if (!isOnline) return;
-
-    const handle = setTimeout(async () => {
-      try {
-        const planDataToSave = routeFacilityIds
-          ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
-          : optimizationResult;
-        const { error: saveErr } = await supabase
-          .from('route_plans')
-          .update({
-            plan_data: planDataToSave,
-            total_days: optimizationResult.totalDays,
-            total_miles: optimizationResult.totalMiles,
-            total_facilities: optimizationResult.totalFacilities,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id);
-        if (saveErr) {
-          console.warn('[autosave] route_plans update failed:', saveErr.message);
-        }
-      } catch (e: any) {
-        console.warn('[autosave] route_plans update threw:', e?.message || e);
-      }
-    }, 800);
-
-    return () => clearTimeout(handle);
-  }, [optimizationResult, currentRouteId, currentAccount, routeFacilityIds, isOnline]);
-
   // Persist one cohesive, account-scoped recovery point as route state changes.
   // iOS can terminate Safari's WebContent process without firing unload, so
   // saving only in pagehide/beforeunload is not reliable enough. IndexedDB is
@@ -711,7 +925,7 @@ function App() {
     }
 
     const planData = optimizationResult
-      ? (routeFacilityIds
+      ? (routeFacilityIds !== null
         ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
         : optimizationResult)
       : null;
@@ -1244,16 +1458,53 @@ function App() {
 
       const snapshotRoute = snapshot.routePlan;
       if (snapshotRoute?.plan_data) {
-        setOptimizationResult(snapshotRoute.plan_data);
-        setCurrentRouteId(snapshotRoute.id);
-        setCurrentRouteName(snapshotRoute.name ?? null);
-        setRouteVersion(prev => prev + 1);
+        try {
+          const hydrated = hydrateSavedRoutePlan(
+            snapshotRoute.plan_data as SavedRoutePlanData,
+            snapshot.facilities,
+            snapshot.homeBases,
+          );
+          const assignmentsByFacilityId = new Map(
+            hydrated.assignments.map(assignment => [assignment.facility_id, assignment]),
+          );
+          setFacilities(snapshot.facilities.map(facility => {
+            const assignment = assignmentsByFacilityId.get(facility.id);
+            if (assignment) {
+              return {
+                ...facility,
+                day_assignment: assignment.day_assignment,
+                team_assignment: assignment.team_assignment,
+              };
+            }
+            return facility.day_assignment != null && facility.day_assignment > 0
+              ? { ...facility, day_assignment: null }
+              : facility;
+          }));
+          setOptimizationResult(hydrated.result);
+          setCurrentRouteId(snapshotRoute.id);
+          setCurrentRouteName(snapshotRoute.name ?? null);
+          setDeletedFacilities(hydrated.deleted);
+          setShowDeletedAlert(hydrated.deleted.length > 0);
+          setRouteVersion(prev => prev + 1);
 
-        const savedIds = snapshot.routeFacilityIds
-          ?? snapshotRoute.plan_data?._routeFacilityIds
-          ?? null;
-        setRouteFacilityIds(savedIds);
-        setShowOnlyRouteFacilities(snapshot.showOnlyRouteFacilities);
+          const savedIds = snapshot.routeFacilityIds
+            ?? snapshotRoute.plan_data?._routeFacilityIds
+            ?? null;
+          setRouteFacilityIds(savedIds);
+          setShowOnlyRouteFacilities(snapshot.showOnlyRouteFacilities);
+        } catch (snapshotRouteError: any) {
+          setError(snapshotRouteError?.message || 'The offline saved route could not be loaded safely.');
+          setFacilities(snapshot.facilities.map(facility =>
+            facility.day_assignment != null && facility.day_assignment > 0
+              ? { ...facility, day_assignment: null }
+              : facility
+          ));
+          setOptimizationResult(null);
+          setCurrentRouteId(null);
+          setCurrentRouteName(null);
+          setRouteFacilityIds(null);
+          setShowOnlyRouteFacilities(false);
+        }
       } else {
         setOptimizationResult(null);
         setCurrentRouteId(null);
@@ -1449,55 +1700,117 @@ function App() {
         facilityCount: facilitiesData?.length || 0
       });
 
-      if (lastRoutePlan) {
-        cacheOfflineRoutePlans([lastRoutePlan]).catch(() => {});
-      }
-
       if (lastRoutePlan && facilitiesData && facilitiesData.length > 0 && !preserveActiveRoute) {
         console.log('[loadData] Loading route plan:', lastRoutePlan.name);
-        // Load the route plan data
-        let loadedResult = lastRoutePlan.plan_data;
+        let routeToActivate = lastRoutePlan;
+        let activatedRoute: ActivatedRoutePlan | null = null;
+
+        for (let activationAttempt = 0; activationAttempt < 2; activationAttempt += 1) {
+          const { data: activationData, error: activationError } = await supabase.rpc(
+            'activate_route_plan_with_assignments',
+            {
+              target_account_id: accountId,
+              target_route_plan_id: routeToActivate.id,
+              // Kept for compatibility with the RPC signature. The locked
+              // server plan_data, never this client value, is authoritative.
+              target_assignments: [],
+              target_require_current: true,
+            },
+          );
+          if (!requestIsCurrent()) return;
+
+          if (!activationError) {
+            try {
+              activatedRoute = parseActivatedRoutePlan(activationData);
+            } catch (activationResponseError: any) {
+              setError(activationResponseError?.message || 'The saved route could not be activated safely.');
+            }
+            break;
+          }
+
+          const currentRouteChanged = activationError.message?.includes('no longer current');
+          if (currentRouteChanged && activationAttempt === 0) {
+            const { data: refreshedCurrentRoute, error: refreshCurrentRouteError } = await supabase
+              .from('route_plans')
+              .select('*')
+              .eq('account_id', accountId)
+              .eq('is_last_viewed', true)
+              .maybeSingle();
+            if (!requestIsCurrent()) return;
+            if (refreshCurrentRouteError) {
+              setError(`The current saved route could not be refreshed: ${refreshCurrentRouteError.message}`);
+              break;
+            }
+            if (!refreshedCurrentRoute) {
+              setError('There is no longer a current saved route to load.');
+              break;
+            }
+            routeToActivate = refreshedCurrentRoute;
+            continue;
+          }
+
+          setError(`The saved route could not be activated: ${activationError.message}`);
+          break;
+        }
+
+        if (!activatedRoute) {
+          setOptimizationResult(null);
+          setCurrentRouteId(null);
+          setCurrentRouteName(null);
+          setRouteFacilityIds(null);
+          setShowOnlyRouteFacilities(false);
+          setIsLoadingRoutes(false);
+          setIsLoadingFacilities(false);
+          return;
+        }
+
+        const canonicalRoutePlan = {
+          ...routeToActivate,
+          id: activatedRoute.id,
+          name: activatedRoute.name,
+          plan_data: activatedRoute.plan_data,
+          settings: activatedRoute.settings,
+          home_base_data: activatedRoute.home_base_data,
+          is_last_viewed: true,
+        };
+
+        let hydratedSavedRoute: ReturnType<typeof hydrateSavedRoutePlan>;
+        try {
+          hydratedSavedRoute = hydrateSavedRoutePlan(
+            activatedRoute.plan_data,
+            facilitiesData,
+            homeBaseData || [],
+          );
+        } catch (routeHydrationError: any) {
+          setError(routeHydrationError?.message || 'The saved route could not be loaded safely.');
+          setOptimizationResult(null);
+          setCurrentRouteId(null);
+          setCurrentRouteName(null);
+          setRouteFacilityIds(null);
+          setShowOnlyRouteFacilities(false);
+          setIsLoadingRoutes(false);
+          setIsLoadingFacilities(false);
+          return;
+        }
+        const canonicalizedRoute = await canonicalizeHydratedRoute(
+          hydratedSavedRoute.result,
+          activatedRoute.assignments,
+          homeBaseData || [],
+          activatedRoute.home_base_data,
+          currentSettings?.lunch_break_minutes || 0,
+        );
+        if (!requestIsCurrent()) return;
+        let loadedResult = canonicalizedRoute.result;
+        const deletedRouteStops = mergeDeletedRouteStops(
+          hydratedSavedRoute.deleted,
+          canonicalizedRoute.dropped,
+        );
 
         // If NOT auto-refresh, update the loaded route with current facility data
         if (!autoRefresh && loadedResult) {
-          // Create a map of old name -> new facility data for easy lookup
-          const facilityMap = new Map<string, typeof facilitiesData[0]>();
-          const facilityByIndex = new Map<number, typeof facilitiesData[0]>();
-
-          facilitiesData.forEach((f, idx) => {
-            facilityMap.set(f.name, f);
-            facilityByIndex.set(idx + 1, f); // index is 1-based
-          });
-
-          const updatedRoutes = loadedResult.routes.map(route => {
-            // Update facility data (name, coordinates, and visit durations)
-            const routeWithUpdatedFacilities = {
-              ...route,
-              facilities: route.facilities.map(routeFacility => {
-                // First try to match by name (in case name hasn't changed)
-                let updatedFacility = facilityMap.get(routeFacility.name);
-
-                // If not found by name, try by index (in case name was changed)
-                if (!updatedFacility && routeFacility.index) {
-                  updatedFacility = facilityByIndex.get(routeFacility.index);
-                }
-
-                if (updatedFacility) {
-                  return {
-                    ...routeFacility,
-                    name: updatedFacility.name,
-                    latitude: Number(updatedFacility.latitude),
-                    longitude: Number(updatedFacility.longitude),
-                    visitDuration: updatedFacility.visit_duration_minutes
-                  };
-                }
-                return routeFacility;
-              })
-            };
-
-            // Recalculate times based on new visit durations
-            return recalculateRouteTimes(routeWithUpdatedFacilities, currentSettings?.lunch_break_minutes || 0);
-          });
+          const updatedRoutes = loadedResult.routes.map(route =>
+            recalculateRouteTimes(route, currentSettings?.lunch_break_minutes || 0)
+          );
 
           // Recalculate totals
           const totalMiles = updatedRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
@@ -1514,6 +1827,30 @@ function App() {
             totalTime
           };
         }
+        cacheOfflineRoutePlans([{
+          ...canonicalRoutePlan,
+          plan_data: loadedResult,
+          total_days: loadedResult.totalDays,
+          total_miles: loadedResult.totalMiles,
+          total_facilities: loadedResult.totalFacilities,
+        }]).catch(() => {});
+
+        const assignmentsByFacilityId = new Map(
+          activatedRoute.assignments.map(assignment => [assignment.facility_id, assignment]),
+        );
+        setFacilities(facilitiesData.map(facility => {
+          const assignment = assignmentsByFacilityId.get(facility.id);
+          if (assignment) {
+            return {
+              ...facility,
+              day_assignment: assignment.day_assignment,
+              team_assignment: assignment.team_assignment,
+            };
+          }
+          return facility.day_assignment != null && facility.day_assignment > 0
+            ? { ...facility, day_assignment: null }
+            : facility;
+        }));
 
         // Set the optimization result (either original or updated)
         console.log('[loadData] Setting optimization result:', {
@@ -1522,38 +1859,32 @@ function App() {
           totalFacilities: loadedResult?.totalFacilities
         });
         setOptimizationResult(loadedResult);
-        setCurrentRouteId(lastRoutePlan.id);
-        setCurrentRouteName(lastRoutePlan.name ?? null);
+        setCurrentRouteId(activatedRoute.id);
+        setCurrentRouteName(activatedRoute.name);
+        setDeletedFacilities(deletedRouteStops);
+        setShowDeletedAlert(deletedRouteStops.length > 0);
         setRouteVersion(prev => prev + 1);
 
         // Restore custom facility selection if saved with the route
-        const savedFacilityIds = lastRoutePlan.plan_data?._routeFacilityIds;
-        if (savedFacilityIds && Array.isArray(savedFacilityIds) && savedFacilityIds.length > 0) {
+        const savedFacilityIds = loadedResult._routeFacilityIds;
+        if (Array.isArray(savedFacilityIds)) {
           setRouteFacilityIds(savedFacilityIds);
           setShowOnlyRouteFacilities(true);
         } else {
-          // Even without saved IDs, if the route has facilities, derive the IDs
-          // so the map only shows route facilities (not all account facilities)
-          const routeFacIds: string[] = [];
-          loadedResult.routes?.forEach((route: any) => {
-            route.facilities?.forEach((rf: any) => {
-              const match = facilitiesData?.find((f: any) => f.name === rf.name);
-              if (match) routeFacIds.push(match.id);
-            });
-          });
-          if (routeFacIds.length > 0) {
-            setRouteFacilityIds(routeFacIds);
-            setShowOnlyRouteFacilities(true);
-          }
+          // Marker scope and route membership are separate. A legacy/full route
+          // can open focused on its stops without being frozen into an explicit
+          // subset when it is later updated.
+          setRouteFacilityIds(null);
+          setShowOnlyRouteFacilities(true);
         }
 
         // Always use current settings from database, not saved settings from route plan
         if (currentSettings) {
           setLastUsedSettings(currentSettings);
         }
-        if (lastRoutePlan.home_base_data && homeBaseData) {
+        if (activatedRoute.home_base_data && homeBaseData) {
           const matchingHomeBase = homeBaseData.find(
-            (hb: HomeBaseType) => hb.id === lastRoutePlan.home_base_data.id
+            (hb: HomeBaseType) => hb.id === activatedRoute.home_base_data?.id
           );
           if (matchingHomeBase) {
             setHomeBase(matchingHomeBase);
@@ -1886,123 +2217,333 @@ function App() {
     return { result, usePerTeamOptimization, teamHomeBases, currentTeamCount };
   };
 
-  type RoutePersistenceMode = 'new' | 'update-current';
+  const stampRoutePlanAssignments = (
+    planData: OptimizationResult & { _routeFacilityIds?: string[] },
+    assignments: RouteAssignment[],
+  ): OptimizationResult & { _routeFacilityIds?: string[] } => {
+    const assignmentByFacilityId = new Map(
+      assignments.map(assignment => [assignment.facility_id, assignment]),
+    );
+    return {
+      ...planData,
+      routes: planData.routes.map(route => ({
+        ...route,
+        facilities: route.facilities.map(routeFacility => {
+          let facilityId = routeFacility.id;
+          if (!facilityId) {
+            const nameMatches = facilities.filter(facility => facility.name === routeFacility.name);
+            if (nameMatches.length === 1) facilityId = nameMatches[0].id;
+          }
+          const assignment = facilityId ? assignmentByFacilityId.get(facilityId) : undefined;
+          return assignment
+            ? {
+                ...routeFacility,
+                id: facilityId,
+                teamAssignment: assignment.team_assignment,
+              }
+            : routeFacility;
+        }),
+      })),
+    };
+  };
+
+  const persistRoutePlanWithAssignments = async ({
+    result,
+    planData = result,
+    settings,
+    assignments,
+    routePlanId,
+    routeName,
+  }: {
+    result: OptimizationResult;
+    planData?: OptimizationResult & { _routeFacilityIds?: string[] };
+    settings: UserSettings;
+    assignments: RouteAssignment[];
+    routePlanId: string | null;
+    routeName: string;
+  }) => {
+    if (!currentAccount || !homeBase) {
+      throw new Error('Account and home base are required to save this route.');
+    }
+    const uploadBatchId = facilities.find(facility => facility.upload_batch_id)?.upload_batch_id;
+    if (!routePlanId && !uploadBatchId) {
+      throw new Error('The route cannot be saved because its upload batch is missing.');
+    }
+
+    const { data, error: persistenceError } = await supabase.rpc(
+      'save_route_plan_with_assignments',
+      {
+        target_account_id: currentAccount.id,
+        target_route_plan_id: routePlanId,
+        target_user_id: DEMO_USER_ID,
+        target_upload_batch_id: uploadBatchId ?? null,
+        target_plan_data: stampRoutePlanAssignments(planData, assignments),
+        target_total_days: result.totalDays,
+        target_total_miles: result.totalMiles,
+        target_total_facilities: result.totalFacilities,
+        target_name: routeName,
+        target_settings: settings,
+        target_home_base_data: homeBase,
+        target_assignments: assignments,
+        target_mark_last_viewed: true,
+      },
+    );
+    if (persistenceError) throw persistenceError;
+    return data as { id: string; name: string | null; assignment_count: number };
+  };
+
+  const applyRouteAssignmentsLocally = (assignments: RouteAssignment[]) => {
+    const assignmentsByFacilityId = new Map(
+      assignments.map(assignment => [assignment.facility_id, assignment]),
+    );
+    setFacilities(current => current.map(facility => {
+      const assignment = assignmentsByFacilityId.get(facility.id);
+      return assignment
+        ? {
+            ...facility,
+            day_assignment: assignment.day_assignment,
+            team_assignment: assignment.team_assignment,
+          }
+        : facility.day_assignment != null && facility.day_assignment > 0
+          ? { ...facility, day_assignment: null }
+          : facility;
+    }));
+  };
+
+  const buildRouteAssignments = ({
+    result,
+    candidateFacilities,
+    usePerTeamOptimization,
+    teamHomeBases,
+    currentTeamCount,
+  }: {
+    result: OptimizationResult;
+    candidateFacilities: Facility[];
+    usePerTeamOptimization: boolean;
+    teamHomeBases: HomeBaseType[];
+    currentTeamCount: number;
+  }): RouteAssignment[] => {
+    const dayToTeamMap = new Map<number, number>();
+
+    if (currentTeamCount <= 1) {
+      result.routes.forEach(route => dayToTeamMap.set(route.day, 1));
+    } else if (usePerTeamOptimization) {
+      for (const route of result.routes) {
+        if (route.facilities.length === 0) continue;
+        const sampleFacility = route.facilities[0];
+        let nearestTeam = 1;
+        let minimumDistance = Infinity;
+        for (const teamHomeBase of teamHomeBases) {
+          const distance = haversineDistance(
+            sampleFacility.latitude,
+            sampleFacility.longitude,
+            teamHomeBase.latitude,
+            teamHomeBase.longitude,
+          );
+          if (distance < minimumDistance) {
+            minimumDistance = distance;
+            nearestTeam = teamHomeBase.team_number;
+          }
+        }
+        dayToTeamMap.set(route.day, nearestTeam);
+      }
+    } else if (teamHomeBases.length >= currentTeamCount) {
+      const maximumDaysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
+      const teamDayCounts = new Map<number, number>();
+      for (let team = 1; team <= currentTeamCount; team += 1) {
+        teamDayCounts.set(team, 0);
+      }
+
+      const routeDistances = result.routes.map(route => {
+        const centroidLatitude = route.facilities.reduce(
+          (sum, facility) => sum + facility.latitude,
+          0,
+        ) / route.facilities.length;
+        const centroidLongitude = route.facilities.reduce(
+          (sum, facility) => sum + facility.longitude,
+          0,
+        ) / route.facilities.length;
+        return {
+          day: route.day,
+          distances: teamHomeBases
+            .map(teamHomeBase => ({
+              team: teamHomeBase.team_number,
+              distance: haversineDistance(
+                centroidLatitude,
+                centroidLongitude,
+                teamHomeBase.latitude,
+                teamHomeBase.longitude,
+              ),
+            }))
+            .sort((a, b) => a.distance - b.distance),
+        };
+      });
+
+      routeDistances.sort((a, b) => {
+        const spreadA = a.distances.length > 1
+          ? a.distances[1].distance - a.distances[0].distance
+          : Infinity;
+        const spreadB = b.distances.length > 1
+          ? b.distances[1].distance - b.distances[0].distance
+          : Infinity;
+        return spreadA - spreadB;
+      });
+
+      for (const routeDistance of routeDistances) {
+        const available = routeDistance.distances.find(({ team }) =>
+          (teamDayCounts.get(team) || 0) < maximumDaysPerTeam
+        );
+        const team = available?.team
+          ?? Array.from(teamDayCounts.entries()).sort((a, b) => a[1] - b[1])[0]?.[0]
+          ?? 1;
+        dayToTeamMap.set(routeDistance.day, team);
+        teamDayCounts.set(team, (teamDayCounts.get(team) || 0) + 1);
+      }
+    } else {
+      const daysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
+      for (let day = 1; day <= result.totalDays; day += 1) {
+        dayToTeamMap.set(day, Math.min(Math.ceil(day / daysPerTeam), currentTeamCount));
+      }
+    }
+
+    const assignments: RouteAssignment[] = [];
+    for (const route of result.routes) {
+      const teamAssignment = dayToTeamMap.get(route.day) || 1;
+      for (const routeFacility of route.facilities) {
+        const facility = candidateFacilities.find(candidate =>
+          (routeFacility.id && candidate.id === routeFacility.id)
+          || (!routeFacility.id && candidate.name === routeFacility.name)
+        );
+        if (!facility) {
+          throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+        }
+        assignments.push({
+          facility_id: facility.id,
+          day_assignment: route.day,
+          team_assignment: teamAssignment,
+        });
+      }
+    }
+    return assignments;
+  };
+
+  const inferRouteTeamAssignment = (route: DailyRoute, fallback = 1): number => {
+    const counts = new Map<number, number>();
+    for (const routeFacility of route.facilities) {
+      const record = facilities.find(facility =>
+        (routeFacility.id && facility.id === routeFacility.id)
+        || (!routeFacility.id && facility.name === routeFacility.name)
+      );
+      const team = record?.team_assignment;
+      if (team && team > 0) counts.set(team, (counts.get(team) || 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
+  };
+
+  const rebuildRouteDayForTeam = async (
+    route: DailyRoute,
+    teamAssignment: number,
+    settings: UserSettings,
+  ): Promise<DailyRoute> => {
+    if (route.facilities.length === 0) return route;
+    const routeHomeBase = homeBases.find(base => base.team_number === teamAssignment) ?? homeBase;
+    if (!routeHomeBase) throw new Error(`Home base for Team ${teamAssignment} is missing.`);
+
+    const oldToNewIndex = new Map<number, number>();
+    const localToStableIndex = new Map<number, number>();
+    const normalizedFacilities: FacilityWithIndex[] = route.facilities.map((routeFacility, index) => {
+      const normalizedIndex = index + 1;
+      oldToNewIndex.set(routeFacility.index, normalizedIndex);
+      const recordIndex = facilities.findIndex(facility =>
+        (routeFacility.id && facility.id === routeFacility.id)
+        || (!routeFacility.id && facility.name === routeFacility.name)
+      );
+      const record = recordIndex >= 0 ? facilities[recordIndex] : null;
+      if (!record) {
+        throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+      }
+      // Route calculations use a compact day-local matrix (1..N), but the
+      // saved/displayed result must keep account-wide unique indexes. Without
+      // this remap, two rebuilt days both produced index 1 and Leaflet popup
+      // controls could target the wrong stop.
+      localToStableIndex.set(normalizedIndex, recordIndex + 1);
+      return {
+        ...routeFacility,
+        id: record.id,
+        name: record.name,
+        index: normalizedIndex,
+        visitDuration: routeFacility.visitDuration
+          ?? getVisitDuration(record, settings, surveyType, dbSurveyTypes),
+      };
+    });
+    const remappedSequence = route.sequence
+      .map(index => oldToNewIndex.get(index))
+      .filter((index): index is number => Boolean(index));
+    const completeSequence = remappedSequence.length === normalizedFacilities.length
+      ? remappedSequence
+      : normalizedFacilities.map(facility => facility.index);
+    const distanceMatrix = await calculateDistanceMatrix([
+      {
+        latitude: Number(routeHomeBase.latitude),
+        longitude: Number(routeHomeBase.longitude),
+      },
+      ...normalizedFacilities.map(facility => ({
+        latitude: Number(facility.latitude),
+        longitude: Number(facility.longitude),
+      })),
+    ]);
+    const rebuilt = rebuildDayRoute(
+      normalizedFacilities,
+      completeSequence,
+      distanceMatrix,
+      0,
+      route.startTime || settings.start_time || '08:00',
+      settings.lunch_break_minutes || 0,
+    );
+    return {
+      ...rebuilt,
+      day: route.day,
+      facilities: rebuilt.facilities.map(facility => ({
+        ...facility,
+        index: localToStableIndex.get(facility.index) ?? facility.index,
+      })),
+      sequence: rebuilt.sequence.map(index => localToStableIndex.get(index) ?? index),
+    };
+  };
 
   const handleGenerateRoutes = async (
     settings: UserSettings,
     persistenceMode: RoutePersistenceMode = 'new',
+    facilitiesOverride?: Facility[],
   ) => {
     if (!homeBase) {
       promptForHomeBase(
-        { kind: 'generate', settings },
+        { kind: 'generate', settings, persistenceMode },
         "Routes start and end at your home base, so we need one before planning. Set it below and we'll pick up right where you left off."
       );
-      return;
+      return false;
     }
 
     if (facilities.length === 0) {
       setError('Please upload facilities first');
-      return;
+      return false;
     }
 
     setIsGenerating(true);
     setError(null);
 
-    // Full re-generate clears any selected-facility-only mode
-    setRouteFacilityIds(null);
-    setShowOnlyRouteFacilities(false);
-
     try {
       // In specific survey modes (SPCC Plans/Inspections/Custom), include all non-sold facilities
       // since day_assignment=-1 exclusions are for general routing, not targeted survey routing.
       // Only manually removed (-2) and sold facilities remain excluded.
+      const routeSourceFacilities = facilitiesOverride ?? facilities;
       let activeFacilities = (surveyTypeKind === 'spcc_plan' || surveyTypeKind === 'spcc_inspection' || surveyTypeKind === 'custom')
-        ? facilities.filter(f => f.day_assignment !== -2 && f.status !== 'sold')
-        : facilities.filter(isActiveFacility);
+        ? routeSourceFacilities.filter(f => f.day_assignment !== -2 && f.status !== 'sold')
+        : routeSourceFacilities.filter(isActiveFacility);
 
-      // Exclude facilities based on current visibility settings (driven by the visibility modal)
-      const completedFacilityIds = new Set<string>();
-      let excludeCount = 0;
-      const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
-
-      // Inspection-based exclusions
-      if (hideAllCompleted || hideInternallyCompleted || hideExternallyCompleted) {
-        if (currentAccount) {
-          const { data: completedInspections } = await supabase
-            .from('inspections')
-            .select('*')
-            .eq('account_id', currentAccount.id)
-            .eq('status', 'completed')
-            .order('conducted_at', { ascending: false });
-
-          const latestInspectionsByFacility = new Map<string, Inspection>();
-          (completedInspections || []).forEach(inspection => {
-            if (!latestInspectionsByFacility.has(inspection.facility_id)) {
-              latestInspectionsByFacility.set(inspection.facility_id, inspection);
-            }
-          });
-
-          if (hideAllCompleted) {
-            latestInspectionsByFacility.forEach((inspection, facilityId) => {
-              if (isInspectionValid(inspection)) {
-                completedFacilityIds.add(facilityId);
-              }
-            });
-            activeFacilities.forEach(facility => {
-              if (facility.spcc_completion_type === 'internal' || facility.spcc_completion_type === 'external') {
-                completedFacilityIds.add(facility.id);
-              }
-            });
-          } else {
-            if (hideInternallyCompleted) {
-              latestInspectionsByFacility.forEach((inspection, facilityId) => {
-                if (isInspectionValid(inspection)) {
-                  completedFacilityIds.add(facilityId);
-                }
-              });
-              activeFacilities.forEach(facility => {
-                if (facility.spcc_completion_type === 'internal') {
-                  completedFacilityIds.add(facility.id);
-                }
-              });
-            }
-            if (hideExternallyCompleted) {
-              activeFacilities.forEach(facility => {
-                if (facility.spcc_completion_type === 'external') {
-                  completedFacilityIds.add(facility.id);
-                }
-              });
-            }
-          }
-        }
-      }
-
-      // Plan-based exclusions
-      if (hideValidPlans) {
-        activeFacilities.forEach(facility => {
-          const planStatus = getSPCCPlanStatus(facility);
-          if (planStatus.status === 'valid' || planStatus.status === 'recertified') {
-            completedFacilityIds.add(facility.id);
-          }
-        });
-      }
-      if (hideExpiringPlans) {
-        activeFacilities.forEach(facility => {
-          const planStatus = getSPCCPlanStatus(facility);
-          if (planStatus.status === 'expiring' || planStatus.status === 'renewal_due') {
-            completedFacilityIds.add(facility.id);
-          }
-        });
-      }
-
-      // Apply exclusions
+      // Map visibility is display-only. Route membership is determined by the
+      // active survey mode and explicit route actions, never by hidden markers.
       let facilitiesForRouting = activeFacilities;
-      if (completedFacilityIds.size > 0) {
-        const facilitiesBeforeFilter = activeFacilities.length;
-        facilitiesForRouting = activeFacilities.filter(f => !completedFacilityIds.has(f.id));
-        excludeCount = facilitiesBeforeFilter - facilitiesForRouting.length;
-        console.log(`Excluded ${excludeCount} facilities from route based on visibility settings`);
-      }
 
       // Survey type filtering: only route facilities relevant to the selected mode
       if (surveyTypeKind === 'spcc_plan') {
@@ -2047,7 +2588,7 @@ function App() {
             : 'No active facilities to route. Please restore excluded facilities or upload new ones.'
         );
         setIsGenerating(false);
-        return;
+        return false;
       }
 
       const constraints = {
@@ -2089,209 +2630,71 @@ function App() {
         }))
       });
 
-      // Distribute days across teams and update facility assignments
-      if (currentTeamCount > 1) {
-        console.log(`Distributing ${result.totalDays} days across ${currentTeamCount} teams`);
+      const routeAssignments = buildRouteAssignments({
+        result,
+        candidateFacilities: facilitiesForRouting,
+        usePerTeamOptimization,
+        teamHomeBases,
+        currentTeamCount,
+      });
 
-        const dayToTeamMap = new Map<number, number>();
-
-        if (usePerTeamOptimization) {
-          // Per-team optimization was used: determine team from facility's pre-assignment
-          // Each route's facilities were pre-assigned to a specific team by nearest home base
-          for (const route of result.routes) {
-            if (route.facilities.length === 0) continue;
-            // Find which team this route's facilities belong to
-            const sampleFac = route.facilities[0];
-            let nearestTeam = 1;
-            let minDist = Infinity;
-            for (const hb of teamHomeBases) {
-              const dist = haversineDistance(sampleFac.latitude, sampleFac.longitude, hb.latitude, hb.longitude);
-              if (dist < minDist) { minDist = dist; nearestTeam = hb.team_number; }
-            }
-            dayToTeamMap.set(route.day, nearestTeam);
+      if (routeAssignments.length !== result.totalFacilities) {
+        throw new Error('The route assignments do not match the optimized stop list.');
+      }
+      const routedFacilityIds = new Set(
+        routeAssignments.map(assignment => assignment.facility_id),
+      );
+      if (facilitiesOverride) {
+        for (const originalFacility of facilities) {
+          const restoredFacility = facilitiesOverride.find(
+            candidate => candidate.id === originalFacility.id,
+          );
+          if (
+            originalFacility.day_assignment === -1
+            && restoredFacility
+            && restoredFacility.day_assignment == null
+            && !routedFacilityIds.has(originalFacility.id)
+          ) {
+            routeAssignments.push({
+              facility_id: originalFacility.id,
+              day_assignment: null,
+              team_assignment: restoredFacility.team_assignment || 1,
+            });
           }
-          console.log('Per-team optimization team distribution:', Array.from(dayToTeamMap.entries()));
-        } else if (teamHomeBases.length >= currentTeamCount) {
-          // Single-pass optimization with home-base-aware day assignment
-          const maxDaysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
-          const teamDayCounts = new Map<number, number>();
-          for (let t = 1; t <= currentTeamCount; t++) teamDayCounts.set(t, 0);
-
-          // For each route, calculate distance to each team's home base
-          const routeDistances = result.routes.map(route => {
-            const lats = route.facilities.map(f => f.latitude);
-            const lngs = route.facilities.map(f => f.longitude);
-            const centroidLat = lats.reduce((s, v) => s + v, 0) / lats.length;
-            const centroidLng = lngs.reduce((s, v) => s + v, 0) / lngs.length;
-            const distances = teamHomeBases.map(hb => ({
-              team: hb.team_number,
-              dist: haversineDistance(centroidLat, centroidLng, hb.latitude, hb.longitude),
-            }));
-            return { day: route.day, distances: distances.sort((a, b) => a.dist - b.dist) };
-          });
-
-          // Sort by distance spread (most constrained first)
-          routeDistances.sort((a, b) => {
-            const spreadA = a.distances.length > 1 ? a.distances[1].dist - a.distances[0].dist : Infinity;
-            const spreadB = b.distances.length > 1 ? b.distances[1].dist - b.distances[0].dist : Infinity;
-            return spreadA - spreadB;
-          });
-
-          // Greedy assignment to nearest team with capacity
-          for (const rd of routeDistances) {
-            let assigned = false;
-            for (const { team } of rd.distances) {
-              const count = teamDayCounts.get(team) || 0;
-              if (count < maxDaysPerTeam) {
-                dayToTeamMap.set(rd.day, team);
-                teamDayCounts.set(team, count + 1);
-                assigned = true;
-                break;
-              }
-            }
-            if (!assigned) {
-              let minTeam = 1;
-              let minCount = Infinity;
-              teamDayCounts.forEach((count, team) => {
-                if (count < minCount) { minCount = count; minTeam = team; }
-              });
-              dayToTeamMap.set(rd.day, minTeam);
-              teamDayCounts.set(minTeam, (teamDayCounts.get(minTeam) || 0) + 1);
-            }
-          }
-          console.log('Home-base-aware team distribution:', Array.from(dayToTeamMap.entries()));
-        } else {
-          // Fallback: sequential distribution if not enough home bases configured
-          const daysPerTeam = Math.ceil(result.totalDays / currentTeamCount);
-          for (let day = 1; day <= result.totalDays; day++) {
-            const teamNumber = Math.ceil(day / daysPerTeam);
-            dayToTeamMap.set(day, Math.min(teamNumber, currentTeamCount));
-          }
-          console.log('Sequential team distribution (not enough home bases):', Array.from(dayToTeamMap.entries()));
         }
-
-        // Update facility team assignments in database
-        const updatePromises: Promise<any>[] = [];
-
-        result.routes.forEach(route => {
-          const teamNumber = dayToTeamMap.get(route.day) || 1;
-
-          route.facilities.forEach(facility => {
-            // Find the actual facility by name to get its ID
-            const actualFacility = activeFacilities.find(f => f.name === facility.name);
-            if (actualFacility) {
-              updatePromises.push(
-                supabase
-                  .from('facilities')
-                  .update({
-                    day_assignment: route.day,
-                    team_assignment: teamNumber
-                  })
-                  .eq('id', actualFacility.id)
-              );
-            }
-          });
-        });
-
-        await Promise.all(updatePromises);
-        console.log(`Updated team assignments for ${updatePromises.length} facilities`);
-      } else {
-        // Single team mode - assign all to team 1
-        const updatePromises: Promise<any>[] = [];
-
-        result.routes.forEach(route => {
-          route.facilities.forEach(facility => {
-            const actualFacility = activeFacilities.find(f => f.name === facility.name);
-            if (actualFacility) {
-              updatePromises.push(
-                supabase
-                  .from('facilities')
-                  .update({
-                    day_assignment: route.day,
-                    team_assignment: 1
-                  })
-                  .eq('id', actualFacility.id)
-              );
-            }
-          });
-        });
-
-        await Promise.all(updatePromises);
-        console.log(`Updated day assignments for ${updatePromises.length} facilities (single team mode)`);
       }
 
-      // Refresh local facilities state so UI reflects updated day_assignment and team_assignment
-      const { data: updatedFacilities } = await supabase
-        .from('facilities')
-        .select('*')
-        .eq('account_id', currentAccount.id)
-        .order('created_at', { ascending: true });
+      const generatedRouteName = `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+      const persistedRoute = await persistRoutePlanWithAssignments({
+        result,
+        settings,
+        assignments: routeAssignments,
+        routePlanId:
+          persistenceMode === 'update-current' && currentRouteId
+            ? currentRouteId
+            : null,
+        routeName: generatedRouteName,
+      });
+      applyRouteAssignmentsLocally(routeAssignments);
+      setCurrentRouteId(persistedRoute.id);
+      setCurrentRouteName(persistedRoute.name ?? generatedRouteName);
 
-      if (updatedFacilities) {
-        setFacilities(updatedFacilities);
-      }
-
+      // Commit the all-eligible scope only after the replacement route has
+      // generated and persisted successfully. Clearing it up front could leave
+      // the old selected route on screen with the wrong label after an error,
+      // and could make autosave drop its saved subset metadata.
       setOptimizationResult(result);
       setLastUsedSettings(settings);
+      setRouteFacilityIds(null);
+      setShowOnlyRouteFacilities(false);
       setRouteVersion(prev => prev + 1);
       localStorage.setItem('currentView', 'route-planning');
       setCurrentView('route-planning');
-
-      // Preserve user's visibility settings across route updates - don't reset them
-
-      let clearLastViewedQuery = supabase
-        .from('route_plans')
-        .update({ is_last_viewed: false })
-        .eq('account_id', currentAccount.id)
-        .eq('is_last_viewed', true);
-      if (persistenceMode === 'update-current' && currentRouteId) {
-        clearLastViewedQuery = clearLastViewedQuery.neq('id', currentRouteId);
-      }
-      const { error: clearLastViewedError } = await clearLastViewedQuery;
-      if (clearLastViewedError) throw clearLastViewedError;
-
-      if (persistenceMode === 'update-current' && currentRouteId) {
-        const { data: updatedRoute, error: updateRouteError } = await supabase
-          .from('route_plans')
-          .update({
-            plan_data: result,
-            total_days: result.totalDays,
-            total_miles: result.totalMiles,
-            total_facilities: result.totalFacilities,
-            is_last_viewed: true,
-            settings,
-            home_base_data: homeBase,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id)
-          .select()
-          .single();
-        if (updateRouteError) throw updateRouteError;
-        if (updatedRoute) setCurrentRouteName(updatedRoute.name ?? currentRouteName);
-      } else {
-        const { data: newRoute, error: insertRouteError } = await supabase.from('route_plans').insert({
-          user_id: DEMO_USER_ID,
-          account_id: currentAccount.id,
-          upload_batch_id: facilities[0].upload_batch_id,
-          plan_data: result,
-          total_days: result.totalDays,
-          total_miles: result.totalMiles,
-          total_facilities: result.totalFacilities,
-          name: `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
-          is_last_viewed: true,
-          settings: settings,
-          home_base_data: homeBase,
-        }).select().single();
-        if (insertRouteError) throw insertRouteError;
-
-        if (newRoute) {
-          setCurrentRouteId(newRoute.id);
-          setCurrentRouteName(newRoute.name ?? null);
-        }
-      }
+      return true;
     } catch (err: any) {
       console.error('Error generating routes:', err);
       setError(err.message || 'Failed to generate routes');
+      return false;
     } finally {
       setIsGenerating(false);
     }
@@ -2304,15 +2707,15 @@ function App() {
   ) => {
     if (!homeBase) {
       promptForHomeBase(
-        { kind: 'fromSelection', facilityIds, sourceSurveyType },
+        { kind: 'fromSelection', facilityIds, sourceSurveyType, persistenceMode },
         `Routes start and end at your home base, so we need one first. Set it below and we'll build the route for your ${facilityIds.length} selected ${facilityIds.length === 1 ? 'facility' : 'facilities'} straight after — your selection is safe.`
       );
-      return;
+      return false;
     }
 
     if (facilityIds.length === 0) {
       setError('No facilities selected');
-      return;
+      return false;
     }
 
     // Set the survey type from the facilities tab so visit durations are correct
@@ -2324,8 +2727,8 @@ function App() {
       const { data: dbSettings } = await supabase
         .from('user_settings')
         .select('*')
-        .eq('user_id', currentAccount.id)
-        .single();
+        .eq('account_id', currentAccount.id)
+        .maybeSingle();
       if (dbSettings) {
         settings = dbSettings;
         setLastUsedSettings(dbSettings);
@@ -2333,7 +2736,7 @@ function App() {
     }
     if (!settings) {
       setError('Route planning settings not found. Please configure settings first.');
-      return;
+      return false;
     }
 
     setIsGenerating(true);
@@ -2341,20 +2744,23 @@ function App() {
     setCurrentView('route-planning');
     localStorage.setItem('currentView', 'route-planning');
 
-    // Track selected facility IDs for re-optimize and map filtering
-    setRouteFacilityIds(facilityIds);
-    setShowOnlyRouteFacilities(true);
-
     try {
       // Filter to only selected facilities with valid coordinates
       const selectedFacilities = facilities.filter(
         f => facilityIds.includes(f.id) && hasCoords(f)
       );
+      const routableFacilityIds = selectedFacilities.map(facility => facility.id);
+      const excludedSelectionCount = facilityIds.length - routableFacilityIds.length;
 
       if (selectedFacilities.length === 0) {
         setError('Selected facilities have no valid coordinates');
-        setIsGenerating(false);
-        return;
+        return false;
+      }
+      if (excludedSelectionCount > 0) {
+        setError(
+          `${excludedSelectionCount} selected ${excludedSelectionCount === 1 ? 'facility is' : 'facilities are'} missing or have invalid coordinates. Add coordinates before building this route so no selected stop is silently left out.`
+        );
+        return false;
       }
 
       const constraints = {
@@ -2374,41 +2780,27 @@ function App() {
       // its per-team home bases here too. Pass sourceSurveyType (the param)
       // rather than the surveyType state — setSurveyType is async and hasn't
       // landed yet at this point.
-      const { result } = await runRouteOptimization(
+      const {
+        result,
+        usePerTeamOptimization,
+        teamHomeBases,
+        currentTeamCount,
+      } = await runRouteOptimization(
         selectedFacilities,
         settings,
         constraints,
         sourceSurveyType
       );
 
-      // Update facility day_assignment in DB
-      const updatePromises: Promise<any>[] = [];
-      result.routes.forEach(route => {
-        route.facilities.forEach(facility => {
-          const actualFacility = selectedFacilities.find(f => f.name === facility.name);
-          if (actualFacility) {
-            updatePromises.push(
-              supabase
-                .from('facilities')
-                .update({ day_assignment: route.day, team_assignment: 1 })
-                .eq('id', actualFacility.id)
-                .then()
-            );
-          }
-        });
+      const routeAssignments = buildRouteAssignments({
+        result,
+        candidateFacilities: selectedFacilities,
+        usePerTeamOptimization,
+        teamHomeBases,
+        currentTeamCount,
       });
-      await Promise.all(updatePromises);
-
-      // Refresh facilities
-      if (currentAccount) {
-        const { data: updatedFacilities } = await supabase
-          .from('facilities')
-          .select('*')
-          .eq('account_id', currentAccount.id)
-          .order('created_at', { ascending: true });
-        if (updatedFacilities) {
-          setFacilities(updatedFacilities);
-        }
+      if (routeAssignments.length !== result.totalFacilities) {
+        throw new Error('The selected route assignments do not match the optimized stop list.');
       }
 
       // Build descriptive name — use sourceSurveyType (param) since setSurveyType is async.
@@ -2427,66 +2819,37 @@ function App() {
         routeName = `Selected Facilities Route ${dateStr}`;
       }
 
-      // Keep one canonical last-viewed route. Updating a route preserves its
-      // id so an active outing and completed stop history stay attached.
-      if (currentAccount) {
-        let clearLastViewedQuery = supabase
-          .from('route_plans')
-          .update({ is_last_viewed: false })
-          .eq('account_id', currentAccount.id)
-          .eq('is_last_viewed', true);
-        if (persistenceMode === 'update-current' && currentRouteId) {
-          clearLastViewedQuery = clearLastViewedQuery.neq('id', currentRouteId);
-        }
-        const { error: clearLastViewedError } = await clearLastViewedQuery;
-        if (clearLastViewedError) throw clearLastViewedError;
-      }
+      // Updating preserves the saved route id, so the current outing and its
+      // accomplishments remain attached. The subset metadata is committed in
+      // the same transaction as the facility day assignments.
+      const planData = { ...result, _routeFacilityIds: routableFacilityIds };
+      const persistedRoute = await persistRoutePlanWithAssignments({
+        result,
+        planData,
+        settings,
+        assignments: routeAssignments,
+        routePlanId:
+          persistenceMode === 'update-current' && currentRouteId
+            ? currentRouteId
+            : null,
+        routeName,
+      });
+      applyRouteAssignmentsLocally(routeAssignments);
+      setCurrentRouteId(persistedRoute.id);
+      setCurrentRouteName(persistedRoute.name ?? routeName);
 
+      // Do not change membership or marker scope until the selected route has
+      // generated and persisted. On any failure, the prior route remains fully
+      // intact instead of being relabeled with an uncommitted selection.
       setOptimizationResult(result);
+      setRouteFacilityIds(routableFacilityIds);
+      setShowOnlyRouteFacilities(true);
       setRouteVersion(prev => prev + 1);
-
-      const planData = { ...result, _routeFacilityIds: facilityIds };
-      if (persistenceMode === 'update-current' && currentRouteId && currentAccount) {
-        const { data: updatedRoute, error: updateRouteError } = await supabase
-          .from('route_plans')
-          .update({
-            plan_data: planData,
-            total_days: result.totalDays,
-            total_miles: result.totalMiles,
-            total_facilities: result.totalFacilities,
-            is_last_viewed: true,
-            settings,
-            home_base_data: homeBase,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id)
-          .select()
-          .single();
-        if (updateRouteError) throw updateRouteError;
-        if (updatedRoute) setCurrentRouteName(updatedRoute.name ?? currentRouteName);
-      } else {
-        const { data: newRoute, error: insertRouteError } = await supabase.from('route_plans').insert({
-          user_id: DEMO_USER_ID,
-          account_id: currentAccount?.id,
-          upload_batch_id: facilities[0]?.upload_batch_id,
-          plan_data: planData,
-          total_days: result.totalDays,
-          total_miles: result.totalMiles,
-          total_facilities: result.totalFacilities,
-          name: routeName,
-          is_last_viewed: true,
-          settings: settings,
-          home_base_data: homeBase,
-        }).select().single();
-        if (insertRouteError) throw insertRouteError;
-        if (newRoute) {
-          setCurrentRouteId(newRoute.id);
-          setCurrentRouteName(newRoute.name ?? null);
-        }
-      }
+      return true;
     } catch (err: any) {
       console.error('Error creating route from selection:', err);
       setError(err.message || 'Failed to create route from selected facilities');
+      return false;
     } finally {
       setIsGenerating(false);
     }
@@ -2502,16 +2865,21 @@ function App() {
     setPendingRouteAction(null);
     setHomeBaseModalContext(null);
     if (action.kind === 'generate') {
-      handleGenerateRoutes(action.settings);
+      handleGenerateRoutes(action.settings, action.persistenceMode);
     } else {
-      handleCreateRouteFromSelection(action.facilityIds, action.sourceSurveyType);
+      handleCreateRouteFromSelection(
+        action.facilityIds,
+        action.sourceSurveyType,
+        action.persistenceMode,
+      );
     }
   }, [homeBase, pendingRouteAction]);
 
 
   const handleApplyWithTimeRefresh = async () => {
-    if (!optimizationResult || !lastUsedSettings) {
+    if (!optimizationResult || !lastUsedSettings || !currentRouteId || !currentAccount) {
       console.log('No existing route to refresh');
+      setError('Save or reload this route before refreshing its times.');
       return;
     }
 
@@ -2547,7 +2915,9 @@ function App() {
           ...route,
           startTime: latestSettings.start_time || route.startTime,
           facilities: route.facilities.map(f => {
-            const facilityRecord = facilities.find(fac => fac.name === f.name);
+            const facilityRecord = f.id
+              ? facilities.find(facility => facility.id === f.id)
+              : facilities.find(facility => facility.name === f.name);
             return {
               ...f,
               visitDuration: getVisitDuration(facilityRecord, latestSettings as UserSettings, surveyType, dbSurveyTypes)
@@ -2575,6 +2945,35 @@ function App() {
         totalTime,
       };
 
+      const routeAssignments: RouteAssignment[] = refreshedResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const facilityRecord = routeFacility.id
+            ? facilities.find(facility => facility.id === routeFacility.id)
+            : facilities.find(facility => facility.name === routeFacility.name);
+          if (!facilityRecord) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: facilityRecord.id,
+            day_assignment: route.day,
+            team_assignment: facilityRecord.team_assignment || 1,
+          };
+        }),
+      );
+      const planData = routeFacilityIds !== null
+        ? { ...refreshedResult, _routeFacilityIds: routeFacilityIds }
+        : refreshedResult;
+
+      await persistRoutePlanWithAssignments({
+        result: refreshedResult,
+        planData,
+        settings: latestSettings as UserSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+
+      applyRouteAssignmentsLocally(routeAssignments);
       setOptimizationResult(refreshedResult);
       setLastUsedSettings(latestSettings);
       setRouteVersion(prev => prev + 1);
@@ -2593,7 +2992,23 @@ function App() {
     }
   };
 
+  const regenerateCurrentRouteScope = async (settings: UserSettings): Promise<boolean> => {
+    if (routeFacilityIds !== null) {
+      if (routeFacilityIds.length === 0) {
+        setError('This route has no stops. Add facilities or choose Use all eligible facilities.');
+        return false;
+      }
+      return handleCreateRouteFromSelection(
+        routeFacilityIds,
+        surveyType,
+        'update-current',
+      );
+    }
+    return handleGenerateRoutes(settings, 'update-current');
+  };
+
   const handleApplyWithFullOptimization = async () => {
+    if (!currentAccount) return;
     // Switch to route planning view and show loading
     setCurrentView('route-planning');
     localStorage.setItem('currentView', 'route-planning');
@@ -2613,84 +3028,102 @@ function App() {
     }
 
     if (latestSettings) {
-      // If we have a selected facility list, re-optimize with only those facilities
-      if (routeFacilityIds && routeFacilityIds.length > 0) {
-        await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
-      } else {
-        await handleGenerateRoutes(latestSettings, 'update-current');
-      }
+      await regenerateCurrentRouteScope(latestSettings);
     }
   };
 
-  const handleLoadRoute = async (route: RoutePlan) => {
-    const deleted: Array<{ name: string; day: number }> = [];
-
-    // Update the loaded route with current facility data (lat/long, visit duration, etc.)
-    const updatedResult = {
-      ...route.plan_data,
-      routes: route.plan_data.routes.map((routeDay: any) => ({
-        ...routeDay,
-        facilities: routeDay.facilities.map((routeFacility: any) => {
-          // Find the current facility data by name
-          const currentFacility = facilities.find(f => f.name === routeFacility.name);
-          if (currentFacility) {
-            // Merge saved route facility with current facility data
-            return {
-              ...routeFacility,
-              latitude: Number(currentFacility.latitude),
-              longitude: Number(currentFacility.longitude),
-              visitDuration: currentFacility.visit_duration_minutes
-            };
-          }
-          // Facility not found - it was deleted
-          deleted.push({ name: routeFacility.name, day: routeDay.day });
-          return routeFacility;
-        })
-      }))
-    };
-
-    setOptimizationResult(updatedResult);
-    setCurrentRouteId(route.id);
-    setCurrentRouteName(route.name ?? null);
-
-    // Restore custom facility selection if saved with the route
-    const savedFacilityIds = route.plan_data._routeFacilityIds;
-    if (savedFacilityIds && Array.isArray(savedFacilityIds) && savedFacilityIds.length > 0) {
-      setRouteFacilityIds(savedFacilityIds);
-      setShowOnlyRouteFacilities(true);
-    } else {
-      setRouteFacilityIds(null);
-      setShowOnlyRouteFacilities(false);
+  const handleLoadRoute = async (route: RoutePlan): Promise<boolean> => {
+    if (!currentAccount) {
+      setError('Select an account before loading a saved route.');
+      return false;
     }
+    try {
+      const { data: activationData, error: activationError } = await supabase.rpc(
+        'activate_route_plan_with_assignments',
+        {
+          target_account_id: currentAccount.id,
+          target_route_plan_id: route.id,
+          // The server resolves this from the locked route plan. Passing an
+          // empty compatibility value prevents this stale list snapshot from
+          // becoming assignment authority.
+          target_assignments: [],
+          target_require_current: false,
+        },
+      );
+      if (activationError) throw activationError;
+      const activatedRoute = parseActivatedRoutePlan(activationData);
+      const hydrated = hydrateSavedRoutePlan(
+        activatedRoute.plan_data,
+        facilities,
+        homeBases,
+      );
+      const canonicalizedRoute = await canonicalizeHydratedRoute(
+        hydrated.result,
+        activatedRoute.assignments,
+        homeBases,
+        activatedRoute.home_base_data,
+        lastUsedSettings?.lunch_break_minutes || 0,
+      );
+      const updatedResult = canonicalizedRoute.result;
+      const deletedRouteStops = mergeDeletedRouteStops(
+        hydrated.deleted,
+        canonicalizedRoute.dropped,
+      );
+      cacheOfflineRoutePlans([{
+        ...route,
+        id: activatedRoute.id,
+        name: activatedRoute.name ?? route.name,
+        plan_data: updatedResult,
+        total_days: updatedResult.totalDays,
+        total_miles: updatedResult.totalMiles,
+        total_facilities: updatedResult.totalFacilities,
+        settings: activatedRoute.settings,
+        home_base_data: activatedRoute.home_base_data,
+        is_last_viewed: true,
+      }]).catch(() => {});
 
-    // Always load current settings from database, not saved settings from route
-    if (currentAccount) {
-      const { data: currentSettings } = await supabase
+      applyRouteAssignmentsLocally(activatedRoute.assignments);
+      setOptimizationResult(updatedResult);
+      setCurrentRouteId(activatedRoute.id);
+      setCurrentRouteName(activatedRoute.name);
+
+      const savedFacilityIds = updatedResult._routeFacilityIds;
+      setRouteFacilityIds(Array.isArray(savedFacilityIds) ? savedFacilityIds : null);
+      setShowOnlyRouteFacilities(true);
+
+      const { data: currentSettings, error: settingsError } = await supabase
         .from('user_settings')
         .select('*')
         .eq('account_id', currentAccount.id)
         .maybeSingle();
-
-      if (currentSettings) {
+      if (settingsError) {
+        console.warn('[LoadRoute] Current settings could not be refreshed:', settingsError.message);
+      } else if (currentSettings) {
         setLastUsedSettings(currentSettings);
       }
-    }
-    if (route.home_base_data && homeBases.length > 0) {
-      const matchingHomeBase = homeBases.find(
-        (hb: HomeBaseType) => hb.id === route.home_base_data.id
-      );
-      if (matchingHomeBase) {
-        setHomeBase(matchingHomeBase);
-      }
-    }
-    localStorage.setItem('currentView', 'route-planning');
-    setCurrentView('route-planning');
-    setRouteVersion(prev => prev + 1);
 
-    // Show alert if deleted facilities found
-    if (deleted.length > 0) {
-      setDeletedFacilities(deleted);
-      setShowDeletedAlert(true);
+      if (activatedRoute.home_base_data && homeBases.length > 0) {
+        const matchingHomeBase = homeBases.find(
+          (hb: HomeBaseType) => hb.id === activatedRoute.home_base_data?.id
+        );
+        if (matchingHomeBase) setHomeBase(matchingHomeBase);
+      }
+      localStorage.setItem('currentView', 'route-planning');
+      setCurrentView('route-planning');
+      setRouteVersion(prev => prev + 1);
+      setDeletedFacilities(deletedRouteStops);
+      setShowDeletedAlert(deletedRouteStops.length > 0);
+      return true;
+    } catch (loadError: any) {
+      console.error('[LoadRoute] Failed to activate saved route:', loadError);
+      setError(loadError?.message || 'Failed to load the saved route.');
+      return false;
+    }
+  };
+
+  const handleRouteRenamed = (routeId: string, name: string) => {
+    if (routeId === currentRouteId) {
+      setCurrentRouteName(name);
     }
   };
 
@@ -2720,17 +3153,21 @@ function App() {
    */
   const currentRouteFacilityIds = useMemo<Set<string>>(() => {
     if (!optimizationResult) return new Set();
-    if (routeFacilityIds && routeFacilityIds.length > 0) {
+    if (routeFacilityIds !== null) {
       return new Set(routeFacilityIds);
     }
-    const namesInRoute = new Set<string>();
+    const idsInRoute = new Set<string>();
+    const legacyNamesInRoute = new Set<string>();
     for (const route of optimizationResult.routes ?? []) {
       for (const rf of (route as any).facilities ?? []) {
-        if (rf?.name) namesInRoute.add(rf.name);
+        if (rf?.id) idsInRoute.add(rf.id);
+        else if (rf?.name) legacyNamesInRoute.add(rf.name);
       }
     }
     return new Set(
-      facilities.filter((f) => namesInRoute.has(f.name)).map((f) => f.id),
+      facilities
+        .filter((facility) => idsInRoute.has(facility.id) || legacyNamesInRoute.has(facility.name))
+        .map((facility) => facility.id),
     );
   }, [optimizationResult, routeFacilityIds, facilities]);
 
@@ -2753,45 +3190,59 @@ function App() {
     // we're in subset mode, otherwise derive from optimizationResult by
     // name-matching back to the facilities list.
     let baseIds: string[];
-    if (routeFacilityIds && routeFacilityIds.length > 0) {
+    if (routeFacilityIds !== null) {
       baseIds = routeFacilityIds;
     } else {
-      const namesInRoute = new Set<string>();
+      const idsInRoute = new Set<string>();
+      const legacyNamesInRoute = new Set<string>();
       for (const route of optimizationResult.routes ?? []) {
         for (const rf of (route as any).facilities ?? []) {
-          if (rf?.name) namesInRoute.add(rf.name);
+          if (rf?.id) idsInRoute.add(rf.id);
+          else if (rf?.name) legacyNamesInRoute.add(rf.name);
         }
       }
-      baseIds = facilities.filter((f) => namesInRoute.has(f.name)).map((f) => f.id);
+      baseIds = facilities
+        .filter((facility) => idsInRoute.has(facility.id) || legacyNamesInRoute.has(facility.name))
+        .map((facility) => facility.id);
     }
 
     const merged = Array.from(new Set([...baseIds, ...facilityIds]));
-    setRouteFacilityIds(merged);
-    setShowOnlyRouteFacilities(true);
     await handleCreateRouteFromSelection(merged, surveyType, 'update-current');
   };
 
-  const handleAddFacilityToRoute = async (facilityId: string, _day: number) => {
+  const handleAddFacilityToRoute = async (facilityId: string): Promise<boolean> => {
     try {
       const settings = lastUsedSettings;
       if (!settings) {
         console.warn('[handleAddFacilityToRoute] No lastUsedSettings; cannot regenerate route');
-        return;
+        return false;
       }
 
-      if (routeFacilityIds && routeFacilityIds.length > 0) {
+      if (routeFacilityIds !== null) {
         // "Show only route facilities" mode — extend the selection and rebuild.
         if (!routeFacilityIds.includes(facilityId)) {
           const newIds = [...routeFacilityIds, facilityId];
-          setRouteFacilityIds(newIds);
-          await handleCreateRouteFromSelection(newIds, surveyType, 'update-current');
+          return handleCreateRouteFromSelection(newIds, surveyType, 'update-current');
         }
+        return true;
       } else {
-        // Full route mode — full regeneration will include all assigned facilities.
-        await handleGenerateRoutes(settings, 'update-current');
+        // Adding a specifically clicked marker is an explicit membership
+        // choice, even when the current route was built from an eligibility
+        // policy. Freeze the displayed stops plus this facility into a subset
+        // so the clicked facility cannot be filtered back out as ineligible.
+        const currentIds = optimizationResult?.routes.flatMap(route =>
+          route.facilities.map(routeFacility =>
+            routeFacility.id
+            ?? facilities.find(facility => facility.name === routeFacility.name)?.id
+            ?? ''
+          )
+        ).filter(Boolean) ?? [];
+        const nextIds = Array.from(new Set([...currentIds, facilityId]));
+        return handleCreateRouteFromSelection(nextIds, surveyType, 'update-current');
       }
     } catch (err) {
       console.error('[handleAddFacilityToRoute] Failed:', err);
+      return false;
     }
   };
 
@@ -2815,21 +3266,29 @@ function App() {
   const planRouteProgressProps = useMemo(() => ({
     runId: planRouteRun.run?.id ?? null,
     stopsByFacilityId: planRouteRun.stopsByFacilityId,
+    completedCount: planRouteRun.completedCount,
+    totalCount: planRouteRun.totalCount,
     loading: planRouteRun.loading,
     savingFacilityId: planRouteRun.savingFacilityId,
     schemaUnavailable: planRouteRun.schemaUnavailable,
+    error: planRouteRun.error,
+    startNewRun: planRouteRun.startNewRun,
     setFacilityCompleted: planRouteRun.setFacilityCompleted,
   }), [
     planRouteRun.run?.id,
     planRouteRun.stopsByFacilityId,
+    planRouteRun.completedCount,
+    planRouteRun.totalCount,
     planRouteRun.loading,
     planRouteRun.savingFacilityId,
     planRouteRun.schemaUnavailable,
+    planRouteRun.error,
+    planRouteRun.startNewRun,
     planRouteRun.setFacilityCompleted,
   ]);
 
   const handleReassignFacility = async (facilityIndex: number, fromDay: number, toDay: number) => {
-    if (!optimizationResult || !homeBase || !lastUsedSettings) return;
+    if (!optimizationResult || !homeBase || !lastUsedSettings) return false;
 
     try {
       // Clone the routes and move the facility
@@ -2841,17 +3300,48 @@ function App() {
 
       // Find the facility in the from day
       const fromRoute = updatedRoutes.find(r => r.day === fromDay);
-      const toRoute = updatedRoutes.find(r => r.day === toDay);
+      let toRoute = updatedRoutes.find(r => r.day === toDay);
 
-      if (!fromRoute || !toRoute) {
-        console.error('[Reassign] ERROR: Could not find routes');
-        return;
+      if (!fromRoute) {
+        throw new Error(`Route day ${fromDay} was not found.`);
       }
+      if (!toRoute) {
+        const nextDayNumber = Math.max(0, ...updatedRoutes.map(route => route.day)) + 1;
+        if (toDay !== nextDayNumber) {
+          throw new Error(`Route day ${toDay} was not found.`);
+        }
+        toRoute = {
+          day: toDay,
+          facilities: [],
+          sequence: [],
+          totalMiles: 0,
+          totalDriveTime: 0,
+          totalVisitTime: 0,
+          totalTime: 0,
+          startTime: lastUsedSettings.start_time || '08:00',
+          endTime: lastUsedSettings.start_time || '08:00',
+          lastFacilityDepartureTime: lastUsedSettings.start_time || '08:00',
+          segments: [],
+        };
+        updatedRoutes.push(toRoute);
+      }
+
+      // A multi-team route may use a different home base for every day. Capture
+      // each day's team before moving the stop so both rebuilt loops continue
+      // to start and end at the home base the crew actually uses.
+      const fromTeamAssignment = inferRouteTeamAssignment(
+        fromRoute,
+        effectiveUserTeam ?? 1,
+      );
+      const toTeamAssignment = inferRouteTeamAssignment(
+        toRoute,
+        fromTeamAssignment,
+      );
 
       const facilityToMove = fromRoute.facilities.find(f => f.index === facilityIndex);
       if (!facilityToMove) {
         console.error('[Reassign] ERROR: Could not find facility with index', facilityIndex);
-        return;
+        return false;
       }
 
       console.log(`[Reassign] Moving facility "${facilityToMove.name}" (index: ${facilityIndex}) from Day ${fromDay} to Day ${toDay}`);
@@ -2864,70 +3354,13 @@ function App() {
       toRoute.facilities.push(facilityToMove);
       toRoute.sequence.push(facilityIndex);
 
-      // Now recalculate optimal routes for both affected days
-      const activeFacilities = facilities.filter(isActiveFacility);
-
-      const locations = [
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-        ...activeFacilities.map((f) => ({
-          latitude: Number(f.latitude),
-          longitude: Number(f.longitude),
-        })),
-      ];
-
-      const distanceMatrix = await calculateDistanceMatrix(locations);
-
-      const facilitiesWithIndex: FacilityWithIndex[] = activeFacilities.map((f, idx) => ({
-        id: f.id,
-        index: idx + 1,
-        name: f.name,
-        latitude: Number(f.latitude),
-        longitude: Number(f.longitude),
-        visitDuration: f.visit_duration_minutes,
-      }));
-
-      // Create a map from facility name to new index
-      const nameToNewIndex = new Map<string, number>();
-      facilitiesWithIndex.forEach(f => {
-        nameToNewIndex.set(f.name, f.index);
-      });
-
-      console.log(`[Reassign] Created index mapping for ${nameToNewIndex.size} facilities`);
-
-      // Re-optimize both affected routes with their new facility assignments
-      const homeIndex = 0;
-
-      // Optimize fromRoute - remap old indices to new indices using facility names
+      // Re-optimize both affected routes using the correct team home base.
       if (fromRoute.sequence.length > 0) {
-        // Convert old sequence to new indices by looking up facility names
-        const remappedFromSequence: number[] = [];
-        fromRoute.facilities.forEach(facility => {
-          const newIndex = nameToNewIndex.get(facility.name);
-          if (newIndex) {
-            remappedFromSequence.push(newIndex);
-          } else {
-            console.error(`[Reassign] ERROR: Could not find new index for facility "${facility.name}"`);
-          }
-        });
-
-        console.log(`[Reassign] Remapped fromRoute sequence from [${fromRoute.sequence.join(', ')}] to [${remappedFromSequence.join(', ')}]`);
-
-        const newFromRoute = rebuildDayRoute(
-          facilitiesWithIndex,
-          remappedFromSequence,
-          distanceMatrix,
-          homeIndex,
-          // Preserve any per-day start time the user had set on this day.
-          // Hard-coding lastUsedSettings.start_time here was clobbering
-          // per-day overrides on every reassign — and was the cause of
-          // the "wrong home arrival time after reassign, fixed by opening
-          // and re-applying the start-time modal" phenomenon. The modal's
-          // tempDayStartTimes still held the override; clicking Apply
-          // detected the mismatch and recalculated correctly.
-          fromRoute.startTime || lastUsedSettings.start_time || '08:00',
-          lastUsedSettings.lunch_break_minutes || 0
+        const newFromRoute = await rebuildRouteDayForTeam(
+          fromRoute,
+          fromTeamAssignment,
+          lastUsedSettings,
         );
-        newFromRoute.day = fromDay;
 
         const fromIndex = updatedRoutes.findIndex(r => r.day === fromDay);
         updatedRoutes[fromIndex] = newFromRoute;
@@ -2951,30 +3384,11 @@ function App() {
         updatedRoutes[fromIndex] = emptyRoute;
       }
 
-      // Optimize toRoute - remap old indices to new indices using facility names
-      const remappedToSequence: number[] = [];
-      toRoute.facilities.forEach(facility => {
-        const newIndex = nameToNewIndex.get(facility.name);
-        if (newIndex) {
-          remappedToSequence.push(newIndex);
-        } else {
-          console.error(`[Reassign] ERROR: Could not find new index for facility "${facility.name}"`);
-        }
-      });
-
-      console.log(`[Reassign] Remapped toRoute sequence from [${toRoute.sequence.join(', ')}] to [${remappedToSequence.join(', ')}]`);
-
-      const newToRoute = rebuildDayRoute(
-        facilitiesWithIndex,
-        remappedToSequence,
-        distanceMatrix,
-        homeIndex,
-        // Preserve the destination day's existing start time (per-day override
-        // stays intact across reassigns). See comment on the fromRoute branch.
-        toRoute.startTime || lastUsedSettings.start_time || '08:00',
-        lastUsedSettings.lunch_break_minutes || 0
+      const newToRoute = await rebuildRouteDayForTeam(
+        toRoute,
+        toTeamAssignment,
+        lastUsedSettings,
       );
-      newToRoute.day = toDay;
 
       const toIndex = updatedRoutes.findIndex(r => r.day === toDay);
       updatedRoutes[toIndex] = newToRoute;
@@ -3004,57 +3418,81 @@ function App() {
         totalTime,
       };
 
+      if (!currentRouteId || !currentAccount) {
+        throw new Error('Save this route before reassigning its stops.');
+      }
+
+      const movedFacilityRecord = facilities.find(f =>
+        (facilityToMove.id && f.id === facilityToMove.id)
+        || (!facilityToMove.id && f.name === facilityToMove.name)
+      );
+      if (!movedFacilityRecord) {
+        throw new Error(`Could not match ${facilityToMove.name} to its facility record.`);
+      }
+      const routeAssignments: RouteAssignment[] = newResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const record = facilities.find(facility =>
+            (routeFacility.id && facility.id === routeFacility.id)
+            || (!routeFacility.id && facility.name === routeFacility.name)
+          );
+          if (!record) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: record.id,
+            day_assignment: route.day,
+            team_assignment:
+              record.id === movedFacilityRecord.id
+                ? toTeamAssignment
+                : record.team_assignment || 1,
+          };
+        })
+      );
+      const planData = routeFacilityIds !== null
+        ? { ...newResult, _routeFacilityIds: routeFacilityIds }
+        : newResult;
+      await persistRoutePlanWithAssignments({
+        result: newResult,
+        planData,
+        settings: lastUsedSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+
+      applyRouteAssignmentsLocally(routeAssignments);
       setOptimizationResult(newResult);
       setRouteVersion(prev => prev + 1);
-
-      // Update facility day_assignment in database
-      if (currentAccount) {
-        // Use name-based lookup instead of index to avoid mismatches
-        const facilityToUpdate = activeFacilities.find(f => f.name === facilityToMove.name);
-        if (facilityToUpdate) {
-          console.log(`[Reassign] Moving facility "${facilityToUpdate.name}" (ID: ${facilityToUpdate.id}) from Day ${fromDay} to Day ${toDay}`);
-
-          await supabase
-            .from('facilities')
-            .update({ day_assignment: toDay })
-            .eq('id', facilityToUpdate.id)
-            .eq('account_id', currentAccount.id);
-
-          console.log(`[Reassign] Successfully updated facility "${facilityToUpdate.name}" day_assignment to ${toDay}`);
-        } else {
-          console.error(`[Reassign] ERROR: Could not find facility "${facilityToMove.name}" in activeFacilities for database update`);
-        }
-      }
-
-      // Update database if we have a current route ID
-      if (currentRouteId && currentAccount) {
-        await supabase
-          .from('route_plans')
-          .update({
-            plan_data: newResult,
-            total_days: newResult.totalDays,
-            total_miles: newResult.totalMiles,
-            total_facilities: newResult.totalFacilities,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id);
-      }
 
       console.log('Route reassignment complete:', {
         totalDays: newResult.totalDays,
         affectedDays: [fromDay, toDay],
         persisted: !!currentRouteId
       });
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Error reassigning facility:', err);
-      setError('Failed to reassign facility');
+      setError(err?.message || 'Failed to reassign facility');
+      return false;
     }
   };
 
-  const handleBulkReassignFacilities = async (facilityIndexes: number[], toDay: number) => {
-    if (!optimizationResult || !homeBase || !lastUsedSettings || facilityIndexes.length === 0) return;
+  const handleBulkReassignFacilities = async (facilityKeys: string[], toDay: number) => {
+    if (!optimizationResult || !homeBase || !lastUsedSettings || facilityKeys.length === 0) return false;
 
     try {
+      const selectedFacilityKeys = new Set(facilityKeys);
+      const originalTargetRoute = optimizationResult.routes.find(route => route.day === toDay);
+      const targetTeamAssignment = originalTargetRoute
+        ? inferRouteTeamAssignment(originalTargetRoute, effectiveUserTeam ?? 1)
+        : effectiveUserTeam ?? 1;
+      const teamByOriginalDay = new Map(
+        optimizationResult.routes.map(route => [
+          route.day,
+          inferRouteTeamAssignment(route, targetTeamAssignment),
+        ]),
+      );
+
       // Clone the routes
       const updatedRoutes = optimizationResult.routes.map(route => ({
         ...route,
@@ -3063,28 +3501,53 @@ function App() {
       }));
 
       // Track facilities to move and their original days
-      const facilitiesToMove: Array<{ facility: any; fromDay: number }> = [];
+      const facilitiesToMove: Array<{ facility: FacilityWithIndex; fromDay: number }> = [];
 
       // Remove facilities from their original days
       updatedRoutes.forEach(route => {
-        facilityIndexes.forEach(facilityIndex => {
-          const facilityToMove = route.facilities.find(f => f.index === facilityIndex);
-          if (facilityToMove) {
-            console.log(`[BulkReassign] Found facility "${facilityToMove.name}" (index: ${facilityIndex}) on Day ${route.day}, will move to Day ${toDay}`);
-            facilitiesToMove.push({ facility: facilityToMove, fromDay: route.day });
-            route.facilities = route.facilities.filter(f => f.index !== facilityIndex);
-            route.sequence = route.sequence.filter(idx => idx !== facilityIndex);
-          }
+        const movingFromRoute = route.facilities.filter(facility =>
+          selectedFacilityKeys.has(
+            facility.id ? `id:${facility.id}` : `name:${facility.name}`,
+          )
+        );
+        if (movingFromRoute.length === 0) return;
+
+        const movingIndexes = new Set(movingFromRoute.map(facility => facility.index));
+        movingFromRoute.forEach(facility => {
+          console.log(`[BulkReassign] Found facility "${facility.name}" on Day ${route.day}, will move to Day ${toDay}`);
+          facilitiesToMove.push({ facility, fromDay: route.day });
         });
+        route.facilities = route.facilities.filter(facility => !movingIndexes.has(facility.index));
+        route.sequence = route.sequence.filter(index => !movingIndexes.has(index));
       });
+
+      if (facilitiesToMove.length === 0) {
+        throw new Error('None of the selected facilities could be found in this route.');
+      }
 
       console.log(`[BulkReassign] Moving ${facilitiesToMove.length} facilities to Day ${toDay}:`, facilitiesToMove.map(f => f.facility.name));
 
       // Add all facilities to the target day
-      const toRoute = updatedRoutes.find(r => r.day === toDay);
+      let toRoute = updatedRoutes.find(r => r.day === toDay);
       if (!toRoute) {
-        console.error('[BulkReassign] ERROR: Target day not found');
-        return;
+        const nextDayNumber = Math.max(0, ...updatedRoutes.map(route => route.day)) + 1;
+        if (toDay !== nextDayNumber) {
+          throw new Error(`Route day ${toDay} was not found.`);
+        }
+        toRoute = {
+          day: toDay,
+          facilities: [],
+          sequence: [],
+          totalMiles: 0,
+          totalDriveTime: 0,
+          totalVisitTime: 0,
+          totalTime: 0,
+          startTime: lastUsedSettings.start_time || '08:00',
+          endTime: lastUsedSettings.start_time || '08:00',
+          lastFacilityDepartureTime: lastUsedSettings.start_time || '08:00',
+          segments: [],
+        };
+        updatedRoutes.push(toRoute);
       }
 
       facilitiesToMove.forEach(({ facility }) => {
@@ -3092,39 +3555,10 @@ function App() {
         toRoute.sequence.push(facility.index);
       });
 
-      // Recalculate routes for all affected days
-      const activeFacilities = facilities.filter(isActiveFacility);
-      const locations = [
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-        ...activeFacilities.map((f) => ({
-          latitude: Number(f.latitude),
-          longitude: Number(f.longitude),
-        })),
-      ];
-
-      const distanceMatrix = await calculateDistanceMatrix(locations);
-      const facilitiesWithIndex: FacilityWithIndex[] = activeFacilities.map((f, idx) => ({
-        id: f.id,
-        index: idx + 1,
-        name: f.name,
-        latitude: Number(f.latitude),
-        longitude: Number(f.longitude),
-        visitDuration: f.visit_duration_minutes,
-      }));
-
-      // Create a map from facility name to new index
-      const nameToNewIndex = new Map<string, number>();
-      facilitiesWithIndex.forEach(f => {
-        nameToNewIndex.set(f.name, f.index);
-      });
-
-      console.log(`[BulkReassign] Created index mapping for ${nameToNewIndex.size} facilities`);
-
-      const homeIndex = 0;
       const affectedDays = new Set([toDay, ...facilitiesToMove.map(f => f.fromDay)]);
 
       // Re-optimize all affected routes
-      const routesToKeep: any[] = [];
+      const routesToKeep: DailyRoute[] = [];
       for (const route of updatedRoutes) {
         if (route.sequence.length === 0) {
           // Skip empty routes
@@ -3132,31 +3566,14 @@ function App() {
         }
 
         if (affectedDays.has(route.day)) {
-          // Re-optimize this route - remap old indices to new indices using facility names
-          const remappedSequence: number[] = [];
-          route.facilities.forEach(facility => {
-            const newIndex = nameToNewIndex.get(facility.name);
-            if (newIndex) {
-              remappedSequence.push(newIndex);
-            } else {
-              console.error(`[BulkReassign] ERROR: Could not find new index for facility "${facility.name}"`);
-            }
-          });
-
-          console.log(`[BulkReassign] Remapped Day ${route.day} sequence from [${route.sequence.slice(0, 5).join(', ')}...] to [${remappedSequence.slice(0, 5).join(', ')}...]`);
-
-          const newRoute = rebuildDayRoute(
-            facilitiesWithIndex,
-            remappedSequence,
-            distanceMatrix,
-            homeIndex,
-            // Preserve the day's existing start time across bulk reassigns.
-            // Same root cause as handleReassignFacility — see the longer
-            // comment there.
-            route.startTime || lastUsedSettings.start_time || '08:00',
-            lastUsedSettings.lunch_break_minutes || 0
+          const routeTeamAssignment = route.day === toDay
+            ? targetTeamAssignment
+            : teamByOriginalDay.get(route.day) ?? targetTeamAssignment;
+          const newRoute = await rebuildRouteDayForTeam(
+            route,
+            routeTeamAssignment,
+            lastUsedSettings,
           );
-          newRoute.day = route.day;
           routesToKeep.push(newRoute);
         } else {
           routesToKeep.push(route);
@@ -3188,171 +3605,143 @@ function App() {
         totalTime,
       };
 
+      if (!currentRouteId || !currentAccount) {
+        throw new Error('Save this route before reassigning its stops.');
+      }
+
+      const movedFacilityIds = new Set(facilitiesToMove.map(({ facility: routeFacility }) => {
+        const record = facilities.find(facility =>
+          (routeFacility.id && facility.id === routeFacility.id)
+          || (!routeFacility.id && facility.name === routeFacility.name)
+        );
+        if (!record) {
+          throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+        }
+        return record.id;
+      }));
+      const routeAssignments: RouteAssignment[] = newResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const record = facilities.find(facility =>
+            (routeFacility.id && facility.id === routeFacility.id)
+            || (!routeFacility.id && facility.name === routeFacility.name)
+          );
+          if (!record) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: record.id,
+            day_assignment: route.day,
+            team_assignment: movedFacilityIds.has(record.id)
+              ? targetTeamAssignment
+              : record.team_assignment || 1,
+          };
+        })
+      );
+      const planData = routeFacilityIds !== null
+        ? { ...newResult, _routeFacilityIds: routeFacilityIds }
+        : newResult;
+      await persistRoutePlanWithAssignments({
+        result: newResult,
+        planData,
+        settings: lastUsedSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+
+      applyRouteAssignmentsLocally(routeAssignments);
       setOptimizationResult(newResult);
       setRouteVersion(prev => prev + 1);
 
-      // Update facility day_assignment in database for all moved facilities
-      if (currentAccount) {
-        const activeFacilities = facilities.filter(isActiveFacility);
-        const updatePromises: Promise<any>[] = [];
-
-        facilitiesToMove.forEach(({ facility }) => {
-          // Use name-based lookup to find the correct facility
-          const facilityToUpdate = activeFacilities.find(f => f.name === facility.name);
-          if (facilityToUpdate) {
-            console.log(`[BulkReassign] Moving facility "${facilityToUpdate.name}" (ID: ${facilityToUpdate.id}) to Day ${toDay}`);
-            updatePromises.push(
-              supabase
-                .from('facilities')
-                .update({ day_assignment: toDay })
-                .eq('id', facilityToUpdate.id)
-                .eq('account_id', currentAccount.id)
-            );
-          } else {
-            console.error(`[BulkReassign] ERROR: Could not find facility "${facility.name}" in activeFacilities for database update`);
-          }
-        });
-
-        if (updatePromises.length > 0) {
-          await Promise.all(updatePromises);
-          console.log(`[BulkReassign] Successfully updated ${updatePromises.length} facilities to Day ${toDay}`);
-        }
-      }
-
-      // Update database if we have a current route ID
-      if (currentRouteId && currentAccount) {
-        await supabase
-          .from('route_plans')
-          .update({
-            plan_data: newResult,
-            total_days: newResult.totalDays,
-            total_miles: newResult.totalMiles,
-            total_facilities: newResult.totalFacilities,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id);
-      }
-
       console.log('Bulk reassignment complete:', {
         totalDays: newResult.totalDays,
-        facilitiesMoved: facilityIndexes.length,
+        facilitiesMoved: facilitiesToMove.length,
         affectedDays: Array.from(affectedDays),
         persisted: !!currentRouteId
       });
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Error bulk reassigning facilities:', err);
-      setError('Failed to bulk reassign facilities');
+      setError(err?.message || 'Failed to bulk reassign facilities');
+      return false;
     }
   };
 
+  const handleRouteListMoveFacility = async (
+    facilityId: string,
+    fromDay: number,
+    toDay: number,
+  ): Promise<boolean> => {
+    const route = optimizationResult?.routes.find(candidate => candidate.day === fromDay);
+    const facilityRecord = facilities.find(facility => facility.id === facilityId);
+    const routeFacility = route?.facilities.find(facility =>
+      facility.id
+        ? facility.id === facilityId
+        : facilityRecord?.name === facility.name
+    );
+    if (!routeFacility) {
+      setError('The selected facility is no longer present on that route day.');
+      return false;
+    }
+    return handleReassignFacility(routeFacility.index, fromDay, toDay);
+  };
+
   const handleRemoveFacilityFromRoute = async (facilityIndex: number, fromDay: number) => {
-    if (!optimizationResult || !homeBase || !lastUsedSettings) return;
+    if (!optimizationResult || !homeBase || !lastUsedSettings) return false;
 
     console.log(`Removing facility ${facilityIndex} from Day ${fromDay} and re-optimizing`);
 
     try {
-      // Find the facility being removed
       const routeToUpdate = optimizationResult.routes.find(r => r.day === fromDay);
       if (!routeToUpdate) {
-        console.error('Route not found for day:', fromDay);
-        return;
+        throw new Error(`Route day ${fromDay} was not found.`);
       }
+      const routeTeamAssignment = inferRouteTeamAssignment(
+        routeToUpdate,
+        effectiveUserTeam ?? 1,
+      );
 
       const facilityToRemove = routeToUpdate.facilities.find(f => f.index === facilityIndex);
       if (!facilityToRemove) {
-        console.error('Facility not found in route:', facilityIndex);
-        return;
+        throw new Error('The selected facility was not found in this route.');
       }
 
-      // Update database to mark facility as removed (day_assignment = -2)
-      const facilityRecord = facilities.find(f => f.name === facilityToRemove.name);
-      if (facilityRecord) {
-        const { error: dbError } = await supabase
-          .from('facilities')
-          .update({ day_assignment: -2 })
-          .eq('id', facilityRecord.id);
-
-        if (dbError) throw dbError;
+      const facilityRecord = facilities.find(f =>
+        (facilityToRemove.id && f.id === facilityToRemove.id)
+        || (!facilityToRemove.id && f.name === facilityToRemove.name)
+      );
+      if (!facilityRecord || !currentAccount || !currentRouteId) {
+        throw new Error('This saved route could not be matched to the facility record.');
       }
 
-      // Remove the facility from the route
       const updatedFacilities = routeToUpdate.facilities.filter(f => f.index !== facilityIndex);
       const updatedSequence = routeToUpdate.sequence.filter(idx => idx !== facilityIndex);
+      let updatedRoutes: OptimizationResult['routes'];
 
-      // If no facilities left, just remove the day
       if (updatedFacilities.length === 0) {
-        const routesWithoutDay = optimizationResult.routes.filter(r => r.day !== fromDay);
-
-        const totalMiles = routesWithoutDay.reduce((sum, r) => sum + r.totalMiles, 0);
-        const totalDriveTime = routesWithoutDay.reduce((sum, r) => sum + r.totalDriveTime, 0);
-        const totalVisitTime = routesWithoutDay.reduce((sum, r) => sum + r.totalVisitTime, 0);
-        const totalTime = routesWithoutDay.reduce((sum, r) => sum + r.totalTime, 0);
-        // Count from the route's actual remaining facilities, not from the
-        // account-wide list — same fix pattern as handleReassignFacility.
-        const totalFacilities = routesWithoutDay.reduce((sum, r) => sum + r.facilities.length, 0);
-
-        const newResult: OptimizationResult = {
-          routes: routesWithoutDay,
-          totalDays: routesWithoutDay.length,
-          totalMiles,
-          totalFacilities,
-          totalDriveTime,
-          totalVisitTime,
-          totalTime,
-        };
-
-        setOptimizationResult(newResult);
-        setRouteVersion(prev => prev + 1);
-        await loadData({ mode: 'background-revalidate' });
-        return;
+        updatedRoutes = optimizationResult.routes
+          .filter(route => route.day !== fromDay)
+          .sort((a, b) => a.day - b.day)
+          .map((route, index) => ({ ...route, day: index + 1 }));
+      } else {
+        const newRoute = await rebuildRouteDayForTeam(
+          {
+            ...routeToUpdate,
+            facilities: updatedFacilities,
+            sequence: updatedSequence,
+          },
+          routeTeamAssignment,
+          lastUsedSettings,
+        );
+        updatedRoutes = optimizationResult.routes.map(route =>
+          route.day === fromDay ? newRoute : route
+        );
       }
 
-      // Build facilities with index for distance calculation
-      const facilitiesWithIndex: FacilityWithIndex[] = updatedFacilities.map(f => ({
-        id: f.id,
-        index: f.index,
-        name: f.name,
-        latitude: f.latitude,
-        longitude: f.longitude,
-        visitDuration: f.visitDuration
-      }));
-
-      // Add home base
-      const homeIndex = 0;
-      const facilitiesForMatrix = [
-        { latitude: Number(homeBase.latitude), longitude: Number(homeBase.longitude) },
-        ...facilitiesWithIndex
-      ];
-
-      // Calculate distance matrix for this day only
-      const distanceMatrix = await calculateDistanceMatrix(facilitiesForMatrix);
-
-      // Re-order and re-clock the day. Preserve the day's existing start time
-      // so per-day overrides survive a remove. Same pattern as the reassign
-      // handlers.
-      const newRoute = rebuildDayRoute(
-        facilitiesWithIndex,
-        updatedSequence,
-        distanceMatrix,
-        homeIndex,
-        routeToUpdate.startTime || lastUsedSettings.start_time || '08:00',
-        // 6th arg is lunchBreakMinutes — this was passing sunset_offset_minutes,
-        // which silently injected a phantom mid-day break (or none at all) on
-        // every facility removal.
-        lastUsedSettings.lunch_break_minutes || 0
-      );
-
-      // Update the route in the optimization result
-      const updatedRoutes = optimizationResult.routes.map(route =>
-        route.day === fromDay ? { ...newRoute, day: fromDay } : route
-      );
-
-      // Recalculate totals
       const totalMiles = updatedRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
       const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
       const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
       const totalTime = updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0);
-      // Count from the route's actual days — see fix in handleReassignFacility.
       const totalFacilities = updatedRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
 
       const newResult: OptimizationResult = {
@@ -3365,25 +3754,47 @@ function App() {
         totalTime,
       };
 
+      const nextRouteFacilityIds = routeFacilityIds !== null
+        ? routeFacilityIds.filter(id => id !== facilityRecord.id)
+        : null;
+      const planData = nextRouteFacilityIds !== null
+        ? { ...newResult, _routeFacilityIds: nextRouteFacilityIds }
+        : newResult;
+      const routeAssignments: RouteAssignment[] = newResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const record = facilities.find(facility =>
+            (routeFacility.id && facility.id === routeFacility.id)
+            || (!routeFacility.id && facility.name === routeFacility.name)
+          );
+          if (!record) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: record.id,
+            day_assignment: route.day,
+            team_assignment: record.team_assignment || 1,
+          };
+        })
+      );
+      routeAssignments.push({
+        facility_id: facilityRecord.id,
+        day_assignment: -2,
+        team_assignment: facilityRecord.team_assignment || 1,
+      });
+
+      await persistRoutePlanWithAssignments({
+        result: newResult,
+        planData,
+        settings: lastUsedSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+
+      applyRouteAssignmentsLocally(routeAssignments);
       setOptimizationResult(newResult);
+      setRouteFacilityIds(nextRouteFacilityIds);
       setRouteVersion(prev => prev + 1);
-
-      // Update saved route if exists
-      if (currentRouteId && currentAccount) {
-        await supabase
-          .from('route_plans')
-          .update({
-            plan_data: newResult,
-            total_days: newResult.totalDays,
-            total_miles: newResult.totalMiles,
-            total_facilities: newResult.totalFacilities,
-          })
-          .eq('id', currentRouteId)
-          .eq('account_id', currentAccount.id);
-      }
-
-      // Reload data to sync with database
-      await loadData({ mode: 'background-revalidate' });
 
       console.log('Facility removed and route re-optimized:', {
         facilityIndex,
@@ -3391,9 +3802,11 @@ function App() {
         newFacilityCount: updatedFacilities.length,
         newTotalMiles: newResult.totalMiles
       });
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Error removing facility and re-optimizing:', err);
-      setError('Failed to remove facility from route');
+      setError(err?.message || 'Failed to remove facility from route');
+      return false;
     }
   };
 
@@ -3413,7 +3826,7 @@ function App() {
    * confirm overwrite once and replace it.
    */
   const handleSaveCurrentRoute = async (name: string, mode: 'update' | 'new' = 'update') => {
-    if (!optimizationResult || !currentAccount) return false;
+    if (!optimizationResult || !currentAccount || !lastUsedSettings || !homeBase) return false;
 
     // No row loaded yet — fall back to inserting a new row even if the
     // caller asked for update. Keeps the dialog's "Update" button safe
@@ -3437,163 +3850,257 @@ function App() {
       const { data: existingRoutes, error: checkError } = await collisionQuery;
       if (checkError) throw checkError;
 
-      if (existingRoutes && existingRoutes.length > 0) {
+      if (existingRoutes && existingRoutes.length > 1) {
+        throw new Error('More than one saved route uses this name. Rename the duplicates before replacing one.');
+      }
+
+      let replacementRouteId: string | null = null;
+      if (existingRoutes && existingRoutes.length === 1) {
         const confirmOverwrite = window.confirm(
           `A saved route named "${name}" already exists. Do you want to overwrite it?`
         );
         if (!confirmOverwrite) return false;
-        await supabase
-          .from('route_plans')
-          .delete()
-          .eq('id', existingRoutes[0].id)
-          .eq('account_id', currentAccount.id);
+        replacementRouteId = existingRoutes[0].id;
       }
 
       // Include routeFacilityIds in plan_data so custom selections persist
-      const planDataToSave = routeFacilityIds
+      const planDataToSave = routeFacilityIds !== null
         ? { ...optimizationResult, _routeFacilityIds: routeFacilityIds }
         : optimizationResult;
 
-      if (effectiveMode === 'update') {
-        await supabase
-          .from('route_plans')
-          .update({
-            name,
-            plan_data: planDataToSave,
-            total_days: optimizationResult.totalDays,
-            total_miles: optimizationResult.totalMiles,
-            total_facilities: optimizationResult.totalFacilities,
-            settings: lastUsedSettings,
-            home_base_data: homeBase,
-          })
-          .eq('id', currentRouteId!)
-          .eq('account_id', currentAccount.id);
-        setCurrentRouteName(name);
-      } else {
-        // Clear the is_last_viewed flag on any prior row so the new one
-        // becomes the canonical "last viewed" record.
-        await supabase
-          .from('route_plans')
-          .update({ is_last_viewed: false })
-          .eq('account_id', currentAccount.id);
-
-        const { data: newRoute, error: insertErr } = await supabase
-          .from('route_plans')
-          .insert({
-            user_id: DEMO_USER_ID,
-            account_id: currentAccount.id,
-            upload_batch_id: facilities[0]?.upload_batch_id,
-            plan_data: planDataToSave,
-            total_days: optimizationResult.totalDays,
-            total_miles: optimizationResult.totalMiles,
-            total_facilities: optimizationResult.totalFacilities,
-            name,
-            is_last_viewed: true,
-            settings: lastUsedSettings,
-            home_base_data: homeBase,
-          })
-          .select()
-          .single();
-        if (insertErr) throw insertErr;
-        if (newRoute) {
-          setCurrentRouteId(newRoute.id);
-          setCurrentRouteName(newRoute.name ?? name);
-        }
+      const routeAssignments: RouteAssignment[] = optimizationResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const facilityRecord = routeFacility.id
+            ? facilities.find(facility => facility.id === routeFacility.id)
+            : facilities.find(facility => facility.name === routeFacility.name);
+          if (!facilityRecord) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: facilityRecord.id,
+            day_assignment: route.day,
+            team_assignment: facilityRecord.team_assignment || 1,
+          };
+        }),
+      );
+      const uploadBatchId = facilities.find(facility => facility.upload_batch_id)?.upload_batch_id;
+      if (effectiveMode === 'new' && !uploadBatchId) {
+        throw new Error('The route cannot be saved because its upload batch is missing.');
       }
 
+      const { data: savedRoute, error: saveError } = await supabase.rpc(
+        'save_named_route_plan_with_assignments',
+        {
+          target_account_id: currentAccount.id,
+          target_route_plan_id: effectiveMode === 'update' ? currentRouteId : null,
+          target_user_id: DEMO_USER_ID,
+          target_upload_batch_id: uploadBatchId ?? null,
+          target_plan_data: stampRoutePlanAssignments(planDataToSave, routeAssignments),
+          target_total_days: optimizationResult.totalDays,
+          target_total_miles: optimizationResult.totalMiles,
+          target_total_facilities: optimizationResult.totalFacilities,
+          target_name: name,
+          target_settings: lastUsedSettings,
+          target_home_base_data: homeBase,
+          target_assignments: routeAssignments,
+          target_mark_last_viewed: true,
+          target_replace_route_plan_id: replacementRouteId,
+        },
+      );
+      if (saveError) throw saveError;
+      if (!savedRoute?.id) throw new Error('The route save did not return a route ID.');
+
+      applyRouteAssignmentsLocally(routeAssignments);
+      setCurrentRouteId(savedRoute.id);
+      setCurrentRouteName(savedRoute.name ?? name);
+
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving route:', err);
+      setError(err?.message || 'Failed to save the route.');
       return false;
     }
   };
 
-  const handleRemoveDeletedFacilities = () => {
-    if (!optimizationResult) return;
+  const handleRemoveDeletedFacilities = async () => {
+    if (!optimizationResult || !currentRouteId || !currentAccount || !lastUsedSettings || !homeBase) {
+      setError('The current saved route is not ready to update. Reload it and try again.');
+      return;
+    }
 
-    const currentFacilityNames = new Set(facilities.map(f => f.name));
+    setIsGenerating(true);
+    setError(null);
+    try {
+      const currentById = new Map(facilities.map(facility => [facility.id, facility]));
+      const currentByName = new Map(facilities.map(facility => [facility.name, facility]));
+      const rebuiltRoutes: DailyRoute[] = [];
 
-    console.log('[RemoveDeleted] Current facilities:', Array.from(currentFacilityNames));
-    console.log('[RemoveDeleted] Deleted facilities to remove:', deletedFacilities.map(f => f.name));
-
-    // Filter out deleted facilities from routes with deep cloning
-    const updatedRoutes = optimizationResult.routes
-      .map(route => {
-        const filteredFacilities = route.facilities.filter((f: any) => {
-          const exists = currentFacilityNames.has(f.name);
-          if (!exists) {
-            console.log(`[RemoveDeleted] Removing facility: ${f.name} from Day ${route.day}`);
+      for (const route of optimizationResult.routes) {
+        const retainedFacilities = route.facilities.filter(routeFacility => {
+          const currentFacility = routeFacility.id
+            ? currentById.get(routeFacility.id)
+            : currentByName.get(routeFacility.name);
+          if (!currentFacility) {
+            console.log(`[RemoveDeleted] Removing ${routeFacility.name} from Day ${route.day}`);
           }
-          return exists;
+          return Boolean(currentFacility);
         });
+        if (retainedFacilities.length === 0) continue;
 
-        const filteredSequence = route.sequence.filter((idx: number) => {
-          const facility = route.facilities.find((f: any) => f.index === idx);
-          return facility && currentFacilityNames.has(facility.name);
-        });
+        if (retainedFacilities.length === route.facilities.length) {
+          rebuiltRoutes.push(route);
+          continue;
+        }
 
-        return {
-          ...route,
-          facilities: [...filteredFacilities],
-          sequence: [...filteredSequence],
-          segments: route.segments ? [...route.segments] : undefined
-        };
-      })
-      .filter(route => route.facilities.length > 0); // Remove empty days
-
-    console.log(`[RemoveDeleted] Updated routes count: ${updatedRoutes.length}, Original: ${optimizationResult.routes.length}`);
-
-    // Renumber days
-    updatedRoutes.forEach((route, idx) => {
-      const oldDay = route.day;
-      route.day = idx + 1;
-      if (oldDay !== route.day) {
-        console.log(`[RemoveDeleted] Renumbering Day ${oldDay} to Day ${route.day}`);
+        const retainedIndexes = new Set(retainedFacilities.map(facility => facility.index));
+        const routeTeamAssignment = inferRouteTeamAssignment(
+          { ...route, facilities: retainedFacilities },
+          effectiveUserTeam ?? 1,
+        );
+        rebuiltRoutes.push(await rebuildRouteDayForTeam(
+          {
+            ...route,
+            facilities: retainedFacilities,
+            sequence: route.sequence.filter(index => retainedIndexes.has(index)),
+          },
+          routeTeamAssignment,
+          lastUsedSettings,
+        ));
       }
-    });
 
-    // Recalculate totals
-    const totalMiles = updatedRoutes.reduce((sum, r) => sum + r.totalMiles, 0);
-    const totalDriveTime = updatedRoutes.reduce((sum, r) => sum + r.totalDriveTime, 0);
-    const totalVisitTime = updatedRoutes.reduce((sum, r) => sum + r.totalVisitTime, 0);
-    const totalTime = updatedRoutes.reduce((sum, r) => sum + r.totalTime, 0);
-    const totalFacilities = updatedRoutes.reduce((sum, r) => sum + r.facilities.length, 0);
+      const updatedRoutes = rebuiltRoutes
+        .sort((a, b) => a.day - b.day)
+        .map((route, index) => ({ ...route, day: index + 1 }));
+      const newResult: OptimizationResult = {
+        routes: updatedRoutes,
+        totalDays: updatedRoutes.length,
+        totalMiles: updatedRoutes.reduce((sum, route) => sum + route.totalMiles, 0),
+        totalFacilities: updatedRoutes.reduce((sum, route) => sum + route.facilities.length, 0),
+        totalDriveTime: updatedRoutes.reduce((sum, route) => sum + route.totalDriveTime, 0),
+        totalVisitTime: updatedRoutes.reduce((sum, route) => sum + route.totalVisitTime, 0),
+        totalTime: updatedRoutes.reduce((sum, route) => sum + route.totalTime, 0),
+      };
 
-    const newResult: OptimizationResult = {
-      routes: updatedRoutes,
-      totalDays: updatedRoutes.length,
-      totalMiles,
-      totalFacilities,
-      totalDriveTime,
-      totalVisitTime,
-      totalTime
-    };
-
-    console.log('[RemoveDeleted] New result:', newResult);
-
-    setOptimizationResult(newResult);
-    setRouteVersion(prev => prev + 1);
-    setShowDeletedAlert(false);
-    setDeletedFacilities([]);
-
-    // Update database if we have a current route ID
-    if (currentRouteId && currentAccount) {
-      supabase
-        .from('route_plans')
-        .update({
-          plan_data: newResult,
-          total_days: newResult.totalDays,
-          total_miles: newResult.totalMiles,
-          total_facilities: newResult.totalFacilities,
+      const routeAssignments: RouteAssignment[] = newResult.routes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const record = routeFacility.id
+            ? currentById.get(routeFacility.id)
+            : currentByName.get(routeFacility.name);
+          if (!record) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: record.id,
+            day_assignment: route.day,
+            team_assignment: record.team_assignment || 1,
+          };
         })
-        .eq('id', currentRouteId)
-        .eq('account_id', currentAccount.id)
-        .then(() => {
-          console.log('[RemoveDeleted] Database updated successfully');
+      );
+      const remainingFacilityIds = new Set(
+        routeAssignments.map(assignment => assignment.facility_id),
+      );
+      const nextRouteFacilityIds = routeFacilityIds !== null
+        ? routeFacilityIds.filter(id => remainingFacilityIds.has(id))
+        : null;
+      const planData = nextRouteFacilityIds !== null
+        ? { ...newResult, _routeFacilityIds: nextRouteFacilityIds }
+        : newResult;
+
+      await persistRoutePlanWithAssignments({
+        result: newResult,
+        planData,
+        settings: lastUsedSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+
+      applyRouteAssignmentsLocally(routeAssignments);
+      setOptimizationResult(newResult);
+      setRouteFacilityIds(nextRouteFacilityIds);
+      setRouteVersion(prev => prev + 1);
+      setShowDeletedAlert(false);
+      setDeletedFacilities([]);
+    } catch (err: any) {
+      console.error('[RemoveDeleted] Route update failed:', err);
+      setError(err?.message || 'Failed to remove deleted facilities from the route.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const persistRouteListResult = async (editedResult: OptimizationResult): Promise<boolean> => {
+    if (!optimizationResult || !currentRouteId || !currentAccount || !lastUsedSettings || !homeBase) {
+      setError('The current saved route is not ready to update. Reload it and try again.');
+      return false;
+    }
+
+    try {
+      // RouteResults receives the current team's view. Merge those globally
+      // numbered days back into the full account plan so a Team 2 edit never
+      // drops Team 1's routes from plan_data.
+      let nextRoutes = editedResult.routes;
+      if (effectiveUserTeam !== null && filteredOptimizationResult) {
+        const previouslyVisibleDays = new Set(
+          filteredOptimizationResult.routes.map(route => route.day),
+        );
+        nextRoutes = [
+          ...optimizationResult.routes.filter(route => !previouslyVisibleDays.has(route.day)),
+          ...editedResult.routes,
+        ].sort((a, b) => a.day - b.day);
+      }
+      // Day numbers are account-wide assignment keys. Compact them only after
+      // the edited team view has been merged with every other team, then save
+      // every affected facility in the same transaction.
+      nextRoutes = nextRoutes
+        .sort((a, b) => a.day - b.day)
+        .map((route, index) => ({ ...route, day: index + 1 }));
+
+      const nextResult: OptimizationResult = {
+        routes: nextRoutes,
+        totalDays: nextRoutes.length,
+        totalMiles: nextRoutes.reduce((sum, route) => sum + route.totalMiles, 0),
+        totalFacilities: nextRoutes.reduce((sum, route) => sum + route.facilities.length, 0),
+        totalDriveTime: nextRoutes.reduce((sum, route) => sum + route.totalDriveTime, 0),
+        totalVisitTime: nextRoutes.reduce((sum, route) => sum + route.totalVisitTime, 0),
+        totalTime: nextRoutes.reduce((sum, route) => sum + route.totalTime, 0),
+      };
+      const routeAssignments: RouteAssignment[] = nextRoutes.flatMap(route =>
+        route.facilities.map(routeFacility => {
+          const record = facilities.find(facility =>
+            (routeFacility.id && facility.id === routeFacility.id)
+            || (!routeFacility.id && facility.name === routeFacility.name)
+          );
+          if (!record) {
+            throw new Error(`Could not match ${routeFacility.name} to its facility record.`);
+          }
+          return {
+            facility_id: record.id,
+            day_assignment: route.day,
+            team_assignment: record.team_assignment || effectiveUserTeam || 1,
+          };
         })
-        .catch((err) => {
-          console.error('[RemoveDeleted] Database update failed:', err);
-        });
+      );
+      const planData = routeFacilityIds !== null
+        ? { ...nextResult, _routeFacilityIds: routeFacilityIds }
+        : nextResult;
+
+      await persistRoutePlanWithAssignments({
+        result: nextResult,
+        planData,
+        settings: lastUsedSettings,
+        assignments: routeAssignments,
+        routePlanId: currentRouteId,
+        routeName: currentRouteName || 'Route',
+      });
+      applyRouteAssignmentsLocally(routeAssignments);
+      setOptimizationResult(nextResult);
+      setRouteVersion(previous => previous + 1);
+      return true;
+    } catch (err: any) {
+      console.error('[RouteList] Atomic route update failed:', err);
+      setError(err?.message || 'Failed to update the route.');
+      return false;
     }
   };
 
@@ -3717,7 +4224,7 @@ function App() {
                   </button>
 
                   {showProfileDropdown && (
-                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
+                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-[80]">
                       {/* User info header */}
                       <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
                         <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
@@ -3800,7 +4307,7 @@ function App() {
       )}
 
       {(!isFullScreenMap || (currentView !== 'route-planning' && currentView !== 'survey')) && (
-        <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-colors duration-200">
+        <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-[70] transition-colors duration-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center gap-2 py-2">
               {/* Desktop navigation - hidden on mobile */}
@@ -3949,7 +4456,13 @@ function App() {
         </nav>
       )}
 
-      <main className={currentView === 'survey' ? 'flex-1' : 'flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
+      <main className={
+        currentView === 'survey'
+          ? 'flex-1'
+          : currentView === 'route-planning'
+            ? 'flex-1 w-full'
+            : 'flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'
+      }>
         {error && (
           <div className={`mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 ${currentView === 'survey' ? 'mx-4 mt-4' : ''}`}>
             <p className="whitespace-pre-line">{error}</p>
@@ -3984,6 +4497,8 @@ function App() {
                 hideAllCompleted: false,
                 hideInternallyCompleted: false,
                 hideExternallyCompleted: false,
+                hideValidPlans: false,
+                hideExpiringPlans: false,
               });
               // Switch to route planning view and set map to fullscreen mode
               viewingFacilityRef.current = true;
@@ -3992,7 +4507,7 @@ function App() {
               setMapTargetCoords({ latitude, longitude });
               // Don't clear targetCoords - let the map handle it naturally
             }}
-            onCoordinatesUpdated={(facilityId, latitude, longitude) => {
+            onCoordinatesUpdated={(_facilityId, latitude, longitude) => {
               // Only auto-center the map on the saved coordinates when the
               // user is ALREADY in route-planning context. Saving lat/long
               // from the Facilities tab (or anywhere else) was previously
@@ -4008,6 +4523,8 @@ function App() {
                 hideAllCompleted: false,
                 hideInternallyCompleted: false,
                 hideExternallyCompleted: false,
+                hideValidPlans: false,
+                hideExpiringPlans: false,
               });
               viewingFacilityRef.current = true;
               setIsFullScreenMap(true);
@@ -4037,7 +4554,7 @@ function App() {
         {/* Legacy configure view handled by useEffect redirect */}
 
         {currentView === 'route-planning' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 md:py-6">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 md:py-6">
             <div className="space-y-2 md:space-y-6">
               {!optimizationResult && !isLoadingRoutes && homeBase && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4120,69 +4637,41 @@ function App() {
                 <>
                   {!isFullScreenMap && (
                     <StickyStatsBar
-                      totalDays={optimizationResult.totalDays}
-                      totalFacilities={visibleFacilityCount}
-                      totalMiles={optimizationResult.totalMiles}
-                      totalDriveTime={optimizationResult.totalDriveTime}
-                      totalVisitTime={optimizationResult.totalVisitTime}
-                      totalTime={optimizationResult.totalTime}
+                      totalDays={filteredOptimizationResult?.totalDays ?? optimizationResult.totalDays}
+                      totalFacilities={filteredOptimizationResult?.totalFacilities ?? optimizationResult.totalFacilities}
+                      totalMiles={filteredOptimizationResult?.totalMiles ?? optimizationResult.totalMiles}
+                      totalDriveTime={filteredOptimizationResult?.totalDriveTime ?? optimizationResult.totalDriveTime}
+                      totalVisitTime={filteredOptimizationResult?.totalVisitTime ?? optimizationResult.totalVisitTime}
+                      totalTime={filteredOptimizationResult?.totalTime ?? optimizationResult.totalTime}
                       triggerElementId="main-stats-cards"
                     />
                   )}
 
                   <section
                     id="main-stats-cards"
-                    className="grid grid-cols-1 xl:grid-cols-12 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-visible"
+                    className="relative z-50 grid grid-cols-1 xl:grid-cols-12 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-visible"
                   >
 
-                  {/* Route membership and map visibility are deliberately
-                      separate. Showing extra markers must never silently
-                      rewrite an active outing. */}
-                  {routeFacilityIds && (
-                    <div className="order-1 xl:col-span-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
-                      <div>
-                        <div className="flex items-center gap-2 text-gray-900 dark:text-white text-sm font-semibold">
-                          <CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                          <span>Current Route: {routeFacilityIds.length} stops</span>
-                        </div>
-                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                          {showOnlyRouteFacilities
-                            ? 'Route stops only on the map'
-                            : `All markers shown · route remains ${routeFacilityIds.length} stops`}
-                        </p>
+                  {/* Route membership and marker visibility stay separate. The
+                      map control can reveal markers without changing this stop list. */}
+                  <div className="order-1 xl:col-span-4 flex items-center px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-gray-900 dark:text-white text-sm font-semibold">
+                        <CheckCircle className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span className="truncate">{currentRouteName || 'Current route'}</span>
+                        <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                          {filteredOptimizationResult?.totalFacilities ?? optimizationResult.totalFacilities} stops
+                        </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setShowOnlyRouteFacilities(current => !current)}
-                          className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 dark:hover:border-blue-500 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-                        >
-                          {showOnlyRouteFacilities ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                          {showOnlyRouteFacilities ? 'Show All Markers' : 'Show Route Only'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!lastUsedSettings}
-                          onClick={async () => {
-                            const confirmed = window.confirm(
-                              'Replace the current route with all facilities eligible for this survey mode? Completed stops from this outing will remain in its history, and any added stops will start pending.',
-                            );
-                            if (confirmed && lastUsedSettings) {
-                              await handleGenerateRoutes(lastUsedSettings, 'update-current');
-                            }
-                          }}
-                          className="flex items-center gap-1.5 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed text-xs font-medium px-3 py-1.5 rounded transition-colors"
-                        >
-                          <Route className="w-3.5 h-3.5" />
-                          Use All Eligible
-                        </button>
-                      </div>
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        {routeFacilityIds !== null ? 'Selected stop list' : 'All eligible facilities'}
+                      </p>
                     </div>
-                  )}
+                  </div>
 
                   {surveyTypeKind === 'spcc_plan' && (
-                    <div className="order-4 xl:col-span-5 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="order-4 xl:order-5 xl:col-span-5 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <Image className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -4193,13 +4682,12 @@ function App() {
                               <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
                                 {planRouteRun.completedCount} of {planRouteRun.totalCount} stops completed on this outing.
                               </p>
-                              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-                                Resetting an outing keeps facility status and photo history.
-                              </p>
                             </>
                           ) : (
                             <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
-                              Not started · tracked separately from Facilities
+                              {currentRouteId
+                                ? 'Starts automatically when the first stop is marked done'
+                                : 'Save this route to track outing progress'}
                             </p>
                           )}
                           {planRouteRun.error && (
@@ -4207,9 +4695,16 @@ function App() {
                           )}
                         </div>
 
-                        <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                        <div className="w-24 sm:w-40 shrink-0">
                           {planRouteRun.run && planRouteRun.totalCount > 0 && (
-                            <div className="w-full sm:w-48 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                            <div
+                              className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
+                              role="progressbar"
+                              aria-label="Outing photo progress"
+                              aria-valuemin={0}
+                              aria-valuemax={planRouteRun.totalCount}
+                              aria-valuenow={planRouteRun.completedCount}
+                            >
                               <div
                                 className="h-full bg-green-600 text-white transition-all"
                                 style={{
@@ -4218,49 +4713,47 @@ function App() {
                               />
                             </div>
                           )}
-                          <button
-                            type="button"
-                            disabled={planRouteRun.loading || planRouteRun.schemaUnavailable || !currentRouteId}
-                            onClick={async () => {
-                              if (!planRouteRun.run) {
-                                await planRouteRun.startRun(false);
-                                return;
-                              }
-                              const confirmed = window.confirm(
-                                'Start a new outing for this saved route? This resets only the route checklist. Facility photo status and photo history will not be cleared.',
-                              );
-                              if (confirmed) await planRouteRun.startNewRun();
-                            }}
-                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white disabled:cursor-not-allowed px-4 py-2 text-sm font-medium transition-colors"
-                          >
-                            {planRouteRun.loading ? (
-                              <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                            ) : (
-                              <Route className="w-4 h-4" />
-                            )}
-                            {planRouteRun.run ? 'Start New Outing' : 'Start This Outing'}
-                          </button>
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {!isFullScreenMap && (
-                    <div className="order-5 xl:col-span-12 px-3 py-2">
+                  {(!isFullScreenMap || showRefreshOptions) && (
+                    <div className={isFullScreenMap
+                      ? 'fixed inset-0 z-[9999]'
+                      : 'order-5 xl:order-3 xl:col-span-3 px-3 py-2 border-b border-gray-200 dark:border-gray-700'}>
                     <RouteResults
                       result={optimizationResult}
                       settings={lastUsedSettings}
                       facilities={facilities}
                       userId={currentAccount.id}
-                      teamNumber={1}
+                      teamNumber={effectiveUserTeam ?? 1}
                       accountId={currentAccount.id}
                       onSaveCurrentRoute={handleSaveCurrentRoute}
                       onLoadRoute={handleLoadRoute}
+                      onRouteRenamed={handleRouteRenamed}
                       currentRouteId={currentRouteId || undefined}
                       currentRouteName={currentRouteName || undefined}
+                      nextRouteDayNumber={nextRouteDayNumber}
+                      routeStopCount={filteredOptimizationResult?.totalFacilities ?? optimizationResult.totalFacilities}
+                      routeScopeIsSubset={routeFacilityIds !== null}
+                      onUseAllEligible={routeFacilityIds !== null
+                        ? async (updatedSettings, facilitiesOverride) => {
+                            return handleGenerateRoutes(updatedSettings, 'update-current', facilitiesOverride);
+                          }
+                        : undefined}
+                      onRegenerateAllEligible={async (updatedSettings, facilitiesOverride) => {
+                        return handleGenerateRoutes(updatedSettings, 'update-current', facilitiesOverride);
+                      }}
                       planRouteProgress={planRouteProgressProps}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
-                      homeBase={homeBase || undefined}
+                      showRefreshOptions={showRefreshOptions}
+                      onShowRefreshOptions={setShowRefreshOptions}
+                      homeBase={visibleHomeBase || undefined}
+                      onPersistRouteResult={persistRouteListResult}
+                      onMoveFacility={handleRouteListMoveFacility}
+                      onMoveFacilities={handleBulkReassignFacilities}
+                      onAddFacilitiesToRoute={handleAddFacilitiesToCurrentRoute}
                       onUpdateResult={(newResult) => {
                         setOptimizationResult(newResult);
                         setRouteVersion(prev => prev + 1);
@@ -4292,29 +4785,26 @@ function App() {
                           alert('Settings not found. Please configure settings first.');
                           return;
                         }
-                        if (routeFacilityIds && routeFacilityIds.length > 0) {
-                          await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
-                        } else {
-                          handleGenerateRoutes(settingsToUse, 'update-current');
-                        }
+                        await regenerateCurrentRouteScope(settingsToUse);
                       }}
                       onFacilitiesUpdated={loadData}
                       isRefreshing={isGenerating}
                       showOnlySettings={true}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
+                      surveyType={surveyType}
+                      surveyTypeKind={surveyTypeKind}
                     />
                     </div>
                   )}
 
                   {/* Compact metrics share the command-center surface instead
                       of pushing the map down with four separate cards. */}
-                  <div className={`${surveyTypeKind === 'spcc_plan' ? 'xl:col-span-7' : 'xl:col-span-12'} order-3 grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-200 dark:divide-gray-700 border-b xl:border-r border-gray-200 dark:border-gray-700`}>
+                  <div className={`${surveyTypeKind === 'spcc_plan' ? 'xl:col-span-7 xl:border-r' : 'xl:col-span-12'} order-3 xl:order-4 grid grid-cols-4 divide-x divide-gray-200 dark:divide-gray-700 border-b border-gray-200 dark:border-gray-700`}>
                     {(() => {
                       const totalTime = filteredOptimizationResult?.totalTime || 0;
                       const driveTime = filteredOptimizationResult?.totalDriveTime || 0;
                       const visitTime = filteredOptimizationResult?.totalVisitTime || 0;
-                      const fmtHM = (mins: number) =>
-                        isNaN(mins) ? '0h 0m' : `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
+                      const fmtHM = formatHoursAndMinutes;
 
                       const cards: Array<{
                         key: string;
@@ -4326,7 +4816,7 @@ function App() {
                       }> = [
                         {
                           key: 'days',
-                          label: 'Total Days',
+                          label: 'Days',
                           value: `${filteredOptimizationResult?.totalDays || 0}`,
                           sub: `${fmtHM(totalTime)} • ${fmtHM(driveTime)} drive + ${fmtHM(visitTime)} onsite`,
                           iconColor: 'text-blue-600 dark:text-blue-400',
@@ -4334,22 +4824,22 @@ function App() {
                         },
                         {
                           key: 'facilities',
-                          label: 'Total Facilities',
-                          value: `${visibleFacilityCount}`,
+                          label: 'Stops',
+                          value: `${filteredOptimizationResult?.totalFacilities ?? optimizationResult.totalFacilities}`,
                           iconColor: 'text-emerald-600 dark:text-emerald-400',
                           Icon: MapPin,
                         },
                         {
                           key: 'miles',
-                          label: 'Total Miles',
+                          label: 'Miles',
                           value: (filteredOptimizationResult?.totalMiles || 0).toFixed(1),
                           iconColor: 'text-orange-600 dark:text-orange-400',
                           Icon: TrendingUp,
                         },
                         {
                           key: 'drive',
-                          label: 'Drive Time',
-                          value: `${Math.round(driveTime / 60)}h`,
+                          label: 'Drive',
+                          value: fmtHM(driveTime),
                           iconColor: 'text-purple-600 dark:text-purple-400',
                           Icon: Clock,
                         },
@@ -4358,8 +4848,9 @@ function App() {
                       return cards.map(({ key, label, value, sub, iconColor, Icon }) => (
                         <div
                           key={key}
-                          className="min-w-0 px-3 py-2.5"
-                          title={sub}
+                          className="min-w-0 px-2 sm:px-3 py-2.5"
+                          title={sub || `${label}: ${value}`}
+                          aria-label={`${label}: ${value}${sub ? `. ${sub}` : ''}`}
                         >
                           <div className="flex items-center gap-1.5">
                             <Icon className={`w-3.5 h-3.5 shrink-0 ${iconColor}`} />
@@ -4378,31 +4869,56 @@ function App() {
                       custom types appear automatically alongside the seeded SPCC types. */}
                   {!isFullScreenMap && filteredOptimizationResult && (() => {
                     // Precompute the SPCC-specific count badges (unchanged).
-                    const inspectionsMap = new Map(inspections.map(i => [i.facility_id, i]));
-                    const activeFacilitiesForCounts = filteredFacilities.filter(f => f.status !== 'sold' && f.day_assignment !== -1);
-                    const facilitiesInRoute = new Set<string>();
-                    const excludedNames = new Set(filteredFacilities.filter(f => f.day_assignment === -1).map(f => f.name));
+                    // Inspections are loaded newest-first. Preserve the first
+                    // row per facility so an older record cannot overwrite the
+                    // current status in the route-mode badge.
+                    const inspectionsMap = new Map<string, Inspection>();
+                    inspections.forEach(inspection => {
+                      if (!inspectionsMap.has(inspection.facility_id)) {
+                        inspectionsMap.set(inspection.facility_id, inspection);
+                      }
+                    });
+                    // Count against the route that is actually on screen. General
+                    // routing exclusions (-1) do not apply to targeted survey
+                    // routes, while manually removed stops (-2) never count.
+                    const activeFacilitiesForCounts = filteredFacilities.filter(
+                      f => f.status !== 'sold' && f.day_assignment !== -2,
+                    );
+                    const facilityIdsInRoute = new Set<string>();
+                    const fallbackNamesInRoute = new Set<string>();
                     filteredOptimizationResult.routes.forEach(route => {
                       route.facilities.forEach(f => {
-                        if (!excludedNames.has(f.name)) facilitiesInRoute.add(f.name);
+                        if (f.id) facilityIdsInRoute.add(f.id);
+                        else fallbackNamesInRoute.add(f.name);
                       });
                     });
+                    const isFacilityInRoute = (facility: Facility): boolean =>
+                      facilityIdsInRoute.has(facility.id) || fallbackNamesInRoute.has(facility.name);
 
                     let planInRouteCount = 0;
-                    let planPastDueCount = 0;
                     let inspectionInRouteCount = 0;
-                    let inspectionPastDueCount = 0;
+                    const planOverdueFacilities: Array<{ name: string; detail: string }> = [];
+                    const inspectionOverdueFacilities: Array<{ name: string; detail: string }> = [];
 
                     activeFacilitiesForCounts.forEach(f => {
-                      const isInRoute = facilitiesInRoute.has(f.name);
+                      const isInRoute = isFacilityInRoute(f);
                       const s = getSPCCPlanStatus(f);
-                      if (s.status === 'initial_overdue' || s.status === 'expired') planPastDueCount++;
+                      if (isInRoute && (s.status === 'initial_overdue' || s.status === 'expired')) {
+                        planOverdueFacilities.push({ name: f.name, detail: s.message });
+                      }
                       if (facilityNeedsSPCCPlan(f) && isInRoute) planInRouteCount++;
                       const insp = inspectionsMap.get(f.id);
                       const inspExpiry = getFacilityInspectionExpiry(f, insp);
                       if (inspExpiry.status !== 'valid') {
                         if (isInRoute) inspectionInRouteCount++;
-                        if (inspExpiry.status === 'expired') inspectionPastDueCount++;
+                        if (isInRoute && (inspExpiry.status === 'expired' || inspExpiry.status === 'initial_overdue')) {
+                          inspectionOverdueFacilities.push({
+                            name: f.name,
+                            detail: inspExpiry.status === 'initial_overdue'
+                              ? 'Initial inspection overdue'
+                              : 'Inspection expired',
+                          });
+                        }
                       }
                     });
 
@@ -4421,6 +4937,7 @@ function App() {
                     const customNeedsCount = (typeId: string): number => {
                       let n = 0;
                       activeFacilitiesForCounts.forEach(f => {
+                        if (!isFacilityInRoute(f)) return;
                         const status = getCompletionStatus(f.id, typeId);
                         if (status.total > 0 && status.percent < 100) n++;
                       });
@@ -4429,19 +4946,21 @@ function App() {
 
                     const allActive = surveyType === 'all';
                     return (
-                      <div className={`order-2 ${routeFacilityIds ? 'xl:col-span-7' : 'xl:col-span-12'} px-4 py-3 border-b border-gray-200 dark:border-gray-700`}>
+                      <div className="order-2 xl:col-span-5 px-4 py-3 border-b xl:border-r border-gray-200 dark:border-gray-700">
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <ClipboardList className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Survey</span>
                           </div>
-                          {/* Compact mode switcher. The active option uses the
-                              same high-contrast brand treatment in every mode. */}
-                          <div className="inline-flex flex-wrap rounded-lg border border-gray-200 dark:border-gray-600 p-0.5 gap-0.5">
-                            {/* All Facilities tab — always first */}
+                          <div className="flex w-full flex-wrap gap-0.5 rounded-lg border border-gray-200 p-0.5 dark:border-gray-600 sm:w-auto">
                             <button
-                              onClick={() => setSurveyType('all')}
-                              className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${allActive
+                              type="button"
+                              onClick={() => {
+                                setSurveyType('all');
+                                setOpenOverdueTypeId(null);
+                              }}
+                              aria-pressed={allActive}
+                              className={`min-h-11 w-full rounded-md px-3.5 py-2 text-xs font-medium transition-all sm:w-auto sm:text-sm ${allActive
                                 ? 'bg-blue-600 text-white shadow-sm'
                                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                 }`}
@@ -4449,46 +4968,104 @@ function App() {
                               All Facilities
                             </button>
 
-                            {/* Dynamic tabs from survey_types */}
                             {routeModeTypes.map(type => {
                               const Icon = resolveSurveyTypeIcon(type.icon);
                               const isActive = isTypeActive(type);
                               const isSpccInsp = type.system_kind === 'spcc_inspection';
                               const isSpccPlan = type.system_kind === 'spcc_plan';
                               const inRouteCount = isSpccInsp ? inspectionInRouteCount : isSpccPlan ? planInRouteCount : customNeedsCount(type.id);
-                              const overdueCount = isSpccInsp ? inspectionPastDueCount : isSpccPlan ? planPastDueCount : 0;
+                              const overdueFacilities = isSpccInsp
+                                ? inspectionOverdueFacilities
+                                : isSpccPlan
+                                  ? planOverdueFacilities
+                                  : [];
+                              const overdueCount = overdueFacilities.length;
+                              const overduePopoverId = `route-overdue-${type.id}`;
 
                               return (
-                                <button
+                                <div
                                   key={type.id}
-                                  onClick={() => setSurveyType(type.id)}
-                                  title={type.description || type.name}
-                                  className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 ${isActive
-                                    ? 'bg-blue-600 text-white shadow-sm'
-                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
-                                    }`}
+                                  data-route-overdue-popover
+                                  className="relative flex min-w-0 flex-1 gap-0.5 sm:flex-none"
                                 >
-                                  <Icon className="w-4 h-4" />
-                                  <span>{type.name}</span>
-                                  {/* Count + overdue badges only surface on
-                                      the ACTIVE tab. Inactive tabs stay
-                                      clean text so the user isn't pre-
-                                      bombarded with alerts for modes
-                                      they haven't picked yet — the
-                                      counts are still one click away. */}
-                                  {isActive && inRouteCount > 0 && (
-                                    <span
-                                      className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap bg-white/20 text-white"
-                                    >
-                                      {inRouteCount}
-                                    </span>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSurveyType(type.id);
+                                      setOpenOverdueTypeId(null);
+                                    }}
+                                    title={type.description || type.name}
+                                    aria-pressed={isActive}
+                                    className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-all sm:flex-none sm:text-sm ${isActive
+                                      ? 'bg-blue-600 text-white shadow-sm'
+                                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white'
+                                      }`}
+                                  >
+                                    <Icon className="h-4 w-4 shrink-0" />
+                                    <span className="truncate">{type.name}</span>
+                                    {isActive && inRouteCount > 0 && (
+                                      <span className="ml-0.5 whitespace-nowrap rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                        {inRouteCount}
+                                      </span>
+                                    )}
+                                    {isActive && overdueCount > 0 && (
+                                      <span className="ml-0.5 hidden whitespace-nowrap rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white sm:inline-flex">
+                                        {overdueCount} overdue
+                                      </span>
+                                    )}
+                                  </button>
+
                                   {isActive && overdueCount > 0 && (
-                                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500 text-white whitespace-nowrap">
-                                      {overdueCount} overdue
-                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOpenOverdueTypeId(current => current === type.id ? null : type.id)}
+                                      aria-label={`${overdueCount} overdue ${type.name} ${overdueCount === 1 ? 'facility' : 'facilities'}. Show details`}
+                                      aria-expanded={openOverdueTypeId === type.id}
+                                      aria-controls={overduePopoverId}
+                                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-red-500 text-white shadow-sm transition-colors hover:bg-red-600 sm:hidden"
+                                    >
+                                      <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold text-red-600">
+                                        {overdueCount}
+                                      </span>
+                                    </button>
                                   )}
-                                </button>
+
+                                  {openOverdueTypeId === type.id && overdueCount > 0 && (
+                                    <div
+                                      id={overduePopoverId}
+                                      className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[80] max-h-[50dvh] overflow-y-auto rounded-xl border border-red-200 bg-white p-3 text-left shadow-2xl dark:border-red-900/60 dark:bg-gray-800 sm:hidden"
+                                      role="dialog"
+                                      aria-labelledby={`${overduePopoverId}-title`}
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <p id={`${overduePopoverId}-title`} className="text-sm font-semibold text-gray-900 dark:text-white">
+                                          {overdueCount} overdue {overdueCount === 1 ? 'facility' : 'facilities'}
+                                        </p>
+                                        <button
+                                          type="button"
+                                          onClick={() => setOpenOverdueTypeId(null)}
+                                          aria-label="Close overdue facility details"
+                                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                      <ul className="mt-2 space-y-2">
+                                        {overdueFacilities.slice(0, 3).map(item => (
+                                          <li key={`${type.id}-${item.name}`} className="min-w-0">
+                                            <p className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">{item.name}</p>
+                                            <p className="truncate text-[11px] text-red-600 dark:text-red-400">{item.detail}</p>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                      {overdueCount > 3 && (
+                                        <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                          Plus {overdueCount - 3} more. Open the Facilities tab for the full list.
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>
@@ -4501,18 +5078,11 @@ function App() {
 
                   {!isFullScreenMap && (
                     <div className="relative">
-                      <button
-                        onClick={() => setIsFullScreenMap(true)}
-                        className="absolute bottom-4 left-4 z-10 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg shadow-md flex items-center gap-2 transition-colors"
-                        title="Full screen map"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                        <span className="text-sm font-medium">Full Screen</span>
-                      </button>
                       <RouteMap
                         key={`route-map-${routeVersion}`}
                         result={filteredOptimizationResult}
-                        homeBase={homeBase}
+                        homeBase={visibleHomeBase}
+                        nextRouteDayNumber={nextRouteDayNumber}
                         onReassignFacility={handleReassignFacility}
                         onBulkReassignFacilities={handleBulkReassignFacilities}
                         onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
@@ -4523,7 +5093,7 @@ function App() {
                         completedVisibility={completedVisibility}
                         facilities={filteredFacilities}
                         userId={DEMO_USER_ID}
-                        teamNumber={1}
+                        teamNumber={effectiveUserTeam ?? 1}
                         onFacilitiesChange={loadData}
                         onFacilityPatch={handleFacilityPatch}
                         onAddFacilityToRoute={handleAddFacilityToRoute}
@@ -4534,6 +5104,8 @@ function App() {
                         surveyTypeKind={surveyTypeKind}
                         onToggleHideCompleted={() => setShowVisibilityModal(true)}
                         showOnlyRouteFacilities={showOnlyRouteFacilities}
+                        onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
+                        onEnterFullscreen={() => setIsFullScreenMap(true)}
                         planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
                         onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                         planRouteSavingFacilityId={planRouteRun.savingFacilityId}
@@ -4542,21 +5114,28 @@ function App() {
                   )}
                   {!isFullScreenMap && (
                     <RouteResults
-                      result={filteredOptimizationResult}
+                      result={filteredOptimizationResult || optimizationResult}
                       settings={lastUsedSettings}
                       facilities={filteredFacilities.filter(f => f.status !== 'sold')}
                       userId={currentAccount.id}
-                      teamNumber={1}
+                      teamNumber={effectiveUserTeam ?? 1}
                       accountId={currentAccount.id}
                       onSaveCurrentRoute={handleSaveCurrentRoute}
                       onLoadRoute={handleLoadRoute}
+                      onRouteRenamed={handleRouteRenamed}
                       currentRouteId={currentRouteId || undefined}
                       currentRouteName={currentRouteName || undefined}
+                      nextRouteDayNumber={nextRouteDayNumber}
                       planRouteProgress={planRouteProgressProps}
+                      onRegenerateAllEligible={async (updatedSettings, facilitiesOverride) => {
+                        return handleGenerateRoutes(updatedSettings, 'update-current', facilitiesOverride);
+                      }}
                       onConfigureHomeBase={() => setShowHomeBaseModal(true)}
-                      showRefreshOptions={showRefreshOptions}
-                      onShowRefreshOptions={setShowRefreshOptions}
-                      homeBase={homeBase || undefined}
+                      homeBase={visibleHomeBase || undefined}
+                      onPersistRouteResult={persistRouteListResult}
+                      onMoveFacility={handleRouteListMoveFacility}
+                      onMoveFacilities={handleBulkReassignFacilities}
+                      onAddFacilitiesToRoute={handleAddFacilitiesToCurrentRoute}
                       onUpdateResult={(newResult) => {
                         setOptimizationResult(newResult);
                         setRouteVersion(prev => prev + 1);
@@ -4580,20 +5159,11 @@ function App() {
 
                         if (latestSettings) {
                           console.log('Loaded latest settings, calling route generation');
-                          // If we have a selected facility list, re-optimize with only those
-                          if (routeFacilityIds && routeFacilityIds.length > 0) {
-                            await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
-                          } else {
-                            handleGenerateRoutes(latestSettings, 'update-current');
-                          }
+                          await regenerateCurrentRouteScope(latestSettings);
                         } else {
                           console.warn('No settings found in database, using current settings');
                           if (lastUsedSettings) {
-                            if (routeFacilityIds && routeFacilityIds.length > 0) {
-                              await handleCreateRouteFromSelection(routeFacilityIds, surveyType, 'update-current');
-                            } else {
-                              handleGenerateRoutes(lastUsedSettings, 'update-current');
-                            }
+                            await regenerateCurrentRouteScope(lastUsedSettings);
                           } else {
                             alert('Settings not found. Please configure settings first.');
                           }
@@ -4611,16 +5181,13 @@ function App() {
                       surveyTypeKind={surveyTypeKind}
                       onSurveyTypeChange={(newType) => {
                         setSurveyType(newType);
-                        // Clear selected facility list when survey type changes
-                        setRouteFacilityIds(null);
-                        setShowOnlyRouteFacilities(false);
                       }}
                     />
                   )}
 
                   {isFullScreenMap && (
                     <>
-                      <div className="fixed inset-0 z-[5] bg-white overflow-hidden">
+                      <div className="fixed inset-0 z-[90] bg-white overflow-hidden">
                         {filteredOptimizationResult && (
                           <div className="absolute bottom-0 left-0 right-0 z-[60] pb-safe">
                             <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700 shadow-lg transition-colors duration-200">
@@ -4631,15 +5198,15 @@ function App() {
                                     <div className="flex flex-col">
                                       <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalDays} days</span>
                                       <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                        {Math.floor(filteredOptimizationResult.totalTime / 60)}h {Math.round(filteredOptimizationResult.totalTime % 60)}m total
+                                        {formatHoursAndMinutes(filteredOptimizationResult.totalTime)} total
                                       </span>
                                     </div>
                                   </div>
                                   <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
                                     <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
-                                    <span className="font-semibold text-gray-900 dark:text-white">{visibleFacilityCount}</span>
-                                    <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">facilities</span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">{filteredOptimizationResult.totalFacilities}</span>
+                                    <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">stops</span>
                                   </div>
                                   <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -4651,7 +5218,7 @@ function App() {
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
                                     <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                                     <div className="flex flex-col">
-                                      <span className="font-semibold text-gray-900 dark:text-white whitespace-nowrap">{Math.floor(filteredOptimizationResult.totalDriveTime / 60)}h {Math.round(filteredOptimizationResult.totalDriveTime % 60)}m</span>
+                                      <span className="font-semibold text-gray-900 dark:text-white whitespace-nowrap">{formatHoursAndMinutes(filteredOptimizationResult.totalDriveTime)}</span>
                                       <span className="text-xs text-gray-500 dark:text-gray-400">drive time</span>
                                     </div>
                                   </div>
@@ -4665,7 +5232,8 @@ function App() {
                           <RouteMap
                             key={`route-map-fullscreen-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
                             result={filteredOptimizationResult}
-                            homeBase={homeBase}
+                            homeBase={visibleHomeBase}
+                            nextRouteDayNumber={nextRouteDayNumber}
                             isFullScreen={true}
                             onReassignFacility={handleReassignFacility}
                             onBulkReassignFacilities={handleBulkReassignFacilities}
@@ -4681,7 +5249,7 @@ function App() {
                             completedVisibility={completedVisibility}
                             facilities={filteredFacilities.filter(f => f.status !== 'sold')}
                             userId={DEMO_USER_ID}
-                            teamNumber={1}
+                            teamNumber={effectiveUserTeam ?? 1}
                             onFacilitiesChange={loadData}
                             onFacilityPatch={handleFacilityPatch}
                             onAddFacilityToRoute={handleAddFacilityToRoute}
@@ -4703,6 +5271,7 @@ function App() {
                             surveyType={surveyType}
                             surveyTypeKind={surveyTypeKind}
                             showOnlyRouteFacilities={showOnlyRouteFacilities}
+                            onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
                             planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
                             onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                             planRouteSavingFacilityId={planRouteRun.savingFacilityId}
@@ -4710,30 +5279,25 @@ function App() {
                         </div>
                       </div>
 
-                      <div className="fixed bottom-16 left-4 z-20 flex gap-2">
+                      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 z-[100] flex gap-2">
                         <button
+                          type="button"
                           onClick={() => setIsFullScreenMap(false)}
-                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg border border-red-700"
+                          aria-label="Exit fullscreen map"
+                          className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-red-700 bg-red-600 px-3 py-2 text-white shadow-lg transition-colors hover:bg-red-700 sm:px-4"
                         >
                           <X className="w-4 h-4" />
                           <span className="text-sm font-medium hidden sm:inline">Exit Fullscreen</span>
                         </button>
-                        <button
-                          onClick={() => setShowVisibilityModal(true)}
-                          className={`p-2 rounded-lg transition-colors shadow-lg border ${completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans
-                            ? 'bg-gray-600 text-white border-gray-600 hover:bg-gray-700'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                            }`}
-                          title="Adjust completed facilities visibility"
-                        >
-                          {completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                        </button>
                       </div>
 
-                      <div className="fixed bottom-16 right-4 z-20 flex items-center gap-3">
+                      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-[100] flex items-center gap-3">
                         <button
+                          type="button"
                           onClick={() => setNavigationMode(!navigationMode)}
-                          className={`p-2 rounded-lg transition-colors shadow-lg border ${navigationMode
+                          aria-label={navigationMode ? 'Turn off navigation mode' : 'Turn on navigation mode'}
+                          aria-pressed={navigationMode}
+                          className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 shadow-lg transition-colors ${navigationMode
                             ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                             }`}
@@ -4744,6 +5308,7 @@ function App() {
 
                         {!navigationMode && (
                           <button
+                            type="button"
                             onClick={() => {
                               viewingFacilityRef.current = false;
                               setMapTargetCoords(null);
@@ -4752,7 +5317,9 @@ function App() {
                               // Always trigger location center when clicking the button
                               setTriggerMapLocation(prev => prev + 1);
                             }}
-                            className={`p-2 rounded-lg transition-colors shadow-lg border ${locationTracking
+                            aria-label={locationTracking ? 'Stop following my location' : 'Follow my location'}
+                            aria-pressed={locationTracking}
+                            className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 shadow-lg transition-colors ${locationTracking
                               ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
                               : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                               }`}
@@ -4783,12 +5350,14 @@ function App() {
                 return filteredFacilities.filter(f => f.status !== 'sold');
               })()}
               routeFacilityIds={
-                currentRouteFacilityIds.size > 0
+                routeFacilityIds !== null
+                  ? routeFacilityIds
+                  : currentRouteFacilityIds.size > 0
                   ? Array.from(currentRouteFacilityIds)
                   : null
               }
               userId={currentAccount.id}
-              teamNumber={1}
+              teamNumber={effectiveUserTeam ?? 1}
               accountId={currentAccount.id}
               userRole={accountRole === 'account_admin' ? 'admin' : 'user'}
               surveyType={surveyType}
@@ -5056,23 +5625,6 @@ function App() {
             setCompletedVisibility(newVisibility);
             localStorage.setItem(`facilityVisibility_${surveyType}`, JSON.stringify(newVisibility));
           }}
-          onApplyAndRefreshRoute={async (newVisibility) => {
-            setCompletedVisibility(newVisibility);
-            localStorage.setItem(`facilityVisibility_${surveyType}`, JSON.stringify(newVisibility));
-            // Trigger route regeneration with latest settings
-            if (currentAccount) {
-              const { data: latestSettings } = await supabase
-                .from('user_settings')
-                .select('*')
-                .eq('account_id', currentAccount.id)
-                .maybeSingle();
-              if (latestSettings) {
-                handleGenerateRoutes(latestSettings, 'update-current');
-              } else if (lastUsedSettings) {
-                handleGenerateRoutes(lastUsedSettings, 'update-current');
-              }
-            }
-          }}
         />
       )}
 
@@ -5109,21 +5661,20 @@ function App() {
 
       <OfflineIndicator />
 
-      {/* Floating AI assistant — bottom-right bubble. Lets the user query
+      {/* Floating AI assistant, bottom-right bubble. Lets the user query
           their account-wide facility data in natural language ("how many
           SPCCs are due this year"). Backed by the `ai-assistant` Edge
           Function which loads a snapshot + calls Claude with an
-          SPCC-aware system prompt. Hidden on fullscreen map to keep the
-          map view uncluttered. */}
-      {!isFullScreenMap && (
-        <AIAssistantBubble
-          facilities={facilities}
-          onOpenFacility={setAiOpenedFacility}
-          // When the AI-opened facility modal is in front, Esc should close
-          // the modal (which has its own handler), not the bubble behind it.
-          escapeDisabled={!!aiOpenedFacility}
-        />
-      )}
+          SPCC-aware system prompt. It stays mounted while hidden so an
+          in-progress conversation is not lost. */}
+      <AIAssistantBubble
+        hidden={isFullScreenMap || (currentView === 'route-planning' && isMobileViewport)}
+        facilities={facilities}
+        onOpenFacility={setAiOpenedFacility}
+        // When the AI-opened facility modal is in front, Esc should close
+        // the modal (which has its own handler), not the bubble behind it.
+        escapeDisabled={!!aiOpenedFacility}
+      />
 
       {/* Top-level FacilityDetailModal triggered by the AI bubble's linkified
           facility mentions. Lives at App level so the modal works from any
@@ -5133,7 +5684,7 @@ function App() {
         <FacilityDetailModal
           facility={aiOpenedFacility}
           userId={user.id}
-          teamNumber={1}
+          teamNumber={effectiveUserTeam ?? 1}
           accountId={currentAccount.id}
           facilities={facilities}
           allInspections={inspections}

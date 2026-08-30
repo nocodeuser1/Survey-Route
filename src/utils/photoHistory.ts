@@ -3,8 +3,10 @@ import { instantToZonedParts } from './dateUtils';
 
 export interface EffectivePhotoHistoryItem {
   event: PhotoVisitEvent;
+  /** All immutable events in this correction group, parents before children. */
+  chainEvents: PhotoVisitEvent[];
   latestRevision: PhotoVisitEventRevision | null;
-  occurredOn: string;
+  occurredOn: string | null;
   occurredTime: string | null;
   deleted: boolean;
   corrected: boolean;
@@ -19,9 +21,78 @@ export function resolveEffectivePhotoHistory(
   events: PhotoVisitEvent[],
   revisions: PhotoVisitEventRevision[],
 ): EffectivePhotoHistoryItem[] {
-  const supersededIds = new Set(
-    events.map(event => event.supersedes_event_id).filter((id): id is string => Boolean(id)),
-  );
+  // A route reopen is an audit fact about the outing checklist, not a
+  // correction to the physical photo occurrence. Timestamp corrections form
+  // a version chain. Resolve each connected chain to its most recently
+  // recorded leaf so older data that accidentally branched cannot surface two
+  // effective occurrences or win Latest Photos Date.
+  const historyEvents = events.filter(event => event.event_type !== 'route_reopened');
+  const eventsById = new Map(historyEvents.map(event => [event.id, event]));
+  const rootIdFor = (event: PhotoVisitEvent): string => {
+    let current = event;
+    const seen = new Set<string>([event.id]);
+    while (current.supersedes_event_id) {
+      const parent = eventsById.get(current.supersedes_event_id);
+      if (
+        !parent ||
+        seen.has(parent.id) ||
+        parent.account_id !== current.account_id ||
+        parent.facility_id !== current.facility_id
+      ) break;
+      seen.add(parent.id);
+      current = parent;
+    }
+    return current.id;
+  };
+  const eventsByRoot = new Map<string, PhotoVisitEvent[]>();
+  for (const event of historyEvents) {
+    const rootId = rootIdFor(event);
+    const group = eventsByRoot.get(rootId) || [];
+    group.push(event);
+    eventsByRoot.set(rootId, group);
+  }
+
+  // A transaction gives every automatic correction the same recorded_at, so
+  // timestamp/UUID ordering alone can select an ancestor at random. Only
+  // structural leaves are eligible to represent a physical occurrence. The
+  // recorded fields are a deterministic tie-breaker for old branched data.
+  const effectiveEventByRoot = new Map<string, PhotoVisitEvent>();
+  const orderedEventsByRoot = new Map<string, PhotoVisitEvent[]>();
+  for (const [rootId, group] of eventsByRoot) {
+    const groupIds = new Set(group.map(event => event.id));
+    const parentIds = new Set(
+      group
+        .map(event => event.supersedes_event_id)
+        .filter((id): id is string => Boolean(id) && groupIds.has(id as string)),
+    );
+    const leaves = group.filter(event => !parentIds.has(event.id));
+    const candidates = leaves.length > 0 ? leaves : group;
+    const effective = candidates.slice().sort(
+      (a, b) => b.recorded_at.localeCompare(a.recorded_at) || b.id.localeCompare(a.id),
+    )[0];
+    effectiveEventByRoot.set(rootId, effective);
+
+    const depthFor = (event: PhotoVisitEvent): number => {
+      let depth = 0;
+      let current = event;
+      const seen = new Set<string>([event.id]);
+      while (current.supersedes_event_id && groupIds.has(current.supersedes_event_id)) {
+        const parent = eventsById.get(current.supersedes_event_id);
+        if (!parent || seen.has(parent.id)) break;
+        seen.add(parent.id);
+        current = parent;
+        depth += 1;
+      }
+      return depth;
+    };
+    orderedEventsByRoot.set(
+      rootId,
+      group.slice().sort((a, b) =>
+        depthFor(a) - depthFor(b)
+        || a.recorded_at.localeCompare(b.recorded_at)
+        || a.id.localeCompare(b.id)),
+    );
+  }
   const latestByEvent = new Map<string, PhotoVisitEventRevision>();
 
   for (const revision of revisions) {
@@ -35,11 +106,11 @@ export function resolveEffectivePhotoHistory(
     }
   }
 
-  return events
-    .filter(event => event.event_type !== 'route_reopened' && !supersededIds.has(event.id))
-    .map(event => {
+  return Array.from(effectiveEventByRoot.entries())
+    .map(([rootId, event]) => {
       const latestRevision = latestByEvent.get(event.id) || null;
-      let occurredOn = event.occurred_on || '';
+      const chainEvents = orderedEventsByRoot.get(rootId) || [event];
+      let occurredOn: string | null = event.occurred_on || null;
       let occurredTime = event.occurred_time || null;
 
       if (!occurredOn && event.occurred_at) {
@@ -47,8 +118,6 @@ export function resolveEffectivePhotoHistory(
         occurredOn = parts.date;
         occurredTime = occurredTime || parts.time;
       }
-      if (!occurredOn) occurredOn = event.recorded_at.slice(0, 10);
-
       if (latestRevision?.action === 'edit') {
         occurredOn = latestRevision.occurred_on || occurredOn;
         occurredTime = latestRevision.occurred_time || null;
@@ -61,14 +130,17 @@ export function resolveEffectivePhotoHistory(
 
       return {
         event,
+        chainEvents,
         latestRevision,
         occurredOn,
         occurredTime,
         deleted: latestRevision?.action === 'delete',
-        corrected: latestRevision?.action === 'edit',
+        corrected: chainEvents.length > 1 || latestRevision?.action === 'edit',
       };
     })
     .sort((a, b) => {
+      if (a.occurredOn && !b.occurredOn) return -1;
+      if (!a.occurredOn && b.occurredOn) return 1;
       const aKey = `${a.occurredOn}T${a.occurredTime || '00:00'}`;
       const bKey = `${b.occurredOn}T${b.occurredTime || '00:00'}`;
       return bKey.localeCompare(aKey) || b.event.recorded_at.localeCompare(a.event.recorded_at);
@@ -87,4 +159,21 @@ export function getLatestPhotoDatesByFacility(
     }
   }
   return latestDates;
+}
+
+/**
+ * Facilities that have a real base record in the photo ledger, including
+ * records currently hidden by an admin tombstone. Consumers use this to
+ * distinguish "the ledger has no record yet" from "the ledger record was
+ * deliberately removed from active history". Route-reopen audit events alone
+ * do not establish a physical photo visit.
+ */
+export function getFacilitiesWithPhotoHistory(
+  events: PhotoVisitEvent[],
+): Set<string> {
+  return new Set(
+    events
+      .filter(event => event.event_type !== 'route_reopened' && Boolean(event.facility_id))
+      .map(event => event.facility_id as string),
+  );
 }

@@ -4,7 +4,7 @@ import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
-import { formatDate } from '../utils/dateUtils';
+import { formatDate, nowInAccountTimeZone } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel, parseVisitTimeInput, formatVisitTimeDisplay, saveFieldVisitTime } from '../utils/spccPlans';
 import BermPlanCard from './BermPlanCard';
 import BermWellAssignmentModal from './BermWellAssignmentModal';
@@ -115,7 +115,7 @@ function FieldOperationsSection({
 
   const handleTogglePhotos = async () => {
     const newVal = !photosTaken;
-    const today = new Date().toISOString().split('T')[0];
+    const today = nowInAccountTimeZone().date;
 
     // Photos Taken seeds the visit date with today's date ONLY when there's
     // no date already on file. Don't clobber a date the user already typed.

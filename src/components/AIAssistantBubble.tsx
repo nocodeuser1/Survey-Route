@@ -131,6 +131,9 @@ interface AIAssistantBubbleProps {
    *  facility-detail modal opened by clicking a linkified mention) is
    *  visible — Esc should close the modal in front, not the bubble behind. */
   escapeDisabled?: boolean;
+  /** Hide the launcher and panel without unmounting the component, preserving
+   *  the current conversation, draft, and any in-flight response. */
+  hidden?: boolean;
 }
 
 const PANEL_WIDTH_KEY = 'ai-assistant-panel-width';
@@ -154,6 +157,7 @@ export default function AIAssistantBubble({
   facilities = [],
   onOpenFacility,
   escapeDisabled = false,
+  hidden = false,
 }: AIAssistantBubbleProps = {}) {
   const { currentAccount } = useAccount();
 
@@ -220,10 +224,10 @@ export default function AIAssistantBubble({
 
   // Focus the input when the panel opens.
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (!hidden && isOpen && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [isOpen]);
+  }, [isOpen, hidden]);
 
   // Escape minimizes the panel. Registered globally (window-level) so
   // it works no matter where focus is — input field, message body, or
@@ -231,7 +235,7 @@ export default function AIAssistantBubble({
   // don't intercept Escape for the rest of the app (modals, dropdowns,
   // etc. have their own Escape handling).
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || hidden) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Skip when a child modal is in front (e.g. the AI-opened facility
@@ -243,7 +247,7 @@ export default function AIAssistantBubble({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, escapeDisabled]);
+  }, [isOpen, escapeDisabled, hidden]);
 
   // Cancel any in-flight stream when the component unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -487,6 +491,8 @@ export default function AIAssistantBubble({
       inputRef.current?.setSelectionRange(target.content.length, target.content.length);
     }, 0);
   };
+
+  if (hidden) return null;
 
   return (
     <>

@@ -6,8 +6,9 @@ import LoadingSpinner from './LoadingSpinner';
 interface SavedRoutesManagerProps {
   accountId: string;
   currentRouteId?: string;
-  onLoadRoute: (route: RoutePlan) => void;
-  onSaveCurrentRoute?: (name: string) => void;
+  onLoadRoute: (route: RoutePlan) => Promise<boolean | void> | boolean | void;
+  onSaveCurrentRoute?: (name: string) => Promise<boolean | void> | boolean | void;
+  onRouteRenamed?: (routeId: string, name: string) => void;
   autoOpen?: boolean;
   hideButtons?: boolean;
 }
@@ -17,6 +18,7 @@ export default function SavedRoutesManager({
   currentRouteId,
   onLoadRoute,
   onSaveCurrentRoute,
+  onRouteRenamed,
   autoOpen = false,
   hideButtons = false,
 }: SavedRoutesManagerProps) {
@@ -27,6 +29,7 @@ export default function SavedRoutesManager({
   const [editingName, setEditingName] = useState('');
   const [saveName, setSaveName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [loadingRouteId, setLoadingRouteId] = useState<string | null>(null);
 
   const calculateRouteMetrics = (route: RoutePlan) => {
     const planData = route.plan_data;
@@ -93,7 +96,8 @@ export default function SavedRoutesManager({
     if (!onSaveCurrentRoute) return;
 
     const routeName = saveName.trim() || `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-    await onSaveCurrentRoute(routeName);
+    const saved = await onSaveCurrentRoute(routeName);
+    if (saved === false) return;
     setSaveName('');
     setShowSaveDialog(false);
     loadSavedRoutes();
@@ -103,17 +107,19 @@ export default function SavedRoutesManager({
     if (!editingName.trim()) return;
 
     try {
-      const { error } = await supabase
-        .from('route_plans')
-        .update({ name: editingName.trim() })
-        .eq('id', id)
-        .eq('account_id', accountId);
+      const cleanName = editingName.trim();
+      const { error } = await supabase.rpc('rename_saved_route', {
+        target_account_id: accountId,
+        target_route_plan_id: id,
+        target_name: cleanName,
+      });
 
       if (error) throw error;
 
       setSavedRoutes(routes =>
-        routes.map(r => (r.id === id ? { ...r, name: editingName.trim() } : r))
+        routes.map(r => (r.id === id ? { ...r, name: cleanName } : r))
       );
+      onRouteRenamed?.(id, cleanName);
       setEditingId(null);
       setEditingName('');
     } catch (err) {
@@ -122,38 +128,36 @@ export default function SavedRoutesManager({
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this saved route?')) return;
+    if (id === currentRouteId) return;
+    if (!confirm(
+      'Delete this saved route? Any active outing for it will be archived. Photo history will be preserved.',
+    )) return;
 
     try {
-      const { error } = await supabase
-        .from('route_plans')
-        .delete()
-        .eq('id', id)
-        .eq('account_id', accountId);
+      const { error } = await supabase.rpc('delete_saved_route', {
+        target_account_id: accountId,
+        target_route_plan_id: id,
+      });
 
       if (error) throw error;
 
       setSavedRoutes(routes => routes.filter(r => r.id !== id));
     } catch (err) {
       console.error('Error deleting route:', err);
+      alert(err instanceof Error ? err.message : 'The saved route could not be deleted.');
     }
   };
 
   const handleLoad = async (route: RoutePlan) => {
-    await supabase
-      .from('route_plans')
-      .update({ is_last_viewed: false })
-      .eq('account_id', accountId)
-      .eq('is_last_viewed', true);
-
-    await supabase
-      .from('route_plans')
-      .update({ is_last_viewed: true })
-      .eq('id', route.id)
-      .eq('account_id', accountId);
-
-    onLoadRoute(route);
-    setIsOpen(false);
+    if (loadingRouteId) return;
+    setLoadingRouteId(route.id);
+    try {
+      const loaded = await onLoadRoute(route);
+      if (loaded === false) return;
+      setIsOpen(false);
+    } finally {
+      setLoadingRouteId(null);
+    }
   };
 
   return (
@@ -314,9 +318,10 @@ export default function SavedRoutesManager({
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => handleLoad(route)}
-                            className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                            disabled={loadingRouteId !== null}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Load
+                            {loadingRouteId === route.id ? 'Loading...' : 'Load'}
                           </button>
                           <button
                             onClick={() => {
@@ -329,7 +334,9 @@ export default function SavedRoutesManager({
                           </button>
                           <button
                             onClick={() => handleDelete(route.id)}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            disabled={route.id === currentRouteId || route.is_last_viewed}
+                            title={route.id === currentRouteId || route.is_last_viewed ? 'Load a different route before deleting this one' : 'Delete saved route'}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded disabled:cursor-not-allowed disabled:opacity-35"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -430,9 +437,10 @@ export default function SavedRoutesManager({
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleLoad(route)}
-                          className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                          disabled={loadingRouteId !== null}
+                          className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          Load
+                          {loadingRouteId === route.id ? 'Loading...' : 'Load'}
                         </button>
                         <button
                           onClick={() => {
@@ -445,7 +453,9 @@ export default function SavedRoutesManager({
                         </button>
                         <button
                           onClick={() => handleDelete(route.id)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                          disabled={route.id === currentRouteId || route.is_last_viewed}
+                          title={route.id === currentRouteId || route.is_last_viewed ? 'Load a different route before deleting this one' : 'Delete saved route'}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded disabled:cursor-not-allowed disabled:opacity-35"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, ClipboardList, FileCheck, Eye, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, ClipboardList, FileCheck, Eye } from 'lucide-react';
 
 export interface CompletedVisibility {
   // Inspection-related
@@ -24,7 +24,6 @@ interface CompletedFacilitiesVisibilityModalProps {
   surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
   onClose: () => void;
   onApply: (visibility: CompletedVisibility) => void;
-  onApplyAndRefreshRoute?: (visibility: CompletedVisibility) => void;
 }
 
 export default function CompletedFacilitiesVisibilityModal({
@@ -33,7 +32,6 @@ export default function CompletedFacilitiesVisibilityModal({
   surveyTypeKind,
   onClose,
   onApply,
-  onApplyAndRefreshRoute,
 }: CompletedFacilitiesVisibilityModalProps) {
   // Prefer the parent-supplied kind (knows about UUIDs); fall back to the
   // legacy enum-string check for callers that haven't been updated.
@@ -45,16 +43,79 @@ export default function CompletedFacilitiesVisibilityModal({
         ? 'spcc_inspection'
         : 'all');
   const [localVisibility, setLocalVisibility] = useState(visibility);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]';
+    const animationFrame = window.requestAnimationFrame(() => {
+      dialog?.querySelector<HTMLElement>(focusableSelector)?.focus();
+    });
+
+    const scrollY = window.scrollY;
+    const previousBodyStyles = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      overflow: document.body.style.overflow,
+    };
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.position = previousBodyStyles.position;
+      document.body.style.top = previousBodyStyles.top;
+      document.body.style.left = previousBodyStyles.left;
+      document.body.style.right = previousBodyStyles.right;
+      document.body.style.overflow = previousBodyStyles.overflow;
+      window.scrollTo(0, scrollY);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, []);
 
   const handleApply = () => {
     onApply(localVisibility);
-    onClose();
-  };
-
-  const handleApplyAndRefresh = () => {
-    if (onApplyAndRefreshRoute) {
-      onApplyAndRefreshRoute(localVisibility);
-    }
     onClose();
   };
 
@@ -91,24 +152,33 @@ export default function CompletedFacilitiesVisibilityModal({
         : 'Choose which completed facilities to hide from the map view.';
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000] p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full">
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+    <div className="fixed inset-0 z-[10000] flex items-end justify-center bg-black bg-opacity-50 p-0 sm:items-center sm:p-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="map-visibility-title"
+        tabIndex={-1}
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-800 sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="flex items-center gap-2">
             <Eye className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h3 id="map-visibility-title" className="text-lg font-semibold text-gray-900 dark:text-white">
               {title}
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            aria-label="Close map visibility"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {description}
           </p>
@@ -274,39 +344,33 @@ export default function CompletedFacilitiesVisibilityModal({
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+        <div className="shrink-0 border-t border-gray-200 p-4 dark:border-gray-700">
           <div className="flex gap-3">
             {hasAnyHidden && (
               <button
+                type="button"
                 onClick={handleReset}
-                className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                className="min-h-11 px-3 py-2 text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               >
-                Reset
+                Show all
               </button>
             )}
             <div className="flex-1" />
             <button
+              type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors font-medium"
+              className="min-h-11 rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleApply}
-              className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              className="min-h-11 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700"
             >
               Apply
             </button>
           </div>
-          {onApplyAndRefreshRoute && (
-            <button
-              onClick={handleApplyAndRefresh}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Apply & Refresh Route
-            </button>
-          )}
         </div>
       </div>
     </div>

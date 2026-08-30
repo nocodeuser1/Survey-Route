@@ -154,7 +154,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     () => new Set(routeFacilityIds || []),
     [routeFacilityIds]
   );
-  const isCustomRouteActive = !!routeFacilityIds && routeFacilityIds.length > 0;
+  // `null` means there is no explicit membership filter. An empty array is a
+  // real, explicitly empty route and must not expand back to every facility.
+  const isCustomRouteActive = routeFacilityIds !== null && routeFacilityIds !== undefined;
 
   // Per-facility SPCC plan rows (multi-berm). Loaded once; the per-row
   // history dropdown reads from this map when surveyType === 'spcc_plan' or
@@ -884,7 +886,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       <InspectionForm
         facility={inspectingFacility}
         userId={userId}
-        teamNumber={1}
+        teamNumber={teamNumber}
         accountId={accountId}
         onSaved={handleInspectionComplete}
         onClose={() => setInspectingFacility(null)}

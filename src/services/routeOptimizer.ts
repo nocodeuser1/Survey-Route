@@ -17,6 +17,8 @@ import {
 export interface FacilityWithIndex {
   /** Stable database id. Older saved routes may omit it, so name remains the fallback. */
   id?: string;
+  /** Team snapshot persisted with saved routes. Older plans infer this per day. */
+  teamAssignment?: number;
   index: number;
   name: string;
   latitude: number;

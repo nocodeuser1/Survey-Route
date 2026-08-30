@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { supabase, type Facility, type SPCCPlan, type UserSignature } from '../lib/supabase';
 import InlineSPCCPlanUpload from './InlineSPCCPlanUpload';
-import { formatDate } from '../utils/dateUtils';
+import { formatDate, nowInAccountTimeZone } from '../utils/dateUtils';
 import { getBermDisplayLabel, getBermShortLabel, getFacilityWells } from '../utils/spccPlans';
 import { isPlanRecertificationActive, isRecertificationActive } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
@@ -427,7 +427,7 @@ export default function BermPlanCard({
   // input commits on blur/Enter and auto-flips photosTaken to true.
   const handleTogglePhotos = async () => {
     const newVal = !photosTaken;
-    const today = new Date().toISOString().split('T')[0];
+    const today = nowInAccountTimeZone().date;
     const existingIso =
       plan.field_visit_date || (visitDateInput ? parseDateInput(visitDateInput) : null);
     const seedDate = newVal && !existingIso ? today : null;

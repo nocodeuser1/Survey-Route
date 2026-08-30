@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2 } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -9,7 +9,7 @@ import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, minutesTo12Hour } from '../utils/sunset';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, isRecertificationActive } from '../utils/spccStatus';
-import { formatDate, parseLocalDate } from '../utils/dateUtils';
+import { formatDate, nowInAccountTimeZone, parseLocalDate } from '../utils/dateUtils';
 import NavigationPopup from './NavigationPopup';
 import SearchInput from './SearchInput';
 import FacilityDetailModal from './FacilityDetailModal';
@@ -22,10 +22,11 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 interface RouteMapProps {
   result: OptimizationResult | null;
   homeBase: HomeBase | null;
+  nextRouteDayNumber?: number;
   selectedDay?: number | null;
   onReassignFacility?: (facilityIndex: number, fromDay: number, toDay: number) => void;
-  onBulkReassignFacilities?: (facilityIndexes: number[], toDay: number) => void;
-  onRemoveFacilityFromRoute?: (facilityIndex: number, fromDay: number) => void;
+  onBulkReassignFacilities?: (facilityKeys: string[], toDay: number) => void;
+  onRemoveFacilityFromRoute?: (facilityIndex: number, fromDay: number) => boolean | Promise<boolean>;
   isFullScreen?: boolean;
   onUpdateRoute?: () => void;
   accountId?: string;
@@ -45,10 +46,12 @@ interface RouteMapProps {
   targetCoords?: { latitude: number; longitude: number } | null;
   onNavigateToView?: (view: 'facilities' | 'route-planning' | 'survey' | 'settings') => void;
   onToggleHideCompleted?: () => void;
+  onToggleMarkerScope?: () => void;
+  onEnterFullscreen?: () => void;
   showSearchFromParent?: boolean;
   triggerLocationCenter?: number;
   onFacilityPatch?: (id: string, patch: Record<string, any>) => void;
-  onAddFacilityToRoute?: (facilityId: string, day: number) => void | Promise<void>;
+  onAddFacilityToRoute?: (facilityId: string) => boolean | Promise<boolean>;
   navigationMode?: boolean;
   onNavigationModeChange?: (enabled: boolean) => void;
   onInspectionFormActiveChange?: (active: boolean) => void;
@@ -103,7 +106,26 @@ const COLORS = [
   '#EA580C', // Dark Orange
 ];
 
-export default function RouteMap({ result, homeBase, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+type RouteFacilityIdentity = {
+  id?: string;
+  name: string;
+};
+
+/**
+ * Resolve a saved route stop to its current facility row without allowing a
+ * duplicate name to override a stable id. Only legacy saved stops that do not
+ * contain an id are allowed to use the historical name fallback.
+ */
+function findCurrentFacilityForRouteStop(
+  routeFacility: RouteFacilityIdentity,
+  facilitiesById: Map<string, Facility>,
+  facilities: Facility[],
+): Facility | undefined {
+  if (routeFacility.id) return facilitiesById.get(routeFacility.id);
+  return facilities.find(facility => facility.name === routeFacility.name);
+}
+
+export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
@@ -124,7 +146,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const userMarkerRef = useRef<L.Marker | null>(null);
 
   // Memoize completed facilities calculation to avoid recalculating on every render
-  const completedFacilityNames = useMemo(() => {
+  const completedFacilityIds = useMemo(() => {
     const completed = new Set<string>();
     const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
 
@@ -137,23 +159,23 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         .filter(i => isInspectionValid(i))
         .forEach(i => {
           const facility = facilities.find(f => f.id === i.facility_id);
-          if (facility) completed.add(facility.name);
+          if (facility) completed.add(facility.id);
         });
       // Facilities with spcc_completion_type === 'internal'
       facilities
         .filter(f => f.spcc_completion_type === 'internal')
-        .forEach(f => completed.add(f.name));
+        .forEach(f => completed.add(f.id));
       // Facilities with a valid spcc_inspection_date (within last year)
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
       facilities
         .filter(f => f.spcc_inspection_date && parseLocalDate(f.spcc_inspection_date) >= oneYearAgo)
-        .forEach(f => completed.add(f.name));
+        .forEach(f => completed.add(f.id));
     }
     if (hideAllCompleted || hideExternallyCompleted) {
       facilities
         .filter(f => f.spcc_completion_type === 'external')
-        .forEach(f => completed.add(f.name));
+        .forEach(f => completed.add(f.id));
     }
 
     // Plan-based hiding
@@ -161,10 +183,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       facilities.forEach(f => {
         const planStatus = getSPCCPlanStatus(f);
         if (hideValidPlans && (planStatus.status === 'valid' || planStatus.status === 'recertified')) {
-          completed.add(f.name);
+          completed.add(f.id);
         }
         if (hideExpiringPlans && (planStatus.status === 'expiring' || planStatus.status === 'renewal_due')) {
-          completed.add(f.name);
+          completed.add(f.id);
         }
       });
     }
@@ -172,13 +194,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     return completed;
   }, [facilities, inspections, completedVisibility]);
 
-  // Memoize facility name to ID lookup map
-  const facilityNameToIdMap = useMemo(() => {
-    const map = new Map<string, string>();
+  // Stable lookup for current facility coordinates and status. Route rows with
+  // ids never fall back to names, which prevents duplicate-name collisions.
+  const facilitiesById = useMemo(() => {
+    const map = new Map<string, Facility>();
     facilities.forEach(f => {
-      if (f.id && f.name) {
-        map.set(f.name, f.id);
-      }
+      if (f.id) map.set(f.id, f);
     });
     return map;
   }, [facilities]);
@@ -192,7 +213,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const savedMapViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
   const justNavigatedRef = useRef(false);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedFacilities, setSelectedFacilities] = useState<Set<number>>(new Set());
+  // Use stable facility identity for multi-select. Route indexes are local to
+  // each rebuilt day and can repeat across days, which previously caused one
+  // selected marker to move a different stop carrying the same index.
+  const [selectedFacilities, setSelectedFacilities] = useState<Set<string>>(new Set());
   const [bulkTargetDay, setBulkTargetDay] = useState<number>(1);
   const [showRoadRoutes, setShowRoadRoutes] = useState(false);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
@@ -209,7 +233,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [addFacilityError, setAddFacilityError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; facility: Facility } | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const surveyTypeRef = useRef(surveyType);
+  const surveyTypeKindRef = useRef(effectiveKind);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -219,6 +243,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const spiderfyLinesRef = useRef<L.Polyline[]>([]);
   const spiderfyBackdropRef = useRef<L.Layer | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const fullscreenMenuRef = useRef<HTMLDivElement>(null);
+  const fullscreenMenuButtonRef = useRef<HTMLButtonElement>(null);
 
   const [internalNavigationMode, setInternalNavigationMode] = useState(false);
   const navigationMode = externalNavigationMode !== undefined ? externalNavigationMode : internalNavigationMode;
@@ -247,14 +273,15 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
   const [isTogglingNavMode, setIsTogglingNavMode] = useState(false);
   const navModeToggleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Keep surveyType ref in sync for DOM event listeners
+  // Leaflet popup listeners outlive individual renders, so retain the
+  // normalized kind rather than the UUID-backed raw survey type value.
   useEffect(() => {
-    surveyTypeRef.current = surveyType;
-  }, [surveyType]);
+    surveyTypeKindRef.current = effectiveKind;
+  }, [effectiveKind]);
 
   // Route facility click based on current surveyType
   const openFacilityModal = (facility: Facility) => {
-    if (surveyTypeRef.current === 'spcc_plan') {
+    if (surveyTypeKindRef.current === 'spcc_plan') {
       setSpccPlanDetailFacility(facility);
     } else {
       setSurveyFacility(facility);
@@ -267,6 +294,28 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       setShowSearch(showSearchFromParent);
     }
   }, [showSearchFromParent]);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!fullscreenMenuRef.current?.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowMenu(false);
+        fullscreenMenuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showMenu]);
 
   // Auto-focus search input when opened
   useEffect(() => {
@@ -325,12 +374,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onFacilitiesChange, isOnline]);
 
-  // Stable refs so the delegated day-assign handler always sees fresh props.
-  const onFacilityPatchRef = useRef(onFacilityPatch);
-  const onFacilitiesChangeRef = useRef(onFacilitiesChange);
+  // Stable ref so the delegated add-to-route handler always sees fresh props.
   const onAddFacilityToRouteRef = useRef(onAddFacilityToRoute);
-  useEffect(() => { onFacilityPatchRef.current = onFacilityPatch; }, [onFacilityPatch]);
-  useEffect(() => { onFacilitiesChangeRef.current = onFacilitiesChange; }, [onFacilitiesChange]);
   useEffect(() => { onAddFacilityToRouteRef.current = onAddFacilityToRoute; }, [onAddFacilityToRoute]);
 
   // Global delegated click/touch listener for ".assign-day-btn" inside popups.
@@ -346,46 +391,29 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       e.preventDefault();
       e.stopPropagation();
 
-      const day = parseInt(btn.dataset.day || '0', 10);
       const facilityId = btn.dataset.facilityId || '';
       const facilityName = btn.dataset.facilityName || 'facility';
-      if (!facilityId || !day) return;
+      if (!facilityId) return;
 
       // Guard against double-fire (e.g. touchend + click).
       if (btn.dataset.assigning === '1') return;
       btn.dataset.assigning = '1';
 
       try {
-        const { error } = await supabase
-          .from('facilities')
-          .update({ day_assignment: day })
-          .eq('id', facilityId);
-
-        if (error) throw error;
+        if (!onAddFacilityToRouteRef.current) {
+          throw new Error('Route updates are unavailable in this map.');
+        }
+        const saved = await onAddFacilityToRouteRef.current(facilityId);
+        if (!saved) throw new Error('The route could not be updated.');
 
         // Close any open popup
         mapRef.current?.closePopup();
 
-        // Instant local update so the marker stays visible on the map.
-        if (onFacilityPatchRef.current) {
-          onFacilityPatchRef.current(facilityId, { day_assignment: day });
-        }
-
         // Keep facility visible after search is cleared.
         setRecentlyAssignedIds(prev => new Set(prev).add(facilityId));
 
-        setAssignSuccessMsg(`Added ${facilityName} to Day ${day}`);
+        setAssignSuccessMsg(`Added ${facilityName} to the route`);
         setTimeout(() => setAssignSuccessMsg(null), 3000);
-
-        // Rebuild the route plan so the new facility is actually IN the route
-        // (gets its day color/D-badge marker and persists to Supabase via the
-        // auto-save). If the parent didn't wire onAddFacilityToRoute, fall
-        // back to a plain data refresh.
-        if (onAddFacilityToRouteRef.current) {
-          await onAddFacilityToRouteRef.current(facilityId, day);
-        } else if (onFacilitiesChangeRef.current) {
-          onFacilitiesChangeRef.current();
-        }
       } catch (err) {
         console.error('[RouteMap] Failed to assign facility to day:', err);
         setAssignSuccessMsg('Failed to add facility to route');
@@ -428,12 +456,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         },
         onAdd: function () {
           const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom-north');
-          const link = L.DomUtil.create('a', '', container);
+          const link = L.DomUtil.create('a', 'text-white', container);
           link.href = '#';
           link.title = 'Reset to North';
-          link.innerHTML = `<svg width="29" height="29" viewBox="0 0 29 29" xmlns="http://www.w3.org/2000/svg" fill="#333"><path d="M10.5 14l4-8 4 8h-8z"/><path d="M10.5 16l4 8 4-8h-8z" fill="#ccc"/></svg>`;
-          link.style.width = '30px';
-          link.style.height = '30px';
+          link.innerHTML = `<svg width="24" height="24" viewBox="0 0 29 29" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M10.5 14l4-8 4 8h-8z"/><path d="M10.5 16l4 8 4-8h-8z" fill="#BFDBFE"/></svg>`;
+          link.style.width = '44px';
+          link.style.height = '44px';
           link.style.display = 'flex';
           link.style.alignItems = 'center';
           link.style.justifyContent = 'center';
@@ -476,8 +504,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             <line x1="21" y1="3" x2="14" y2="10"></line>
             <line x1="3" y1="21" x2="10" y2="14"></line>
           </svg>`;
-          link.style.width = '30px';
-          link.style.height = '30px';
+          link.style.width = '44px';
+          link.style.height = '44px';
           link.style.display = 'flex';
           link.style.alignItems = 'center';
           link.style.justifyContent = 'center';
@@ -728,7 +756,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       console.log('[RouteMap] Rendering with:', {
         inspectionsCount: inspections.length,
         hideCompletedFacilities,
-        facilitiesWithIds: facilityNameToIdMap.size,
+        facilitiesWithIds: facilitiesById.size,
         facilitiesPassedIn: facilities.length,
         sampleFacilities: facilities.slice(0, 3).map(f => ({
           id: f.id,
@@ -746,13 +774,26 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       // Use memoized completed facilities calculation (calculated outside useEffect for performance)
       console.log('[RouteMap] Visibility settings:', completedVisibility);
-      console.log('[RouteMap] Hidden facility names:', Array.from(completedFacilityNames));
+      console.log('[RouteMap] Hidden facility ids:', Array.from(completedFacilityIds));
 
       // Filter routes by selected day
       let routesToShow =
         selectedDay !== null
           ? result.routes.filter((r) => r.day === selectedDay)
           : result.routes;
+
+      // Route membership follows stable ids for modern routes. Names are kept
+      // only for saved legacy stops that predate route facility ids.
+      const routeFacilityIds = new Set<string>();
+      const legacyRouteFacilityNames = new Set<string>();
+      routesToShow.forEach(route => {
+        route.facilities.forEach(routeFacility => {
+          if (routeFacility.id) routeFacilityIds.add(routeFacility.id);
+          else legacyRouteFacilityNames.add(routeFacility.name);
+        });
+      });
+      const isFacilityInVisibleRoutes = (facility: Facility): boolean =>
+        routeFacilityIds.has(facility.id) || legacyRouteFacilityNames.has(facility.name);
 
       const currentFacilityIndexes = new Set<string>();
       const bounds = L.latLngBounds([[Number(homeBase.latitude), Number(homeBase.longitude)]]);
@@ -767,13 +808,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Look up the latest coordinates from the facilities prop
           // This ensures map markers update when lat-long is edited in Facilities tab
-          const latestFacilityData = facilities.find(f => f.name === facility.name);
+          const latestFacilityData = findCurrentFacilityForRouteStop(facility, facilitiesById, facilities);
           const currentLat = latestFacilityData?.latitude ?? facility.latitude;
           const currentLng = latestFacilityData?.longitude ?? facility.longitude;
 
           // Check if facility should be hidden based on name or removal status
           // This is VIEW-ONLY logic - does not affect route assignments or data
-          const isCompleted = completedFacilityNames.has(facility.name);
+          const isCompleted = latestFacilityData ? completedFacilityIds.has(latestFacilityData.id) : false;
           const isManuallyRemoved = latestFacilityData?.day_assignment === -2;
           const isExcluded = latestFacilityData?.day_assignment === -1;
           const isSold = latestFacilityData?.status === 'sold';
@@ -785,8 +826,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             // Excluded (day_assignment=-1) or sold facilities are always hidden
             shouldBeHidden = true;
           } else if (effectiveKind === 'spcc_plan') {
-            // In SPCC plan mode, respect the Plan Visibility filter (completedFacilityNames)
-            if (hideCompletedFacilities && completedFacilityNames.has(facility.name)) {
+            // In SPCC plan mode, respect the Plan Visibility filter.
+            if (hideCompletedFacilities && isCompleted) {
               shouldBeHidden = true;
             } else {
               shouldBeHidden = isManuallyRemoved;
@@ -800,11 +841,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           }
 
           const existingMarkerData = markersRef.current.get(markerKey);
-          const isSelected = selectedFacilities.has(facility.index);
+          const selectionKey = facility.id ? `id:${facility.id}` : `name:${facility.name}`;
+          const isSelected = selectedFacilities.has(selectionKey);
 
           // Check if facility has a valid completed inspection (within last year)
-          // Look up the database ID by facility name
-          const facilityDatabaseId = facilityNameToIdMap.get(facility.name);
+          // using the stable route id (or the resolved legacy-name row).
+          const facilityDatabaseId = latestFacilityData?.id;
           const facilityInspections = facilityDatabaseId
             ? inspections.filter(i => i.facility_id === facilityDatabaseId)
               .sort((a, b) => new Date(b.conducted_at).getTime() - new Date(a.conducted_at).getTime())
@@ -813,9 +855,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           const hasCompletedInspection = isInspectionValid(latestInspection);
 
           // Check completion type from facility data
-          const completionType = facilityDatabaseId
-            ? facilities?.find(f => f.id === facilityDatabaseId)?.spcc_completion_type
-            : null;
+          const completionType = latestFacilityData?.spcc_completion_type ?? null;
 
           // Determine if valid completion exists (inspection or completion type)
           const isInternalCompletion = completionType === 'internal';
@@ -1046,10 +1086,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             marker.on('click', () => {
               setSelectedFacilities(prev => {
                 const newSet = new Set(prev);
-                if (newSet.has(facility.index)) {
-                  newSet.delete(facility.index);
+                if (newSet.has(selectionKey)) {
+                  newSet.delete(selectionKey);
                 } else {
-                  newSet.add(facility.index);
+                  newSet.add(selectionKey);
                 }
                 return newSet;
               });
@@ -1063,8 +1103,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             // Get departure time from last facility
             const lastDepartureTime = route.lastFacilityDepartureTime || route.endTime || 'N/A';
 
-            // Get full facility data including SPCC completion status
-            const fullFacility = facilities.find(f => f.name === facility.name);
+            // Get full facility data including SPCC completion status. This is
+            // the same stable-id resolution used for marker coordinates.
+            const fullFacility = latestFacilityData;
 
             // Build survey-type-aware badge
             let statusBadgeHtml = '';
@@ -1432,7 +1473,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               // and reassign this facility to it in one click. Mirrors
               // the bulk-reassign panel pattern so users see the same
               // affordance everywhere day reassignment exists.
-              const newDayNumber = result.routes.length + 1;
+              const newDayNumber = nextRouteDayNumber
+                ?? Math.max(0, ...result.routes.map(candidateRoute => candidateRoute.day)) + 1;
               const newDayColor = COLORS[(newDayNumber - 1) % COLORS.length];
               return `
                         <button
@@ -1465,49 +1507,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               </div>
             `;
 
-            // CRITICAL FIX: Match facility data ONCE at marker creation time
-            // Store facility data in a closure with const to ensure correct capture
-            const facilityForThisMarker = (() => {
-              if (!facilities) return undefined;
-
-              const currentFacility = facility; // Capture current facility in closure
-              const facLat = Number(currentFacility.latitude);
-              const facLng = Number(currentFacility.longitude);
-
-              console.log('[RouteMap] Looking for facility:', currentFacility.name, 'at coords:', facLat, facLng);
-
-              // Match by coordinates - most reliable since names can change
-              let matched = facilities.find(f => {
-                const fLat = Number(f.latitude);
-                const fLng = Number(f.longitude);
-                const latMatch = Math.abs(fLat - facLat) < 0.000001;
-                const lngMatch = Math.abs(fLng - facLng) < 0.000001;
-
-                if (latMatch && lngMatch) {
-                  console.log('[RouteMap] Coordinate match found:', f.name, f.id);
-                  return true;
-                }
-                return false;
-              });
-
-              // Fallback: try exact name match if coords don't match
-              if (!matched) {
-                console.warn('[RouteMap] Coords match failed for', currentFacility.name, ', trying exact name match');
-                matched = facilities.find(f => f.name === currentFacility.name);
-                if (matched) {
-                  console.log('[RouteMap] Name match found:', matched.name, matched.id);
-                }
-              }
-
-              if (!matched) {
-                console.error('[RouteMap] Could not match facility data for:', currentFacility.name, 'coords:', facLat, facLng);
-                console.log('[RouteMap] Available facilities:', facilities.map(f => ({ name: f.name, lat: f.latitude, lng: f.longitude })));
-              } else {
-                console.log('[RouteMap] ✓ Successfully matched facility:', matched.name, matched.id, 'for marker:', currentFacility.name);
-              }
-
-              return matched;
-            })();
+            // Capture the already-resolved current row for every popup action.
+            // Modern route stops never fall through to a same-name facility.
+            const facilityForThisMarker = latestFacilityData;
 
             marker.on('popupopen', () => {
               const currentFacilityName = facility.name;
@@ -1556,7 +1558,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
                   if (facilityForThisMarker) {
                     // In SPCC plan mode, always open the plan modal
-                    if (surveyTypeRef.current === 'spcc_plan') {
+                    if (surveyTypeKindRef.current === 'spcc_plan') {
                       openFacilityModal(facilityForThisMarker);
                     } else if (facilityInspections.length > 0) {
                       // If facility has existing inspections, show the inspections list modal
@@ -1635,7 +1637,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   const facId = togglePhotosBtn.dataset.facilityId;
                   const current = togglePhotosBtn.dataset.current === 'true';
                   const newVal = !current;
-                  const today = new Date().toISOString().split('T')[0];
+                  const today = nowInAccountTimeZone().date;
                   try {
                     if (effectiveKind === 'spcc_plan' && onPlanRouteStopChange && facId) {
                       togglePhotosBtn.setAttribute('disabled', 'true');
@@ -1723,7 +1725,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             marker.on('contextmenu', (e) => {
               L.DomEvent.stopPropagation(e as any);
               L.DomEvent.preventDefault(e as any);
-              const fullFacility = facilities.find(f => f.name === facility.name);
+              const fullFacility = latestFacilityData;
               if (fullFacility) {
                 setContextMenu({
                   x: (e.originalEvent as MouseEvent).clientX,
@@ -1739,7 +1741,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               markerElement.addEventListener('touchstart', (e) => {
                 longPressTimerRef.current = setTimeout(() => {
                   const touch = (e as TouchEvent).touches[0];
-                  const fullFacility = facilities.find(f => f.name === facility.name);
+                  const fullFacility = latestFacilityData;
                   if (fullFacility) {
                     setContextMenu({
                       x: touch.clientX,
@@ -1781,16 +1783,10 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // skip this entire block and the search would have nothing to filter.
       const fullscreenSearchActive = isFullScreen && (searchQuery.trim().length > 0 || recentlyAssignedIds.size > 0);
       if ((!hideCompletedFacilities || effectiveKind === 'spcc_plan' || fullscreenSearchActive) && (!showOnlyRouteFacilities || fullscreenSearchActive)) {
-        // Get facility names already shown in routes
-        const facilitiesInRoutes = new Set<string>();
-        routesToShow.forEach(route => {
-          route.facilities.forEach(f => facilitiesInRoutes.add(f.name));
-        });
-
         // Show all other facilities from facilities tab
-        facilities.forEach((facility) => {
+        facilities.forEach((facility, idx) => {
           // Skip if already shown in route
-          if (facilitiesInRoutes.has(facility.name)) return;
+          if (isFacilityInVisibleRoutes(facility)) return;
 
           // No coordinates on file — there's nowhere to put the marker, and
           // falling back to 0,0 would drop a pin in the Gulf of Guinea.
@@ -1799,7 +1795,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Skip if facility should be hidden by Plan Visibility filter
           // Exception: keep recently-assigned facilities visible.
-          if (hideCompletedFacilities && completedFacilityNames.has(facility.name) && !recentlyAssignedIds.has(facility.id)) return;
+          if (hideCompletedFacilities && completedFacilityIds.has(facility.id) && !recentlyAssignedIds.has(facility.id)) return;
 
           // In fullscreen mode with an active search query, only show facilities
           // that match the search string (partial, case-insensitive).
@@ -1900,13 +1896,11 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             opacity: 1,
           }).addTo(mapRef.current!);
 
-          // Get available days from result for assignment
-          const availableDays = result?.routes.map(r => r.day) || [];
-          // Show "Add to Route" buttons for unassigned facilities OR any non-route facility
+          // Show "Add to Route" for unassigned facilities OR any non-route facility
           // when found via search (so the user can add it even if it has a day_assignment
           // that isn't reflected in the current optimized route).
           const isUnassigned = !isManuallyRemoved && !hasAnyValidCompletion;
-          const showAddToRoute = (isUnassigned || (isFullScreen && searchQuery.trim().length > 0 && !facilitiesInRoutes.has(facility.name)));
+          const showAddToRoute = (isUnassigned || (isFullScreen && searchQuery.trim().length > 0 && !isFacilityInVisibleRoutes(facility)));
 
           // Build survey-type-aware status and buttons for non-route popup
           let nonRouteStatusHtml = '';
@@ -2038,24 +2032,18 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               </div>
               ${nonRoutePlanInfoHtml}
               ${nonRouteFieldVisitHtml}
-              ${showAddToRoute && availableDays.length > 0 ? `
+              ${showAddToRoute && (result?.routes.length || 0) > 0 ? `
                 <div style="margin-bottom: 8px;">
-                  <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px; font-weight: 500;">Add to Route — choose day:</div>
-                  <div id="day-buttons-${facilityIndex}" style="display: flex; flex-wrap: wrap; gap: 4px;">
-                    ${availableDays.map(day => {
-            const color = COLORS[(day - 1) % COLORS.length];
-            return `<button
-                        data-day="${day}"
-                        data-facility-id="${facility.id}"
-                        data-facility-name="${facility.name.replace(/"/g, '&quot;')}"
-                        data-facility-index="${facilityIndex}"
-                        class="assign-day-btn"
-                        style="padding: 6px 12px; background-color: ${color}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; flex: 0 0 auto; touch-action: manipulation; -webkit-tap-highlight-color: transparent;"
-                      >
-                        Day ${day}
-                      </button>`;
-          }).join('')}
-                  </div>
+                  <div style="font-size: 11px; color: #6b7280; margin-bottom: 4px;">The route will be re-optimized after adding this stop.</div>
+                  <button
+                    data-facility-id="${facility.id}"
+                    data-facility-name="${facility.name.replace(/"/g, '&quot;')}"
+                    data-facility-index="${facilityIndex}"
+                    class="assign-day-btn"
+                    style="width: 100%; min-height: 44px; padding: 8px 12px; background-color: #2563EB; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; touch-action: manipulation; -webkit-tap-highlight-color: transparent;"
+                  >
+                    Add to route
+                  </button>
                 </div>
               ` : ''}
               ${!isManuallyRemoved ? `
@@ -2107,7 +2095,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 console.log('[RouteMap] Non-route survey button clicked!');
                 console.log('[RouteMap] - Facility inspections count:', facilityInspections.length);
 
-                if (surveyTypeRef.current === 'spcc_plan') {
+                if (surveyTypeKindRef.current === 'spcc_plan') {
                   openFacilityModal(facility);
                 } else if (facilityInspections.length > 0) {
                   // If facility has existing inspections, show the inspections list modal
@@ -2145,7 +2133,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 const facId = togglePhotosNR.dataset.facilityId;
                 const current = togglePhotosNR.dataset.current === 'true';
                 const newVal = !current;
-                const today = new Date().toISOString().split('T')[0];
+                const today = nowInAccountTimeZone().date;
                 try {
                   const updateData: any = { photos_taken: newVal };
                   if (newVal) {
@@ -2190,19 +2178,14 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       // Add markers for externally completed facilities (not assigned to routes but should be visible)
       // Skip in SPCC plan mode - external completion is an inspection concept, not plan-related
       // These facilities will be handled by the normal non-route section with plan-aware logic
-      if (surveyType !== 'spcc_plan' && !showOnlyRouteFacilities && facilities && facilities.length > 0) {
-        const facilitiesInRoutes = new Set<string>();
-        routesToShow.forEach(route => {
-          route.facilities.forEach(f => facilitiesInRoutes.add(f.name));
-        });
-
-        facilities.forEach((facility, idx) => {
+      if (effectiveKind !== 'spcc_plan' && !showOnlyRouteFacilities && facilities && facilities.length > 0) {
+        facilities.forEach((facility) => {
           // Only render if:
           // 1. It's externally completed
           // 2. It's not already in a route
           // 3. It's not manually excluded (day_assignment !== -1 or -2)
           const isExternallyCompleted = facility.spcc_completion_type === 'external';
-          const isNotInRoute = !facilitiesInRoutes.has(facility.name);
+          const isNotInRoute = !isFacilityInVisibleRoutes(facility);
           const isNotExcluded = facility.day_assignment !== -1 && facility.day_assignment !== -2;
 
           if (isExternallyCompleted && isNotInRoute && isNotExcluded) {
@@ -2295,8 +2278,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
           // Get current coordinates for active facilities in route (exclude removed/sold and hidden completed)
           const activeFacilities = route.facilities.filter(f => {
-            if (completedFacilityNames.has(f.name)) return false;
-            const latestData = facilities.find(facility => facility.name === f.name);
+            const latestData = findCurrentFacilityForRouteStop(f, facilitiesById, facilities);
+            if (latestData && completedFacilityIds.has(latestData.id)) return false;
             if (!latestData) return true;
             return latestData.day_assignment !== -1 && latestData.day_assignment !== -2 && latestData.status !== 'sold';
           });
@@ -2304,7 +2287,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
           if (activeFacilities.length === 0) continue;
 
           const facilitiesWithCurrentCoords = activeFacilities.map(f => {
-            const latestData = facilities.find(facility => facility.name === f.name);
+            const latestData = findCurrentFacilityForRouteStop(f, facilitiesById, facilities);
             return {
               latitude: latestData?.latitude ?? f.latitude,
               longitude: latestData?.longitude ?? f.longitude
@@ -2392,7 +2375,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
     }
-  }, [result, homeBase, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId]);
+  }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {
@@ -2845,11 +2828,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
     result.routes.forEach((dailyRoute, routeIdx) => {
       dailyRoute.facilities.forEach((routeFacility, facIdx) => {
+        const currentFacility = findCurrentFacilityForRouteStop(routeFacility, facilitiesById, facilities);
+        const currentCoords = currentFacility ? getCoords(currentFacility) : null;
         const distance = calculateDistance(
           currentLat,
           currentLng,
-          routeFacility.latitude,
-          routeFacility.longitude
+          currentCoords?.lat ?? routeFacility.latitude,
+          currentCoords?.lng ?? routeFacility.longitude
         );
 
         if (distance < closestDistance) {
@@ -2871,11 +2856,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
       if (nextIndex < currentDayRoute.facilities.length) {
         const nextRouteFacility = currentDayRoute.facilities[nextIndex];
+        const currentNextFacility = findCurrentFacilityForRouteStop(nextRouteFacility, facilitiesById, facilities);
+        const currentNextCoords = currentNextFacility ? getCoords(currentNextFacility) : null;
         const distanceToNext = calculateDistance(
           currentLat,
           currentLng,
-          nextRouteFacility.latitude,
-          nextRouteFacility.longitude
+          currentNextCoords?.lat ?? nextRouteFacility.latitude,
+          currentNextCoords?.lng ?? nextRouteFacility.longitude
         );
 
         setNextFacility({
@@ -3773,22 +3760,20 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
   const handleRemoveFacility = async (facility: Facility) => {
     try {
-      // Always update the database first to mark as removed
-      const { error: dbError } = await supabase
-        .from('facilities')
-        .update({ day_assignment: -2 })
-        .eq('id', facility.id);
-
-      if (dbError) throw dbError;
-
-      // If we have the new callback for route re-optimization, use it
+      // A routed stop is removed by the parent's atomic route+assignment save.
+      // Never prewrite -2: an OSRM/RPC failure must leave the prior route and
+      // facility assignment together.
       if (onRemoveFacilityFromRoute && result) {
         // Find the facility's index and day in the result
         let facilityIndex: number | null = null;
         let facilityDay: number | null = null;
 
         for (const route of result.routes) {
-          const facilityInRoute = route.facilities.find(f => f.name === facility.name);
+          const facilityInRoute = route.facilities.find(routeFacility =>
+            routeFacility.id
+              ? routeFacility.id === facility.id
+              : routeFacility.name === facility.name,
+          );
           if (facilityInRoute) {
             facilityIndex = facilityInRoute.index;
             facilityDay = route.day;
@@ -3798,13 +3783,19 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
         if (facilityIndex !== null && facilityDay !== null) {
           setContextMenu(null);
-          // Call the callback which handles re-optimization
-          onRemoveFacilityFromRoute(facilityIndex, facilityDay);
+          const removed = await onRemoveFacilityFromRoute(facilityIndex, facilityDay);
+          if (removed === false) throw new Error('The route could not be updated.');
           return;
         }
       }
 
-      // Close menu and refresh
+      // Non-route facility fallback: there is no saved route membership to
+      // rebuild, so a scoped assignment update is sufficient.
+      const { error: dbError } = await supabase
+        .from('facilities')
+        .update({ day_assignment: -2 })
+        .eq('id', facility.id);
+      if (dbError) throw dbError;
       setContextMenu(null);
       if (onFacilitiesChange) {
         onFacilitiesChange();
@@ -3817,6 +3808,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
   const handleRestoreFacility = async (facility: Facility) => {
     try {
+      if (onAddFacilityToRoute) {
+        const restored = await onAddFacilityToRoute(facility.id);
+        if (!restored) throw new Error('The route could not be updated.');
+        setContextMenu(null);
+        return;
+      }
+
       const { error } = await supabase
         .from('facilities')
         .update({ day_assignment: null })
@@ -3836,9 +3834,9 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
 
   return (
     <div className={isFullScreen ? "h-full flex flex-col relative" : "bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"}>
-      <div className={isFullScreen ? "px-6 py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-0 left-0 right-0 z-40 transition-colors duration-200" : "px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
+      <div className={isFullScreen ? "shrink-0 px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 relative z-40 transition-colors duration-200" : "px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
         <div className="flex items-center justify-between">
-          <div>
+          <div className="shrink-0">
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">Route Map</h2>
             {selectionMode && (
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
@@ -3846,10 +3844,12 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-hide">
             {isFullScreen && onNavigateToView && (
-              <div className="relative">
+              <div ref={fullscreenMenuRef} className="relative">
                 <button
+                  ref={fullscreenMenuButtonRef}
+                  type="button"
                   onClick={() => {
                     setShowMenu(!showMenu);
                     // Close search when opening menu to prevent overlap
@@ -3857,14 +3857,17 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       setShowSearch(false);
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md transition-colors touch-manipulation"
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 touch-manipulation dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
                   title="Navigation menu"
+                  aria-label="Navigation menu"
+                  aria-expanded={showMenu}
+                  aria-controls="fullscreen-navigation-panel"
                 >
                   <Menu className="w-4 h-4" />
                   <span className="hidden sm:inline">Menu</span>
                 </button>
                 {showMenu && (
-                  <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 min-w-[200px] z-[10000] transition-colors duration-200">
+                  <div id="fullscreen-navigation-panel" className="fixed left-3 top-[72px] sm:left-6 sm:top-[80px] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 min-w-[200px] z-[10000] transition-colors duration-200">
                     <button
                       onClick={() => {
                         onNavigateToView('facilities');
@@ -3912,24 +3915,49 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             {onUpdateRoute && isFullScreen && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={onUpdateRoute}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
                   title="Update route settings"
+                  aria-label="Update route settings"
                 >
                   <RefreshCw className="w-4 h-4" />
                   <span className="hidden sm:inline">Update Route</span>
                 </button>
               </div>
             )}
+            {onToggleMarkerScope && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={onToggleMarkerScope}
+                  className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${showOnlyRouteFacilities
+                    ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
+                    }`}
+                  title={showOnlyRouteFacilities
+                    ? 'Showing route markers only. Show all facility markers.'
+                    : 'Showing all facility markers. Show route markers only.'}
+                  aria-label="Route-only marker view"
+                  aria-pressed={showOnlyRouteFacilities}
+                >
+                  {showOnlyRouteFacilities ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <span className="hidden sm:inline">{showOnlyRouteFacilities ? 'Route Only' : 'All Markers'}</span>
+                </button>
+              </div>
+            )}
             {onToggleHideCompleted && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={onToggleHideCompleted}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${hideCompletedFacilities
-                    ? 'bg-gray-600 dark:bg-gray-700 text-white hover:bg-gray-700 dark:hover:bg-gray-600'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${hideCompletedFacilities
+                    ? 'border-transparent bg-gray-600 text-white hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
                     }`}
                   title="Adjust completed facilities visibility"
+                  aria-label="Adjust completed facilities visibility"
+                  aria-pressed={hideCompletedFacilities}
                 >
                   {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   <span className="hidden sm:inline">Visibility</span>
@@ -3938,6 +3966,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             )}
             <div className="relative">
               <button
+                type="button"
                 onClick={async () => {
                   const newValue = !showRoadRoutes;
                   setShowRoadRoutes(newValue);
@@ -3954,11 +3983,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                     }
                   }
                 }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showRoadRoutes
-                  ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${showRoadRoutes
+                  ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
                   }`}
                 title="Toggle actual road routes"
+                aria-label="Show road routes"
+                aria-pressed={showRoadRoutes}
                 disabled={isLoadingRoutes}
               >
                 <Route className="w-4 h-4" />
@@ -3968,24 +3999,42 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             {onBulkReassignFacilities && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectionMode(!selectionMode);
                     setSelectedFacilities(new Set());
                   }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${selectionMode
-                    ? 'bg-green-600 text-white hover:bg-green-700'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${selectionMode
+                    ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
                     }`}
                   title="Toggle multi-select mode"
+                  aria-label="Select multiple facilities"
+                  aria-pressed={selectionMode}
                 >
                   {selectionMode ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                   <span className="hidden sm:inline">Multi-Select</span>
                 </button>
               </div>
             )}
+            {!isFullScreen && onEnterFullscreen && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={onEnterFullscreen}
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 touch-manipulation dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                  title="Open full screen map"
+                  aria-label="Open full screen map"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Full Screen</span>
+                </button>
+              </div>
+            )}
             {isFullScreen && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => {
                     const next = !showSearch;
                     setShowSearch(next);
@@ -3998,11 +4047,13 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                       setRecentlyAssignedIds(new Set());
                     }
                   }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors touch-manipulation ${showSearch
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${showSearch
+                    ? 'border-transparent bg-blue-600 text-white hover:bg-blue-700'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
                     }`}
                   title="Search facilities"
+                  aria-label="Search facilities"
+                  aria-pressed={showSearch}
                 >
                   <Search className="w-4 h-4" />
                   <span className="hidden sm:inline">Search</span>
@@ -4014,7 +4065,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       </div>
 
       {showSearch && isFullScreen && (
-        <div className="px-6 py-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 fixed top-[80px] left-0 right-0 z-[9998]">
+        <div className="shrink-0 px-4 sm:px-6 py-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 relative z-30">
           <SearchInput
             ref={searchInputRef}
             value={searchQuery}
@@ -4050,7 +4101,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
       )}
 
       {selectionMode && selectedFacilities.size > 0 && result && (
-        <div className={isFullScreen ? `px-6 py-3 bg-blue-50 border-b border-blue-200 fixed ${showSearch ? 'top-[132px]' : 'top-[80px]'} left-0 right-0 z-[9997]` : "px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-10"}>
+        <div className={isFullScreen ? "shrink-0 max-h-[40dvh] overflow-y-auto px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-30" : "px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-10"}>
           <div className="flex items-center gap-4 flex-wrap">
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-200">
               Reassign {selectedFacilities.size} to:
@@ -4077,7 +4128,8 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                 );
               })}
               {(() => {
-                const newDayNumber = result.routes.length + 1;
+                const newDayNumber = nextRouteDayNumber
+                  ?? Math.max(0, ...result.routes.map(route => route.day)) + 1;
                 const color = COLORS[(newDayNumber - 1) % COLORS.length];
                 const isSelected = bulkTargetDay === newDayNumber;
                 return (
@@ -4119,12 +4171,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
         style={{
           position: 'relative',
           zIndex: 0,
-          paddingTop: isFullScreen
-            ? (showSearch && selectionMode && selectedFacilities.size > 0 ? '160px'
-              : showSearch ? '104px'
-                : selectionMode && selectedFacilities.size > 0 ? '108px'
-                  : '56px')
-            : '0'
+          paddingTop: '0'
         }}
       >
         <div
@@ -4363,7 +4410,7 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100">
                     <X className="w-5 h-5 text-red-600" />
                   </div>
-                  <span className="text-gray-900 dark:text-white font-medium">Remove from Map</span>
+                  <span className="text-gray-900 dark:text-white font-medium">Remove from Route</span>
                 </button>
               )}
               <button
@@ -4386,22 +4433,20 @@ export default function RouteMap({ result, homeBase, selectedDay = null, onReass
             onClick={() => {
               // Pan map to next facility
               if (mapRef.current) {
+                const fullFacility = findCurrentFacilityForRouteStop(
+                  nextFacility.facility,
+                  facilitiesById,
+                  facilities,
+                );
+                const currentCoords = fullFacility ? getCoords(fullFacility) : null;
                 mapRef.current.setView(
-                  [nextFacility.facility.latitude, nextFacility.facility.longitude],
+                  [
+                    currentCoords?.lat ?? nextFacility.facility.latitude,
+                    currentCoords?.lng ?? nextFacility.facility.longitude,
+                  ],
                   16,
                   { animate: true, duration: 1 }
                 );
-
-                // Find the matching full facility data to open detail modal
-                const fullFacility = facilities.find(f => {
-                  const c = getCoords(f);
-                  return (
-                    f.name === nextFacility.facility.name &&
-                    !!c &&
-                    Math.abs(c.lat - nextFacility.facility.latitude) < 0.0001 &&
-                    Math.abs(c.lng - nextFacility.facility.longitude) < 0.0001
-                  );
-                });
 
                 if (fullFacility) {
                   // Open facility detail modal after a short delay
