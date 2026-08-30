@@ -21,7 +21,7 @@ export default function SpeedDisplay({
   const isOverSpeedLimit = estimatedSpeedLimit && speed && speed > estimatedSpeedLimit;
 
   return (
-    <div className="fixed left-4 bottom-24 z-[1000] flex flex-col gap-2">
+    <div className="fixed bottom-[calc(9rem+env(safe-area-inset-bottom))] left-4 z-[1000] flex flex-col gap-2">
       {speed === null && (
         <div className="bg-yellow-50 rounded-lg shadow-lg border-2 border-yellow-300 px-3 py-2 flex items-center justify-center">
           <span className="text-sm font-semibold text-yellow-700">No GPS Signal</span>

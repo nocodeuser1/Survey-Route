@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal, MoreHorizontal } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, type PhotoVisitEvent, type PhotoVisitEventRevision, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
@@ -987,6 +987,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showWells2to6, setShowWells2to6] = useState(false);
   const [hideEmptyFields, setHideEmptyFields] = useState(facPrefs.hide_empty_fields);
   const [showFilters, setShowFilters] = useState(false);
+  const [showMobileTools, setShowMobileTools] = useState(false);
+  const mobileToolsDialogRef = useRef<HTMLDivElement>(null);
   // Viewport-anchored coords for the Filters dropdown. Computed on open
   // and whenever the window resizes so the dropdown always fits on
   // screen and is internally scrollable, regardless of where the
@@ -1057,6 +1059,50 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showPlansOverview, setShowPlansOverview] = useState(false);
   const [showOverviewTypePicker, setShowOverviewTypePicker] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
+
+  useEffect(() => {
+    if (!showMobileTools) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowMobileTools(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !mobileToolsDialogRef.current) return;
+
+      const focusableElements = Array.from(
+        mobileToolsDialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusableElements.length === 0) return;
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      } else if (!mobileToolsDialogRef.current.contains(document.activeElement)) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+    const handleResize = () => {
+      if (window.innerWidth >= 640) setShowMobileTools(false);
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [showMobileTools]);
+
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesValue, setNotesValue] = useState('');
@@ -4086,7 +4132,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2 sm:space-y-4">
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
           <p className="whitespace-pre-line">{error}</p>
@@ -4716,16 +4762,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         );
       })()}
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200">
+      <div className="bg-white dark:bg-gray-800 rounded-xl sm:rounded-lg shadow-md overflow-hidden transition-colors duration-200">
         <div className="border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
           {/* Row 1: Title + Stats + SPCC Mode */}
-          <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3 min-w-0 flex-wrap">
+          <div className="px-3 pt-2 pb-1.5 sm:px-4 sm:pt-3 sm:pb-2 flex items-center justify-between gap-2 sm:gap-4 flex-nowrap sm:flex-wrap">
+            <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-shrink-0 sm:flex-wrap">
               <div className="flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Facilities</h2>
+                <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
+                <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-white">Facilities</h2>
                 {!isLoading && (
-                  <span className="text-sm text-gray-400 dark:text-gray-500 font-normal">{filteredFacilities.length}/{facilities.length}</span>
+                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 font-normal">{filteredFacilities.length}/{facilities.length}</span>
                 )}
               </div>
               {/* Active custom-filter chips — visible even when the Filters
@@ -4869,7 +4915,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 completion-data columns, etc.). The standalone SurveyTypeSelector
                 that used to sit above this header was removed 2026-05-21 in
                 favor of this consolidated control. */}
-            <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 flex-shrink-0">
+            <div className="inline-flex min-w-0 max-w-full overflow-x-auto scrollbar-hide rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-0.5 flex-shrink">
               <button
                 onClick={() => { setSpccMode('all'); setSpccPlanFilter('all'); }}
                 className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${activeToggleKey === 'all'
@@ -4926,18 +4972,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
           {/* Row 2: Search + Toolbar */}
           {!isLoading && (
-            <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">
+            <div className="px-3 pb-2 sm:px-4 sm:pb-3 flex items-center gap-1.5 sm:gap-2 flex-nowrap sm:flex-wrap">
               {/* Search */}
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
                 placeholder={`Search name, address, or ${facilityIdLabel.short}...`}
                 size="sm"
-                containerClassName="relative flex-1 min-w-[180px]"
+                containerClassName="relative flex-1 min-w-0 sm:min-w-[180px]"
               />
 
               {/* View controls group */}
-              <div className="flex items-center gap-1">
+              <div className="flex flex-shrink-0 items-center gap-1">
                 <div className="relative" ref={filtersTriggerRef}>
                   <TouchTooltipButton
                     id="tb-filters"
@@ -5177,7 +5223,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     id="tb-columns"
                     tooltip="Column Visibility"
                     onClick={openColumnSelector}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
+                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
                   >
                     <Columns className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Columns</span>
@@ -5191,17 +5237,175 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   id="tb-fit"
                   tooltip="Fit columns to screen"
                   onClick={() => fitColumnsToDisplay()}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-gray-700 dark:hover:text-gray-200"
                 >
                   <MoveHorizontal className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Fit</span>
                 </TouchTooltipButton>
               </div>
 
-              <div className="h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
+              {/* Mobile keeps the high-frequency search and filter controls in
+                  the toolbar. Less-frequent actions stay one tap away in a
+                  bottom sheet instead of wrapping into two or three rows. */}
+              <div className="sm:hidden flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileTools(true)}
+                  aria-label="Open facility actions"
+                  aria-haspopup="dialog"
+                  aria-expanded={showMobileTools}
+                  data-contextual-help="More facility actions"
+                  title="More facility actions"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                </button>
+
+                {showMobileTools && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close facility actions"
+                      onClick={() => setShowMobileTools(false)}
+                      className="fixed inset-0 z-[90] cursor-default bg-black/40 text-white backdrop-blur-[1px]"
+                    />
+                    <div
+                      ref={mobileToolsDialogRef}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label="Facility actions"
+                      className="fixed inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] z-[91] max-h-[min(72dvh,32rem)] overflow-y-auto rounded-2xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                    >
+                      <div className="mb-3 flex items-center justify-between px-1">
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Facility actions</h3>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Manage the table without leaving your place.</p>
+                        </div>
+                        <button
+                          type="button"
+                          autoFocus
+                          onClick={() => setShowMobileTools(false)}
+                          aria-label="Close facility actions"
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {!invoiceView && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMobileTools(false);
+                              openColumnSelector();
+                            }}
+                            className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                          >
+                            <Columns className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            Columns
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMobileTools(false);
+                            requestAnimationFrame(() => fitColumnsToDisplay());
+                          }}
+                          className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                        >
+                          <MoveHorizontal className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          Fit table
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMobileTools(false);
+                            setShowAddForm(true);
+                          }}
+                          className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                        >
+                          <Plus className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          Add facility
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMobileTools(false);
+                            setShowUpload(true);
+                          }}
+                          className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                        >
+                          <Upload className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          Import CSV
+                        </button>
+                        {spccMode === 'plan' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMobileTools(false);
+                              setShowBulkSPCCUpload(true);
+                            }}
+                            className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                          >
+                            <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            Bulk plans
+                          </button>
+                        )}
+                        {facilities.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMobileTools(false);
+                                handleExportFacilities();
+                              }}
+                              className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                            >
+                              <Database className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                              Export CSV
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBulkDownloading}
+                              onClick={() => {
+                                if (isBulkDownloading) return;
+                                setShowMobileTools(false);
+                                if (spccMode === 'inspection') setShowExportPopup(true);
+                                else setShowReportTypePicker(true);
+                              }}
+                              className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 disabled:cursor-wait disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                            >
+                              {isBulkDownloading
+                                ? <Loader2 className="h-4 w-4 animate-spin text-purple-600 dark:text-purple-400" />
+                                : <FileDown className="h-4 w-4 text-purple-600 dark:text-purple-400" />}
+                              Reports
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMobileTools(false);
+                                if (spccMode === 'plan') setShowPlansOverview(true);
+                                else if (spccMode === 'inspection') setShowInspectionOverview(true);
+                                else setShowOverviewTypePicker(true);
+                              }}
+                              className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                            >
+                              <ClipboardList className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                              Overview
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
 
               {/* Add / Import */}
-              <div className="flex items-center gap-1">
+              <div className="hidden sm:flex items-center gap-1">
                 <TouchTooltipButton
                   id="tb-add"
                   tooltip="Add Facility"
@@ -5237,10 +5441,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
               {facilities.length > 0 && (
                 <>
-                  <div className="h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
+                  <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-gray-600"></div>
 
                   {/* Export & Reporting */}
-                  <div className="flex items-center gap-1">
+                  <div className="hidden sm:flex items-center gap-1">
                     <TouchTooltipButton
                       id="tb-csv"
                       tooltip="Export Facilities to CSV"
@@ -5672,7 +5876,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           ) : (
             <div
-              className="overflow-auto mt-0 relative max-h-[calc(100vh-150px)] min-h-[500px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm"
+              className="overflow-auto mt-0 relative h-[calc(100dvh-16rem)] min-h-[180px] sm:h-auto sm:max-h-[calc(100vh-150px)] sm:min-h-[500px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overscroll-contain"
               ref={tableContainerRef}
             >
               <div ref={headerSentinelRef} className="absolute top-0 left-0 w-full h-[1px] pointer-events-none" />

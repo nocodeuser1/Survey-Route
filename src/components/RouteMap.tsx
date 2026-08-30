@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2 } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -48,8 +48,8 @@ interface RouteMapProps {
   onToggleHideCompleted?: () => void;
   onToggleMarkerScope?: () => void;
   onEnterFullscreen?: () => void;
-  showSearchFromParent?: boolean;
-  triggerLocationCenter?: number;
+  onExitFullscreen?: () => void;
+  onClearTargetCoords?: () => void;
   onFacilityPatch?: (id: string, patch: Record<string, any>) => void;
   onAddFacilityToRoute?: (facilityId: string) => boolean | Promise<boolean>;
   navigationMode?: boolean;
@@ -125,7 +125,7 @@ function findCurrentFacilityForRouteStop(
   return facilities.find(facility => facility.name === routeFacility.name);
 }
 
-export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, showSearchFromParent, triggerLocationCenter, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
@@ -143,6 +143,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [isMapActive, setIsMapActive] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
+  const userLocationRef = useRef<L.LatLng | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
 
   // Memoize completed facilities calculation to avoid recalculating on every render
@@ -272,6 +273,14 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
   const [isTogglingNavMode, setIsTogglingNavMode] = useState(false);
   const navModeToggleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const skipNextTrackingInitialPositionRef = useRef(false);
+  const locationRequestGenerationRef = useRef(0);
+  const locationRequestInFlightRef = useRef(false);
+
+  useEffect(() => () => {
+    locationRequestGenerationRef.current += 1;
+    locationRequestInFlightRef.current = false;
+  }, []);
 
   // Leaflet popup listeners outlive individual renders, so retain the
   // normalized kind rather than the UUID-backed raw survey type value.
@@ -287,13 +296,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       setSurveyFacility(facility);
     }
   };
-
-  // Sync search visibility with parent component
-  useEffect(() => {
-    if (showSearchFromParent !== undefined) {
-      setShowSearch(showSearchFromParent);
-    }
-  }, [showSearchFromParent]);
 
   useEffect(() => {
     if (!showMenu) return;
@@ -864,7 +866,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
           // SPCC Plan status calculation using shared utility
           let hasValidSPCCPlan = false;
-          let spccPlanStatus: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'recertified' | 'pending' = 'missing';
+          let spccPlanStatus: 'missing' | 'overdue' | 'warning' | 'expiring' | 'expired' | 'valid' | 'recertified' | 'pending' | 'awaiting_pe_stamp' = 'missing';
           let spccPlanStatusColor = '#EF4444'; // Default red for problems
 
           if (latestFacilityData) {
@@ -2533,6 +2535,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const updateUserLocation = (position: GeolocationPosition) => {
     const { latitude, longitude } = position.coords;
     const latLng = L.latLng(latitude, longitude);
+    userLocationRef.current = latLng;
     setUserLocation(latLng);
 
     const popupContent = `
@@ -2591,18 +2594,28 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   // Enhanced geolocation tracking with navigation mode support
   useEffect(() => {
     if (!navigator.geolocation) return;
+    if (!navigationMode && !locationTracking) return;
 
     // Skip initial geolocation if viewing a specific facility
     if (targetCoords) return;
 
-    // Track if this is the first position after enabling tracking
-    let isFirstPosition = true;
+    // A fullscreen follow/drive button can own the initial fresh GPS request.
+    // In that case its success handler performs the first center exactly once,
+    // and this polling loop begins with subsequent movement updates only.
+    const skipInitialPosition = skipNextTrackingInitialPositionRef.current;
+    skipNextTrackingInitialPositionRef.current = false;
+    let isFirstPosition = !skipInitialPosition;
+    let effectActive = true;
 
     const handlePosition = (position: GeolocationPosition) => {
+      const previousUserLocation = userLocationRef.current;
       updateUserLocation(position);
 
       // Extract GPS heading and speed
       const { heading, speed } = position.coords;
+      const speedMph = speed !== null && speed !== undefined
+        ? speed * 2.23694
+        : 0;
 
       // Update heading with averaging to prevent jitter
       if (heading !== null && heading !== undefined) {
@@ -2636,8 +2649,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       // Auto-center based on mode:
       // - Navigation mode (Drive Mode): ALWAYS center (unless dragging) - user expects continuous tracking
       // - Manual location tracking: Only center if autoCentering is true (respect user's map interaction)
-      // Force center on first position when location tracking is freshly enabled
-      const forceCenter = isFirstPosition && locationTracking;
+      // Force the first accepted position to center in either follow mode.
+      // Previously Drive Mode could keep the old viewport when a cached blue
+      // dot was already within five metres of the fresh GPS reading.
+      const forceCenter = isFirstPosition && (locationTracking || navigationMode);
       if (forceCenter) {
         isFirstPosition = false;
         setAutoCentering(true);
@@ -2670,6 +2685,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       }
 
       if (shouldAutoCenter) {
+        const map = mapRef.current;
+        if (!map) return;
         const { latitude, longitude } = position.coords;
 
         // Validate coordinates before auto-centering
@@ -2685,9 +2702,12 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         let shouldUpdate = true;
         let shouldAnimate = false;
 
-        if (userLocation) {
-          const distance = mapRef.current.distance(
-            [userLocation.lat, userLocation.lng],
+        if (forceCenter) {
+          shouldUpdate = true;
+          shouldAnimate = true;
+        } else if (previousUserLocation) {
+          const distance = map.distance(
+            [previousUserLocation.lat, previousUserLocation.lng],
             [latitude, longitude]
           );
 
@@ -2708,8 +2728,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         if (shouldUpdate) {
           if (navigationMode) {
             // Navigation mode: Use speed-based zoom for better navigation experience
-            const currentSpeedMph = gpsSpeed !== null ? gpsSpeed : 0;
-            const zoom = getZoomForSpeed(currentSpeedMph);
+            const zoom = getZoomForSpeed(speedMph);
             centerMapOnLocation(latitude, longitude, zoom, shouldAnimate);
           } else if (locationTracking) {
             // Manual location tracking: Use fixed zoom level (user's preferred)
@@ -2725,27 +2744,53 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       setGpsHeading(null);
     };
 
-    // Get initial location
-    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
-    });
+    // The fullscreen buttons perform their own immediate, user-gesture-bound
+    // request. Skip this duplicate initial request once, then let polling own
+    // subsequent updates.
+    if (!skipInitialPosition) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          if (effectActive) handlePosition(position);
+        },
+        (error) => {
+          if (effectActive) handleError(error);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        },
+      );
+    }
 
-    // Set polling interval based on mode:
-    // - Navigation/drive mode: 500ms for smooth, responsive tracking
-    // - Location tracking (blue dot following): 3s is plenty
-    // - Neither active: 15s just to keep the blue dot roughly current
-    const updateInterval = navigationMode ? 500 : locationTracking ? 3000 : 15000;
+    // Keep follow mode responsive without stacking geolocation requests. On
+    // mobile, a position request can stay pending for several seconds; issuing
+    // another every 500 ms can deliver old readings out of order and make the
+    // map appear to jump backward.
+    const updateInterval = navigationMode ? 500 : 3000;
+    let pollingRequestInFlight = false;
     const locationInterval = setInterval(() => {
-      navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-        enableHighAccuracy: navigationMode,
-        timeout: navigationMode ? 3000 : 10000,
-        maximumAge: navigationMode ? 0 : 5000,
-      });
+      if (locationRequestInFlightRef.current || pollingRequestInFlight) return;
+      pollingRequestInFlight = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          pollingRequestInFlight = false;
+          if (effectActive) handlePosition(position);
+        },
+        (error) => {
+          pollingRequestInFlight = false;
+          if (effectActive) handleError(error);
+        },
+        {
+          enableHighAccuracy: navigationMode,
+          timeout: navigationMode ? 3000 : 10000,
+          maximumAge: navigationMode ? 0 : 5000,
+        },
+      );
     }, updateInterval);
 
     return () => {
+      effectActive = false;
       clearInterval(locationInterval);
     };
   }, [navigationMode, locationTracking, targetCoords]);
@@ -2848,11 +2893,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       });
     });
 
-    if (closestFacilityInfo !== null) {
-      const currentDayRoute = result.routes[closestFacilityInfo.routeIndex];
+    // TypeScript does not track assignments performed inside forEach callbacks,
+    // so take an explicit post-loop snapshot before narrowing it.
+    const closest = closestFacilityInfo as {
+      routeIndex: number;
+      facilityIndex: number;
+      distance: number;
+    } | null;
+
+    if (closest !== null) {
+      const currentDayRoute = result.routes[closest.routeIndex];
 
       // Get the next facility in the route (skip current, get next one)
-      const nextIndex = closestFacilityInfo.facilityIndex + 1;
+      const nextIndex = closest.facilityIndex + 1;
 
       if (nextIndex < currentDayRoute.facilities.length) {
         const nextRouteFacility = currentDayRoute.facilities[nextIndex];
@@ -2868,7 +2921,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         setNextFacility({
           facility: nextRouteFacility,
           distance: distanceToNext,
-          routeIndex: closestFacilityInfo.routeIndex,
+          routeIndex: closest.routeIndex,
           facilityIndex: nextIndex
         });
       } else {
@@ -2883,7 +2936,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   // Update next facility when location changes in navigation mode
   useEffect(() => {
     if (navigationMode && userLocation) {
-      findNextFacility(userLocation.latitude, userLocation.longitude);
+      findNextFacility(userLocation.lat, userLocation.lng);
     } else {
       setNextFacility(null);
     }
@@ -2954,12 +3007,33 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
     setIsTogglingNavMode(true);
 
+    const newMode = !navigationMode;
+    if (newMode && !navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      setIsTogglingNavMode(false);
+      return;
+    }
+
+    cancelPendingLocationRequest();
+    const navigationRequestGeneration = newMode
+      ? locationRequestGenerationRef.current + 1
+      : null;
+    if (navigationRequestGeneration !== null) {
+      locationRequestGenerationRef.current = navigationRequestGeneration;
+      locationRequestInFlightRef.current = true;
+    }
+
     // Clear any existing timeout
     if (navModeToggleTimeoutRef.current) {
       clearTimeout(navModeToggleTimeoutRef.current);
     }
 
-    const newMode = !navigationMode;
+    if (newMode) {
+      // toggleNavigationMode owns the immediate GPS request below. Prevent the
+      // tracking effect caused by this state change from issuing the same
+      // request a second time.
+      skipNextTrackingInitialPositionRef.current = true;
+    }
     if (onNavigationModeChange) {
       onNavigationModeChange(newMode);
     } else {
@@ -2979,9 +3053,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       setAutoCentering(true);
 
       // Clear facility viewing state to allow drive mode to take over
-      if (onTargetCoordsChange) {
-        onTargetCoordsChange(null);
-      }
+      onClearTargetCoords?.();
 
       // Reset all interaction flags
       justNavigatedRef.current = false;
@@ -2998,6 +3070,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       // Use increased timeout and better error handling for reliability
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (locationRequestGenerationRef.current !== navigationRequestGeneration) return;
+          locationRequestInFlightRef.current = false;
           const { latitude, longitude } = position.coords;
 
           // Validate coordinates before proceeding
@@ -3007,21 +3081,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             longitude < -180 || longitude > 180) {
             console.error('Invalid location data received:', position.coords);
 
-            // Try to use existing userLocation as fallback
-            if (userLocation &&
-              userLocation.lat >= -90 && userLocation.lat <= 90 &&
-              userLocation.lng >= -180 && userLocation.lng <= 180) {
-              console.log('Using existing user location as fallback with offset');
-              centerMapOnLocation(userLocation.lat, userLocation.lng, 17, true, true);
+            alert('Unable to get valid location data. Please ensure location services are enabled and try again.');
+            // Never substitute an unknown-age marker for a fresh Drive Mode
+            // fix. It can be far from the device after a resumed mobile tab.
+            if (onNavigationModeChange) {
+              onNavigationModeChange(false);
             } else {
-              console.error('No valid location available for Drive Mode');
-              alert('Unable to get valid location data. Please ensure location services are enabled and try again.');
-              // Revert navigation mode since we have no valid location
-              if (onNavigationModeChange) {
-                onNavigationModeChange(false);
-              } else {
-                setInternalNavigationMode(false);
-              }
+              setInternalNavigationMode(false);
             }
             return;
           }
@@ -3035,6 +3101,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           centerMapOnLocation(latitude, longitude, 17, true, true);
         },
         (error) => {
+          if (locationRequestGenerationRef.current !== navigationRequestGeneration) return;
+          locationRequestInFlightRef.current = false;
           console.error('Could not get initial location for navigation mode:', error);
 
           let errorMessage = 'Unable to get your location for Drive Mode.';
@@ -3047,25 +3115,18 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               errorMessage = 'Location information is unavailable. Make sure location services are enabled.';
               break;
             case error.TIMEOUT:
-              errorMessage = 'Location request timed out. Trying with last known location...';
+              errorMessage = 'Location request timed out. Please try again.';
               break;
           }
 
-          // If we can't get fresh location, try using existing userLocation if valid
-          if (userLocation &&
-            userLocation.lat >= -90 && userLocation.lat <= 90 &&
-            userLocation.lng >= -180 && userLocation.lng <= 180) {
-            console.log('Using last known location for Drive Mode with offset');
-            centerMapOnLocation(userLocation.lat, userLocation.lng, 17, true, true);
+          // A failed fresh request must not send the user to an unknown-age
+          // marker. Leave the viewport untouched and turn Drive Mode back off.
+          alert(errorMessage);
+          console.error('No fresh location available, disabling Drive Mode');
+          if (onNavigationModeChange) {
+            onNavigationModeChange(false);
           } else {
-            // No valid location available - disable Drive Mode
-            alert(errorMessage);
-            console.error('No valid location available, disabling Drive Mode');
-            if (onNavigationModeChange) {
-              onNavigationModeChange(false);
-            } else {
-              setInternalNavigationMode(false);
-            }
+            setInternalNavigationMode(false);
           }
         },
         {
@@ -3335,26 +3396,32 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     };
   }, [isFullScreen]);
 
-  const goToCurrentLocation = () => {
-    console.log('goToCurrentLocation called');
+  const cancelPendingLocationRequest = () => {
+    locationRequestGenerationRef.current += 1;
+    locationRequestInFlightRef.current = false;
+    setIsLocating(false);
+  };
 
-    if (isLocating) {
-      console.log('Already locating, ignoring request');
-      return;
-    }
+  const goToCurrentLocation = (disableTrackingOnError = false) => {
+    if (locationRequestInFlightRef.current) return;
 
     if (!navigator.geolocation) {
-      console.error('Geolocation not supported');
-      alert('Geolocation is not supported by your browser');
+      if (disableTrackingOnError) {
+        if (onLocationTrackingChange) {
+          onLocationTrackingChange(false);
+        } else {
+          setInternalLocationTracking(false);
+        }
+      }
+      alert('Geolocation is not supported by your browser.');
       return;
     }
 
+    const requestGeneration = locationRequestGenerationRef.current + 1;
+    locationRequestGenerationRef.current = requestGeneration;
+    locationRequestInFlightRef.current = true;
     setIsLocating(true);
-    console.log('Requesting geolocation...');
 
-    // INSTANT FEEDBACK: reset interaction flags and bump zoom RIGHT NOW so the
-    // user sees the map respond immediately. Geolocation can take a beat
-    // (especially on first tap with no cached position).
     const trackingZoom = 18;
     setLocationTrackingZoom(trackingZoom);
     setAutoCentering(true);
@@ -3362,134 +3429,153 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     userInteractedWithMapRef.current = false;
     isDraggingRef.current = false;
 
-    if (userLocation &&
-        userLocation.lat >= -90 && userLocation.lat <= 90 &&
-        userLocation.lng >= -180 && userLocation.lng <= 180) {
-      // Best case: we have a cached user location — center on it instantly
-      // at zoom 18, then refine via geolocation in the background.
-      console.log('[goToCurrentLocation] Instant center on cached userLocation');
-      centerMapOnLocation(userLocation.lat, userLocation.lng, trackingZoom, true);
-    } else if (mapRef.current) {
-      // No cached location yet: at minimum zoom the map in at zoom 18 on its
-      // current center so the tap visibly registers. Real centering happens
-      // when geolocation resolves below.
-      console.log('[goToCurrentLocation] No cached userLocation — zooming in on current center as visual feedback');
-      try {
-        const currentCenter = mapRef.current.getCenter();
-        mapRef.current.setView(currentCenter, trackingZoom, { animate: true, duration: 0.3 });
-      } catch (err) {
-        console.warn('[goToCurrentLocation] Could not pre-zoom map:', err);
-      }
-    }
+    const isCurrentRequest = () => (
+      locationRequestGenerationRef.current === requestGeneration
+      && locationRequestInFlightRef.current
+    );
 
-    const handleSuccess = (position: GeolocationPosition) => {
-      console.log('[goToCurrentLocation] Geolocation success:', position.coords);
-      const { latitude, longitude } = position.coords;
-
-      // Update user location marker
-      updateUserLocation(position);
-
-      // Use zoom level 18 for location tracking (close-up view)
-      const trackingZoom = 18;
-      setLocationTrackingZoom(trackingZoom);
-
-      // Enable auto-centering for manual tracking
-      setAutoCentering(true);
-
-      // Reset interaction flags to allow tracking to work
-      justNavigatedRef.current = false;
-      userInteractedWithMapRef.current = false;
-      isDraggingRef.current = false;
-
-      // Center the map on user location IMMEDIATELY at zoom 18
-      console.log('[goToCurrentLocation] Calling centerMapOnLocation with zoom 18:', { latitude, longitude });
-      centerMapOnLocation(latitude, longitude, trackingZoom, true);
-
-      setIsLocating(false);
-      console.log('[goToCurrentLocation] Complete - map should now be centered');
-    };
-
-    const handleError = (error: GeolocationPositionError) => {
-      console.error('Geolocation error:', error);
-      setIsLocating(false);
-
-      let errorMessage = 'Unable to get your location';
-
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          errorMessage = 'Location permission denied. Please enable location access in your browser settings.';
-          break;
-        case error.POSITION_UNAVAILABLE:
-          errorMessage = 'Location information is unavailable. Make sure location services are enabled on your device.';
-          break;
-        case error.TIMEOUT:
-          errorMessage = 'Location request timed out. Please try again.';
-          break;
-      }
-
-      alert(errorMessage);
-    };
-
-    // Three-stage approach for fastest possible visual response:
-    //   1. Accept ANY cached browser position (maximumAge: Infinity) — returns
-    //      synchronously if the browser has ever resolved location before.
-    //   2. If no cache, try a low-accuracy fast read (3s timeout).
-    //   3. Finally refine with high-accuracy GPS in the background.
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        console.log('[goToCurrentLocation] Got browser-cached position, centering immediately');
-        handleSuccess(position);
-        // Refine with high accuracy in the background.
-        navigator.geolocation.getCurrentPosition(
-          (refinedPosition) => {
-            console.log('[goToCurrentLocation] Got refined high-accuracy position');
-            updateUserLocation(refinedPosition);
-            centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, trackingZoom, true);
-          },
-          () => {}, // Ignore refinement errors — we already have a position
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
+        if (!isCurrentRequest()) return;
+
+        const { latitude, longitude } = position.coords;
+        const coordinatesAreValid = Number.isFinite(latitude)
+          && Number.isFinite(longitude)
+          && latitude >= -90
+          && latitude <= 90
+          && longitude >= -180
+          && longitude <= 180;
+
+        locationRequestInFlightRef.current = false;
+        setIsLocating(false);
+
+        if (!coordinatesAreValid) {
+          if (disableTrackingOnError) {
+            if (onLocationTrackingChange) {
+              onLocationTrackingChange(false);
+            } else {
+              setInternalLocationTracking(false);
+            }
+          }
+          alert('Your device returned an invalid location. Please try again.');
+          return;
+        }
+
+        updateUserLocation(position);
+        centerMapOnLocation(latitude, longitude, trackingZoom, true);
       },
-      () => {
-        // No browser cache — try a fast low-accuracy read next.
-        console.log('[goToCurrentLocation] No cache, trying fast low-accuracy read');
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            handleSuccess(position);
-            // Then refine with high accuracy.
-            navigator.geolocation.getCurrentPosition(
-              (refinedPosition) => {
-                console.log('[goToCurrentLocation] Got refined high-accuracy position');
-                updateUserLocation(refinedPosition);
-                centerMapOnLocation(refinedPosition.coords.latitude, refinedPosition.coords.longitude, trackingZoom, true);
-              },
-              () => {},
-              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-          },
-          (error) => {
-            console.warn('[goToCurrentLocation] Fast read failed, falling back to high-accuracy:', error.message);
-            navigator.geolocation.getCurrentPosition(
-              handleSuccess,
-              handleError,
-              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-          },
-          { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
-        );
+      (error) => {
+        if (!isCurrentRequest()) return;
+
+        locationRequestInFlightRef.current = false;
+        setIsLocating(false);
+        if (disableTrackingOnError) {
+          if (onLocationTrackingChange) {
+            onLocationTrackingChange(false);
+          } else {
+            setInternalLocationTracking(false);
+          }
+        }
+
+        let errorMessage = 'Unable to get your location.';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location permission denied. Please enable location access in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information is unavailable. Make sure location services are enabled on your device.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location request timed out. Please try again.';
+            break;
+        }
+        alert(errorMessage);
       },
-      { enableHighAccuracy: false, timeout: 0, maximumAge: Infinity }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
   };
 
-  // Trigger location centering from parent component
-  // This should ALWAYS work when triggered, regardless of other state
-  useEffect(() => {
-    if (triggerLocationCenter && triggerLocationCenter > 0) {
-      console.log('[RouteMap] Location button clicked, triggering goToCurrentLocation');
-      goToCurrentLocation();
+  const toggleLocationTrackingMode = () => {
+    if (locationTracking) {
+      cancelPendingLocationRequest();
+      if (onLocationTrackingChange) {
+        onLocationTrackingChange(false);
+      } else {
+        setInternalLocationTracking(false);
+      }
+      setAutoCentering(false);
+      return;
     }
-  }, [triggerLocationCenter]);
+
+    onClearTargetCoords?.();
+    skipNextTrackingInitialPositionRef.current = true;
+    if (onLocationTrackingChange) {
+      onLocationTrackingChange(true);
+    } else {
+      setInternalLocationTracking(true);
+    }
+    goToCurrentLocation(true);
+  };
+
+  const exitFullscreenMap = () => {
+    cancelPendingLocationRequest();
+    if (navigationMode) {
+      void toggleNavigationMode();
+    } else if (locationTracking) {
+      if (onLocationTrackingChange) {
+        onLocationTrackingChange(false);
+      } else {
+        setInternalLocationTracking(false);
+      }
+    }
+    onExitFullscreen?.();
+  };
+
+  const toggleRoadRouteVisibility = async () => {
+    const nextValue = !showRoadRoutes;
+    setShowRoadRoutes(nextValue);
+
+    if (accountId) {
+      try {
+        await supabase
+          .from('user_settings')
+          .update({ show_road_routes: nextValue })
+          .eq('account_id', accountId);
+      } catch (error) {
+        console.error('Error saving road routes preference:', error);
+      }
+    }
+  };
+
+  const toggleMultiSelectMode = () => {
+    setSelectionMode(current => !current);
+    setSelectedFacilities(new Set());
+  };
+
+  useEffect(() => {
+    if (!isFullScreen) return;
+
+    const handleFullscreenEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+
+      if (showMenu) {
+        setShowMenu(false);
+        return;
+      }
+      if (showSearch) {
+        setShowSearch(false);
+        setSearchQuery('');
+        setRecentlyAssignedIds(new Set());
+        return;
+      }
+      if (navigationTarget || surveyFacility || spccPlanDetailFacility) return;
+
+      exitFullscreenMap();
+    };
+
+    window.addEventListener('keydown', handleFullscreenEscape);
+    return () => window.removeEventListener('keydown', handleFullscreenEscape);
+  }, [isFullScreen, locationTracking, navigationMode, navigationTarget, onExitFullscreen, showMenu, showSearch, spccPlanDetailFacility, surveyFacility]);
 
   // Helper function to find overlapping markers using pixel distance
   const findOverlappingMarkers = (clickedIndex: string): string[] => {
@@ -3834,9 +3920,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
   return (
     <div className={isFullScreen ? "h-full flex flex-col relative" : "bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200"}>
-      <div className={isFullScreen ? "shrink-0 px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 relative z-40 transition-colors duration-200" : "px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
+      <div className={isFullScreen ? "shrink-0 px-3 sm:px-6 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:py-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 relative z-40 transition-colors duration-200" : "px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative z-40 transition-colors duration-200"}>
         <div className="flex items-center justify-between">
-          <div className="shrink-0">
+          <div className={isFullScreen ? "hidden shrink-0 sm:block" : "shrink-0"}>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white dark:text-white">Route Map</h2>
             {selectionMode && (
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
@@ -3844,7 +3930,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </p>
             )}
           </div>
-          <div className="flex min-w-0 items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-hide">
+          <div className={`flex min-w-0 items-center scrollbar-hide ${isFullScreen
+            ? 'w-full justify-between gap-2 overflow-visible sm:w-auto sm:justify-start sm:overflow-x-auto'
+            : 'gap-1 overflow-x-auto sm:gap-2'
+            }`}>
             {isFullScreen && onNavigateToView && (
               <div ref={fullscreenMenuRef} className="relative">
                 <button
@@ -3867,9 +3956,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   <span className="hidden sm:inline">Menu</span>
                 </button>
                 {showMenu && (
-                  <div id="fullscreen-navigation-panel" className="fixed left-3 top-[72px] sm:left-6 sm:top-[80px] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 min-w-[200px] z-[10000] transition-colors duration-200">
+                  <div id="fullscreen-navigation-panel" className="fixed left-3 top-[calc(72px+env(safe-area-inset-top))] z-[10000] max-h-[calc(100dvh-84px-env(safe-area-inset-top))] min-w-[220px] overflow-y-auto rounded-lg border border-gray-200 bg-white py-2 shadow-xl transition-colors duration-200 dark:border-gray-700 dark:bg-gray-800 sm:left-6 sm:top-[80px] sm:max-h-[calc(100dvh-92px)] sm:min-w-[200px]">
                     <button
                       onClick={() => {
+                        exitFullscreenMap();
                         onNavigateToView('facilities');
                         setShowMenu(false);
                       }}
@@ -3880,6 +3970,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     </button>
                     <button
                       onClick={() => {
+                        exitFullscreenMap();
                         onNavigateToView('route-planning');
                         setShowMenu(false);
                       }}
@@ -3890,6 +3981,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     </button>
                     <button
                       onClick={() => {
+                        exitFullscreenMap();
                         onNavigateToView('survey');
                         setShowMenu(false);
                       }}
@@ -3900,6 +3992,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     </button>
                     <button
                       onClick={() => {
+                        exitFullscreenMap();
                         onNavigateToView('settings');
                         setShowMenu(false);
                       }}
@@ -3908,6 +4001,77 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                       <UserCog className="w-4 h-4 text-gray-600" />
                       <span className="text-gray-900 dark:text-white">Settings</span>
                     </button>
+
+                    <div className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700 sm:hidden">
+                      <p className="px-4 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Map tools
+                      </p>
+                      {onToggleMarkerScope && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleMarkerScope();
+                            setShowMenu(false);
+                          }}
+                          className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                          aria-pressed={showOnlyRouteFacilities}
+                        >
+                          {showOnlyRouteFacilities
+                            ? <EyeOff className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <span className="text-gray-900 dark:text-white">Marker Scope</span>
+                          <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                            {showOnlyRouteFacilities ? 'Route only' : 'All'}
+                          </span>
+                        </button>
+                      )}
+                      {onToggleHideCompleted && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleHideCompleted();
+                            setShowMenu(false);
+                          }}
+                          className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          {hideCompletedFacilities
+                            ? <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-300" />
+                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <span className="text-gray-900 dark:text-white">Visibility</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void toggleRoadRouteVisibility();
+                          setShowMenu(false);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                        aria-pressed={showRoadRoutes}
+                      >
+                        <Route className={`h-4 w-4 ${showRoadRoutes ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'}`} />
+                        <span className="text-gray-900 dark:text-white">Road Routes</span>
+                        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                          {showRoadRoutes ? 'On' : 'Off'}
+                        </span>
+                      </button>
+                      {onBulkReassignFacilities && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            toggleMultiSelectMode();
+                            setShowMenu(false);
+                          }}
+                          className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                          aria-pressed={selectionMode}
+                        >
+                          {selectionMode
+                            ? <CheckSquare className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            : <Square className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <span className="text-gray-900 dark:text-white">Multi-Select</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -3916,7 +4080,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               <div className="relative">
                 <button
                   type="button"
-                  onClick={onUpdateRoute}
+                  onClick={() => {
+                    exitFullscreenMap();
+                    onUpdateRoute();
+                  }}
                   className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors touch-manipulation"
                   title="Update route settings"
                   aria-label="Update route settings"
@@ -3927,7 +4094,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </div>
             )}
             {onToggleMarkerScope && (
-              <div className="relative">
+              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
                 <button
                   type="button"
                   onClick={onToggleMarkerScope}
@@ -3947,7 +4114,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </div>
             )}
             {onToggleHideCompleted && (
-              <div className="relative">
+              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
                 <button
                   type="button"
                   onClick={onToggleHideCompleted}
@@ -3964,25 +4131,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 </button>
               </div>
             )}
-            <div className="relative">
+            <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
               <button
                 type="button"
-                onClick={async () => {
-                  const newValue = !showRoadRoutes;
-                  setShowRoadRoutes(newValue);
-
-                  // Save preference to database
-                  if (accountId) {
-                    try {
-                      await supabase
-                        .from('user_settings')
-                        .update({ show_road_routes: newValue })
-                        .eq('account_id', accountId);
-                    } catch (err) {
-                      console.error('Error saving road routes preference:', err);
-                    }
-                  }
-                }}
+                onClick={() => void toggleRoadRouteVisibility()}
                 className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${showRoadRoutes
                   ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
                   : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
@@ -3997,13 +4149,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </button>
             </div>
             {onBulkReassignFacilities && (
-              <div className="relative">
+              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectionMode(!selectionMode);
-                    setSelectedFacilities(new Set());
-                  }}
+                  onClick={toggleMultiSelectMode}
                   className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 transition-colors touch-manipulation ${selectionMode
                     ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
                     : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
@@ -4427,8 +4576,67 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         </>
       )}
 
+      {isFullScreen && (
+        <>
+          <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 z-[1000]">
+            <button
+              type="button"
+              onClick={exitFullscreenMap}
+              aria-label="Exit fullscreen map"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-red-700 bg-red-600 px-3 py-2 text-white shadow-lg transition-colors hover:bg-red-700 sm:px-4"
+              title="Exit fullscreen map"
+            >
+              <X className="h-4 w-4" />
+              <span className="hidden text-sm font-medium sm:inline">Exit Fullscreen</span>
+            </button>
+          </div>
+
+          <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-[1000] flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void toggleNavigationMode()}
+              disabled={isTogglingNavMode}
+              aria-label={navigationMode ? 'Turn off drive mode' : 'Turn on drive mode'}
+              aria-pressed={navigationMode}
+              className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${navigationMode
+                ? 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700'
+                }`}
+              title={navigationMode ? 'Turn off drive mode' : 'Turn on drive mode'}
+            >
+              <Car className="h-5 w-5" />
+            </button>
+
+            {!navigationMode && (
+              <button
+                type="button"
+                onClick={toggleLocationTrackingMode}
+                disabled={isLocating && !locationTracking}
+                aria-label={isLocating
+                  ? (locationTracking ? 'Locating you. Tap to stop.' : 'Locating you.')
+                  : (locationTracking ? 'Stop following my location' : 'Follow my location')}
+                aria-busy={isLocating}
+                aria-pressed={locationTracking}
+                className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 text-white shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${locationTracking
+                  ? 'border-green-600 bg-green-600 hover:bg-green-700'
+                  : 'border-blue-600 bg-blue-600 hover:bg-blue-700'
+                  }`}
+                title={isLocating
+                  ? (locationTracking ? 'Locating you - tap to stop' : 'Locating you')
+                  : (locationTracking ? 'Stop following my location' : 'Follow my location')}
+              >
+                <Crosshair className={`h-5 w-5 ${isLocating ? 'animate-pulse' : ''}`} />
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
       {navigationMode && nextFacility && (
-        <div className="fixed top-20 right-4 z-[1000] bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-blue-500 overflow-hidden max-w-xs">
+        <div className={`fixed left-4 right-4 z-[1000] overflow-hidden rounded-lg border-2 border-blue-500 bg-white shadow-xl dark:bg-gray-800 sm:left-auto sm:w-80 sm:max-w-xs ${showSearch
+          ? 'top-[calc(9.5rem+env(safe-area-inset-top))]'
+          : 'top-[calc(5rem+env(safe-area-inset-top))]'
+          }`}>
           <button
             onClick={() => {
               // Pan map to next facility

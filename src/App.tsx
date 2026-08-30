@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { MapPin, Home, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, X, Image, CheckCircle, Crosshair, Sun, Moon, Car, Menu, ClipboardList, User } from 'lucide-react';
+import { MapPin, Home, Route, UserCog, Navigation2, Calendar, Clock, TrendingUp, LogOut, Building2, X, Image, CheckCircle, Sun, Moon, Menu, ClipboardList, User } from 'lucide-react';
 import OfflineIndicator from './components/OfflineIndicator';
 import AIAssistantBubble from './components/AIAssistantBubble';
 import DeletedFacilitiesAlert from './components/DeletedFacilitiesAlert';
@@ -576,10 +576,13 @@ function App() {
   const [locationTracking, setLocationTracking] = useState(false);
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [userTeamAssignment, setUserTeamAssignment] = useState<number | null>(null);
-  const [showMapSearch, setShowMapSearch] = useState(false);
-  const [triggerMapLocation, setTriggerMapLocation] = useState(0);
   const [showVisibilityModal, setShowVisibilityModal] = useState(false);
   const [showHomeBaseModal, setShowHomeBaseModal] = useState(false);
+  const exitFullScreenMap = useCallback(() => {
+    setNavigationMode(false);
+    setLocationTracking(false);
+    setIsFullScreenMap(false);
+  }, []);
   // When a route action is blocked purely because no home base is configured,
   // we don't dead-end the user on a red banner. We open the Home Base modal
   // with an explanation and remember what they were trying to do, then run it
@@ -878,19 +881,6 @@ function App() {
       logTabView(currentAccount.id, currentView);
     }
   }, [currentView, currentAccount, logTabView, isOnline]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullScreenMap) {
-        setIsFullScreenMap(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isFullScreenMap]);
 
   // Clear loading state when optimization result is available
   useEffect(() => {
@@ -1306,14 +1296,6 @@ function App() {
       }
     }
 
-    // If we're on route-planning and fullscreen map was saved, trigger location on mobile
-    // BUT skip if we have target coordinates (user is viewing a specific facility)
-    if (currentView === 'route-planning' && isFullScreenMap && window.innerWidth < 768 && !mapTargetCoords && !viewingFacilityRef.current) {
-      // Trigger location centering after a brief delay to allow map to initialize
-      setTimeout(() => {
-        setTriggerMapLocation(prev => prev + 1);
-      }, 500);
-    }
   }, [currentView, optimizationResult, currentAccount, user?.id, isFullScreenMap, mapTargetCoords, facilities.length, isOnline]);
 
   // Clear facility viewing state when navigation mode is activated
@@ -4172,32 +4154,34 @@ function App() {
       )}
       {!isFullScreenMap && (
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 transition-colors duration-200" style={{ marginTop: showSignatureBanner ? '60px' : '0' }}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Route className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Survey-Route</h1>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm text-gray-600 dark:text-gray-300">{getAccountDisplayName(currentAccount)}</p>
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                <Route className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="flex items-baseline gap-1.5">
+                    <h1 className="text-base sm:text-2xl leading-tight font-bold text-gray-900 dark:text-white whitespace-nowrap">Survey-Route</h1>
+                    <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</span>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="max-w-[11rem] truncate text-[11px] leading-tight text-gray-600 dark:text-gray-300 sm:max-w-none sm:text-sm">{getAccountDisplayName(currentAccount)}</p>
                     {teamCount > 1 && effectiveUserTeam && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">
+                      <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">
                         Team {effectiveUserTeam}
                       </span>
                     )}
                     {teamCount > 1 && !effectiveUserTeam && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200 whitespace-nowrap">
+                      <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200 whitespace-nowrap">
                         All Teams
                       </span>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
                 <button
                   onClick={toggleDarkMode}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                   title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 >
                   {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -4206,7 +4190,7 @@ function App() {
                 {user?.isAgencyOwner && (
                   <button
                     onClick={() => navigate('/agency')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                   >
                     <Building2 className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Back to Agency</span>
@@ -4285,6 +4269,19 @@ function App() {
                         Profile Settings
                       </button>
 
+                      {user?.isAgencyOwner && (
+                        <button
+                          onClick={() => {
+                            setShowProfileDropdown(false);
+                            navigate('/agency');
+                          }}
+                          className="flex sm:hidden w-full items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        >
+                          <Building2 className="w-4 h-4" />
+                          Back to Agency
+                        </button>
+                      )}
+
                       <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
 
                       <button
@@ -4308,8 +4305,8 @@ function App() {
 
       {(!isFullScreenMap || (currentView !== 'route-planning' && currentView !== 'survey')) && (
         <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-[70] transition-colors duration-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center gap-2 py-2">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center gap-2 py-1 sm:py-2">
               {/* Desktop navigation - hidden on mobile */}
               <div className="hidden md:flex gap-1 overflow-x-auto scrollbar-hide">
                 <button
@@ -4370,7 +4367,7 @@ function App() {
 
               {/* Mobile - Show current view name and hamburger */}
               <div className="flex md:hidden items-center justify-between w-full">
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                <span className="text-base font-semibold text-gray-900 dark:text-white">
                   {currentView === 'facilities' && 'Facilities'}
                   {currentView === 'route-planning' && 'Route Planning'}
                   {currentView === 'survey' && 'Survey Mode'}
@@ -4461,7 +4458,9 @@ function App() {
           ? 'flex-1'
           : currentView === 'route-planning'
             ? 'flex-1 w-full'
-            : 'flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'
+            : currentView === 'facilities'
+              ? 'flex-1 min-h-0 w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-8'
+              : 'flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'
       }>
         {error && (
           <div className={`mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 ${currentView === 'survey' ? 'mx-4 mt-4' : ''}`}>
@@ -5187,9 +5186,9 @@ function App() {
 
                   {isFullScreenMap && (
                     <>
-                      <div className="fixed inset-0 z-[90] bg-white overflow-hidden">
+                      <div className="fixed inset-0 z-[90] overflow-hidden overscroll-none bg-white dark:bg-gray-900">
                         {filteredOptimizationResult && (
-                          <div className="absolute bottom-0 left-0 right-0 z-[60] pb-safe">
+                          <div className="absolute bottom-0 left-0 right-0 z-[60] pb-[env(safe-area-inset-bottom)]">
                             <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700 shadow-lg transition-colors duration-200">
                               <div className="px-3 py-3 sm:px-4 sm:py-3">
                                 <div className="flex items-center justify-around gap-2 sm:gap-4 text-xs sm:text-sm overflow-x-auto">
@@ -5239,7 +5238,7 @@ function App() {
                             onBulkReassignFacilities={handleBulkReassignFacilities}
                             onRemoveFacilityFromRoute={handleRemoveFacilityFromRoute}
                             onUpdateRoute={() => {
-                              setIsFullScreenMap(false);
+                              exitFullScreenMap();
                               setShowRefreshOptions(true);
                               setTriggerFitBounds(prev => prev + 1);
                             }}
@@ -5256,12 +5255,15 @@ function App() {
                             targetCoords={mapTargetCoords}
                             onNavigateToView={(view) => {
                               setCurrentView(view);
-                              setIsFullScreenMap(false);
+                              exitFullScreenMap();
+                            }}
+                            onExitFullscreen={exitFullScreenMap}
+                            onClearTargetCoords={() => {
+                              viewingFacilityRef.current = false;
+                              setMapTargetCoords(null);
                             }}
                             onInspectionFormActiveChange={setIsInspectionFormActive}
                             onToggleHideCompleted={() => setShowVisibilityModal(true)}
-                            showSearchFromParent={showMapSearch}
-                            triggerLocationCenter={triggerMapLocation}
                             navigationMode={navigationMode}
                             onNavigationModeChange={setNavigationMode}
                             locationTracking={locationTracking}
@@ -5277,57 +5279,6 @@ function App() {
                             planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                           />
                         </div>
-                      </div>
-
-                      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 z-[100] flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsFullScreenMap(false)}
-                          aria-label="Exit fullscreen map"
-                          className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-red-700 bg-red-600 px-3 py-2 text-white shadow-lg transition-colors hover:bg-red-700 sm:px-4"
-                        >
-                          <X className="w-4 h-4" />
-                          <span className="text-sm font-medium hidden sm:inline">Exit Fullscreen</span>
-                        </button>
-                      </div>
-
-                      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-[100] flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setNavigationMode(!navigationMode)}
-                          aria-label={navigationMode ? 'Turn off navigation mode' : 'Turn on navigation mode'}
-                          aria-pressed={navigationMode}
-                          className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 shadow-lg transition-colors ${navigationMode
-                            ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                            }`}
-                          title="Toggle navigation mode with GPS speed and map rotation"
-                        >
-                          <Car className="w-5 h-5" />
-                        </button>
-
-                        {!navigationMode && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              viewingFacilityRef.current = false;
-                              setMapTargetCoords(null);
-                              const newTracking = !locationTracking;
-                              setLocationTracking(newTracking);
-                              // Always trigger location center when clicking the button
-                              setTriggerMapLocation(prev => prev + 1);
-                            }}
-                            aria-label={locationTracking ? 'Stop following my location' : 'Follow my location'}
-                            aria-pressed={locationTracking}
-                            className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 shadow-lg transition-colors ${locationTracking
-                              ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
-                              : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                              }`}
-                            title={locationTracking ? "Stop following my location" : "Follow my location"}
-                          >
-                            <Crosshair className="w-5 h-5" />
-                          </button>
-                        )}
                       </div>
                     </>
                   )}
@@ -5592,7 +5543,7 @@ function App() {
         )}
       </main>
 
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto pb-[env(safe-area-inset-bottom)] transition-colors duration-200">
+      <footer className={`${currentView === 'facilities' ? 'hidden sm:block ' : ''}bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto pb-[env(safe-area-inset-bottom)] transition-colors duration-200`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <p className="text-sm text-gray-600 dark:text-gray-300 text-center">
             Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenStreetMap</a> contributors | Routing by <a href="http://project-osrm.org/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OSRM</a>
