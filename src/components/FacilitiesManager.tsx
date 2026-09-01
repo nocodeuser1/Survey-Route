@@ -43,6 +43,7 @@ import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { getCoords } from '../utils/coordinates';
 import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 import { useAccount } from '../contexts/AccountContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getFacilitiesWithPhotoHistory, getLatestPhotoDatesByFacility } from '../utils/photoHistory';
 
 interface FacilitiesManagerProps {
@@ -238,6 +239,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // team-wide default they see on a fresh load is whatever the owner
   // curated. See the docstring on useFacilitiesPreferences for details.
   const { isAgencyAdmin } = useAccount();
+  const { user: authUser } = useAuth();
+  // Stamped onto resolved_by_name when a comment is checked off from the
+  // quick-peek popover — same expression the full editor uses, so the two
+  // paths attribute completions identically.
+  const currentAuthorName = authUser?.fullName || authUser?.email || 'User';
   const { preferences: facPrefs, updatePreferences: updateFacPrefs } = useFacilitiesPreferences(accountId, userId, isAgencyAdmin);
 
   // Brand-aware label for the external facility-id field. Camino-specific
@@ -5099,7 +5105,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                   type="checkbox"
                                   checked={statusFilters.includes(opt.value)}
                                   onChange={() => toggleStatusFilter(opt.value)}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  className="rounded accent-blue-600 focus:ring-blue-500"
                                 />
                                 {opt.label}
                               </label>
@@ -5745,7 +5751,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                           type="checkbox"
                                           checked={checked}
                                           onChange={() => toggleCopyColumn(col)}
-                                          className="w-3.5 h-3.5 text-violet-600 rounded"
+                                          className="w-3.5 h-3.5 rounded accent-violet-600"
                                         />
                                         <span className="text-xs text-gray-700 dark:text-gray-200 truncate">
                                           {columnLabels[col] ?? col}
@@ -5908,7 +5914,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               setSelectedFacilityIds(new Set());
                             }
                           }}
-                          className="w-4 h-4 text-blue-600 rounded"
+                          className="w-4 h-4 rounded accent-blue-600"
                         />
                       )}
                     </th>
@@ -6018,7 +6024,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                 }
                                 setSelectedFacilityIds(newSelected);
                               }}
-                              className="w-4 h-4 text-blue-600 rounded"
+                              className="w-4 h-4 rounded accent-blue-600"
                               onClick={(e) => e.stopPropagation()}
                             />
                           </div>
@@ -6893,10 +6899,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       {commentsPopover && (
         <FacilityCommentsPopover
           facility={commentsPopover.facility}
-          comments={(commentsByFacility.get(commentsPopover.facility.id) ?? []).filter(isUserComment)}
+          // Open comments only, matching the row bubble's own count — a
+          // comment that's been checked off is done, and this panel is the
+          // quick read of what's still outstanding.
+          comments={(commentsByFacility.get(commentsPopover.facility.id) ?? [])
+            .filter(isUserComment)
+            .filter((c) => !c.resolved_at)}
           x={commentsPopover.x}
           y={commentsPopover.y}
-          onClose={() => setCommentsPopover(null)}
+          authorName={currentAuthorName}
+          onClose={() => {
+            setCommentsPopover(null);
+            // Anything completed in the popover has to reach the row bubble.
+            // Reloading on close rather than per-click keeps the list stable
+            // (and the exit animation intact) while it's open.
+            setCommentsRefreshKey((k) => k + 1);
+          }}
           onOpenFullEditor={() => {
             const f = commentsPopover.facility;
             setCommentsPopover(null);
@@ -7276,22 +7294,89 @@ function isUserComment(c: FacilityComment): boolean {
 
 interface FacilityCommentsPopoverProps {
   facility: Facility;
+  /** OPEN user comments only — the caller filters out resolved ones. */
   comments: FacilityComment[];
   x: number;
   y: number;
+  /** Stamped onto resolved_by_name, same as the full editor does. */
+  authorName: string;
   onClose: () => void;
   onOpenFullEditor: () => void;
 }
+
+/** How long a checked-off comment takes to collapse out of the list. */
+const COMMENT_EXIT_MS = 260;
 
 function FacilityCommentsPopover({
   facility,
   comments,
   x,
   y,
+  authorName,
   onClose,
   onOpenFullEditor,
 }: FacilityCommentsPopoverProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+
+  // The popover owns its list for as long as it is open.
+  //
+  // Checking a comment off has to leave the row on screen long enough to
+  // animate out, but resolving also refreshes the table's comment counts —
+  // and if this list re-derived from that refreshed prop the row would blink
+  // out instantly, mid-transition. So seed once from the prop and let the
+  // local copy drive the render; the parent reloads on close, by which point
+  // the two agree again.
+  const [items, setItems] = useState<FacilityComment[]>(comments);
+  // Rows mid-collapse. Still rendered, at zero height and zero opacity.
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+  // Guards double-clicks on a row whose UPDATE is still in flight.
+  const [resolvingIds, setResolvingIds] = useState<Set<string>>(new Set());
+  const exitTimersRef = useRef<number[]>([]);
+
+  useEffect(() => () => {
+    exitTimersRef.current.forEach(t => window.clearTimeout(t));
+  }, []);
+
+  const markComplete = async (comment: FacilityComment) => {
+    if (resolvingIds.has(comment.id) || exitingIds.has(comment.id)) return;
+    setResolvingIds(prev => new Set(prev).add(comment.id));
+    try {
+      const { error } = await supabase
+        .from('facility_comments')
+        .update({ resolved_at: new Date().toISOString(), resolved_by_name: authorName })
+        .eq('id', comment.id);
+      if (error) throw error;
+
+      // Collapse it out, then drop it once the transition has run. Only after
+      // the write lands, so a rejected update (RLS: author or agency owner)
+      // leaves the comment visibly untouched rather than vanishing and
+      // reappearing on the next load.
+      setExitingIds(prev => new Set(prev).add(comment.id));
+      exitTimersRef.current.push(
+        window.setTimeout(() => {
+          setItems(prev => prev.filter(c => c.id !== comment.id));
+          setExitingIds(prev => {
+            const next = new Set(prev);
+            next.delete(comment.id);
+            return next;
+          });
+        }, COMMENT_EXIT_MS)
+      );
+    } catch (err) {
+      console.error('[FacilitiesManager] Failed to complete comment:', err);
+      alert('Failed to mark the comment complete. Please try again.');
+    } finally {
+      setResolvingIds(prev => {
+        const next = new Set(prev);
+        next.delete(comment.id);
+        return next;
+      });
+    }
+  };
+
+  // What the header counts: rows still standing, excluding any mid-collapse,
+  // so the number ticks down with the animation instead of after it.
+  const openCount = items.filter(c => !exitingIds.has(c.id)).length;
   const [coords, setCoords] = useState<{ left: number; top: number; maxHeight: number }>({
     left: x,
     top: y,
@@ -7388,7 +7473,7 @@ function FacilityCommentsPopover({
             {facility.name}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {comments.length} comment{comments.length === 1 ? '' : 's'}
+            {openCount} open comment{openCount === 1 ? '' : 's'}
           </p>
         </div>
         <button
@@ -7401,30 +7486,65 @@ function FacilityCommentsPopover({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2.5">
-        {comments.length === 0 ? (
+      {/* No space-y here: each row carries its own bottom margin INSIDE the
+          collapsing wrapper, so the gap disappears along with the row.
+          A flex/space-y gap would survive the collapse and leave a visible
+          hole where the completed comment used to be. */}
+      <div className="flex-1 overflow-y-auto px-3 py-2">
+        {openCount === 0 ? (
           <p className="text-xs italic text-gray-500 dark:text-gray-400 py-3 text-center">
-            No comments yet.
+            {comments.length === 0 ? 'No open comments.' : 'All caught up — every comment is complete.'}
           </p>
         ) : (
-          comments.map((c) => (
-            <div
-              key={c.id}
-              className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2"
-            >
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">
-                  {c.author_name || 'Unknown'}
-                </span>
-                <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                  {formatTime(c.created_at)}
-                </span>
+          items.map((c) => {
+            const isExiting = exitingIds.has(c.id);
+            const isResolving = resolvingIds.has(c.id);
+            return (
+              // grid-rows 1fr -> 0fr collapses content of ANY height smoothly
+              // without measuring it first, which a max-height guess can't do
+              // for a comment body that might be one line or ten.
+              <div
+                key={c.id}
+                className={`grid transition-all ease-out ${
+                  isExiting ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'
+                }`}
+                style={{ transitionDuration: `${COMMENT_EXIT_MS}ms` }}
+                aria-hidden={isExiting}
+              >
+                <div className="overflow-hidden">
+                  <div className="mb-2.5 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">
+                        {c.author_name || 'Unknown'}
+                      </span>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                        {formatTime(c.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words">
+                      {c.body}
+                    </p>
+                    <div className="mt-1.5 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => markComplete(c)}
+                        disabled={isResolving || isExiting}
+                        title="Mark this comment complete"
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-emerald-700 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isResolving ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Check className="w-3 h-3" />
+                        )}
+                        {isResolving ? 'Saving…' : 'Mark complete'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words">
-                {c.body}
-              </p>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

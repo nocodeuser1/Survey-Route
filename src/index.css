@@ -9,6 +9,18 @@
     touch-action: manipulation;
     overflow-x: hidden;
     max-width: 100vw;
+    /* Tell the browser which palette to paint UA-rendered chrome with.
+       Without this, dark mode left every native control on its default
+       LIGHT canvas — an unchecked checkbox is a filled white square, which
+       on the near-black facilities table read as a grid of bright dots.
+       color-scheme is the platform's own switch for this, so it fixes
+       checkboxes, radios, scrollbars and date/time pickers in one go
+       instead of each one needing an appearance-none reskin. */
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
