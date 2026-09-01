@@ -5617,15 +5617,23 @@ function App() {
           SPCCs are due this year"). Backed by the `ai-assistant` Edge
           Function which loads a snapshot + calls Claude with an
           SPCC-aware system prompt. It stays mounted while hidden so an
-          in-progress conversation is not lost. */}
-      <AIAssistantBubble
-        hidden={isFullScreenMap || (currentView === 'route-planning' && isMobileViewport)}
-        facilities={facilities}
-        onOpenFacility={setAiOpenedFacility}
-        // When the AI-opened facility modal is in front, Esc should close
-        // the modal (which has its own handler), not the bubble behind it.
-        escapeDisabled={!!aiOpenedFacility}
-      />
+          in-progress conversation is not lost.
+
+          AGENCY-OWNER ONLY: client accounts and invited users don't get the
+          assistant at all — for them it isn't merely hidden, it's never
+          mounted (there's no conversation to preserve). The `ai-assistant`
+          Edge Function enforces the same rule server-side, so this gate isn't
+          the only thing stopping a non-owner from calling it. */}
+      {user?.isAgencyOwner && (
+        <AIAssistantBubble
+          hidden={isFullScreenMap || (currentView === 'route-planning' && isMobileViewport)}
+          facilities={facilities}
+          onOpenFacility={setAiOpenedFacility}
+          // When the AI-opened facility modal is in front, Esc should close
+          // the modal (which has its own handler), not the bubble behind it.
+          escapeDisabled={!!aiOpenedFacility}
+        />
+      )}
 
       {/* Top-level FacilityDetailModal triggered by the AI bubble's linkified
           facility mentions. Lives at App level so the modal works from any

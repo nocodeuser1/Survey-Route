@@ -216,7 +216,10 @@ ${JSON.stringify(snapshot.facilities)}`;
  * `user_has_account_access` SQL helper that powers RLS, so this matches
  * the agency-owner + member pattern already enforced everywhere else.
  */
-async function verifyAccountAccess(authUserId: string, accountId: string): Promise<boolean> {
+async function verifyAccountAccess(
+  authUserId: string,
+  accountId: string,
+): Promise<'ok' | 'not_owner' | 'no_access'> {
   // Hand-rolled join. We can't use the user_has_account_access RPC here
   // because that helper reads auth.uid() from the JWT context — and we're
   // calling it with the SERVICE ROLE client, where auth.uid() is null.
@@ -230,21 +233,22 @@ async function verifyAccountAccess(authUserId: string, accountId: string): Promi
     .select('id, is_agency_owner, email, account_users!account_users_user_id_fkey(account_id)')
     .eq('auth_user_id', authUserId)
     .maybeSingle();
-  if (!profile) return false;
-  if (profile.is_agency_owner) {
-    // Agency owner: verify they own the agency that owns this account.
-    const { data: acct } = await supabase
-      .from('accounts')
-      .select('agency_id, agencies!inner(owner_email)')
-      .eq('id', accountId)
-      .maybeSingle();
-    if (!acct) return false;
-    // @ts-expect-error nested join shape
-    return profile.email === acct.agencies?.owner_email;
-  }
-  // Regular user: must have an account_users membership row for this account.
-  const memberships = (profile.account_users ?? []) as Array<{ account_id: string }>;
-  return memberships.some((m) => m.account_id === accountId);
+  if (!profile) return 'no_access';
+  // AGENCY-OWNER ONLY. The assistant is not offered to client accounts or
+  // invited users, so membership alone is NOT enough here — a regular member
+  // with a valid account_users row is still refused. The UI hides the bubble
+  // for non-owners; this is the enforcement that actually matters, since the
+  // endpoint is reachable by any authenticated user.
+  if (!profile.is_agency_owner) return 'not_owner';
+  // Agency owner: verify they own the agency that owns this account.
+  const { data: acct } = await supabase
+    .from('accounts')
+    .select('agency_id, agencies!inner(owner_email)')
+    .eq('id', accountId)
+    .maybeSingle();
+  if (!acct) return 'no_access';
+  // @ts-expect-error nested join shape
+  return profile.email === acct.agencies?.owner_email ? 'ok' : 'no_access';
 }
 
 /**
@@ -288,8 +292,14 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'messages required' }, 400);
     }
 
-    const hasAccess = await verifyAccountAccess(user.id, body.accountId);
-    if (!hasAccess) {
+    const access = await verifyAccountAccess(user.id, body.accountId);
+    if (access === 'not_owner') {
+      // Feature is agency-owner only — don't leak account details here.
+      return jsonResponse({
+        error: 'The AI assistant is not available for this account.',
+      }, 403);
+    }
+    if (access !== 'ok') {
       // Diagnostic enrichment: surface the signed-in email + the account
       // the request asked for. Lets the user (or me debugging on their
       // behalf) see at a glance whether the user is signed in as the
