@@ -6,7 +6,6 @@ import {
   Eye,
   EyeOff,
   LogIn,
-  Route,
   Shield,
   UserPlus,
 } from 'lucide-react';
@@ -229,161 +228,161 @@ export default function AcceptInvitePage() {
     navigate('/app', { replace: true });
   }
 
+  const roleLabel = invitation?.role === 'account_admin' ? 'Account administrator' : 'Team member';
+  const workspaceName = invitation ? possessive(invitation.account_name) : '';
+
   if (pageState === 'loading' || pageState === 'joining' || pageState === 'complete') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 text-white flex items-center justify-center p-4">
-        <div className="bg-white text-gray-900 rounded-2xl shadow-xl border border-gray-200 p-10 text-center max-w-md w-full">
+      <InviteShell>
+        <div className="px-6 sm:px-9 py-12 text-center">
           {pageState === 'complete' ? (
-            <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" />
+            <CheckCircle className="w-11 h-11 text-emerald-600 mx-auto mb-5" />
           ) : (
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-600 mx-auto mb-4" />
+            <div className="animate-spin rounded-full h-11 w-11 border-[3px] border-slate-200 border-t-blue-600 mx-auto mb-5" />
           )}
-          <h1 className="text-2xl font-bold mb-2">
-            {pageState === 'loading' ? 'Checking Your Invitation' : 'Joining Your Account'}
+          <h1 className="text-xl font-bold text-slate-900">
+            {pageState === 'loading' ? 'Checking your invitation' : 'Setting up your workspace'}
           </h1>
-          <p className="text-gray-600">This should only take a moment.</p>
+          <p className="mt-2 text-sm text-slate-500">This should only take a moment.</p>
         </div>
-      </div>
+      </InviteShell>
     );
   }
 
   if (pageState === 'check-email') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 text-white flex items-center justify-center p-4">
-        <div className="bg-white text-gray-900 rounded-2xl shadow-xl border border-gray-200 p-8 text-center max-w-md w-full">
-          <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold mb-3">Check Your Email</h1>
-          <p className="text-gray-600">
-            Confirm your email address, then reopen this invitation link to finish joining {invitation?.account_name}.
+      <InviteShell>
+        <div className="px-6 sm:px-9 py-11 text-center">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-5">
+            <CheckCircle className="w-6 h-6 text-emerald-600" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">Confirm your email</h1>
+          <p className="mt-2.5 text-sm leading-relaxed text-slate-500">
+            We sent a confirmation link to <span className="font-semibold text-slate-700">{invitation?.email}</span>.
+            Confirm it, then reopen this invitation to finish joining{' '}
+            {invitation ? possessive(invitation.account_name) : 'the'} workspace.
           </p>
         </div>
-      </div>
+      </InviteShell>
     );
   }
 
   if (!invitation || (error && (invitation.status !== 'pending' || invitation.expired))) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 text-white flex items-center justify-center p-4">
-        <div className="bg-white text-gray-900 rounded-2xl shadow-xl border border-gray-200 p-8 text-center max-w-md w-full">
-          <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold mb-3">Invitation Unavailable</h1>
-          <p className="text-gray-600 mb-6">{error}</p>
+      <InviteShell>
+        <div className="px-6 sm:px-9 py-11 text-center">
+          <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-5">
+            <AlertCircle className="w-6 h-6 text-red-600" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">This invitation isn&rsquo;t available</h1>
+          <p className="mt-2.5 text-sm leading-relaxed text-slate-500">{error}</p>
           {invitation?.already_member && signedInWithInvitedEmail && (
             <button
               type="button"
               onClick={continueToAccount}
-              className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+              className="mt-6 w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
             >
-              Continue to Account
+              Go to workspace
             </button>
           )}
         </div>
-      </div>
+      </InviteShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 text-white flex items-center justify-center p-4 sm:p-6">
-      <div className="bg-white text-gray-900 rounded-2xl shadow-xl border border-gray-200 max-w-lg w-full overflow-hidden">
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-7 sm:p-8 text-center">
-          <div className="w-14 h-14 bg-blue-800 text-white rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Route className="w-8 h-8 text-white" />
+    <InviteShell>
+      <div className="px-6 sm:px-9 pt-7 pb-8">
+        <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-blue-600">
+          Account invitation
+        </p>
+        <h1 className="mt-2.5 text-[25px] sm:text-[28px] leading-[1.2] font-bold text-slate-900">
+          Join {workspaceName} Workspace
+          <span className="block mt-1 text-lg sm:text-xl font-semibold text-slate-400">
+            in SurveyRoute.com
+          </span>
+        </h1>
+
+        {/* The grant, shown as a record — mirrors the invitation email */}
+        <dl className="mt-6 rounded-xl border border-slate-200 bg-slate-50/70 divide-y divide-slate-200/70">
+          <InviteFact label="Workspace" value={invitation.account_name} />
+          <InviteFact label="Your role" value={roleLabel} />
+          <InviteFact label="Invited email" value={invitation.email} />
+        </dl>
+
+        {error && (
+          <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-800">{error}</p>
           </div>
-          <p className="text-blue-100 text-sm font-medium mb-2">Survey Route invitation</p>
-          <h1 className="text-3xl font-bold">Join {invitation.account_name}</h1>
-        </div>
+        )}
 
-        <div className="p-6 sm:p-8">
-          <div className="border border-gray-200 rounded-xl p-4 mb-6">
-            <div className="flex gap-3">
-              <div className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center flex-shrink-0">
-                <UserPlus className="w-5 h-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-gray-900">{invitation.email}</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  Access: {invitation.role === 'account_admin' ? 'Account administrator' : 'Team member'}
-                </p>
-                <p className="text-xs text-gray-500 mt-2">
-                  This invitation grants access only to {invitation.account_name}.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {error && (
-            <div className="border border-red-300 rounded-xl p-4 mb-5 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
-
+        <div className="mt-6">
           {signedInWithDifferentEmail ? (
             <div className="space-y-4">
-              <div className="border border-amber-300 rounded-xl p-4">
-                <p className="font-semibold text-gray-900 mb-1">Use the invited email</p>
-                <p className="text-sm text-gray-600">
-                  You are signed in as {supabaseUser?.email}. This invitation belongs to {invitation.email}.
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="font-semibold text-slate-900 text-sm mb-1">Switch accounts to continue</p>
+                <p className="text-sm text-slate-600">
+                  You&rsquo;re signed in as {supabaseUser?.email}, but this invitation was sent to{' '}
+                  {invitation.email}.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleUseInvitedEmail}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors"
               >
-                Sign Out and Continue
+                Sign out and continue
               </button>
             </div>
           ) : signedInWithInvitedEmail ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {invitation.already_member ? (
                 <button
                   type="button"
                   onClick={continueToAccount}
-                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                  className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors"
                 >
-                  Continue to Account
+                  Go to workspace
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={finishAcceptance}
-                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                  className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
                 >
                   <UserPlus className="w-5 h-5" />
-                  Accept Invitation
+                  Accept invitation
                 </button>
               )}
-              <p className="text-xs text-gray-500 text-center">
-                Signed in as {supabaseUser?.email}
-              </p>
+              <p className="text-xs text-slate-400 text-center">Signed in as {supabaseUser?.email}</p>
             </div>
           ) : invitation.recipient_state === 'existing_user' ? (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600 text-center">
-                You already have a Survey Route sign-in. Log in to add this account to your existing profile.
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500 text-center leading-relaxed">
+                You already have a Survey Route sign-in. Log in and this workspace will be added to your profile.
               </p>
               <button
                 type="button"
                 onClick={() => navigate(loginUrl)}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
               >
                 <LogIn className="w-5 h-5" />
-                Sign In to Accept
+                Sign in to accept
               </button>
               <button
                 type="button"
                 onClick={() => navigate(recoveryUrl)}
-                className="w-full border border-gray-300 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                className="w-full border border-slate-300 text-slate-700 py-3.5 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
               >
-                Forgot Password
+                Forgot password
               </button>
             </div>
           ) : (
-            <form onSubmit={handleCreateAccount} className="space-y-5">
+            <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
-                <label htmlFor="invite-full-name" className="block text-sm font-semibold text-gray-800 mb-2">
-                  Full Name
+                <label htmlFor="invite-full-name" className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  Full name
                 </label>
                 <input
                   id="invite-full-name"
@@ -398,8 +397,8 @@ export default function AcceptInvitePage() {
               </div>
 
               <div>
-                <label htmlFor="invite-password" className="block text-sm font-semibold text-gray-800 mb-2">
-                  Create Password
+                <label htmlFor="invite-password" className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  Create password
                 </label>
                 <div className="relative">
                   <input
@@ -416,7 +415,7 @@ export default function AcceptInvitePage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword((visible) => !visible)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -425,8 +424,8 @@ export default function AcceptInvitePage() {
               </div>
 
               <div>
-                <label htmlFor="invite-confirm-password" className="block text-sm font-semibold text-gray-800 mb-2">
-                  Confirm Password
+                <label htmlFor="invite-confirm-password" className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  Confirm password
                 </label>
                 <input
                   id="invite-confirm-password"
@@ -443,20 +442,69 @@ export default function AcceptInvitePage() {
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors"
               >
-                Create Sign-In and Join
+                Create sign-in and join
               </button>
             </form>
           )}
-
-          <div className="border-t border-gray-200 mt-6 pt-5 flex items-start gap-2">
-            <Shield className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-gray-500">
-              The invitation can only be accepted while signed in with {invitation.email}.
-            </p>
-          </div>
         </div>
+
+        <div className="border-t border-slate-100 mt-7 pt-5 flex items-start gap-2.5">
+          <Shield className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs leading-relaxed text-slate-400">
+            This invitation can only be accepted while signed in as {invitation.email}, and grants
+            access to {invitation.account_name} only.
+          </p>
+        </div>
+      </div>
+    </InviteShell>
+  );
+}
+
+/** "Camino" → "Camino's"; "Jones" → "Jones'" */
+function possessive(name: string) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return 'this';
+  return /s$/i.test(trimmed) ? `${trimmed}'` : `${trimmed}'s`;
+}
+
+/** One labelled row in the invitation record. */
+function InviteFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="px-4 py-3">
+      <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">{label}</dt>
+      <dd className="mt-0.5 text-[15px] font-semibold text-slate-900 break-words">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * Shared frame for every state of the invite flow: brand rule, the real
+ * Survey Route lockup, and the BEAR Data line — so the page a recipient lands
+ * on looks like the email that brought them here.
+ */
+function InviteShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#eef2f7] via-white to-[#e9eef6] flex items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-lg">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_12px_44px_-14px_rgba(15,23,42,0.22)] overflow-hidden">
+          <div className="h-1 bg-blue-600" />
+          <div className="px-6 sm:px-9 pt-8 pb-6 text-center border-b border-slate-100">
+            <img
+              src="/survey-route-logo.png"
+              alt="Survey Route — by BEAR Data"
+              width={165}
+              height={45}
+              className="h-[42px] w-auto mx-auto"
+            />
+          </div>
+          {children}
+        </div>
+        <p className="mt-5 text-center text-[11px] text-slate-400">
+          Survey Route <span className="text-slate-300">·</span>{' '}
+          <span className="tracking-wide">by BEAR Data</span>
+        </p>
       </div>
     </div>
   );

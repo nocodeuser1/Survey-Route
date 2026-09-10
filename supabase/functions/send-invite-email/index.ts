@@ -179,57 +179,186 @@ Deno.serve(async (req: Request) => {
     const safeAcceptUrl = escapeHtml(acceptUrl.toString());
     const currentYear = new Date().getUTCFullYear();
 
+    // "Camino" -> "Camino's"; "Jones" -> "Jones'"
+    const workspaceName = /s$/i.test(accountName) ? `${accountName}'` : `${accountName}'s`;
+    const safeWorkspaceName = escapeHtml(workspaceName);
+
+    // Brand lockup lives in public/ and is served from the site root, so it
+    // resolves for any APP_URL (prod, staging, preview).
+    const logoUrl = escapeHtml(new URL("/survey-route-logo.png", baseUrl).toString());
+    // Show the real expiry date rather than a hardcoded "7 days" — the row's
+    // expires_at is the source of truth and reads as a genuine record.
+    const expiresLabel = escapeHtml(
+      new Date(invitation.expires_at).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "America/Chicago",
+      }),
+    );
+    const preheader = escapeHtml(
+      `${inviterName} invited you to ${accountName} on Survey Route as a ${role.toLowerCase()}. Link expires ${new Date(invitation.expires_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}.`,
+    );
+
+    const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+
     const emailHtml = `
 <!doctype html>
-<html lang="en">
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
     <title>Join ${safeAccountName} on Survey Route</title>
+    <!--[if mso]>
+    <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+    <![endif]-->
   </head>
-  <body style="margin:0;background:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:32px 16px;">
-      <tr><td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;">
-          <tr><td style="background:#2563eb;color:#ffffff;padding:30px;text-align:center;">
-            <div style="font-size:26px;font-weight:700;">Survey Route</div>
-            <div style="font-size:14px;margin-top:6px;color:#dbeafe;">Account invitation</div>
+  <body style="margin:0;padding:0;background:#eef2f7;font-family:${font};color:#0f172a;-webkit-font-smoothing:antialiased;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${preheader}</div>
+    <div style="display:none;max-height:0;overflow:hidden;">&#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847;</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eef2f7;">
+      <tr><td align="center" style="padding:40px 16px;">
+
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #dbe3ee;">
+
+          <!-- brand rule -->
+          <tr><td style="height:4px;line-height:4px;font-size:0;background:#2563eb;">&nbsp;</td></tr>
+
+          <!-- logo lockup on white: the mark reads as the real brand, and the
+               alt text still says the name if images are blocked -->
+          <tr><td align="center" style="padding:32px 32px 26px;">
+            <img src="${logoUrl}" width="165" height="45" alt="Survey Route — by BEAR DATA"
+                 style="display:block;border:0;outline:none;text-decoration:none;width:165px;height:auto;max-width:165px;font-family:${font};font-size:17px;font-weight:700;color:#0f172a;">
           </td></tr>
-          <tr><td style="padding:34px;">
-            <h1 style="font-size:24px;line-height:1.25;margin:0 0 18px;">Join ${safeAccountName}</h1>
-            <p style="font-size:16px;line-height:1.6;margin:0 0 14px;color:#4b5563;">
-              <strong>${safeInviterName}</strong> invited you to Survey Route as a <strong>${safeRole}</strong>.
+
+          <tr><td style="padding:0 40px;">
+            <div style="height:1px;line-height:1px;font-size:0;background:#eef2f7;">&nbsp;</div>
+          </td></tr>
+
+          <tr><td style="padding:30px 40px 0;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#2563eb;">Account invitation</div>
+            <h1 style="margin:12px 0 0;font-size:27px;line-height:1.22;font-weight:700;color:#0f172a;">
+              Join ${safeWorkspaceName} Workspace
+              <span style="display:block;margin-top:4px;font-size:19px;font-weight:600;color:#94a3b8;">in SurveyRoute.com</span>
+            </h1>
+            <p style="margin:16px 0 0;font-size:16px;line-height:1.62;color:#475569;">
+              <strong style="color:#0f172a;font-weight:600;">${safeInviterName}</strong> has invited you to collaborate on ${safeAccountName}.
             </p>
-            <p style="font-size:14px;line-height:1.6;margin:0 0 26px;color:#4b5563;">
-              This invitation grants access only to ${safeAccountName}.
+          </td></tr>
+
+          <!-- the grant, as a record -->
+          <tr><td style="padding:24px 40px 0;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;">
+              <tr>
+                <td style="padding:16px 20px 10px;">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;">Account</div>
+                  <div style="margin-top:3px;font-size:15px;font-weight:600;color:#0f172a;">${safeAccountName}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 20px 10px;">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;">Your role</div>
+                  <div style="margin-top:3px;font-size:15px;font-weight:600;color:#0f172a;">${safeRole}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 20px 16px;">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;">Invited by</div>
+                  <div style="margin-top:3px;font-size:15px;font-weight:600;color:#0f172a;">${safeInviterName}</div>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:#64748b;">
+              This invitation grants access to ${safeAccountName} only.
             </p>
-            <div style="text-align:center;margin:0 0 26px;">
-              <a href="${safeAcceptUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:9px;">Accept Invitation</a>
+          </td></tr>
+
+          <!-- CTA -->
+          <tr><td align="center" style="padding:28px 40px 0;">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${safeAcceptUrl}" style="height:50px;v-text-anchor:middle;width:260px;" arcsize="20%" stroke="f" fillcolor="#2563eb">
+              <w:anchorlock/>
+              <center style="color:#ffffff;font-family:${font};font-size:16px;font-weight:700;">Accept invitation</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-- -->
+            <a href="${safeAcceptUrl}"
+               style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;line-height:1;padding:17px 40px;border-radius:10px;font-family:${font};">
+              Accept invitation
+            </a>
+            <!--<![endif]-->
+            <p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#94a3b8;">
+              Expires ${expiresLabel}
+            </p>
+          </td></tr>
+
+          <!-- fallback link -->
+          <tr><td style="padding:26px 40px 0;">
+            <div style="font-size:12px;font-weight:600;color:#64748b;">Button not working? Paste this into your browser:</div>
+            <div style="margin-top:8px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;line-height:1.5;color:#2563eb;word-break:break-all;">
+              ${safeAcceptUrl}
             </div>
-            <p style="font-size:12px;line-height:1.6;margin:0;color:#6b7280;word-break:break-all;">
-              If the button does not work, open this link:<br>${safeAcceptUrl}
-            </p>
-            <p style="font-size:12px;line-height:1.6;margin:18px 0 0;color:#6b7280;">
-              This link expires in 7 days. If you did not expect this invitation, you can ignore this email.
+          </td></tr>
+
+          <tr><td style="padding:24px 40px 0;">
+            <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">
+              If you weren&rsquo;t expecting this invitation, you can safely ignore this email &mdash; no account will be created.
             </p>
           </td></tr>
-          <tr><td style="padding:20px 34px;border-top:1px solid #e5e7eb;text-align:center;color:#9ca3af;font-size:12px;">
-            &copy; ${currentYear} Survey Route
-            ${unsubscribeUrl ? `<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280;">Unsubscribe from email</a>` : ""}
+
+          <!-- footer -->
+          <tr><td style="padding:28px 40px 32px;">
+            <div style="height:1px;line-height:1px;font-size:0;background:#eef2f7;">&nbsp;</div>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr><td align="center" style="padding-top:20px;">
+                <div style="font-size:13px;font-weight:700;color:#334155;letter-spacing:-.01em;">Survey Route</div>
+                <div style="margin-top:3px;font-size:11px;color:#94a3b8;letter-spacing:.05em;">by BEAR Data</div>
+                <div style="margin-top:12px;font-size:11px;color:#b6c2d2;">
+                  &copy; ${currentYear} Survey Route${unsubscribeUrl ? ` &nbsp;&middot;&nbsp; <a href="${escapeHtml(unsubscribeUrl)}" style="color:#94a3b8;text-decoration:underline;">Unsubscribe</a>` : ""}
+                </div>
+              </td></tr>
+            </table>
           </td></tr>
+
         </table>
+
       </td></tr>
     </table>
   </body>
 </html>`;
 
-    const emailText = `${inviterName} invited you to join ${accountName} on Survey Route as a ${role}.
+    const plainExpires = new Date(invitation.expires_at).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "America/Chicago",
+    });
 
-This invitation grants access only to ${accountName}.
+    const emailText = `SURVEY ROUTE — by BEAR Data
+Account invitation
 
-Accept the invitation: ${acceptUrl.toString()}
+Join ${workspaceName} Workspace in SurveyRoute.com
 
-This link expires in 7 days. If you did not expect this invitation, you can ignore this email.`;
+${inviterName} has invited you to collaborate on ${accountName} in Survey Route.
+
+  Workspace:   ${accountName}
+  Your role:   ${role}
+  Invited by:  ${inviterName}
+
+This invitation grants access to ${accountName} only.
+
+Accept the invitation:
+${acceptUrl.toString()}
+
+Expires ${plainExpires}.
+
+If you weren't expecting this invitation, you can safely ignore this email — no account will be created.
+
+© ${currentYear} Survey Route${unsubscribeUrl ? `\nUnsubscribe: ${unsubscribeUrl}` : ""}`;
 
     const emailHeaders: Record<string, string> = {
       "Auto-Submitted": "auto-generated",
@@ -249,7 +378,7 @@ This link expires in 7 days. If you did not expect this invitation, you can igno
       body: JSON.stringify({
         from: "Survey Route <invites@mail.survey-route.com>",
         to: [invitation.email],
-        subject: `You're invited to join ${accountName} on Survey Route`,
+        subject: `Join ${workspaceName} Workspace in SurveyRoute.com`,
         html: emailHtml,
         text: emailText,
         headers: emailHeaders,
