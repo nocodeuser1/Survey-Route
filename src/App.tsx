@@ -20,6 +20,7 @@ import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
 import ProfileModal from './components/ProfileModal';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
+import AccountSwitcher from './components/AccountSwitcher';
 import ManagementSignatureSettings from './components/ManagementSignatureSettings';
 import FacilityDetailModal from './components/FacilityDetailModal';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
@@ -4164,7 +4165,14 @@ function App() {
                     <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400">by BEAR DATA</span>
                   </div>
                   <div className="flex min-w-0 items-center gap-2">
-                    <p className="max-w-[11rem] truncate text-[11px] leading-tight text-gray-600 dark:text-gray-300 sm:max-w-none sm:text-sm">{getAccountDisplayName(currentAccount)}</p>
+                    <AccountSwitcher
+                      accounts={accounts.map((account) => ({ id: account.id, name: getAccountDisplayName(account) }))}
+                      currentAccountId={currentAccount.id}
+                      onSelect={async (accountId) => {
+                        setShowProfileDropdown(false);
+                        if (await selectAccount(accountId)) setCurrentView('facilities');
+                      }}
+                    />
                     {teamCount > 1 && effectiveUserTeam && (
                       <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 whitespace-nowrap">
                         Team {effectiveUserTeam}
