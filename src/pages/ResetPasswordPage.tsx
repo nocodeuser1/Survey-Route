@@ -81,7 +81,7 @@ export default function ResetPasswordPage() {
           <div className="text-center">
             <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" />
             <h1 className="text-2xl font-bold mb-2">Password Updated</h1>
-            <p className="text-gray-600">Returning you to Survey Route...</p>
+            <p className="text-gray-600">Returning you to Survey-Route...</p>
           </div>
         ) : checkingSession ? (
           <div className="text-center">

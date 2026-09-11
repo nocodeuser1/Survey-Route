@@ -236,7 +236,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
       const url = URL.createObjectURL(zipBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `surveyroute-backup-${new Date().toISOString().split('T')[0]}.zip`;
+      link.download = `Survey-Route-backup-${new Date().toISOString().split('T')[0]}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

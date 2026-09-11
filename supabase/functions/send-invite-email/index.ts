@@ -170,7 +170,7 @@ Deno.serve(async (req: Request) => {
       ? new URL(`/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`, baseUrl).toString()
       : null;
 
-    const accountName = headerSafe(account.company_name || account.account_name || "Survey Route");
+    const accountName = headerSafe(account.company_name || account.account_name || "Survey-Route");
     const inviterName = headerSafe(inviter?.full_name || "Your account administrator");
     const role = invitation.role === "account_admin" ? "Account administrator" : "Team member";
     const safeAccountName = escapeHtml(accountName);
@@ -185,7 +185,7 @@ Deno.serve(async (req: Request) => {
 
     // Brand lockup lives in public/ and is served from the site root, so it
     // resolves for any APP_URL (prod, staging, preview).
-    const logoUrl = escapeHtml(new URL("/survey-route-logo.png", baseUrl).toString());
+    const logoUrl = escapeHtml(new URL("/survey-route-logo-v2.png", baseUrl).toString());
     // Show the real expiry date rather than a hardcoded "7 days" — the row's
     // expires_at is the source of truth and reads as a genuine record.
     const expiresLabel = escapeHtml(
@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
       }),
     );
     const preheader = escapeHtml(
-      `${inviterName} invited you to ${accountName} on Survey Route as a ${role.toLowerCase()}. Link expires ${new Date(invitation.expires_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}.`,
+      `${inviterName} invited you to ${accountName} on Survey-Route as a ${role.toLowerCase()}. Link expires ${new Date(invitation.expires_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}.`,
     );
 
     const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
@@ -211,7 +211,7 @@ Deno.serve(async (req: Request) => {
     <meta name="x-apple-disable-message-reformatting">
     <meta name="color-scheme" content="light">
     <meta name="supported-color-schemes" content="light">
-    <title>Join ${safeAccountName} on Survey Route</title>
+    <title>Join ${safeAccountName} on Survey-Route</title>
     <!--[if mso]>
     <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
     <![endif]-->
@@ -231,7 +231,7 @@ Deno.serve(async (req: Request) => {
           <!-- logo lockup on white: the mark reads as the real brand, and the
                alt text still says the name if images are blocked -->
           <tr><td align="center" style="padding:32px 32px 26px;">
-            <img src="${logoUrl}" width="165" height="45" alt="Survey Route — by BEAR DATA"
+            <img src="${logoUrl}" width="165" height="55" alt="Survey-Route by BEAR DATA"
                  style="display:block;border:0;outline:none;text-decoration:none;width:165px;height:auto;max-width:165px;font-family:${font};font-size:17px;font-weight:700;color:#0f172a;">
           </td></tr>
 
@@ -243,7 +243,7 @@ Deno.serve(async (req: Request) => {
             <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#2563eb;">Account invitation</div>
             <h1 style="margin:12px 0 0;font-size:27px;line-height:1.22;font-weight:700;color:#0f172a;">
               Join ${safeWorkspaceName} Workspace
-              <span style="display:block;margin-top:4px;font-size:19px;font-weight:600;color:#94a3b8;">in survey-route.com</span>
+              <span style="display:block;margin-top:4px;font-size:19px;font-weight:600;color:#94a3b8;">in Survey-Route.com</span>
             </h1>
             <p style="margin:16px 0 0;font-size:16px;line-height:1.62;color:#475569;">
               <strong style="color:#0f172a;font-weight:600;">${safeInviterName}</strong> has invited you to collaborate on ${safeAccountName}.
@@ -315,10 +315,10 @@ Deno.serve(async (req: Request) => {
             <div style="height:1px;line-height:1px;font-size:0;background:#eef2f7;">&nbsp;</div>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
               <tr><td align="center" style="padding-top:20px;">
-                <div style="font-size:13px;font-weight:700;color:#334155;letter-spacing:-.01em;">Survey Route</div>
+                <div style="font-size:13px;font-weight:700;color:#334155;letter-spacing:-.01em;">Survey-Route</div>
                 <div style="margin-top:3px;font-size:11px;color:#94a3b8;letter-spacing:.05em;">by BEAR Data</div>
                 <div style="margin-top:12px;font-size:11px;color:#b6c2d2;">
-                  &copy; ${currentYear} Survey Route${unsubscribeUrl ? ` &nbsp;&middot;&nbsp; <a href="${escapeHtml(unsubscribeUrl)}" style="color:#94a3b8;text-decoration:underline;">Unsubscribe</a>` : ""}
+                  &copy; ${currentYear} Survey-Route${unsubscribeUrl ? ` &nbsp;&middot;&nbsp; <a href="${escapeHtml(unsubscribeUrl)}" style="color:#94a3b8;text-decoration:underline;">Unsubscribe</a>` : ""}
                 </div>
               </td></tr>
             </table>
@@ -338,12 +338,12 @@ Deno.serve(async (req: Request) => {
       timeZone: "America/Chicago",
     });
 
-    const emailText = `SURVEY ROUTE — by BEAR Data
+    const emailText = `Survey-Route by BEAR DATA
 Account invitation
 
-Join ${workspaceName} Workspace in survey-route.com
+Join ${workspaceName} Workspace in Survey-Route.com
 
-${inviterName} has invited you to collaborate on ${accountName} in Survey Route.
+${inviterName} has invited you to collaborate on ${accountName} in Survey-Route.
 
   Workspace:   ${accountName}
   Your role:   ${role}
@@ -358,7 +358,7 @@ Expires ${plainExpires}.
 
 If you weren't expecting this invitation, you can safely ignore this email — no account will be created.
 
-© ${currentYear} Survey Route${unsubscribeUrl ? `\nUnsubscribe: ${unsubscribeUrl}` : ""}`;
+© ${currentYear} Survey-Route${unsubscribeUrl ? `\nUnsubscribe: ${unsubscribeUrl}` : ""}`;
 
     const emailHeaders: Record<string, string> = {
       "Auto-Submitted": "auto-generated",
@@ -376,9 +376,9 @@ If you weren't expecting this invitation, you can safely ignore this email — n
         "Authorization": `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: "Survey Route <invites@mail.survey-route.com>",
+        from: "Survey-Route <invites@mail.survey-route.com>",
         to: [invitation.email],
-        subject: `Join ${workspaceName} Workspace in survey-route.com`,
+        subject: `Join ${workspaceName} Workspace in Survey-Route.com`,
         html: emailHtml,
         text: emailText,
         headers: emailHeaders,

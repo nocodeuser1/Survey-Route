@@ -1,10 +1,10 @@
-# Survey Route authentication emails
+# Survey-Route authentication emails
 
 `recovery.html` is the production Supabase password-reset email, styled to match
 `supabase/functions/send-invite-email/index.ts`.
 
 - Project: `rbjvcwgmqnubxixneitb` (survey-route)
-- Subject: `Reset your Survey Route password`
+- Subject: `Reset your Survey-Route password`
 - Dashboard: https://supabase.com/dashboard/project/rbjvcwgmqnubxixneitb/auth/templates
 - Applied and read back through the Supabase Management API on 2026-09-11.
 
@@ -21,3 +21,17 @@ Never put management credentials in this repository.
 Custom SMTP is not configured as of the application date. The subject and body
 are branded, but changing the default Supabase sender requires a verified custom
 SMTP provider. Do not change delivery settings without valid provider credentials.
+
+## Brand spelling
+
+Visible product name: **Survey-Route**. Visible domain: **Survey-Route.com**.
+URL hostnames and sender addresses remain lowercase. Internal storage keys and
+app identifiers are unchanged so existing sessions and offline data remain valid.
+
+The page and emails use `/survey-route-logo-v2.png` to avoid cached old artwork.
+The older public logo filenames also contain the corrected artwork.
+
+Logo edited with the built-in image generation tool from the previous logo.
+Prompt: Change only the main text from SurveyRoute to exactly Survey-Route,
+preserving the blue route mark, bold typography, white background, and
+“by BEAR DATA” subtitle.

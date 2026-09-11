@@ -279,7 +279,7 @@ export default function SignatureSetupPage() {
                 <div className="flex items-center gap-2">
                   <MapPin className="w-10 h-10 text-green-600" />
                   <div className="text-3xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
-                    Survey Route
+                    Survey-Route
                   </div>
                 </div>
               </div>

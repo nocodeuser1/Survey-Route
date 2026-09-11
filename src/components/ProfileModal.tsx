@@ -59,9 +59,9 @@ export default function ProfileModal({ isOpen, onClose, userEmail, userFullName 
   };
 
   const handleRequestEmailChange = () => {
-    const subject = encodeURIComponent('Email Change Request - Survey Route');
+    const subject = encodeURIComponent('Email Change Request - Survey-Route');
     const body = encodeURIComponent(
-      `Hi Survey Route Support,\n\nI would like to request an email change for my account.\n\nCurrent email: ${userEmail}\nNew email: [ENTER NEW EMAIL]\n\nAccount name: ${userFullName || 'N/A'}\n\nThank you.`
+      `Hi Survey-Route Support,\n\nI would like to request an email change for my account.\n\nCurrent email: ${userEmail}\nNew email: [ENTER NEW EMAIL]\n\nAccount name: ${userFullName || 'N/A'}\n\nThank you.`
     );
     window.open(`mailto:support@beardata.co?subject=${subject}&body=${body}`, '_blank');
     setEmailChangeRequested(true);

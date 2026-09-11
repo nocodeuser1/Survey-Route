@@ -218,13 +218,13 @@ export default function MobileSignaturePage() {
               <LogIn style={{ width: 20, height: 20 }} />
               Sign In on This Device
             </button>
-            <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>Access your full Survey Route account from your phone</p>
+            <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>Access your full Survey-Route account from your phone</p>
           </div>
           <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px 24px', background: '#fafafa', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <div className="bg-blue-600 p-1 rounded-md">
               <Route style={{ width: 14, height: 14, color: '#fff' }} />
             </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Survey Route</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Survey-Route</span>
             <Sparkles style={{ width: 12, height: 12, color: '#f59e0b' }} />
           </div>
         </div>

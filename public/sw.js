@@ -215,7 +215,7 @@ async function handleNavigationRequest(request) {
     return response;
   } catch (_e) {
     return new Response(
-      '<!doctype html><meta charset="utf-8"><title>Offline</title><body style="font-family:system-ui;padding:24px"><h1>Offline</h1><p>Survey Route is offline and the cached app shell is unavailable. Reconnect to load.</p></body>',
+      '<!doctype html><meta charset="utf-8"><title>Offline</title><body style="font-family:system-ui;padding:24px"><h1>Offline</h1><p>Survey-Route is offline and the cached app shell is unavailable. Reconnect to load.</p></body>',
       { status: 503, headers: { 'Content-Type': 'text/html' } }
     );
   }

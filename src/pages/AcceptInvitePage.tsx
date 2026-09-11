@@ -299,7 +299,7 @@ export default function AcceptInvitePage() {
         <h1 className="mt-2.5 text-[25px] sm:text-[28px] leading-[1.2] font-bold text-slate-900">
           Join {workspaceName} Workspace
           <span className="block mt-1 text-lg sm:text-xl font-semibold text-slate-400">
-            in survey-route.com
+            in Survey-Route.com
           </span>
         </h1>
 
@@ -360,7 +360,7 @@ export default function AcceptInvitePage() {
           ) : invitation.recipient_state === 'existing_user' ? (
             <div className="space-y-3">
               <p className="text-sm text-slate-500 text-center leading-relaxed">
-                You already have a Survey Route sign-in. Log in and this workspace will be added to your profile.
+                You already have a Survey-Route sign-in. Log in and this workspace will be added to your profile.
               </p>
               <button
                 type="button"
@@ -481,7 +481,7 @@ function InviteFact({ label, value }: { label: string; value: string }) {
 
 /**
  * Shared frame for every state of the invite flow: brand rule, the real
- * Survey Route lockup, and the BEAR Data line — so the page a recipient lands
+ * Survey-Route lockup, and the BEAR Data line — so the page a recipient lands
  * on looks like the email that brought them here.
  */
 function InviteShell({ children }: { children: React.ReactNode }) {
@@ -492,17 +492,17 @@ function InviteShell({ children }: { children: React.ReactNode }) {
           <div className="h-1 bg-blue-600" />
           <div className="px-6 sm:px-9 pt-8 pb-6 text-center border-b border-slate-100">
             <img
-              src="/survey-route-logo.png"
-              alt="Survey Route — by BEAR Data"
+              src="/survey-route-logo-v2.png"
+              alt="Survey-Route by BEAR DATA"
               width={165}
-              height={45}
-              className="h-[42px] w-auto mx-auto"
+              height={55}
+              className="w-[165px] h-auto mx-auto"
             />
           </div>
           {children}
         </div>
         <p className="mt-5 text-center text-[11px] text-slate-400">
-          Survey Route <span className="text-slate-300">·</span>{' '}
+          Survey-Route <span className="text-slate-300">·</span>{' '}
           <span className="tracking-wide">by BEAR Data</span>
         </p>
       </div>

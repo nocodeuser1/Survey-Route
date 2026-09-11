@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.surveyroute.app',
-  appName: 'Survey Route',
+  appName: 'Survey-Route',
   webDir: 'dist',
   plugins: {
     SplashScreen: {
