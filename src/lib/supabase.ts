@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createRecoveryTracker, recoveryCallbackPath } from './passwordRecovery';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -6,6 +7,14 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
+
+let recoveryStorage: Storage | null = null;
+try { recoveryStorage = window.sessionStorage; } catch { /* Private browsers may block storage. */ }
+export const passwordRecovery = createRecoveryTracker(recoveryStorage);
+const callbackUrl = new URL(window.location.href);
+passwordRecovery.beginCallback(callbackUrl);
+const callbackPath = recoveryCallbackPath(callbackUrl);
+if (callbackPath) window.history.replaceState(window.history.state, '', callbackPath);
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -15,6 +24,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
     storageKey: 'surveyroute-auth',
   }
+});
+
+// Subscribe before async SDK initialization finishes so the page cannot miss
+// PASSWORD_RECOVERY and mistake an unrelated signed-in session for a reset.
+supabase.auth.onAuthStateChange((event, session) => {
+  passwordRecovery.handleAuthEvent(event, session);
 });
 
 export interface RouteVisitEvent {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
+import { passwordResetRedirect } from '../lib/passwordRecovery';
 
 interface User {
   id: string;
@@ -443,13 +444,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function resetPassword(email: string, returnTo?: string) {
-    const callbackUrl = new URL('/reset-password', window.location.origin);
-    if (returnTo?.startsWith('/') && !returnTo.startsWith('//')) {
-      callbackUrl.searchParams.set('redirect', returnTo);
-    }
-
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: callbackUrl.toString(),
+      redirectTo: passwordResetRedirect(returnTo),
     });
     if (error) throw error;
   }

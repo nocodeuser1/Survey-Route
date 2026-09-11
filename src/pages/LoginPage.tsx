@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Route, AlertCircle } from 'lucide-react';
+import { safeReturnPath } from '../lib/passwordRecovery';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -17,17 +18,17 @@ export default function LoginPage() {
   const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
-    if (user && !authLoading) {
+    if (user && !authLoading && !showForgotPassword) {
       const redirectUrl = searchParams.get('redirect');
       if (redirectUrl) {
-        navigate(redirectUrl, { replace: true });
+        navigate(safeReturnPath(redirectUrl, '/app'), { replace: true });
       } else if (user.isAgencyOwner) {
         navigate('/agency', { replace: true });
       } else {
         navigate('/app', { replace: true });
       }
     }
-  }, [user, authLoading, navigate, searchParams]);
+  }, [user, authLoading, navigate, searchParams, showForgotPassword]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

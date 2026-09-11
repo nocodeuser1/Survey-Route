@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AccountProvider } from './contexts/AccountContext';
@@ -18,6 +18,7 @@ import SPCCPlanDownloadPage from './pages/SPCCPlanDownloadPage';
 import MobileSignaturePage from './pages/MobileSignaturePage';
 import App from './App';
 import LoadingScreen from './components/LoadingScreen';
+import { safeReturnPath } from './lib/passwordRecovery';
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -73,12 +74,15 @@ function RootRoute() {
 
 function LoginRoute() {
   const { user, loading } = useAuth();
+  const [searchParams] = useSearchParams();
 
   if (loading) {
     return <LoadingScreen message="Signing in..." />;
   }
 
-  if (user) {
+  if (user && searchParams.get('forgot') !== '1') {
+    const requested = searchParams.get('redirect');
+    if (requested) return <Navigate to={safeReturnPath(requested, '/app')} replace />;
     if (user.isAgencyOwner) {
       return <Navigate to="/agency" replace />;
     }

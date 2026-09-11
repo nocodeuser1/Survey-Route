@@ -35,3 +35,18 @@ Logo edited with the built-in image generation tool from the previous logo.
 Prompt: Change only the main text from SurveyRoute to exactly Survey-Route,
 preserving the blue route mark, bold typography, white background, and
 “by BEAR DATA” subtitle.
+
+## Password recovery routing
+
+Production Supabase Auth Site URL is `https://survey-route.com`. Allowed redirects
+are `https://survey-route.com/**` and `https://www.survey-route.com/**`; the obsolete
+Bolt host was removed on 2026-09-11. Reset requests always use the canonical
+`https://survey-route.com/reset-password` callback, including requests from native
+apps. Invitation return paths are preserved and restricted to local routes.
+
+The SDK recovery event is captured before the page mounts. The password form
+requires a verified recovery session for the same user, retained only in the
+current tab until expiry or successful password change. Ordinary signed-in
+sessions and invalid/expired email callbacks cannot unlock the form.
+
+Regression checks: `node --test tests/passwordRecovery.test.ts`.

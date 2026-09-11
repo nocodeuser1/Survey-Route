@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, CheckCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { passwordRecovery, supabase } from '../lib/supabase';
+import { completePasswordReset, safeReturnPath } from '../lib/passwordRecovery';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [sessionReady, setSessionReady] = useState(false);
+  const [recoveryUserId, setRecoveryUserId] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -14,37 +15,47 @@ export default function ResetPasswordPage() {
   const [saving, setSaving] = useState(false);
   const [complete, setComplete] = useState(false);
   const [error, setError] = useState('');
+  const navigationTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const returnTo = useMemo(() => {
     const requested = searchParams.get('redirect');
-    return requested?.startsWith('/') && !requested.startsWith('//') ? requested : '/login';
+    return safeReturnPath(requested);
   }, [searchParams]);
+  const newLinkUrl = useMemo(() => {
+    const params = new URLSearchParams({ forgot: '1' });
+    if (returnTo !== '/login') params.set('redirect', returnTo);
+    return `/login?${params}`;
+  }, [returnTo]);
 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error: sessionError }) => {
       if (!mounted) return;
-      setSessionReady(Boolean(session?.user));
+      setRecoveryUserId(sessionError ? null : passwordRecovery.userIdFor(session));
+      setCheckingSession(false);
+    }).catch(() => {
+      if (!mounted) return;
+      setRecoveryUserId(null);
       setCheckingSession(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
-      if (event === 'PASSWORD_RECOVERY' || session?.user) {
-        setSessionReady(true);
-        setCheckingSession(false);
-      }
+      setRecoveryUserId(passwordRecovery.userIdFor(session));
+      setCheckingSession(false);
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      clearTimeout(navigationTimer.current);
     };
   }, []);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (saving) return;
     setError('');
 
     if (password.length < 8) {
@@ -58,16 +69,21 @@ export default function ResetPasswordPage() {
     }
 
     setSaving(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setSaving(false);
-
-    if (updateError) {
-      setError(updateError.message || 'We could not update your password.');
-      return;
+    try {
+      const updated = await completePasswordReset(supabase.auth, passwordRecovery, recoveryUserId, password);
+      if (!updated) {
+        setRecoveryUserId(null);
+        return;
+      }
+      setPassword('');
+      setConfirmPassword('');
+      setComplete(true);
+      navigationTimer.current = setTimeout(() => navigate(returnTo, { replace: true }), 1200);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'We could not update your password. Please try again.');
+    } finally {
+      setSaving(false);
     }
-
-    setComplete(true);
-    window.setTimeout(() => navigate(returnTo, { replace: true }), 1200);
   }
 
   return (
@@ -88,7 +104,7 @@ export default function ResetPasswordPage() {
             <div className="animate-spin rounded-full h-10 w-10 border-4 border-gray-200 border-t-blue-600 mx-auto mb-4" />
             <h1 className="text-xl font-bold">Checking Reset Link</h1>
           </div>
-        ) : !sessionReady ? (
+        ) : !recoveryUserId ? (
           <div className="text-center">
             <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
             <h1 className="text-2xl font-bold mb-2">Reset Link Unavailable</h1>
@@ -97,7 +113,8 @@ export default function ResetPasswordPage() {
             </p>
             <button
               type="button"
-              onClick={() => navigate('/login?forgot=1')}
+              onClick={() => navigate(newLinkUrl)}
+              title="Request a new password reset link"
               className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
             >
               Request New Link
