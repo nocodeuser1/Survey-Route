@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 
 interface InvitationPreview {
   id: string;
@@ -31,6 +32,7 @@ export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { supabaseUser, signOut, reloadUserProfile } = useAuth();
+  const { refreshAccounts } = useAccount();
 
   const token = searchParams.get('token') || '';
   const [invitation, setInvitation] = useState<InvitationPreview | null>(null);
@@ -156,6 +158,9 @@ export default function AcceptInvitePage() {
     localStorage.setItem('currentView', 'facilities');
     localStorage.setItem('needsSignature', 'true');
     await reloadUserProfile();
+    // The provider stays mounted across invitation and app routes. Refresh its
+    // memberships and selected account before opening the newly joined company.
+    await refreshAccounts();
     setPageState('complete');
     navigate('/setup-signature', { replace: true });
   }
@@ -221,10 +226,11 @@ export default function AcceptInvitePage() {
     window.location.reload();
   }
 
-  function continueToAccount() {
+  async function continueToAccount() {
     if (!invitation) return;
     localStorage.setItem('currentAccountId', invitation.account_id);
     localStorage.setItem('currentView', 'facilities');
+    await refreshAccounts();
     navigate('/app', { replace: true });
   }
 
