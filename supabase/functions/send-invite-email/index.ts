@@ -243,7 +243,7 @@ Deno.serve(async (req: Request) => {
             <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#2563eb;">Account invitation</div>
             <h1 style="margin:12px 0 0;font-size:27px;line-height:1.22;font-weight:700;color:#0f172a;">
               Join ${safeWorkspaceName} Workspace
-              <span style="display:block;margin-top:4px;font-size:19px;font-weight:600;color:#94a3b8;">in SurveyRoute.com</span>
+              <span style="display:block;margin-top:4px;font-size:19px;font-weight:600;color:#94a3b8;">in survey-route.com</span>
             </h1>
             <p style="margin:16px 0 0;font-size:16px;line-height:1.62;color:#475569;">
               <strong style="color:#0f172a;font-weight:600;">${safeInviterName}</strong> has invited you to collaborate on ${safeAccountName}.
@@ -341,7 +341,7 @@ Deno.serve(async (req: Request) => {
     const emailText = `SURVEY ROUTE — by BEAR Data
 Account invitation
 
-Join ${workspaceName} Workspace in SurveyRoute.com
+Join ${workspaceName} Workspace in survey-route.com
 
 ${inviterName} has invited you to collaborate on ${accountName} in Survey Route.
 
@@ -378,7 +378,7 @@ If you weren't expecting this invitation, you can safely ignore this email — n
       body: JSON.stringify({
         from: "Survey Route <invites@mail.survey-route.com>",
         to: [invitation.email],
-        subject: `Join ${workspaceName} Workspace in SurveyRoute.com`,
+        subject: `Join ${workspaceName} Workspace in survey-route.com`,
         html: emailHtml,
         text: emailText,
         headers: emailHeaders,

@@ -299,7 +299,7 @@ export default function AcceptInvitePage() {
         <h1 className="mt-2.5 text-[25px] sm:text-[28px] leading-[1.2] font-bold text-slate-900">
           Join {workspaceName} Workspace
           <span className="block mt-1 text-lg sm:text-xl font-semibold text-slate-400">
-            in SurveyRoute.com
+            in survey-route.com
           </span>
         </h1>
 
