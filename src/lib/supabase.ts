@@ -356,6 +356,8 @@ export interface Facility {
    *  `accounts.default_state_code` on insert; editable per facility. */
   state_code?: string | null;
   camino_facility_id?: string | null;
+  /** Optional account-visible grouping tag used for filtering facility lists. */
+  facility_group?: string | null;
   /**
    * Prior facility name preserved when a rename happens (manual edit or a
    * data import like the 2026-04-25 Camino backfill). Display-only — the

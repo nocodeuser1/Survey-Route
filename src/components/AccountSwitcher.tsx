@@ -65,11 +65,11 @@ export default function AccountSwitcher({ accounts, currentAccountId, onSelect }
             setOpen(true);
           }
         }}
-        className="inline-flex min-h-11 max-w-[11rem] items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800 sm:max-w-[20rem] sm:text-base"
+        className="inline-flex min-h-9 max-w-[11rem] items-center gap-1.5 rounded-md bg-transparent px-2 py-1.5 text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-white dark:hover:bg-gray-700 dark:hover:text-white dark:focus-visible:ring-offset-gray-800 sm:max-w-[20rem]"
       >
-        <Building2 className="h-4 w-4 shrink-0 text-white" aria-hidden="true" />
+        <Building2 className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="truncate">{accountName}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-white transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
 
       {open && (

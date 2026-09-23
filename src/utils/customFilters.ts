@@ -225,6 +225,21 @@ export const FILTER_FIELDS: CustomFilterField[] = [
     getValue: (f) => f.camino_facility_id ?? null,
   },
   {
+    id: 'facility_group',
+    label: 'Facility Group',
+    group: 'identity',
+    operators: [
+      ...PRESENCE_OPS,
+      {
+        id: 'contains',
+        label: 'contains',
+        needsValue: true,
+        valueInputType: 'text',
+      },
+    ],
+    getValue: (f) => f.facility_group ?? null,
+  },
+  {
     id: 'county',
     label: 'County',
     group: 'identity',

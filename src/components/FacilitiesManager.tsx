@@ -114,7 +114,7 @@ function TouchTooltipButton({
   );
 }
 
-type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'historical_name' |
+type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'historical_name' |
   'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'latest_photo_date' | 'field_visit_date' | 'estimated_oil_per_day' |
@@ -145,7 +145,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
   // freshly-toggled column re-inserts into an order that keeps SPCC status
   // pinned right beside the facility name.
-  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id',
+  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group',
   'status', 'day_assignment', 'team_assignment',
   'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
@@ -173,6 +173,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   visit_duration: 'Visit Duration',
   county: 'County',
   camino_facility_id: 'Camino Facility ID',
+  facility_group: 'Facility Group',
   historical_name: 'Historical Name',
   status: 'Status',
   day_assignment: 'Day Assignment',
@@ -2127,6 +2128,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.county || '';
           case 'camino_facility_id':
             return facility.camino_facility_id || '';
+          case 'facility_group':
+            return facility.facility_group || '';
           case 'historical_name':
             return facility.historical_name || '';
           case 'visit_duration':
@@ -4064,6 +4067,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
       case 'created_at':
         return facility.created_at ? formatDate(facility.created_at) : '-';
+      case 'facility_group':
+        return facility.facility_group || '-';
       case 'notes': {
         const effectiveNotes = getEffectiveNotes(facility);
         if (editingNotesId === facility.id) {
