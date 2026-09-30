@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
@@ -2296,7 +2297,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         )}
-        {showRefreshOptions && tempSettings && (
+        {/* Portaled to document.body: this panel lives inside the
+            #main-stats-cards section, which is `relative z-50` and therefore
+            creates a stacking context. Inside it, no z-index can rise above
+            the sticky nav (z-[70]) — the nav painted over this dialog. */}
+        {showRefreshOptions && tempSettings && createPortal(
           <div
             className="fixed inset-0 z-[9999] flex items-end justify-center overflow-hidden bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
             onClick={() => {
@@ -2788,7 +2793,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Export Routes Popup */}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal, MoreHorizontal } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal, MoreHorizontal, Tag as TagIcon } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, type PhotoVisitEvent, type PhotoVisitEventRevision, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
@@ -114,7 +114,7 @@ function TouchTooltipButton({
   );
 }
 
-type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'historical_name' |
+type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'tags' | 'historical_name' |
   'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'latest_photo_date' | 'field_visit_date' | 'estimated_oil_per_day' |
@@ -145,7 +145,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
   // freshly-toggled column re-inserts into an order that keeps SPCC status
   // pinned right beside the facility name.
-  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group',
+  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group', 'tags',
   'status', 'day_assignment', 'team_assignment',
   'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
@@ -174,6 +174,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   county: 'County',
   camino_facility_id: 'Camino Facility ID',
   facility_group: 'Facility Group',
+  tags: 'Tags',
   historical_name: 'Historical Name',
   status: 'Status',
   day_assignment: 'Day Assignment',
@@ -374,6 +375,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+  // Bulk tagging: applies a free-form label to every selected facility.
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
+  // Every distinct tag already in use on this account, for the quick-pick
+  // chips and the input's autocomplete. Case-insensitive de-dupe keeps
+  // "Priority" and "priority" from both showing up.
+  const allExistingTags = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const f of facilities) {
+      for (const t of f.tags ?? []) {
+        const key = t.toLowerCase();
+        if (!seen.has(key)) seen.set(key, t);
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [facilities]);
 
   // Esc clears the row selection. Skipped when the user is typing in an
   // input/textarea/contenteditable (so search-bar Esc behavior isn't
@@ -2130,6 +2149,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return facility.camino_facility_id || '';
           case 'facility_group':
             return facility.facility_group || '';
+          case 'tags':
+            // Sort alphabetically by the joined tag list; untagged rows sink
+            // to the bottom of an ascending sort rather than leading it.
+            return (facility.tags && facility.tags.length)
+              ? [...facility.tags].sort((a, b) => a.localeCompare(b)).join(', ').toLowerCase()
+              : '\uffff';
           case 'historical_name':
             return facility.historical_name || '';
           case 'visit_duration':
@@ -2869,6 +2894,83 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     } catch (err) {
       console.error('Error marking facilities as complete:', err);
       alert('Failed to update facilities');
+    }
+  };
+
+  /**
+   * Add or remove one tag across every selected facility.
+   *
+   * Each row's tags differ, so this can't be a single UPDATE with one value —
+   * we compute the new array per facility from what's already in memory and
+   * write them in parallel. Rows that wouldn't change are skipped.
+   *
+   * On success the Tags column is force-shown, otherwise the user applies a
+   * tag and sees nothing happen. They can hide it again via Columns.
+   */
+  const handleBulkTag = async (rawTag: string, mode: 'add' | 'remove') => {
+    const tag = rawTag.trim().replace(/\s+/g, ' ');
+    if (!tag || tagBusy) return;
+    if (tag.length > 40) { setTagError('Keep tags under 40 characters.'); return; }
+    if (selectedFacilityIds.size === 0) return;
+
+    setTagBusy(true);
+    setTagError(null);
+    try {
+      const targets = facilities.filter((f) => selectedFacilityIds.has(f.id));
+      const updates = targets.flatMap((f) => {
+        const current = f.tags ?? [];
+        const has = current.some((t) => t.toLowerCase() === tag.toLowerCase());
+        if (mode === 'add' && has) return [];
+        if (mode === 'remove' && !has) return [];
+        const next = mode === 'add'
+          ? [...current, tag]
+          : current.filter((t) => t.toLowerCase() !== tag.toLowerCase());
+        return [{ id: f.id, tags: next }];
+      });
+
+      if (updates.length === 0) {
+        setTagError(mode === 'add'
+          ? 'Every selected facility already has that tag.'
+          : 'None of the selected facilities have that tag.');
+        return;
+      }
+
+      const results = await Promise.all(
+        updates.map((u) =>
+          supabase.from('facilities').update({ tags: u.tags }).eq('id', u.id),
+        ),
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+
+      // Surface the column so the change is visible.
+      setVisibleColumns((prev) => {
+        if (prev.includes('tags')) return prev;
+        const next = [...prev];
+        const anchorIdx = next.indexOf('facility_group');
+        const nameIdx = next.indexOf('name');
+        const at = anchorIdx >= 0 ? anchorIdx + 1 : (nameIdx >= 0 ? nameIdx + 1 : next.length);
+        next.splice(at, 0, 'tags');
+        // Persist both ways, exactly like applyColumnChanges does:
+        // localStorage keeps it per-computer, prefs keep it per-account.
+        localStorage.setItem(getStorageKey('visible_columns'), JSON.stringify(next));
+        updateFacPrefs({
+          columns: {
+            ...facPrefs.columns,
+            [getColumnsKey()]: { visible: next, order: columnOrder },
+          },
+        });
+        return next;
+      });
+
+      setShowTagModal(false);
+      setTagDraft('');
+      onFacilitiesChange();
+    } catch (err) {
+      console.error('Error tagging facilities:', err);
+      setTagError(err instanceof Error ? err.message : 'Could not update tags.');
+    } finally {
+      setTagBusy(false);
     }
   };
 
@@ -4069,6 +4171,23 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         return facility.created_at ? formatDate(facility.created_at) : '-';
       case 'facility_group':
         return facility.facility_group || '-';
+      case 'tags': {
+        const tags = facility.tags ?? [];
+        if (tags.length === 0) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            {[...tags].sort((a, b) => a.localeCompare(b)).map((t) => (
+              <span
+                key={t}
+                className="inline-flex max-w-[140px] items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-800"
+                title={t}
+              >
+                <span className="truncate">{t}</span>
+              </span>
+            ))}
+          </div>
+        );
+      }
       case 'notes': {
         const effectiveNotes = getEffectiveNotes(facility);
         if (editingNotesId === facility.id) {
@@ -5646,6 +5765,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       </button>
                     )}
 
+                    <button
+                      onClick={() => { setTagDraft(''); setTagError(null); setShowTagModal(true); }}
+                      className="flex items-center justify-center gap-1.5 whitespace-nowrap flex-shrink-0 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-500/10 dark:bg-blue-400/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-400/20 active:scale-95 transition-all text-xs font-medium"
+                      title="Tag the selected facilities"
+                    >
+                      <TagIcon className="w-4 h-4 md:w-3.5 md:h-3.5 flex-shrink-0" />
+                      <span className="hidden lg:inline whitespace-nowrap">Tag</span>
+                    </button>
+
                     {/* Copy popover — clicking opens a small menu where the
                         user can opt in to additional visible columns. With
                         zero extras (the default) the clipboard payload is
@@ -6705,6 +6833,109 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       })()}
 
       {/* mobileEditingField is no longer used for inline editing */}
+
+      {/* Bulk tag dialog. Portaled to document.body so no ancestor stacking
+          context can trap it behind the sticky nav. */}
+      {showTagModal && createPortal(
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => !tagBusy && setShowTagModal(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-tag-title"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-100 px-5 py-4 dark:border-gray-700">
+              <h3 id="bulk-tag-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+                Tag {selectedFacilityIds.size} {selectedFacilityIds.size === 1 ? 'facility' : 'facilities'}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">
+                Add a label you can sort and filter by.
+              </p>
+            </div>
+
+            <div className="px-5 py-4">
+              <label htmlFor="bulk-tag-input" className="block text-sm font-semibold text-slate-800 dark:text-gray-200">
+                Tag
+              </label>
+              <input
+                id="bulk-tag-input"
+                list="existing-facility-tags"
+                value={tagDraft}
+                autoFocus
+                disabled={tagBusy}
+                onChange={(e) => { setTagDraft(e.target.value); setTagError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && tagDraft.trim()) handleBulkTag(tagDraft, 'add'); }}
+                className="form-input mt-1.5"
+                placeholder="e.g. Needs re-survey"
+                maxLength={40}
+              />
+              <datalist id="existing-facility-tags">
+                {allExistingTags.map((t) => <option key={t} value={t} />)}
+              </datalist>
+
+              {allExistingTags.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Existing tags</p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {allExistingTags.slice(0, 12).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        disabled={tagBusy}
+                        onClick={() => { setTagDraft(t); setTagError(null); }}
+                        className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {tagError && (
+                <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                  {tagError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                disabled={tagBusy || !tagDraft.trim()}
+                onClick={() => handleBulkTag(tagDraft, 'remove')}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-red-600 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-700"
+                title="Remove this tag from the selected facilities"
+              >
+                Remove tag
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={tagBusy}
+                  onClick={() => setShowTagModal(false)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={tagBusy || !tagDraft.trim()}
+                  onClick={() => handleBulkTag(tagDraft, 'add')}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {tagBusy ? 'Applying…' : 'Apply tag'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {
         showCompletionModal && (

@@ -358,6 +358,8 @@ export interface Facility {
   camino_facility_id?: string | null;
   /** Optional account-visible grouping tag used for filtering facility lists. */
   facility_group?: string | null;
+  /** Free-form labels applied in bulk from the facilities table. */
+  tags?: string[] | null;
   /**
    * Prior facility name preserved when a rename happens (manual edit or a
    * data import like the 2026-04-25 Camino backfill). Display-only — the
