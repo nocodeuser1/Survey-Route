@@ -118,37 +118,24 @@ The conversation that followed:
 
 **No code task was in flight.** The setup conversation ended at "generate CLAUDE.md + a starter prompt for Claude Code." That's what this file is.
 
-### First-time setup: clean up sandbox leftovers and clone
+### Where the repo lives (moved 2026-09-29)
 
-The workspace folder was Cowork-mode's mount point, which means Cowork-Claude left some junk behind that it couldn't delete from inside its sandbox:
+The working copy is at **`~/Developer/survey-route`**.
 
-- `.git/` — a broken partial clone with a stuck `config.lock` file
-- `.probe-test-renamed.txt` — a file-system probe Cowork-Claude wrote to confirm delete was blocked
-- `claude-autopush-install.sh` — the (unused) installer for the auto-push agent
+It used to live at `~/Documents/Claude/Projects/Survey-Route.com`, but `~/Documents`
+is an iCloud-synced folder and iCloud was indexing `node_modules` (16k+ files) on every
+build. That pinned `fileproviderd` and pushed a clean `vite build` from ~7 seconds to
+**46 minutes**, and made `git fetch` time out. Moving the repo onto local disk fixed it.
 
-Before you can do anything else, clean up and clone for real. Preserve this CLAUDE.md file through the process:
+Keep this repo (and its `node_modules`) **out of `~/Documents`**. If builds ever crawl
+again, check `uptime` and whether `fileproviderd`/`bird` are burning CPU before
+suspecting the code.
 
-```
-cd ~/Documents/Claude/Projects/Survey-Route.com
-mv CLAUDE.md /tmp/CLAUDE.md.tmp
-rm -rf .git .probe-test-renamed.txt claude-autopush-install.sh
-git clone https://github.com/nocodeuser1/Survey-Route.git .
-mv /tmp/CLAUDE.md.tmp CLAUDE.md
-```
+An old pre-git snapshot of the app (Feb 2026, no history) is archived alongside at
+`~/Developer/survey-route-archive-2026-02`. It is not a working copy — ignore it.
 
-Then commit CLAUDE.md so it persists for future sessions and for Miles:
-
-```
-git add CLAUDE.md
-git commit -m "[claude] docs: add CLAUDE.md collaboration rules"
-git push
-```
-
-### Where to go from there
-
-1. `git log --oneline -5` to confirm you're on latest `main`. The last commit Cowork-Claude saw was `172700e  ui: remove PE Stamped workflow badge from facility header` — flag anything newer that looks like it came from Miles or Israel so we're oriented.
-2. Skim `CRITICAL_FIXES_SUMMARY.md` and any file in `Shared Files for AI/` so you're calibrated to recent work.
-3. Ask Israel for the first task. Don't assume there's pending work to pick up from the prior Cowork session — there isn't.
+The one-time Cowork sandbox cleanup that used to be documented here is done and has
+been removed, because it instructed deleting `.git` and re-cloning.
 
 ### Auto-memory parity
 
