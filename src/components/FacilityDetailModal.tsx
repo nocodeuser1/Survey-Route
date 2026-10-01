@@ -198,7 +198,10 @@ export default function FacilityDetailModal({
     const el = tabStripRef.current;
     if (!el) return;
     const max = el.scrollWidth - el.clientWidth;
-    setTabScroll({ left: el.scrollLeft > 1, right: el.scrollLeft < max - 1 });
+    // 12px rather than 1px: with a few pixels left to scroll there is nothing
+    // worth hinting at, and the fade would just wash out the pill underneath it.
+    const EDGE = 12;
+    setTabScroll({ left: el.scrollLeft > EDGE, right: el.scrollLeft < max - EDGE });
   }, []);
 
   // Keep the active pill reachable. 'auto' rather than 'smooth': this also runs
@@ -3043,7 +3046,7 @@ export default function FacilityDetailModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex-shrink-0">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-5">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 sm:px-5 sm:py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3056,7 +3059,7 @@ export default function FacilityDetailModal({
                       hover; on click it flips to a green "Copied" pill for
                       1.5s. Mirrors the same affordance in SPCCPlanDetailModal. */}
                   <h2
-                    className="text-2xl font-bold max-w-[16rem] sm:max-w-xs md:max-w-sm lg:max-w-md cursor-pointer select-text inline-flex items-center gap-2 group hover:text-white/90 transition-colors"
+                    className="text-xl sm:text-2xl font-bold max-w-full sm:max-w-xs md:max-w-sm lg:max-w-md cursor-pointer select-text inline-flex items-center gap-2 group hover:text-white/90 transition-colors"
                     title={`${facility.name}\n(click to copy)`}
                     onClick={async (e) => {
                       // Toggle the truncate class on the heading element so
