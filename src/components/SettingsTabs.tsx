@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import ScrollableTabStrip from './ScrollableTabStrip';
 import { Settings, Users, Building2, Lock, FileText, ScanLine, Route, Map, FileImage, ClipboardCheck } from 'lucide-react';
 
 interface SettingsTab {
@@ -22,7 +23,13 @@ export default function SettingsTabs({ tabs, activeTab, onTabChange }: SettingsT
   return (
     <div className="space-y-6">
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex items-center overflow-x-auto" aria-label="Settings tabs">
+        <ScrollableTabStrip
+          activeKey={activeTab}
+          as="nav"
+          ariaLabel="Settings tabs"
+          className="-mb-px flex items-center overflow-x-auto"
+          fadeClassName="from-white dark:from-gray-800"
+        >
           {tabs.map((tab, index) => {
             const showDivider = tab.section && !renderedSections.has(tab.section) && index > 0;
             if (tab.section) renderedSections.add(tab.section);
@@ -36,6 +43,7 @@ export default function SettingsTabs({ tabs, activeTab, onTabChange }: SettingsT
                 )}
                 <button
                   onClick={() => onTabChange(tab.id)}
+                  data-tab-active={activeTab === tab.id ? 'true' : undefined}
                   className={`
                     flex items-center gap-2 whitespace-nowrap py-4 px-3 border-b-2 font-medium text-sm transition-colors
                     ${
@@ -51,7 +59,7 @@ export default function SettingsTabs({ tabs, activeTab, onTabChange }: SettingsT
               </div>
             );
           })}
-        </nav>
+        </ScrollableTabStrip>
       </div>
 
       <div className="mt-6">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useReducer, useCallback } from 'react';
+import ScrollableTabStrip from './ScrollableTabStrip';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { createPortal } from 'react-dom';
 import {
@@ -183,39 +184,6 @@ export default function FacilityDetailModal({
   const [showCompletionMenu, setShowCompletionMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<FacilityTab>(initialTab);
 
-  // The tab strip scrolls horizontally on phones (five tabs, ~563px of pills
-  // in ~359px). Two things that costs us without help:
-  //   1. The active pill can sit entirely off-screen — switching to Documents,
-  //      or deep-linking ?tab=inspections, showed the right panel with no
-  //      visible active tab at all.
-  //   2. scrollbar-hide removes the only affordance, so on touch there is
-  //      nothing to suggest LDAR/Inspections/Documents exist.
-  const tabStripRef = useRef<HTMLDivElement | null>(null);
-  const activeTabRef = useRef<HTMLButtonElement | null>(null);
-  const [tabScroll, setTabScroll] = useState({ left: false, right: false });
-
-  const syncTabScroll = useCallback(() => {
-    const el = tabStripRef.current;
-    if (!el) return;
-    const max = el.scrollWidth - el.clientWidth;
-    // 12px rather than 1px: with a few pixels left to scroll there is nothing
-    // worth hinting at, and the fade would just wash out the pill underneath it.
-    const EDGE = 12;
-    setTabScroll({ left: el.scrollLeft > EDGE, right: el.scrollLeft < max - EDGE });
-  }, []);
-
-  // Keep the active pill reachable. 'auto' rather than 'smooth': this also runs
-  // as the modal opens, and an animation mid-entrance reads as jank.
-  useEffect(() => {
-    activeTabRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-    syncTabScroll();
-  }, [activeTab, syncTabScroll]);
-
-  useEffect(() => {
-    syncTabScroll();
-    window.addEventListener('resize', syncTabScroll);
-    return () => window.removeEventListener('resize', syncTabScroll);
-  }, [syncTabScroll]);
   const [editingIpDate, setEditingIpDate] = useState(false);
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDate(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
@@ -3184,11 +3152,10 @@ export default function FacilityDetailModal({
           </div>
 
           <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-700 px-3 sm:px-5">
-            <div className="relative">
-            <div
-              ref={tabStripRef}
-              onScroll={syncTabScroll}
+            <ScrollableTabStrip
+              activeKey={activeTab}
               className="flex items-center gap-1 overflow-x-auto py-2 -mx-1 px-1 scrollbar-hide"
+              fadeClassName="from-white dark:from-gray-900"
             >
               {tabItems.map((tab) => {
                 const Icon = tab.icon;
@@ -3197,7 +3164,7 @@ export default function FacilityDetailModal({
                 return (
                   <button
                     key={tab.id}
-                    ref={isActive ? activeTabRef : undefined}
+                    data-tab-active={isActive ? 'true' : undefined}
                     onClick={() => setActiveTab(tab.id)}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5 text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                       isActive
@@ -3210,16 +3177,7 @@ export default function FacilityDetailModal({
                   </button>
                 );
               })}
-            </div>
-
-            {/* Edge fades: the only hint, on touch, that the strip scrolls. */}
-            {tabScroll.left && (
-              <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent dark:from-gray-900" aria-hidden="true" />
-            )}
-            {tabScroll.right && (
-              <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent dark:from-gray-900" aria-hidden="true" />
-            )}
-            </div>
+            </ScrollableTabStrip>
           </div>
         </div>
 
