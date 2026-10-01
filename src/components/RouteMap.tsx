@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import ModalPortal from './ModalPortal';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair, SlidersHorizontal } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, CheckCircle, CheckSquare, Maximize2, Car, SlidersHorizontal, Layers, ListFilter, LocateFixed } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -254,6 +254,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [showMapToolsMenu, setShowMapToolsMenu] = useState(false);
   const mapToolsMenuRef = useRef<HTMLDivElement>(null);
   const mapToolsButtonRef = useRef<HTMLButtonElement>(null);
+  // The panel is portaled to document.body (see ModalPortal), so it is not a
+  // DOM descendant of mapToolsMenuRef. Outside-click detection has to test it
+  // separately or the pointerdown that opens an item would close the menu
+  // before the click lands on it.
+  const mapToolsPanelRef = useRef<HTMLDivElement>(null);
 
   const [internalNavigationMode, setInternalNavigationMode] = useState(false);
   const navigationMode = externalNavigationMode !== undefined ? externalNavigationMode : internalNavigationMode;
@@ -278,7 +283,75 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [nextFacility, setNextFacility] = useState<{ facility: any, distance: number, routeIndex: number, facilityIndex: number } | null>(null);
   const [internalLocationTracking, setInternalLocationTracking] = useState(false);
   const locationTracking = externalLocationTracking !== undefined ? externalLocationTracking : internalLocationTracking;
-  const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
+
+  // ── Follow-my-location (the locate button; Drive Mode has its own rules) ──
+  // Following keeps the blue dot centred. Panning or zooming the map PAUSES
+  // it rather than switching it off: FOLLOW_PAUSE_MS after the last touch the
+  // map glides back to you, and every further pan/zoom restarts that clock.
+  // The zoom you settle on is kept — following re-centres, it never re-zooms.
+  // Only tapping the button while centred turns following off, and then it
+  // stays off.
+  const FOLLOW_PAUSE_MS = 20000;
+  const FOLLOW_START_ZOOM = 16;
+  const followPausedUntilRef = useRef(0);
+  const followResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followZoomRef = useRef<number | null>(null);
+  const followEnabledRef = useRef(false);
+  const userInteractingRef = useRef(false);
+  // Set while the map is moving because WE moved it, so the movestart /
+  // zoomstart that our own flyTo/panTo fire aren't mistaken for the user.
+  const programmaticMoveRef = useRef(false);
+  const programmaticMoveCleanupRef = useRef<(() => void) | null>(null);
+  const [followPaused, setFollowPaused] = useState(false);
+  // The Leaflet controls are built once, so they reach pauseFollow via a ref.
+  const pauseFollowRef = useRef<() => void>(() => {});
+  followEnabledRef.current = locationTracking && !navigationMode;
+
+  // Marker-scope feedback. On a phone the toggle is icon-only, and in SPCC
+  // Plan mode an all-eligible route already holds every facility that needs
+  // a plan — the rest have valid plans, which Visibility hides by default —
+  // so flipping to "all" often changed nothing on screen and read as broken.
+  // Say what happened, and why when nothing new appeared.
+  const [mapNotice, setMapNotice] = useState<{ text: string; showVisibilityLink: boolean } | null>(null);
+  const mapNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousMarkerScopeRef = useRef(showOnlyRouteFacilities);
+  useEffect(() => {
+    // Compare with the last value rather than skipping the first run, so a
+    // StrictMode double-invoke on mount can't announce a change that didn't happen.
+    if (previousMarkerScopeRef.current === showOnlyRouteFacilities) return;
+    previousMarkerScopeRef.current = showOnlyRouteFacilities;
+    let notice: { text: string; showVisibilityLink: boolean };
+    if (showOnlyRouteFacilities) {
+      notice = { text: 'Showing route stops only', showVisibilityLink: false };
+    } else {
+      const routeIds = new Set<string>();
+      const routeNames = new Set<string>();
+      result?.routes.forEach(route => route.facilities.forEach(stop => {
+        if (stop.id) routeIds.add(stop.id);
+        else routeNames.add(stop.name);
+      }));
+      let revealed = 0;
+      let hiddenByVisibility = 0;
+      facilities.forEach(facility => {
+        if (routeIds.has(facility.id) || routeNames.has(facility.name) || !getCoords(facility)) return;
+        if (hideCompletedFacilities && completedFacilityIds.has(facility.id)) hiddenByVisibility++;
+        else revealed++;
+      });
+      notice = revealed > 0
+        ? { text: `Showing all facilities (+${revealed} not on this route)`, showVisibilityLink: false }
+        : hiddenByVisibility > 0
+          ? { text: `No new markers: the other ${hiddenByVisibility} are completed and hidden by Visibility`, showVisibilityLink: true }
+          : { text: 'Every facility is already on this route', showVisibilityLink: false };
+    }
+    setMapNotice(notice);
+    if (mapNoticeTimerRef.current) clearTimeout(mapNoticeTimerRef.current);
+    mapNoticeTimerRef.current = setTimeout(() => setMapNotice(null), notice.showVisibilityLink ? 6000 : 3000);
+    // Fires on the toggle only; the counts are read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOnlyRouteFacilities]);
+  useEffect(() => () => {
+    if (mapNoticeTimerRef.current) clearTimeout(mapNoticeTimerRef.current);
+  }, []);
   const [isTogglingNavMode, setIsTogglingNavMode] = useState(false);
   const navModeToggleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const skipNextTrackingInitialPositionRef = useRef(false);
@@ -330,7 +403,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   useEffect(() => {
     if (!showMapToolsMenu) return;
     const handlePointerDown = (event: PointerEvent) => {
-      if (!mapToolsMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !mapToolsMenuRef.current?.contains(target) &&
+        !mapToolsPanelRef.current?.contains(target)
+      ) {
         setShowMapToolsMenu(false);
       }
     };
@@ -529,12 +606,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
           const link = L.DomUtil.create('a', '', container);
           link.href = '#';
-          link.title = 'Show all facilities';
+          link.title = 'Fit all facilities in view';
+          link.setAttribute('aria-label', 'Fit all facilities in view');
+          // Frame corners around three stops. This used to be the same two
+          // diagonal arrows as the Full Screen button right above the map, so
+          // the page showed two identical icons that did different things.
           link.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 3 21 3 21 9"></polyline>
-            <polyline points="9 21 3 21 3 15"></polyline>
-            <line x1="21" y1="3" x2="14" y2="10"></line>
-            <line x1="3" y1="21" x2="10" y2="14"></line>
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+            <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+            <circle cx="9" cy="10" r="1.4" fill="currentColor" stroke="none"></circle>
+            <circle cx="15" cy="9" r="1.4" fill="currentColor" stroke="none"></circle>
+            <circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"></circle>
           </svg>`;
           link.style.width = '44px';
           link.style.height = '44px';
@@ -560,6 +644,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 });
 
                 if (bounds.isValid()) {
+                  // Deliberately looking at the whole plan: hold off follow-me,
+                  // but don't let this wide zoom become the zoom it returns at.
+                  pauseFollowRef.current();
+                  programmaticMoveRef.current = true;
+                  mapRef.current.once('moveend', () => { programmaticMoveRef.current = false; });
                   mapRef.current.fitBounds(bounds, { padding: [50, 50] });
                   savedMapViewRef.current = null; // Clear saved view
                   console.log('[RouteMap] Fit all facilities manually triggered');
@@ -752,11 +841,22 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   useEffect(() => {
     if (!mapRef.current || !homeBase) return;
 
+    // While follow-my-location owns the view — we're mid-flight to the user,
+    // or following and not paused — this redraw must neither snapshot nor
+    // restore it. This effect re-runs on most parent re-renders (its deps
+    // include inline callbacks), including the one the locate button itself
+    // triggers; it used to grab the view a few ms into the flight and put it
+    // back 50 ms later, so pressing locate visibly did nothing. Clearing the
+    // snapshot also stops a stale pre-follow view being restored later.
+    const followOwnsView = programmaticMoveRef.current
+      || (followEnabledRef.current && Date.now() >= followPausedUntilRef.current);
+    if (followOwnsView) savedMapViewRef.current = null;
+
     // Save current map view before updating markers (skip on initial load)
     // Save in both full-screen and embedded modes so the user's view is preserved
     // through facility visibility toggles, silent patches, etc.
     // SKIP saving if targetCoords is set (we're navigating to a specific location).
-    if (!initialLoadRef.current && !targetCoords) {
+    if (!initialLoadRef.current && !targetCoords && !followOwnsView) {
       savedMapViewRef.current = {
         center: mapRef.current.getCenter(),
         zoom: mapRef.current.getZoom()
@@ -2384,6 +2484,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
         // Use setTimeout to ensure restoration happens after all DOM updates
         setTimeout(() => {
+          // A locate/follow move may have started in the meantime.
+          if (programmaticMoveRef.current) return;
           if (mapRef.current && savedView) {
             mapRef.current.setView(savedView.center, savedView.zoom, {
               animate: false
@@ -2690,7 +2792,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
       // Use ref for autoCentering so polling closures always see the latest value
       const currentAutoCentering = autoCenteringRef.current;
-      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && (currentAutoCentering || forceCenter)));
+      // Follow mode answers to its own pause window (see pauseFollow), not
+      // Drive Mode's autoCentering flag.
+      const followIsPaused = Date.now() < followPausedUntilRef.current;
+      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && !followIsPaused));
 
       if (!shouldAutoCenter) {
         console.log('[RouteMap] Auto-center SKIPPED:', {
@@ -2761,8 +2866,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             const zoom = getZoomForSpeed(speedMph);
             centerMapOnLocation(latitude, longitude, zoom, shouldAnimate);
           } else if (locationTracking) {
-            // Manual location tracking: Use fixed zoom level (user's preferred)
-            centerMapOnLocation(latitude, longitude, locationTrackingZoom, shouldAnimate);
+            // Follow mode moves the centre only. Re-applying a fixed zoom here
+            // is what snapped the map back in every time the user zoomed out.
+            if (forceCenter) {
+              flyToUser(latitude, longitude);
+            } else {
+              moveMapProgrammatically([latitude, longitude], 0.25, m => m.panTo([latitude, longitude], { animate: shouldAnimate }));
+            }
           }
         }
       }
@@ -3337,12 +3447,17 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
     const handleDragStart = () => {
       isDraggingRef.current = true;
+      if (followEnabledRef.current) {
+        userInteractingRef.current = true;
+        pauseFollow();
+      }
       if (interactionTimer) return;
       interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
     };
 
     const handleDragEnd = () => {
       isDraggingRef.current = false;
+      userInteractingRef.current = false;
 
       // In navigation mode: keep tracking but pause auto-center for 5s
       if (navigationMode) {
@@ -3353,17 +3468,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           setAutoCentering(true);
           userInteractedWithMapRef.current = false;
         }, 5000);
-      } else if (locationTracking) {
-        // Location tracking mode: turn it OFF completely when user pans
-        // User must tap the button again to re-enable
-        setAutoCentering(false);
-        autoCenteringRef.current = false;
-        if (onLocationTrackingChange) onLocationTrackingChange(false);
-        else setInternalLocationTracking(false);
+      } else if (followEnabledRef.current) {
+        // Panning away pauses following; it doesn't end it. The 20 s window
+        // restarts from when the finger lifts, not from when it went down.
+        pauseFollow();
       }
     };
 
     const handleZoomStart = () => {
+      // Our own flyTo/panTo fire zoomstart too — only a user zoom pauses.
+      if (followEnabledRef.current && !programmaticMoveRef.current) {
+        userInteractingRef.current = true;
+        pauseFollow();
+      }
       if (interactionTimer) return;
       interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
 
@@ -3376,20 +3493,28 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           userInteractedWithMapRef.current = false;
         }, 5000);
       }
-      // For location tracking: pinch-to-zoom shouldn't kill tracking
-      // Only drag/pan kills it
+    };
+
+    const handleZoomEnd = () => {
+      if (!followEnabledRef.current || programmaticMoveRef.current) return;
+      // Whatever zoom the user settles on is the zoom following keeps.
+      if (mapRef.current) followZoomRef.current = mapRef.current.getZoom();
+      userInteractingRef.current = false;
+      pauseFollow();
     };
 
     // Listen for drag and zoom interactions
     mapRef.current.on('dragstart', handleDragStart);
     mapRef.current.on('dragend', handleDragEnd);
     mapRef.current.on('zoomstart', handleZoomStart);
+    mapRef.current.on('zoomend', handleZoomEnd);
 
     return () => {
       if (mapRef.current) {
         mapRef.current.off('dragstart', handleDragStart);
         mapRef.current.off('dragend', handleDragEnd);
         mapRef.current.off('zoomstart', handleZoomStart);
+        mapRef.current.off('zoomend', handleZoomEnd);
       }
       if (autoCenteringTimeoutRef.current) {
         clearTimeout(autoCenteringTimeoutRef.current);
@@ -3432,6 +3557,93 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     setIsLocating(false);
   };
 
+  /**
+   * Run a map move we initiated, flagged so the interaction listeners skip it.
+   * The flag clears when the map comes to rest at `target`, not on the first
+   * moveend: starting a second move (the fresh GPS fix arriving mid-flight)
+   * interrupts the first, and that interruption fires a moveend of its own.
+   * Clearing on it let the second flight's zoom read as the user zooming,
+   * which re-paused following the instant it resumed.
+   */
+  const moveMapProgrammatically = (
+    target: [number, number],
+    durationSeconds: number,
+    move: (map: L.Map) => void,
+  ) => {
+    const map = mapRef.current;
+    if (!map) return;
+    programmaticMoveCleanupRef.current?.(); // superseded: drop its listener, keep the flag
+    programmaticMoveRef.current = true;
+    const detach = () => {
+      map.off('moveend', onEnd);
+      clearTimeout(timer);
+      if (programmaticMoveCleanupRef.current === detach) programmaticMoveCleanupRef.current = null;
+    };
+    const finish = () => {
+      detach();
+      programmaticMoveRef.current = false;
+    };
+    const onEnd = () => {
+      if (map.distance(map.getCenter(), target) < 10) finish();
+    };
+    map.on('moveend', onEnd);
+    // Backstop for a move that never fires moveend (already there).
+    const timer = setTimeout(finish, durationSeconds * 1000 + 800);
+    programmaticMoveCleanupRef.current = detach;
+    move(map);
+  };
+
+  /**
+   * Bring the map to the user. A long way off (zoomed in on a facility in the
+   * next county, say) it flies — zooming out mid-flight so you can see where
+   * you are relative to where you were — and lands at the follow zoom. Close
+   * by, it just glides.
+   */
+  const flyToUser = (latitude: number, longitude: number) => {
+    const map = mapRef.current;
+    if (!map || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    const zoom = followZoomRef.current ?? FOLLOW_START_ZOOM;
+    followZoomRef.current = zoom;
+    const far = map.distance(map.getCenter(), [latitude, longitude]) > 1500
+      || Math.abs(map.getZoom() - zoom) > 1;
+    moveMapProgrammatically([latitude, longitude], far ? 1.1 : 0.25, m => {
+      if (far) m.flyTo([latitude, longitude], zoom, { duration: 1.1 });
+      else m.setView([latitude, longitude], zoom, { animate: true });
+    });
+  };
+
+  const clearFollowPause = () => {
+    followPausedUntilRef.current = 0;
+    if (followResumeTimerRef.current) {
+      clearTimeout(followResumeTimerRef.current);
+      followResumeTimerRef.current = null;
+    }
+    setFollowPaused(false);
+  };
+
+  /** Snap back to the user now, if following is still on. */
+  const resumeFollow = () => {
+    if (!followEnabledRef.current) return;
+    // A drag or pinch that outlasts the pause shouldn't be yanked mid-gesture.
+    if (userInteractingRef.current) {
+      followResumeTimerRef.current = setTimeout(resumeFollow, 1000);
+      return;
+    }
+    clearFollowPause();
+    const here = userLocationRef.current;
+    if (here) flyToUser(here.lat, here.lng);
+  };
+
+  /** The user moved the map: hold off following for another FOLLOW_PAUSE_MS. */
+  const pauseFollow = () => {
+    if (!followEnabledRef.current) return;
+    followPausedUntilRef.current = Date.now() + FOLLOW_PAUSE_MS;
+    if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+    followResumeTimerRef.current = setTimeout(resumeFollow, FOLLOW_PAUSE_MS);
+    setFollowPaused(true);
+  };
+  pauseFollowRef.current = pauseFollow;
+
   const goToCurrentLocation = (disableTrackingOnError = false) => {
     if (locationRequestInFlightRef.current) return;
 
@@ -3452,8 +3664,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     locationRequestInFlightRef.current = true;
     setIsLocating(true);
 
-    const trackingZoom = 18;
-    setLocationTrackingZoom(trackingZoom);
     setAutoCentering(true);
     justNavigatedRef.current = false;
     userInteractedWithMapRef.current = false;
@@ -3492,7 +3702,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         }
 
         updateUserLocation(position);
-        centerMapOnLocation(latitude, longitude, trackingZoom, true);
+        flyToUser(latitude, longitude);
       },
       (error) => {
         if (!isCurrentRequest()) return;
@@ -3525,9 +3735,22 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     );
   };
 
+  // One button, three states:
+  //   off             → turn following on and fly to you
+  //   on, paused      → you'd moved the map away; bring it straight back
+  //   on, centred     → turn following off, and it stays off
   const toggleLocationTrackingMode = () => {
     if (locationTracking) {
+      if (Date.now() < followPausedUntilRef.current) {
+        clearFollowPause();
+        const here = userLocationRef.current;
+        if (here) flyToUser(here.lat, here.lng);
+        // Refresh the fix too — the cached dot may be minutes old.
+        goToCurrentLocation(false);
+        return;
+      }
       cancelPendingLocationRequest();
+      clearFollowPause();
       if (onLocationTrackingChange) {
         onLocationTrackingChange(false);
       } else {
@@ -3538,14 +3761,64 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     }
 
     onClearTargetCoords?.();
+    clearFollowPause();
+    followZoomRef.current = null; // fresh start: land at FOLLOW_START_ZOOM
+    followEnabledRef.current = true;
     skipNextTrackingInitialPositionRef.current = true;
     if (onLocationTrackingChange) {
       onLocationTrackingChange(true);
     } else {
       setInternalLocationTracking(true);
     }
+    // Move immediately to the last known position so the tap visibly does
+    // something; the fresh fix below corrects it a second or two later.
+    const here = userLocationRef.current;
+    if (here) flyToUser(here.lat, here.lng);
     goToCurrentLocation(true);
   };
+
+  const renderLocateButton = (extraClassName = '') => {
+    const label = isLocating && !locationTracking
+      ? 'Locating you'
+      : !locationTracking
+        ? 'Show and follow my location'
+        : followPaused
+          ? 'Back to my location'
+          : 'Stop following my location';
+    return (
+      <button
+        type="button"
+        onClick={toggleLocationTrackingMode}
+        disabled={isLocating && !locationTracking}
+        aria-label={label}
+        title={label}
+        aria-busy={isLocating}
+        aria-pressed={locationTracking}
+        className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border-2 p-2 shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${
+          !locationTracking
+            ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+            : followPaused
+              // Following, but you've moved the map: outlined = "tap to come back".
+              ? 'border-green-600 bg-white text-green-600 hover:bg-green-50 dark:bg-gray-800 dark:text-green-400 dark:hover:bg-gray-700'
+              : 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+        } ${extraClassName}`}
+      >
+        <LocateFixed className={`h-5 w-5 ${isLocating ? 'animate-pulse' : ''}`} />
+      </button>
+    );
+  };
+
+  // Following switched off (button, drive mode, a facility focus, exiting
+  // fullscreen): drop any pending snap-back so it can't fire afterwards.
+  useEffect(() => {
+    if (locationTracking && !navigationMode) return;
+    clearFollowPause();
+  }, [locationTracking, navigationMode]);
+
+  useEffect(() => () => {
+    if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+    programmaticMoveCleanupRef.current?.();
+  }, []);
 
   const exitFullscreenMap = () => {
     cancelPendingLocationRequest();
@@ -4046,9 +4319,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                           className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                           aria-pressed={showOnlyRouteFacilities}
                         >
-                          {showOnlyRouteFacilities
-                            ? <EyeOff className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <Layers className={`h-4 w-4 ${showOnlyRouteFacilities ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} />
                           <span className="text-gray-900 dark:text-white">Marker Scope</span>
                           <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
                             {showOnlyRouteFacilities ? 'Route only' : 'All'}
@@ -4064,9 +4335,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                           }}
                           className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                         >
-                          {hideCompletedFacilities
-                            ? <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-300" />
-                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <ListFilter className="h-4 w-4 text-gray-600 dark:text-gray-300" />
                           <span className="text-gray-900 dark:text-white">Visibility</span>
                         </button>
                       )}
@@ -4138,7 +4407,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   aria-label="Route-only marker view"
                   aria-pressed={showOnlyRouteFacilities}
                 >
-                  {showOnlyRouteFacilities ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <Layers className="h-4 w-4" />
                   <span className="hidden sm:inline">{showOnlyRouteFacilities ? 'Route Only' : 'All Markers'}</span>
                 </button>
               </div>
@@ -4156,7 +4425,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   aria-label="Adjust completed facilities visibility"
                   aria-pressed={hideCompletedFacilities}
                 >
-                  {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <ListFilter className="w-4 h-4" />
                   <span className="hidden sm:inline">Visibility</span>
                 </button>
               </div>
@@ -4219,11 +4488,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   <SlidersHorizontal className="w-4 h-4" />
                 </button>
                 {showMapToolsMenu && (
+                  <ModalPortal>
                   <div
+                    ref={mapToolsPanelRef}
                     id="map-tools-panel"
                     role="menu"
                     aria-label="Map tools"
-                    className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[100] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                    className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[1300] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-2xl dark:border-gray-700 dark:bg-gray-800 sm:hidden"
                   >
                     <p className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Map tools
@@ -4238,9 +4509,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         }}
                         className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                       >
-                        {hideCompletedFacilities
-                          ? <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-300" />
-                          : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                        <ListFilter className="h-4 w-4 text-gray-600 dark:text-gray-300" />
                         <span className="text-gray-900 dark:text-white">Visibility</span>
                       </button>
                     )}
@@ -4282,6 +4551,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                       </button>
                     )}
                   </div>
+                  </ModalPortal>
                 )}
               </div>
             )}
@@ -4449,6 +4719,33 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           className="w-full h-full dark:[filter:invert(0.9)_hue-rotate(180deg)_brightness(0.95)_contrast(0.95)] transition-all duration-200"
           style={{ position: 'relative', zIndex: 0 }}
         />
+        {mapNotice && (
+          <div
+            role="status"
+            className="absolute left-1/2 top-3 z-[500] flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg bg-gray-900/90 px-3 py-2 text-xs font-medium text-white shadow-lg"
+          >
+            <span>{mapNotice.text}</span>
+            {mapNotice.showVisibilityLink && onToggleHideCompleted && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMapNotice(null);
+                  onToggleHideCompleted();
+                }}
+                className="min-h-8 shrink-0 rounded-md bg-white/15 px-2 font-semibold hover:bg-white/25"
+              >
+                Visibility
+              </button>
+            )}
+          </div>
+        )}
+        {/* Locate lived only in full screen. Bottom-right like every other
+            map app, lifted clear of Leaflet's attribution line. */}
+        {!isFullScreen && !navigationMode && (
+          <div className="absolute bottom-7 right-2 z-[500]">
+            {renderLocateButton()}
+          </div>
+        )}
       </div>
 
       {navigationTarget && settings && (
@@ -4732,27 +5029,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               <Car className="h-5 w-5" />
             </button>
 
-            {!navigationMode && (
-              <button
-                type="button"
-                onClick={toggleLocationTrackingMode}
-                disabled={isLocating && !locationTracking}
-                aria-label={isLocating
-                  ? (locationTracking ? 'Locating you. Tap to stop.' : 'Locating you.')
-                  : (locationTracking ? 'Stop following my location' : 'Follow my location')}
-                aria-busy={isLocating}
-                aria-pressed={locationTracking}
-                className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border p-2 text-white shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${locationTracking
-                  ? 'border-green-600 bg-green-600 hover:bg-green-700'
-                  : 'border-blue-600 bg-blue-600 hover:bg-blue-700'
-                  }`}
-                title={isLocating
-                  ? (locationTracking ? 'Locating you - tap to stop' : 'Locating you')
-                  : (locationTracking ? 'Stop following my location' : 'Follow my location')}
-              >
-                <Crosshair className={`h-5 w-5 ${isLocating ? 'animate-pulse' : ''}`} />
-              </button>
-            )}
+            {!navigationMode && renderLocateButton()}
           </div>
         </>
       )}
