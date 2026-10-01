@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Home-screen icon. Without this, iOS "Add to Home Screen" uses a
+         screenshot of the page instead of the brand mark. Must be opaque:
+         iOS composites any transparency onto black. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Android/Chrome install metadata: name, colours and icon set. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
