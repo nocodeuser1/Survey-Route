@@ -59,4 +59,44 @@ masked(lambda d: d.ellipse((0, 0, big - 1, big - 1), fill=255), "ic_launcher_rou
 PY
 done
 
-echo "Icons written to $IOS and $RES/mipmap-*"
+# Splash screens: the white route glyph centred on brand blue, sized so its
+# ink spans ~30% of the screen's short side on a phone.
+splash_svg() { # width height ink_px
+  python3 - "$@" <<'PY'
+import sys
+w, h, ink = (float(v) for v in sys.argv[1:])
+s = ink / 19.8  # the glyph's ink spans 19.8 of lucide's 24 units, centred on 12
+print(f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w:g}" height="{h:g}" viewBox="0 0 {w:g} {h:g}">
+  <rect width="{w:g}" height="{h:g}" fill="#3360E2"/>
+  <g transform="translate({w/2 - 12*s:.2f} {h/2 - 12*s:.2f}) scale({s:.4f})" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6" cy="19" r="3"/>
+    <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/>
+    <circle cx="18" cy="5" r="3"/>
+  </g>
+</svg>''')
+PY
+}
+
+render_opaque() { # svg_file out_png
+  rsvg-convert "$1" -o "$TMP/splash.png"
+  python3 -c "import sys; from PIL import Image; Image.open(sys.argv[1]).convert('RGB').save(sys.argv[2], optimize=True)" \
+    "$TMP/splash.png" "$2"
+}
+
+# iOS aspect-fills a 2732px square, so on a portrait phone only the middle
+# ~46% of its width is visible. 13.8% of the square ≈ 30% of phone width.
+splash_svg 2732 2732 377 > "$TMP/ios-splash.svg"
+for f in splash-2732x2732.png splash-2732x2732-1.png splash-2732x2732-2.png; do
+  render_opaque "$TMP/ios-splash.svg" "ios/App/App/Assets.xcassets/Splash.imageset/$f"
+done
+
+# Android (pre-12) stretches splash.png to the screen, so each file keeps its
+# own aspect ratio and the glyph stays round.
+for f in "$RES"/drawable/splash.png "$RES"/drawable-*/splash.png; do
+  read -r w h < <(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/ {v = v $2 " "} END {print v}')
+  short=$(( w < h ? w : h ))
+  splash_svg "$w" "$h" "$(( short * 30 / 100 ))" > "$TMP/android-splash.svg"
+  render_opaque "$TMP/android-splash.svg" "$f"
+done
+
+echo "Icons written to $IOS and $RES/mipmap-*; splash screens regenerated"
