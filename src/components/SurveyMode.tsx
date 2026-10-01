@@ -323,9 +323,11 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }, [userId, accountId]);
 
   useEffect(() => {
-    if (currentPosition) {
-      updateFacilitiesWithDistance();
-    }
+    // Build the list whether or not we have a GPS fix. Gating this on
+    // currentPosition meant a denied/unavailable or still-acquiring location
+    // left the list permanently empty — in the field that reads as "this
+    // account has no sites", and the empty state blamed the user's filters.
+    updateFacilitiesWithDistance();
   }, [currentPosition, facilities, result, inspections, routeFacilityIds, showOffRoute]);
 
   // Refresh plan rows whenever the parent's facility list changes (e.g.
@@ -528,8 +530,6 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   function updateFacilitiesWithDistance() {
-    if (!currentPosition) return;
-
     // Source for the visible list:
     //   - No custom route active → every passed-in facility (existing behavior).
     //   - Custom route active + "Show off-route" OFF → only route members.
@@ -545,7 +545,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       // sit at 0,0 off the coast of Africa.
       const coords = getCoords(facility);
 
-      const distance = coords
+      // Unknown distance (no fix yet) sorts last, same as a facility with no
+      // coordinates — it is "not measurable", not "zero miles away".
+      const distance = coords && currentPosition
         ? calculateDistance(
             currentPosition.lat,
             currentPosition.lng,
@@ -554,7 +556,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           )
         : Infinity;
 
-      const bearing = coords
+      const bearing = coords && currentPosition
         ? calculateBearing(
             currentPosition.lat,
             currentPosition.lng,
@@ -582,7 +584,11 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
 
     switch (sortBy) {
       case 'distance':
-        sorted.sort((a, b) => a.distance - b.distance);
+        // Without a fix every distance is Infinity, which would leave the
+        // list in arbitrary order. Fall back to something stable.
+        sorted.sort((a, b) =>
+          currentPosition ? a.distance - b.distance : a.name.localeCompare(b.name),
+        );
         break;
       case 'name':
         sorted.sort((a, b) => a.name.localeCompare(b.name));
@@ -848,6 +854,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   function formatDistance(meters: number): string {
+    // Infinity = no coordinates on file (or no fix). toFixed() would print
+    // the literal "Infinitykm".
+    if (!Number.isFinite(meters)) return '--';
     if (meters < 1000) {
       return `${Math.round(meters)}m`;
     }
