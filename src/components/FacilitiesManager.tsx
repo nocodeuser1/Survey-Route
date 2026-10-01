@@ -6121,6 +6121,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             </div>
                           )}
                           <div
+                            // The checkbox itself is 16px, which is a mean
+                            // target on a phone — and selecting rows is the
+                            // gateway to every bulk action (tag, route,
+                            // export, delete). Padding grows the tap area to
+                            // roughly the full row height; the matching
+                            // negative margin keeps the cell's layout
+                            // identical.
+                            className="py-2 -my-2 pl-2 -ml-2 pr-1 -mr-1"
                             onTouchStart={(e) => {
                               const touch = e.touches[0];
                               const timer = setTimeout(() => {
