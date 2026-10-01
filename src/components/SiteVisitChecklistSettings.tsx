@@ -137,7 +137,7 @@ export default function SiteVisitChecklistSettings({ accountId }: SiteVisitCheck
           </li>
         )}
         {items.map((item, idx) => (
-          <li key={item.id} className="flex items-center gap-2 bg-white px-3 py-2 dark:bg-gray-800">
+          <li key={item.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-3 py-2 dark:bg-gray-800">
             <span className="w-6 shrink-0 text-center text-xs font-semibold text-gray-400">{idx + 1}</span>
             <input
               value={item.label}
@@ -145,9 +145,9 @@ export default function SiteVisitChecklistSettings({ accountId }: SiteVisitCheck
               onChange={(e) => rename(item.id, e.target.value)}
               onBlur={commitRename}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-              className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm text-gray-800 hover:border-gray-200 focus:border-blue-400 focus:bg-white focus:outline-none disabled:opacity-60 dark:text-gray-100 dark:hover:border-gray-600 dark:focus:bg-gray-900"
+              className="order-last w-full min-w-0 basis-full rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm text-gray-800 hover:border-gray-200 focus:border-blue-400 focus:bg-white focus:outline-none disabled:opacity-60 sm:order-none sm:w-auto sm:flex-1 sm:basis-auto dark:text-gray-100 dark:hover:border-gray-600 dark:focus:bg-gray-900"
             />
-            <div className="flex shrink-0 items-center">
+            <div className="ml-auto flex shrink-0 items-center sm:ml-0">
               <button type="button" onClick={() => move(idx, -1)} disabled={saving || idx === 0}
                 className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 dark:hover:bg-gray-700"
                 title="Move up" aria-label="Move up">
