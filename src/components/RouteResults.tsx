@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import ModalPortal from './ModalPortal';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
+import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute, endsAfterDeadline, lastDepartureMinutes, deadlineMinutes } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
 import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, supabase } from '../lib/supabase';
@@ -540,8 +540,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         // Same builder every other path uses (order + clock + lunch break), so
         // the times this decides against are the times the day card shows.
         const trialRoute = rebuildDayRoute(calcFacilities, trial, distanceMatrix, 0, startTime, lunchBreak);
-        const fits = (!leaveByDeadline || trialRoute.lastFacilityDepartureTime <= leaveByDeadline)
-          && (!arriveByDeadline || trialRoute.endTime <= arriveByDeadline)
+        // Unwrapped minutes, not the "HH:MM" strings: those wrap at midnight,
+        // so a day ending "00:40" used to pass a "17:00" deadline.
+        const fits = (!leaveByDeadline || lastDepartureMinutes(trialRoute) <= deadlineMinutes(leaveByDeadline))
+          && !endsAfterDeadline(trialRoute, arriveByDeadline)
           && (!maxHours || trialRoute.totalTime / 60 <= maxHours)
           && (!maxDrive || trialRoute.totalDriveTime <= maxDrive);
 
