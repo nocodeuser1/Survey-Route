@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import ModalPortal from './ModalPortal';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
@@ -2190,6 +2190,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     return (
       <div className="relative">
         {isRefreshing && (
+          <ModalPortal>
           <div className="fixed inset-0 bg-black bg-opacity-50 z-[2000] flex items-center justify-center">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-8 max-w-sm mx-4 text-center transition-colors duration-200">
               <div className="mb-4 flex justify-center">
@@ -2204,6 +2205,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
             </div>
           </div>
+          </ModalPortal>
         )}
         {settings && (
           <div className="relative z-[60] overflow-visible transition-all duration-200">
@@ -2301,7 +2303,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             #main-stats-cards section, which is `relative z-50` and therefore
             creates a stacking context. Inside it, no z-index can rise above
             the sticky nav (z-[70]) — the nav painted over this dialog. */}
-        {showRefreshOptions && tempSettings && createPortal(
+        {showRefreshOptions && tempSettings && (
+          <ModalPortal>
           <div
             className="fixed inset-0 z-[9999] flex items-end justify-center overflow-hidden bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
             onClick={() => {
@@ -2793,12 +2796,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </div>
               </div>
             </div>
-          </div>,
-          document.body
+          </div>
+          </ModalPortal>
         )}
 
         {/* Export Routes Popup */}
         {showExportPopup && (
+          <ModalPortal>
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
             onClick={() => setShowExportPopup(false)}
@@ -2821,6 +2825,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
             </div>
           </div>
+          </ModalPortal>
         )}
 
         {/* Save Route Popup — Update vs Save as New when a route is loaded */}
@@ -2844,6 +2849,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
         {/* Load Route Popup */}
         {showLoadRoutePopup && onLoadRoute && accountId && (
+          <ModalPortal>
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
             onClick={() => setShowLoadRoutePopup(false)}
@@ -2881,6 +2887,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
             </div>
           </div>
+          </ModalPortal>
         )}
       </div>
     );
@@ -2889,6 +2896,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   return (
     <div className="relative space-y-4 lg:space-y-5">
       {isRefreshing && (
+        <ModalPortal>
         <div className="fixed inset-0 bg-black bg-opacity-50 z-[2000] flex items-center justify-center">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-8 max-w-sm mx-4 text-center transition-colors duration-200">
             <div className="mb-4 flex justify-center">
@@ -2903,6 +2911,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
       {!showOnlyRouteList && settings && (
         <div className="bg-white/50 dark:bg-gray-800/40 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] border border-white/40 dark:border-white/[0.08] px-4 py-2.5 transition-all duration-200">
@@ -3912,6 +3921,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       )}
 
       {showRefreshOptions && tempSettings && (
+        <ModalPortal>
         <div
           className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[2000] p-4 overflow-y-auto"
           onClick={() => {
@@ -4242,10 +4252,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Export Routes Popup */}
       {showExportPopup && (
+        <ModalPortal>
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
           onClick={() => setShowExportPopup(false)}
@@ -4268,6 +4280,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Save Route Popup — Update vs Save as New when a route is loaded */}
@@ -4291,6 +4304,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       {/* Load Route Popup */}
       {showLoadRoutePopup && onLoadRoute && accountId && (
+        <ModalPortal>
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
           onClick={() => setShowLoadRoutePopup(false)}
@@ -4328,6 +4342,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Export Surveys Popup */}
@@ -4343,6 +4358,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
       {/* Per-Day Start Times Modal */}
       {showStartTimeModal && (
+        <ModalPortal>
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowStartTimeModal(false)}>
           <div
             className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden"
@@ -4428,6 +4444,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Per-Day "Be Back By" Modal — opened from a day's Home Base row. */}
@@ -4448,6 +4465,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         const beforeStart = timeToMinutesLocal(tempReturnByTime) <= timeToMinutesLocal(startTime);
 
         return (
+          <ModalPortal>
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !isRefitting && setReturnByModalDay(null)}>
             <div
               className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
@@ -4564,6 +4582,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               </div>
             </div>
           </div>
+          </ModalPortal>
         );
       })()}
     </div>
@@ -4797,6 +4816,7 @@ function SaveRouteDialog({ initialName, loadedRouteName, onSave, onCancel }: Sav
     : loadedRouteName;
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000] p-4"
       onClick={onCancel}
@@ -4877,5 +4897,6 @@ function SaveRouteDialog({ initialName, loadedRouteName, onSave, onCancel }: Sav
         )}
       </div>
     </div>
+    </ModalPortal>
   );
 }
