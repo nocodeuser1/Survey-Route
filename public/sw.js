@@ -32,10 +32,21 @@ function isTileRequest(url) {
 // JS/CSS may never pass through this worker. Parse the built HTML and cache the
 // exact Vite assets it references before activating.
 self.addEventListener('install', function (event) {
-  // Do not call skipWaiting(). An older open page may still need one of its
-  // content-hashed lazy chunks. Let the new worker activate only after those
-  // clients close so activation can safely remove the prior build caches.
+  // Do not call skipWaiting() here. An older open page may still need one of
+  // its content-hashed lazy chunks. Let the new worker activate only after
+  // those clients close so activation can safely remove the prior build
+  // caches — or when the user explicitly asks, via SKIP_WAITING below.
   event.waitUntil(precacheAppShell());
+});
+
+// The app offers the user a "new version — Reload" prompt rather than letting
+// a deploy swap the worker mid-session. Taking it posts this message, which is
+// the one path allowed to activate early: the user is about to reload anyway,
+// so no open page is left reaching for a chunk from the previous build.
+self.addEventListener('message', function (event) {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 async function precacheAppShell() {
