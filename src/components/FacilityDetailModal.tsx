@@ -1744,7 +1744,7 @@ export default function FacilityDetailModal({
                 <select
                   value={facility.state_code ?? ''}
                   onChange={(e) => updateFacilityField('state_code', e.target.value || null)}
-                  className="text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded px-2 py-2 sm:py-1 min-h-[44px] sm:min-h-0 focus:ring-2 focus:ring-blue-500 outline-none"
                   aria-label="State"
                 >
                   <option value="">— None —</option>
