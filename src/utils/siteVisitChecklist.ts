@@ -1,0 +1,80 @@
+/**
+ * Site-visit checklist — what a tech confirms while standing at a facility.
+ *
+ * Two pieces of state, deliberately kept apart:
+ *
+ *   accounts.site_visit_checklist          the account's template (the items)
+ *   facilities.site_visit_checklist_progress   which items are done, per facility
+ *
+ * Progress is keyed by item id rather than storing a copy of the template on
+ * each facility. So when the template is edited in Settings, every facility
+ * immediately reflects the new list: added items show up unchecked, removed
+ * items disappear, and anything still on the list keeps the tick it already
+ * had. A per-facility snapshot would instead freeze each site on whatever
+ * the list looked like the first time someone opened it.
+ */
+
+export interface ChecklistItem {
+  /** Stable key. Progress is stored against this, so never reuse or rewrite
+   *  an id when renaming an item — rename the label and keep the id. */
+  id: string;
+  label: string;
+}
+
+/** itemId -> ISO timestamp it was ticked. Absent/undefined means not done. */
+export type ChecklistProgress = Record<string, string | undefined>;
+
+/**
+ * The out-of-the-box list, derived from Israel's 2026-09-23 "West Wichita
+ * Field Work" scope email to Sheila Baber. Accounts that have never saved a
+ * template get this.
+ */
+export const DEFAULT_SITE_VISIT_CHECKLIST: ChecklistItem[] = [
+  { id: 'containers_over_55', label: 'Document every container over 55 gallons, including day tanks' },
+  { id: 'containment_measurements', label: 'Record containment measurements for each container' },
+  { id: 'berm_dimensions', label: 'Measure berm dimensions (length, width, depth)' },
+  { id: 'drain_valves_presence', label: 'Note presence or absence of drain valves on the berms' },
+  { id: 'drain_valve_condition', label: 'Photograph condition and position of any drain valves present' },
+  { id: 'ground_photos', label: 'Take updated ground photos' },
+  { id: 'aerial_photos', label: 'Take updated drone / aerial photos' },
+  { id: 'tank_plates', label: 'Photograph tank plates' },
+  { id: 'related_equipment', label: 'Photograph related equipment' },
+];
+
+/** Tolerant of nulls and of rows written before this feature existed. */
+export function normalizeChecklist(raw: unknown): ChecklistItem[] {
+  if (!Array.isArray(raw)) return DEFAULT_SITE_VISIT_CHECKLIST;
+  const items = raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map((r) => ({ id: String(r.id ?? '').trim(), label: String(r.label ?? '').trim() }))
+    .filter((r) => r.id && r.label);
+  // An account that deliberately saved an empty list keeps it empty; only a
+  // malformed/missing value falls back to the defaults.
+  return raw.length > 0 && items.length === 0 ? DEFAULT_SITE_VISIT_CHECKLIST : items;
+}
+
+export function normalizeProgress(raw: unknown): ChecklistProgress {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: ChecklistProgress = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v) out[k] = v;
+  }
+  return out;
+}
+
+export function countDone(items: ChecklistItem[], progress: ChecklistProgress): number {
+  return items.reduce((n, i) => (progress[i.id] ? n + 1 : n), 0);
+}
+
+/** Slugged id from a label, uniquified against ids already in use. */
+export function makeItemId(label: string, taken: Set<string>): string {
+  const base = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40) || 'item';
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}_${n}`)) n++;
+  return `${base}_${n}`;
+}

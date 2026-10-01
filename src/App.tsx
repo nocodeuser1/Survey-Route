@@ -20,6 +20,7 @@ import NavigationSettings from './components/NavigationSettings';
 import SecuritySettings from './components/SecuritySettings';
 import ProfileModal from './components/ProfileModal';
 import AccountBrandingSettings from './components/AccountBrandingSettings';
+import SiteVisitChecklistSettings from './components/SiteVisitChecklistSettings';
 import AccountSwitcher from './components/AccountSwitcher';
 import ManagementSignatureSettings from './components/ManagementSignatureSettings';
 import FacilityDetailModal from './components/FacilityDetailModal';
@@ -5433,6 +5434,16 @@ function App() {
                           accountId={currentAccount.id}
                         />
                       ),
+                    }] : []),
+                    // The site-visit checklist drives what techs confirm in the
+                    // field, so it sits with the other compliance settings.
+                    // Admin-only: it is an account-wide default.
+                    ...(accountRole === 'account_admin' ? [{
+                      id: 'site-visit-checklist',
+                      label: 'Site Visit Checklist',
+                      section: 'compliance' as const,
+                      icon: getSettingsIcon('site-visit-checklist'),
+                      content: <SiteVisitChecklistSettings accountId={currentAccount.id} />,
                     }] : []),
                     // Management signature is visible to everyone (so non-admins know what's set)
                     // but the upload/remove buttons inside are gated to admins.

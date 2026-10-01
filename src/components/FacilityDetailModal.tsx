@@ -58,6 +58,7 @@ import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
 import { useAuth } from '../contexts/AuthContext';
+import SiteVisitChecklist from './SiteVisitChecklist';
 import { useAccount } from '../contexts/AccountContext';
 
 interface FacilityDetailModalProps {
@@ -2332,6 +2333,10 @@ export default function FacilityDetailModal({
 
     return (
       <div className="space-y-6">
+        {/* Site-visit checklist first: when a tech opens this tab standing at
+            the facility, the thing they need is the list, not the paperwork. */}
+        <SiteVisitChecklist facility={facility} onChange={onInspectionCompleted} />
+
         {/* Prominent shortcut to the full SPCC Plan Detail Modal. The header
             badge already opens it, but it's small and easy to miss when the
             user is focused on the tab content. This button is the one

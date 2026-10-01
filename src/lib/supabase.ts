@@ -360,6 +360,9 @@ export interface Facility {
   facility_group?: string | null;
   /** Free-form labels applied in bulk from the facilities table. */
   tags?: string[] | null;
+  /** Site-visit checklist ticks: itemId -> ISO timestamp. Template lives on
+   *  the account (accounts.site_visit_checklist). */
+  site_visit_checklist_progress?: Record<string, string> | null;
   /**
    * Prior facility name preserved when a rename happens (manual edit or a
    * data import like the 2026-04-25 Camino backfill). Display-only — the

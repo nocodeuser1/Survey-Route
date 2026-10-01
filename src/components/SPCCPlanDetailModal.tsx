@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Clock, ShieldCheck, Edit2, ClipboardList, MapPin, Camera, Droplets, Ruler, Calendar, FileText, Plus, Droplet, Trash2, Copy, Check } from 'lucide-react';
 import { Facility, SPCCPlan, MAX_BERMS_PER_FACILITY, supabase } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import SiteVisitChecklist from './SiteVisitChecklist';
 import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, type SPCCPlanStatus, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import { formatDate, nowInAccountTimeZone } from '../utils/dateUtils';
 import { sortPlansByBermIndex, nextBermIndex, getUnassignedWells, getBermShortLabel, parseVisitTimeInput, formatVisitTimeDisplay, saveFieldVisitTime } from '../utils/spccPlans';
@@ -936,6 +937,10 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
 
         {/* Body */}
         <div className={`p-5 space-y-4 ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+          {/* Opened expanded here: reaching this modal is a deliberate "work
+              this site" action, unlike the SPCC tab where it's one of several
+              sections competing for the top of the page. */}
+          <SiteVisitChecklist facility={facility} defaultOpen onChange={onFacilitiesChange} />
 
           {/* No IP Date alert */}
           {status.status === 'no_ip_date' && (
