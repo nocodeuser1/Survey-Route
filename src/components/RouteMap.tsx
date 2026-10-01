@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair, SlidersHorizontal } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -246,6 +246,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [showMenu, setShowMenu] = useState(false);
   const fullscreenMenuRef = useRef<HTMLDivElement>(null);
   const fullscreenMenuButtonRef = useRef<HTMLButtonElement>(null);
+  // Phone-sized overflow for the embedded map toolbar. Five unlabelled icons
+  // in a row read as noise on a phone, so only marker scope and full screen
+  // stay out; the rest live behind this menu. Full screen has its own
+  // "Map tools" section in the navigation menu and doesn't use this.
+  const [showMapToolsMenu, setShowMapToolsMenu] = useState(false);
+  const mapToolsMenuRef = useRef<HTMLDivElement>(null);
+  const mapToolsButtonRef = useRef<HTMLButtonElement>(null);
 
   const [internalNavigationMode, setInternalNavigationMode] = useState(false);
   const navigationMode = externalNavigationMode !== undefined ? externalNavigationMode : internalNavigationMode;
@@ -318,6 +325,28 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [showMenu]);
+
+  useEffect(() => {
+    if (!showMapToolsMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!mapToolsMenuRef.current?.contains(event.target as Node)) {
+        setShowMapToolsMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowMapToolsMenu(false);
+        mapToolsButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showMapToolsMenu]);
 
   // Auto-focus search input when opened
   useEffect(() => {
@@ -4114,7 +4143,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </div>
             )}
             {onToggleHideCompleted && (
-              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+              <div className="relative hidden sm:block">
                 <button
                   type="button"
                   onClick={onToggleHideCompleted}
@@ -4131,7 +4160,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 </button>
               </div>
             )}
-            <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+            <div className="relative hidden sm:block">
               <button
                 type="button"
                 onClick={() => void toggleRoadRouteVisibility()}
@@ -4149,7 +4178,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </button>
             </div>
             {onBulkReassignFacilities && (
-              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+              <div className="relative hidden sm:block">
                 <button
                   type="button"
                   onClick={toggleMultiSelectMode}
@@ -4164,6 +4193,95 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   {selectionMode ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                   <span className="hidden sm:inline">Multi-Select</span>
                 </button>
+              </div>
+            )}
+            {/* The "N selected" readout lives in the desktop-only title block,
+                so multi-select gave a phone no sign it was on until something
+                was actually selected. */}
+            {selectionMode && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-200 sm:hidden">
+                {selectedFacilities.size} selected
+              </span>
+            )}
+            {!isFullScreen && (
+              <div ref={mapToolsMenuRef} className="relative sm:hidden">
+                <button
+                  ref={mapToolsButtonRef}
+                  type="button"
+                  onClick={() => setShowMapToolsMenu(current => !current)}
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 touch-manipulation dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                  title="Map tools"
+                  aria-label="Map tools"
+                  aria-expanded={showMapToolsMenu}
+                  aria-controls="map-tools-panel"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+                {showMapToolsMenu && (
+                  <div
+                    id="map-tools-panel"
+                    role="menu"
+                    aria-label="Map tools"
+                    className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[100] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    <p className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Map tools
+                    </p>
+                    {onToggleHideCompleted && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onToggleHideCompleted();
+                          setShowMapToolsMenu(false);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        {hideCompletedFacilities
+                          ? <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-300" />
+                          : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                        <span className="text-gray-900 dark:text-white">Visibility</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void toggleRoadRouteVisibility();
+                        setShowMapToolsMenu(false);
+                      }}
+                      disabled={isLoadingRoutes}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-700"
+                      aria-pressed={showRoadRoutes}
+                    >
+                      <Route className={`h-4 w-4 ${showRoadRoutes ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'}`} />
+                      <span className="text-gray-900 dark:text-white">Road Routes</span>
+                      <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                        {isLoadingRoutes ? 'Loading…' : showRoadRoutes ? 'On' : 'Off'}
+                      </span>
+                    </button>
+                    {onBulkReassignFacilities && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          toggleMultiSelectMode();
+                          setShowMapToolsMenu(false);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                        aria-pressed={selectionMode}
+                      >
+                        {selectionMode
+                          ? <CheckSquare className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          : <Square className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                        <span className="text-gray-900 dark:text-white">Multi-Select</span>
+                        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                          {selectionMode ? 'On' : 'Off'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {!isFullScreen && onEnterFullscreen && (
@@ -4250,9 +4368,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       )}
 
       {selectionMode && selectedFacilities.size > 0 && result && (
-        <div className={isFullScreen ? "shrink-0 max-h-[40dvh] overflow-y-auto px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-30" : "px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-10"}>
-          <div className="flex items-center gap-4 flex-wrap">
-            <label className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+        <div className={isFullScreen
+          ? "shrink-0 max-h-[40dvh] overflow-y-auto px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 dark:bg-blue-900/30 dark:border-blue-800 relative z-30"
+          : "px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 dark:bg-blue-900/30 dark:border-blue-800 relative z-10"}>
+          <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+            <label className="text-sm font-semibold text-gray-700 dark:text-gray-100">
               Reassign {selectedFacilities.size} to:
             </label>
             <div className="flex gap-2 flex-wrap">
@@ -4300,13 +4420,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             </div>
             <button
               onClick={handleBulkReassign}
-              className="ml-4 px-4 py-1.5 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm font-semibold"
+              className="ml-4 min-h-11 px-4 py-1.5 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm font-semibold"
             >
               Apply
             </button>
             <button
               onClick={handleClearSelection}
-              className="px-4 py-1.5 bg-gray-300 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-400 transition-colors text-sm"
+              className="min-h-11 px-4 py-1.5 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors text-sm dark:bg-gray-600 dark:text-gray-100 dark:hover:bg-gray-500"
             >
               Clear
             </button>

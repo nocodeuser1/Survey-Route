@@ -4662,7 +4662,7 @@ function App() {
 
                   {/* Route membership and marker visibility stay separate. The
                       map control can reveal markers without changing this stop list. */}
-                  <div className="order-1 flex min-h-[68px] items-center border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:col-span-5 lg:border-r xl:col-span-4">
+                  <div className="order-1 flex items-center border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4 sm:py-3 lg:col-span-5 lg:min-h-[68px] lg:border-r xl:col-span-4">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 text-gray-900 dark:text-white text-sm font-semibold">
                         <CheckCircle className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
@@ -4671,28 +4671,42 @@ function App() {
                           {filteredOptimizationResult?.totalFacilities ?? optimizationResult.totalFacilities} stops
                         </span>
                       </div>
-                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {/* The scope line is reference detail, not something to
+                          act on — on a phone it only costs a line of the map. */}
+                      <p className="mt-0.5 hidden text-xs text-gray-500 dark:text-gray-400 sm:block">
                         {routeFacilityIds !== null ? 'Selected stop list' : 'All eligible facilities'}
                       </p>
                     </div>
                   </div>
 
                   {surveyTypeKind === 'spcc_plan' && (
-                    <div className="order-4 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-5 lg:col-span-5 xl:order-5">
+                    // Until an outing actually starts this band is pure
+                    // explainer, so a phone skips it and keeps the pixels for
+                    // the map. Once there is a run (or an error) to report it
+                    // comes back as a single compact line.
+                    <div className={`order-4 border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4 sm:py-3 lg:order-5 lg:col-span-5 xl:order-5 ${
+                      planRouteRun.run || planRouteRun.error ? '' : 'hidden sm:block'
+                    }`}>
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Image className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Outing Photo Progress</h2>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Image className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <h2 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                              <span className="sm:hidden">Outing photos</span>
+                              <span className="hidden sm:inline">Outing Photo Progress</span>
+                            </h2>
+                            {planRouteRun.run && (
+                              <span className="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400 sm:hidden">
+                                {planRouteRun.completedCount}/{planRouteRun.totalCount}
+                              </span>
+                            )}
                           </div>
                           {planRouteRun.run ? (
-                            <>
-                              <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
-                                {planRouteRun.completedCount} of {planRouteRun.totalCount} stops completed on this outing.
-                              </p>
-                            </>
+                            <p className="mt-0.5 hidden text-xs text-gray-600 dark:text-gray-300 sm:block">
+                              {planRouteRun.completedCount} of {planRouteRun.totalCount} stops completed on this outing.
+                            </p>
                           ) : (
-                            <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
+                            <p className="mt-0.5 hidden text-xs text-gray-600 dark:text-gray-300 sm:block">
                               {currentRouteId
                                 ? 'Starts automatically when the first stop is marked done'
                                 : 'Save this route to track outing progress'}
@@ -4703,8 +4717,8 @@ function App() {
                           )}
                         </div>
 
-                        <div className="w-full shrink-0 sm:w-40">
-                          {planRouteRun.run && planRouteRun.totalCount > 0 && (
+                        {planRouteRun.run && planRouteRun.totalCount > 0 && (
+                          <div className="w-full shrink-0 sm:w-40">
                             <div
                               className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
                               role="progressbar"
@@ -4720,8 +4734,8 @@ function App() {
                                 }}
                               />
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -4729,7 +4743,7 @@ function App() {
                   {(!isFullScreenMap || showRefreshOptions) && (
                     <div className={isFullScreenMap
                       ? 'fixed inset-0 z-[9999]'
-                      : 'order-5 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-2 lg:col-span-7 xl:order-3 xl:col-span-3'}>
+                      : 'order-5 border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4 sm:py-3 lg:order-2 lg:col-span-7 xl:order-3 xl:col-span-3'}>
                     <RouteResults
                       result={optimizationResult}
                       settings={lastUsedSettings}
@@ -4954,13 +4968,21 @@ function App() {
 
                     const allActive = surveyType === 'all';
                     return (
-                      <div className="order-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700 lg:order-3 lg:col-span-12 xl:order-2 xl:col-span-5 xl:border-r">
-                        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
-                          <div className="flex shrink-0 items-center gap-2">
+                      <div className="order-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4 sm:py-3 lg:order-3 lg:col-span-12 xl:order-2 xl:col-span-5 xl:border-r">
+                        <div className="flex items-center justify-between gap-2 sm:gap-3">
+                          {/* The "Survey" caption is desktop-only: on a phone the
+                              pills already read as survey modes, and dropping it
+                              lets them stay on one scrollable line instead of
+                              wrapping into a two-row grid. */}
+                          <div className="hidden shrink-0 items-center gap-2 sm:flex">
                             <ClipboardList className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Survey</span>
                           </div>
-                          <div className="grid w-full grid-cols-1 gap-0.5 rounded-lg border border-gray-200 p-0.5 min-[375px]:grid-cols-2 dark:border-gray-600 sm:flex sm:w-auto sm:max-w-full sm:flex-nowrap sm:overflow-x-auto">
+                          {/* Scrollbar left visible on purpose: on a narrow
+                              phone a third survey type can sit off-screen, and
+                              the overlay scrollbar is the only hint it's
+                              there. */}
+                          <div className="flex w-full min-w-0 flex-nowrap gap-0.5 overflow-x-auto rounded-lg border border-gray-200 p-0.5 dark:border-gray-600 sm:w-auto sm:max-w-full">
                             <button
                               type="button"
                               onClick={() => {
@@ -4968,7 +4990,7 @@ function App() {
                                 setOpenOverdueTypeId(null);
                               }}
                               aria-pressed={allActive}
-                              className={`min-h-11 w-full rounded-md px-3.5 py-2 text-xs font-medium transition-all sm:w-auto sm:shrink-0 sm:text-sm ${allActive
+                              className={`min-h-11 shrink-0 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-all sm:px-3.5 sm:text-sm ${allActive
                                 ? 'bg-blue-600 text-white shadow-sm'
                                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
                                 }`}
@@ -4994,7 +5016,7 @@ function App() {
                                 <div
                                   key={type.id}
                                   data-route-overdue-popover
-                                  className="relative flex min-w-0 gap-0.5 sm:shrink-0"
+                                  className="relative flex shrink-0 gap-0.5"
                                 >
                                   <button
                                     type="button"
@@ -5004,13 +5026,13 @@ function App() {
                                     }}
                                     title={type.description || type.name}
                                     aria-pressed={isActive}
-                                    className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-all sm:flex-none sm:text-sm ${isActive
+                                    className={`flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-medium transition-all sm:px-3 sm:text-sm ${isActive
                                       ? 'bg-blue-600 text-white shadow-sm'
                                       : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white'
                                       }`}
                                   >
                                     <Icon className="h-4 w-4 shrink-0" />
-                                    <span className="truncate">{type.name}</span>
+                                    <span className="whitespace-nowrap">{type.name}</span>
                                     {isActive && inRouteCount > 0 && (
                                       <span className="ml-0.5 whitespace-nowrap rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                         {inRouteCount}

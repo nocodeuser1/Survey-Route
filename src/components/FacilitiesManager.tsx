@@ -34,6 +34,7 @@ import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
+import { hapticTick } from '../utils/haptics';
 import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
@@ -737,6 +738,31 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return {};
   });
   const resizingRef = useRef<{ columnId: ColumnId; startX: number; startWidth: number } | null>(null);
+  // Touch resizing is gated behind a long-press so a finger that lands on a
+  // handle while scrolling the table doesn't drag a column by accident.
+  // `armedResizeColumn` is the column whose handle is currently live; it
+  // drives the handle's highlight and the width readout.
+  const LONG_PRESS_MS = 350;
+  const TOUCH_SLOP_PX = 10;
+  const [armedResizeColumn, setArmedResizeColumn] = useState<ColumnId | null>(null);
+  // A long-press isn't discoverable on its own, so phones get a one-time
+  // nudge. Dismissed for good the first time the user resizes a column or
+  // taps the close button.
+  const [showTouchResizeHint, setShowTouchResizeHint] = useState(() => {
+    try {
+      return localStorage.getItem('facilities_touch_resize_hint_seen') !== '1';
+    } catch {
+      return false;
+    }
+  });
+  const dismissTouchResizeHint = useCallback(() => {
+    setShowTouchResizeHint(false);
+    try {
+      localStorage.setItem('facilities_touch_resize_hint_seen', '1');
+    } catch {
+      /* storage blocked — the hint just comes back next session */
+    }
+  }, []);
   // Tracks which mode keys have had their one-time auto-fit-to-display pass
   // so we don't re-fit (and clobber the user's manual tweaks) on every
   // render. A mode auto-fits the first time it's shown with no saved widths.
@@ -794,6 +820,80 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  };
+
+  // Touch equivalent of startColumnResize. A plain touch-drag can't be used:
+  // the handle sits inside the table's scroller, so the browser would read the
+  // drag as a pan. Instead the finger has to rest on the handle for
+  // LONG_PRESS_MS (moving more than TOUCH_SLOP_PX first cancels it, so a
+  // scroll that happens to start on a handle still scrolls), after which the
+  // column is armed and tracks the finger.
+  //
+  // The move/end listeners are attached natively rather than through React
+  // because React registers touchmove passively, which makes preventDefault a
+  // no-op — without it the page scrolls underneath the drag.
+  const startColumnResizeTouch = (e: React.TouchEvent, columnId: ColumnId) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    const touch = e.touches[0];
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+    const headerEl = (e.currentTarget as HTMLElement).closest('th') as HTMLElement | null;
+    const startWidth = columnWidths[columnId] ?? headerEl?.getBoundingClientRect().width ?? 160;
+
+    let armed = false;
+    let longPressTimer = 0;
+
+    const cleanup = () => {
+      window.clearTimeout(longPressTimer);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+    };
+
+    const onMove = (ev: TouchEvent) => {
+      const point = ev.touches[0];
+      if (!point) return;
+      const dx = point.clientX - startX;
+      if (!armed) {
+        // Movement before the hold completes means the user is scrolling,
+        // not resizing — bail out and let the browser have the gesture.
+        if (Math.abs(dx) > TOUCH_SLOP_PX || Math.abs(point.clientY - startY) > TOUCH_SLOP_PX) {
+          cleanup();
+        }
+        return;
+      }
+      if (ev.cancelable) ev.preventDefault();
+      const newWidth = Math.max(
+        MIN_COL_WIDTH,
+        Math.min(MAX_COL_WIDTH, Math.round(startWidth + dx)),
+      );
+      setColumnWidths(prev => (
+        prev[columnId] === newWidth ? prev : { ...prev, [columnId]: newWidth }
+      ));
+    };
+
+    const onEnd = () => {
+      cleanup();
+      if (!armed) return;
+      armed = false;
+      setArmedResizeColumn(null);
+      setColumnWidths(prev => {
+        persistColumnWidths(prev);
+        return prev;
+      });
+    };
+
+    longPressTimer = window.setTimeout(() => {
+      armed = true;
+      setArmedResizeColumn(columnId);
+      dismissTouchResizeHint();
+      void hapticTick();
+    }, LONG_PRESS_MS);
+
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
   };
 
   // Measure each visible column's natural content width by toggling a CSS
@@ -6014,6 +6114,21 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               <p>No facilities yet. Add a facility or import from CSV.</p>
             </div>
           ) : (
+            <>
+            {showTouchResizeHint && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-900/30 dark:text-blue-200 md:hidden">
+                <MoveHorizontal className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1">Press and hold a column edge, then drag to resize it.</span>
+                <button
+                  type="button"
+                  onClick={dismissTouchResizeHint}
+                  aria-label="Dismiss column resize tip"
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/60"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             <div
               className="overflow-auto mt-0 relative h-[calc(100dvh-16rem)] min-h-[180px] sm:h-auto sm:max-h-[calc(100vh-150px)] sm:min-h-[500px] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overscroll-contain"
               ref={tableContainerRef}
@@ -6083,14 +6198,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             Sits over the right border so it's
                             discoverable without changing the visual
                             chrome. Stops propagation so the click
-                            doesn't accidentally trigger sort. */}
+                            doesn't accidentally trigger sort.
+                            On touch it needs a finger-sized target and a
+                            long-press to arm (see startColumnResizeTouch);
+                            touch-action: pan-y keeps vertical scrolling of
+                            the table working from the handle while reserving
+                            horizontal movement for the drag. */}
                         <div
                           onMouseDown={(e) => startColumnResize(e, columnId)}
+                          onTouchStart={(e) => startColumnResizeTouch(e, columnId)}
                           onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); autoFitColumn(columnId); }}
                           onClick={(e) => e.stopPropagation()}
-                          title="Drag to resize · Double-click to auto-fit"
-                          className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-400/60 active:bg-blue-500/80 transition-colors z-10"
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label={`Resize ${columnLabels[columnId]} column`}
+                          title="Drag to resize · Double-click to auto-fit · On touch, press and hold then drag"
+                          style={{ touchAction: 'pan-y', WebkitTouchCallout: 'none' }}
+                          className={`absolute top-0 right-0 h-full w-3 cursor-col-resize select-none transition-colors z-10 md:w-1.5 ${
+                            armedResizeColumn === columnId
+                              ? 'bg-blue-500'
+                              : 'hover:bg-blue-400/60 active:bg-blue-500/80'
+                          }`}
                         />
+                        {armedResizeColumn === columnId && columnWidths[columnId] != null && (
+                          <span className="pointer-events-none absolute -bottom-6 right-0 z-20 rounded-md bg-blue-600 px-1.5 py-0.5 text-[11px] font-semibold text-white shadow-lg">
+                            {Math.round(columnWidths[columnId])}px
+                          </span>
+                        )}
                       </th>
                     ))}
                     <th className={`px-6 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 hidden md:table-cell transition-all duration-300 ${isHeaderSticky
@@ -6255,6 +6389,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 </tbody>
               </table>
             </div>
+            </>
           )
         }
       </div >

@@ -45,9 +45,6 @@ export default function SPCCPlansOverviewModal({
   accountId,
 }: SPCCPlansOverviewModalProps) {
   const { darkMode } = useDarkMode();
-  // Brand-aware facility-id label so the detail row reads
-  // "Validus Facility ID" when in Validus etc. instead of always "Camino".
-  const facilityIdLabel = useFacilityIdLabel();
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
@@ -529,6 +526,10 @@ function StatCard({
 // Plan Detail Content (shown when a facility row is clicked)
 function PlanDetailContent({ item, darkMode }: { item: PlanSummary; darkMode: boolean }) {
   const { facility } = item;
+  // Own call rather than a prop: the label was being read from the parent
+  // component's scope, which only compiles — at runtime opening the detail
+  // for a facility with a camino_facility_id threw a ReferenceError.
+  const facilityIdLabel = useFacilityIdLabel();
 
   return (
     <div className="space-y-6">
