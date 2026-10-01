@@ -80,7 +80,17 @@ const ICON_HELP: Record<string, string> = {
 
 function getButton(target: EventTarget | null): HTMLButtonElement | null {
   if (!(target instanceof Element)) return null;
-  return target.closest('button');
+  const button = target.closest('button');
+  if (!button) return null;
+  // Full-screen scrims are <button> elements so the backdrop is clickable and
+  // keyboard-reachable, but they are not controls a tooltip should describe —
+  // labelling one puts "Close facility actions" in a floating bubble pinned to
+  // the bottom of the screen. Anything covering most of the viewport is a
+  // backdrop, not a button the user is pointing at.
+  const r = button.getBoundingClientRect();
+  const coversViewport =
+    r.width >= window.innerWidth * 0.9 && r.height >= window.innerHeight * 0.9;
+  return coversViewport ? null : button;
 }
 
 function getIconHelp(button: HTMLButtonElement): string | null {
@@ -142,11 +152,21 @@ export default function ContextualHelpProvider({ children }: { children: ReactNo
     ensureAccessibleName(button);
 
     const rect = button.getBoundingClientRect();
+    // Clamping the tooltip's TOP to the viewport still let its body hang off
+    // the bottom, because the bubble has height. Flip it above the control
+    // when there isn't room below, and only then clamp.
+    const EST_H = 34;   // one line of text + padding; two lines still fit the 12px gutter
+    const GAP = 8;
+    const below = rect.bottom + GAP;
+    const fitsBelow = below + EST_H <= window.innerHeight - 12;
+    const top = fitsBelow
+      ? below
+      : Math.max(12, Math.min(rect.top - GAP - EST_H, window.innerHeight - EST_H - 12));
     setActive({
       button,
       text,
       left: Math.min(Math.max(rect.left + rect.width / 2, 12), window.innerWidth - 12),
-      top: Math.min(rect.bottom + 8, window.innerHeight - 12),
+      top,
     });
   };
 

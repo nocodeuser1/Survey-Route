@@ -4351,6 +4351,7 @@ function App() {
                 <button
                   onClick={() => setCurrentView('survey')}
                   disabled={!optimizationResult}
+                  title={optimizationResult ? 'Survey Mode' : 'Generate a route first — Survey Mode follows your planned route'}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'survey'
                     ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                     : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -4439,7 +4440,17 @@ function App() {
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <Navigation2 className="w-5 h-5" />
-                    <span>Survey Mode</span>
+                    <span className="flex flex-col items-start leading-tight">
+                      <span>Survey Mode</span>
+                      {/* A greyed-out item with no reason reads as broken.
+                          Survey Mode follows a planned route, so it only
+                          unlocks once one exists. */}
+                      {!optimizationResult && (
+                        <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">
+                          Generate a route first
+                        </span>
+                      )}
+                    </span>
                   </button>
                   <button
                     onClick={() => {
