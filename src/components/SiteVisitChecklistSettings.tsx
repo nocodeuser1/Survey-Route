@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import {
   DEFAULT_SITE_VISIT_CHECKLIST,
   makeItemId,
+  isYesNoItem,
   normalizeChecklist,
   type ChecklistItem,
 } from '../utils/siteVisitChecklist';
@@ -125,7 +126,7 @@ export default function SiteVisitChecklistSettings({ accountId }: SiteVisitCheck
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Site Visit Checklist</h3>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             What your techs confirm at every facility. This list appears on each facility&rsquo;s SPCC tab,
-            and each site tracks its own ticks.
+            and each site tracks its own ticks and Yes/No answers.
           </p>
         </div>
       </div>
@@ -139,6 +140,9 @@ export default function SiteVisitChecklistSettings({ accountId }: SiteVisitCheck
         {items.map((item, idx) => (
           <li key={item.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-3 py-2 dark:bg-gray-800">
             <span className="w-6 shrink-0 text-center text-xs font-semibold text-gray-400">{idx + 1}</span>
+            {isYesNoItem(item) && (
+              <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Yes / No</span>
+            )}
             <input
               value={item.label}
               disabled={saving}

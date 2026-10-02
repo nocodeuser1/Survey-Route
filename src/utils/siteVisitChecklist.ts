@@ -21,8 +21,59 @@ export interface ChecklistItem {
   label: string;
 }
 
-/** itemId -> ISO timestamp it was ticked. Absent/undefined means not done. */
+/**
+ * itemId -> ISO completion timestamp. Reserved `__answer:<itemId>` keys hold
+ * JSON-encoded Yes/No responses. Keep every value a string: older web/native
+ * clients discard object values when saving an unrelated checkbox.
+ */
 export type ChecklistProgress = Record<string, string | undefined>;
+
+export type ChecklistAnswer = 'yes' | 'no';
+export const DRAIN_VALVES_ITEM_ID = 'drain_valves_presence';
+
+const answerKey = (itemId: string) => `__answer:${itemId}`;
+
+/** Stable ids also upgrade templates saved before Yes/No was introduced. */
+export function isYesNoItem(item: ChecklistItem): boolean {
+  return item.id === DRAIN_VALVES_ITEM_ID;
+}
+
+export function getChecklistAnswer(progress: ChecklistProgress, itemId: string): ChecklistAnswer | null {
+  const raw = progress[answerKey(itemId)];
+  if (!raw) return null;
+  try {
+    const response: unknown = JSON.parse(raw);
+    if (!response || typeof response !== 'object') return null;
+    const { answer, answeredAt } = response as Record<string, unknown>;
+    // Bind the answer to this visit's completion timestamp. An old client
+    // clearing/rechecking the checkbox must not revive a previous answer.
+    return (answer === 'yes' || answer === 'no')
+      && typeof answeredAt === 'string'
+      && Number.isFinite(Date.parse(answeredAt))
+      && answeredAt === progress[itemId]
+      ? answer : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set/clear one response without touching other items or legacy records. */
+export function setChecklistAnswer(
+  progress: ChecklistProgress,
+  itemId: string,
+  answer: ChecklistAnswer | null,
+  answeredAt = new Date().toISOString(),
+): ChecklistProgress {
+  const next = { ...progress };
+  if (answer === null) {
+    delete next[itemId];
+    delete next[answerKey(itemId)];
+  } else {
+    next[itemId] = answeredAt;
+    next[answerKey(itemId)] = JSON.stringify({ answer, answeredAt });
+  }
+  return next;
+}
 
 /**
  * The out-of-the-box list, derived from Israel's 2026-09-23 "West Wichita
@@ -33,7 +84,7 @@ export const DEFAULT_SITE_VISIT_CHECKLIST: ChecklistItem[] = [
   { id: 'containers_over_55', label: 'Document every container over 55 gallons, including day tanks' },
   { id: 'containment_measurements', label: 'Record containment measurements for each container' },
   { id: 'berm_dimensions', label: 'Measure berm dimensions (length, width, depth)' },
-  { id: 'drain_valves_presence', label: 'Note presence or absence of drain valves on the berms' },
+  { id: DRAIN_VALVES_ITEM_ID, label: 'Are drain valves present on the berms?' },
   { id: 'drain_valve_condition', label: 'Photograph condition and position of any drain valves present' },
   { id: 'ground_photos', label: 'Take updated ground photos' },
   { id: 'aerial_photos', label: 'Take updated drone / aerial photos' },
@@ -47,7 +98,7 @@ export function normalizeChecklist(raw: unknown): ChecklistItem[] {
   const items = raw
     .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
     .map((r) => ({ id: String(r.id ?? '').trim(), label: String(r.label ?? '').trim() }))
-    .filter((r) => r.id && r.label);
+    .filter((r) => r.id && r.label && !r.id.startsWith('__answer:'));
   // An account that deliberately saved an empty list keeps it empty; only a
   // malformed/missing value falls back to the defaults.
   return raw.length > 0 && items.length === 0 ? DEFAULT_SITE_VISIT_CHECKLIST : items;
@@ -63,7 +114,12 @@ export function normalizeProgress(raw: unknown): ChecklistProgress {
 }
 
 export function countDone(items: ChecklistItem[], progress: ChecklistProgress): number {
-  return items.reduce((n, i) => (progress[i.id] ? n + 1 : n), 0);
+  return items.reduce((n, item) => {
+    const done = isYesNoItem(item)
+      ? getChecklistAnswer(progress, item.id) !== null
+      : !!progress[item.id];
+    return done ? n + 1 : n;
+  }, 0);
 }
 
 /** Slugged id from a label, uniquified against ids already in use. */

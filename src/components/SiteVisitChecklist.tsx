@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Loader2, RotateCcw } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import {
   countDone,
+  getChecklistAnswer,
+  isYesNoItem,
   normalizeChecklist,
   normalizeProgress,
+  setChecklistAnswer,
+  type ChecklistAnswer,
   type ChecklistItem,
   type ChecklistProgress,
 } from '../utils/siteVisitChecklist';
@@ -21,9 +25,9 @@ interface SiteVisitChecklistProps {
  * The checklist a tech works through while standing at a site.
  *
  * Items come from the account template (Settings → Site Visit Checklist);
- * the ticks live on the facility. Ticking writes immediately — a tech on
+ * the ticks and Yes/No answers live on the facility. Each writes immediately — a tech on
  * LTE shouldn't have to find a Save button with gloves on — and the UI
- * updates optimistically so a slow write never blocks the next tap.
+ * updates optimistically while the save is confirmed.
  */
 export default function SiteVisitChecklist({ facility, defaultOpen = false, onChange }: SiteVisitChecklistProps) {
   const { currentAccount } = useAccount();
@@ -33,16 +37,28 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scope = `${currentAccount?.id ?? ''}:${facility.id}`;
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const pendingSaves = useRef(new Map<string, { next: ChecklistProgress; busyItemId: string }>());
 
   // Re-seed when switching facilities (the modal reuses one instance).
   useEffect(() => {
-    setProgress(normalizeProgress(facility.site_visit_checklist_progress));
-  }, [facility.id, facility.site_visit_checklist_progress]);
+    const pending = pendingSaves.current.get(scope);
+    setProgress(pending?.next ?? normalizeProgress(facility.site_visit_checklist_progress));
+    setBusyId(pending?.busyItemId ?? null);
+    setError(null);
+  }, [scope, facility.site_visit_checklist_progress]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadTemplate() {
-      if (!currentAccount?.id) return;
+      setLoading(true);
+      if (!currentAccount?.id) {
+        setItems([]);
+        setLoading(false);
+        return;
+      }
       try {
         const { data, error: err } = await supabase
           .from('accounts')
@@ -63,59 +79,56 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
     return () => { cancelled = true; };
   }, [currentAccount?.id]);
 
-  const persist = useCallback(async (next: ChecklistProgress) => {
-    const { error: err } = await supabase
-      .from('facilities')
-      .update({ site_visit_checklist_progress: next })
-      .eq('id', facility.id);
-    if (err) throw err;
-    // Keep the in-memory row in step so reopening the modal doesn't flash
-    // the pre-save state before the parent refetches.
-    Object.assign(facility, { site_visit_checklist_progress: next });
-    onChange?.();
-  }, [facility, onChange]);
-
-  const toggle = async (item: ChecklistItem) => {
-    if (busyId) return;
-    const wasDone = !!progress[item.id];
-    const next: ChecklistProgress = { ...progress };
-    if (wasDone) delete next[item.id];
-    else next[item.id] = new Date().toISOString();
-
-    setProgress(next);          // optimistic
-    setBusyId(item.id);
+  const saveProgress = async (next: ChecklistProgress, busyItemId: string) => {
+    // A synchronous lock also catches repeated taps before React rerenders.
+    if (pendingSaves.current.has(scope)) return;
+    const operation = { next, busyItemId };
+    pendingSaves.current.set(scope, operation);
+    const previous = progress;
+    const isCurrent = () => activeScope.current === scope && pendingSaves.current.get(scope) === operation;
+    setProgress(next);
+    setBusyId(busyItemId);
     setError(null);
     try {
-      await persist(next);
+      const { error: err } = await supabase
+        .from('facilities')
+        .update({ site_visit_checklist_progress: next })
+        .eq('id', facility.id)
+        .select('id')
+        .single();
+      if (err) throw err;
+      // Keep reopening the same facility in step with the acknowledged save.
+      Object.assign(facility, { site_visit_checklist_progress: next });
+      if (isCurrent()) onChange?.();
     } catch (err) {
       console.error('[SiteVisitChecklist] save failed:', err);
-      setProgress(progress);    // roll back
-      setError('Could not save. Check your connection and try again.');
+      // A slow failure for a previous facility must not replace the next one.
+      if (isCurrent()) {
+        setProgress(previous);
+        setError('Could not save. Check your connection and try again.');
+      }
     } finally {
-      setBusyId(null);
+      if (isCurrent()) setBusyId(null);
+      if (pendingSaves.current.get(scope) === operation) pendingSaves.current.delete(scope);
     }
   };
 
-  const resetAll = async () => {
-    if (busyId || done === 0) return;
-    const prev = progress;
-    setProgress({});
-    setBusyId('__reset__');
-    setError(null);
-    try {
-      await persist({});
-    } catch (err) {
-      console.error('[SiteVisitChecklist] reset failed:', err);
-      setProgress(prev);
-      setError('Could not reset. Check your connection and try again.');
-    } finally {
-      setBusyId(null);
-    }
+  const toggle = (item: ChecklistItem) => {
+    const next = { ...progress };
+    if (next[item.id]) delete next[item.id];
+    else next[item.id] = new Date().toISOString();
+    void saveProgress(next, item.id);
+  };
+
+  const answer = (item: ChecklistItem, value: ChecklistAnswer | null) => {
+    if (getChecklistAnswer(progress, item.id) === value) return;
+    void saveProgress(setChecklistAnswer(progress, item.id, value), item.id);
   };
 
   const done = countDone(items, progress);
   const total = items.length;
   const allDone = total > 0 && done === total;
+  const hasProgress = Object.keys(progress).length > 0;
 
   if (loading) {
     return (
@@ -179,6 +192,50 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
               {items.map((item) => {
                 const doneAt = progress[item.id];
                 const isBusy = busyId === item.id;
+                if (isYesNoItem(item)) {
+                  const selected = getChecklistAnswer(progress, item.id);
+                  return (
+                    <li key={item.id} className="rounded-lg bg-blue-50/60 px-2 py-3 dark:bg-blue-900/10">
+                      <fieldset disabled={!!busyId}>
+                        <legend className="text-sm font-medium leading-snug text-gray-800 dark:text-gray-100">
+                          {item.label}
+                        </legend>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Yes = present · No = absent</p>
+                        <div className="mt-2 flex gap-2">
+                          {(['yes', 'no'] as const).map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={selected === value}
+                              onClick={() => answer(item, value)}
+                              className={`min-h-[48px] flex-1 rounded-lg border-2 px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
+                                selected === value
+                                  ? 'border-blue-600 bg-blue-600 text-white'
+                                  : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                              }`}
+                            >
+                              {value === 'yes' ? 'Yes' : 'No'}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
+                          <p className="text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
+                            {isBusy ? <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Saving…</span>
+                              : selected ? `Answered ${selected === 'yes' ? 'Yes' : 'No'}`
+                                : doneAt ? 'Previously checked; Yes/No was not recorded. Choose an answer.'
+                                  : 'Not answered'}
+                          </p>
+                          {selected && (
+                            <button type="button" onClick={() => answer(item, null)}
+                              className="min-h-[44px] px-2 text-xs font-medium text-gray-500 underline hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100">
+                              Clear answer
+                            </button>
+                          )}
+                        </div>
+                      </fieldset>
+                    </li>
+                  );
+                }
                 return (
                   <li key={item.id}>
                     <button
@@ -225,19 +282,19 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
           )}
 
           {error && (
-            <p className="mx-2 mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+            <p role="alert" className="mx-2 mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
               {error}
             </p>
           )}
 
-          {done > 0 && (
+          {hasProgress && (
             <div className="mt-2 flex justify-end px-2">
               <button
                 type="button"
-                onClick={resetAll}
+                onClick={() => { void saveProgress({}, '__reset__'); }}
                 disabled={!!busyId}
                 className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-700"
-                title="Clear every tick for this facility, ready for the next visit"
+                title="Clear every tick and answer for this facility, ready for the next visit"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Reset for next visit

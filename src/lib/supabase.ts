@@ -360,7 +360,8 @@ export interface Facility {
   facility_group?: string | null;
   /** Free-form labels applied in bulk from the facilities table. */
   tags?: string[] | null;
-  /** Site-visit checklist ticks: itemId -> ISO timestamp. Template lives on
+  /** Site-visit checklist ticks and reserved string-encoded Yes/No answers.
+   *  See ChecklistProgress in utils/siteVisitChecklist. Template lives on
    *  the account (accounts.site_visit_checklist). */
   site_visit_checklist_progress?: Record<string, string> | null;
   /**
