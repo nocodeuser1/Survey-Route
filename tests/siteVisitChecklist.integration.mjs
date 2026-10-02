@@ -231,44 +231,95 @@ if (process.env.QA_DOM === '1') {
       Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
       el.dispatchEvent(new dom.window.Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
     };
-    invClick('Yes'); await delay(20);
+    for (const day of [false, true]) {
+      const key = day ? 'day_tanks_inventory' : 'containers_over_55';
+      const before = saves;
+      invClick('Yes', day); await delay(30); await idle();
+      assert.equal(saves, before + 1);
+      assert.equal(JSON.parse(records.a.site_visit_checklist_progress['__answer:' + key]).answer, 'yes');
+      assert.equal(records.a.site_visit_checklist_progress['__inventory:' + key], undefined);
+      assert.equal(inventoryRow(day).querySelector('input'), null);
+      assert.ok(inventoryRow(day).textContent.includes('Yes · details not recorded'));
+      invClick('Yes', day); await delay(20); assert.equal(saves, before + 1);
+    }
+    await reload();
+    assert.ok(text().includes('2 of 10 done'));
+    assert.equal(inventoryRow().querySelector('input'), null);
+    assert.equal(inventoryRow(true).querySelector('input'), null);
+    results.push('Both Yes answers save immediately with zero inventory rows, count as complete, and survive reload');
+
+    failNext = true; invClick('No'); await delay(30); await idle();
+    assert.ok(doc().querySelector('[role="alert"]'));
+    assert.ok(inventoryRow().textContent.includes('Yes · details not recorded'));
+    invClick('No'); await delay(30); await idle(); await reload();
+    assert.equal(inventoryRow().querySelector('[aria-pressed="true"]').textContent, 'No');
+    invClick('Yes'); await delay(30); await idle();
+    results.push('Immediate presence saves roll back on failure and No remains distinct from unanswered');
+
+    invClick('+ Add drum size'); await delay(20);
     assert.equal(inventoryRow().querySelector('[aria-label="Size in gallons 1"]').value, '55');
+    assert.equal(inventoryRow().querySelector('[aria-label="Quantity 1"]').value, '');
+    const beforeBlank = saves;
+    invClick('Save details'); await delay(20);
+    assert.ok(inventoryRow().querySelector('[role="alert"]'));
+    assert.equal(saves, beforeBlank);
+    invClick('Cancel'); await delay(20);
+    assert.equal(inventoryRow().querySelector('input'), null);
+    assert.ok(inventoryRow().textContent.includes('Yes · details not recorded'));
+    invClick('+ Add drum size'); await delay(20);
     invInput('Quantity 1', '3'); await delay(20);
-    invClick('Save inventory'); await delay(30); await idle();
+    invClick('Save details'); await delay(30); await idle();
     assert.ok(inventoryRow().textContent.includes('55 gal × 3'));
     assert.equal(inventoryRow().querySelector('input'), null);
     await reload(); assert.ok(inventoryRow().textContent.includes('55 gal × 3'));
-    results.push('Drum Yes expands mobile inputs; save persists and collapses size/quantity summary');
-    invClick('Edit'); await delay(20); invClick('Add another drum size'); await delay(20);
+    results.push('Optional Add opens a blank quantity; empty save blocked; cancel and successful save collapse details');
+
+    invClick('+ Add drum size'); await delay(20);
+    assert.equal(inventoryRow().querySelector('[aria-label="Quantity 2"]').value, '');
     invInput('Size in gallons 2', '135'); invInput('Quantity 2', '2'); await delay(20);
-    invClick('Save inventory'); await delay(30); await idle();
+    invClick('Save details'); await delay(30); await idle();
     assert.ok(inventoryRow().textContent.includes('135 gal × 2'));
-    invClick('Edit'); await delay(20); invInput('Quantity 1', '0'); await delay(20);
-    invClick('Save inventory'); await delay(20); assert.ok(inventoryRow().querySelector('[role="alert"]'));
+    invClick('Edit details'); await delay(20); invInput('Quantity 1', '0'); await delay(20);
+    invClick('Save details'); await delay(20); assert.ok(inventoryRow().querySelector('[role="alert"]'));
     invClick('Cancel'); await delay(20); assert.ok(inventoryRow().textContent.includes('55 gal × 3'));
-    results.push('Repeatable sizes save; invalid quantities rejected; cancel preserves previous inventory');
-    invClick('Yes', true); await delay(20);
-    invInput('Description 1', 'Methanol', true); invInput('Size in gallons 1', '155', true); await delay(20);
-    invClick('Save inventory', true); await delay(30); await idle();
+    results.push('Repeatable sizes require deliberate quantities; invalid quantities rejected; cancel preserves saved inventory');
+
+    invClick('+ Add day tank', true); await delay(20);
+    assert.equal(inventoryRow(true).querySelector('[aria-label="Quantity 1"]').value, '');
+    invInput('Description 1', 'Methanol', true); invInput('Size in gallons 1', '155', true); invInput('Quantity 1', '1', true); await delay(20);
+    invClick('Save details', true); await delay(30); await idle();
     assert.ok(inventoryRow(true).textContent.includes('155 gal × 1 (Methanol)'));
     assert.ok(inventoryRow().textContent.includes('55 gal × 3'));
-    invClick('Edit', true); await delay(20); invInput('Description 1', 'custom', true); await delay(20);
+    invClick('Edit details', true); await delay(20); invInput('Description 1', 'custom', true); await delay(20);
     invInput('Custom description 1', 'Custom fluid', true); await delay(20);
-    invClick('Save inventory', true); await delay(30); await idle();
+    invClick('Save details', true); await delay(30); await idle();
     assert.ok(inventoryRow(true).textContent.includes('Custom fluid'));
-    results.push('Day tanks have independent inventory with preset and custom fluid descriptions');
-    invClick('Edit'); await delay(20); invClick('No'); await delay(20);
-    failNext = true; invClick('Save inventory'); await delay(30); await idle();
+    await reload(); assert.ok(inventoryRow(true).textContent.includes('155 gal × 1 (Custom fluid)'));
+    results.push('Day tanks save preset/custom descriptions independently; genuine quantity of one survives reload');
+
+    invClick('Edit details'); await delay(20); invInput('Quantity 1', '9'); await delay(20);
+    failNext = true; invClick('Save details'); await delay(30); await idle();
     assert.ok(doc().querySelector('[role="alert"]'));
-    assert.equal(JSON.parse(records.a.site_visit_checklist_progress['__answer:containers_over_55']).answer, 'yes');
-    invClick('Save inventory'); await delay(30); await idle();
-    assert.ok(inventoryRow().textContent.includes('No containers recorded'));
+    assert.equal(JSON.parse(records.a.site_visit_checklist_progress['__inventory:containers_over_55']).containers[0].quantity, 3);
+    assert.equal(inventoryRow().querySelector('[aria-label="Quantity 1"]').value, '9');
+    invClick('Cancel'); await delay(20);
+    assert.ok(inventoryRow().textContent.includes('55 gal × 3'));
+    invClick('Edit details'); await delay(20);
+    inventoryRow().querySelector('[aria-label="Remove entry 2"]').click(); await delay(20);
+    inventoryRow().querySelector('[aria-label="Remove entry 1"]').click(); await delay(20);
+    invClick('Save details'); await delay(30); await idle();
+    assert.ok(inventoryRow().textContent.includes('Yes · details not recorded'));
     assert.equal(records.a.site_visit_checklist_progress['__inventory:containers_over_55'], undefined);
+    assert.equal(JSON.parse(records.a.site_visit_checklist_progress['__answer:containers_over_55']).answer, 'yes');
+    results.push('Failed detail save preserves persisted data and draft; removing every row retains saved Yes');
+
+    invClick('No', true); await delay(30); await idle();
+    assert.equal(records.a.site_visit_checklist_progress['__inventory:day_tanks_inventory'], undefined);
     click('Reset for next visit'); await delay(30); await idle();
     assert.deepEqual(records.a.site_visit_checklist_progress, {});
     assert.ok(inventoryRow().textContent.includes('Not answered'));
     assert.ok(inventoryRow(true).textContent.includes('Not answered'));
-    results.push('Inventory failures retain saved data; No clears inventory; reset clears both inventories');
+    results.push('No clears only that inventory; reset clears both presence answers and inventories');
 
     await writeFile(join(output, 'dom-results.json'), JSON.stringify({ passed: results, visualTesting: 'Not covered by DOM emulator' }, null, 2));
     globalThis.console.log(JSON.stringify({ passed: results, visualTesting: 'Not covered by DOM emulator' }, null, 2));
@@ -289,7 +340,8 @@ const context = await browser.newContext({ viewport: { width: 390, height: 844 }
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
-const button = name => page.getByRole('button', { name, exact: true });
+const drain = page.locator('li').filter({ has: page.getByText(/drain valves.*berms/) });
+const button = name => (['Yes', 'No', 'Clear answer'].includes(name) ? drain : page).getByRole('button', { name, exact: true });
 const selected = async name => assert.equal(await button(name).getAttribute('aria-pressed'), 'true');
 const idle = () => page.waitForFunction(() => ![...document.querySelectorAll('fieldset')].some(node => node.disabled));
 const open = async () => { await page.goto(`http://127.0.0.1:${server.address().port}`); await button('Yes').waitFor(); };
@@ -302,7 +354,7 @@ try {
   await page.getByText('0 of 10 done', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: /Photograph condition and position/ }).count(), 1);
   await page.screenshot({ path: join(output, 'mobile-unanswered.png'), fullPage: true });
-  results.push('Legacy tick is unanswered; other eight items remain checkboxes');
+  results.push('Legacy tick is unanswered; ordinary items remain checkboxes');
 
   await button('No').click(); await idle(); await selected('No');
   assert.equal(JSON.parse(records.a.site_visit_checklist_progress['__answer:' + id]).answer, 'no');
@@ -317,7 +369,8 @@ try {
   await button('Yes').click(); assert.equal(saves, beforeRepeated);
   requestDelay = 400;
   await page.evaluate(() => {
-    const no = [...document.querySelectorAll('button')].find(node => node.textContent === 'No');
+    const row = [...document.querySelectorAll('li')].find(node => /drain valves.*berms/.test(node.textContent));
+    const no = [...row.querySelectorAll('button')].find(node => node.textContent === 'No');
     no.click(); no.click();
   });
   await idle(); await selected('No'); assert.equal(saves, beforeRepeated + 1);
@@ -336,7 +389,7 @@ try {
   requestDelay = 700;
   await button('No').click();
   await page.evaluate(() => window.qa.select('b'));
-  await page.getByText('Not answered', { exact: true }).waitFor();
+  await drain.getByText('Not answered', { exact: true }).waitFor();
   await page.evaluate(() => window.qa.select('a'));
   await selected('No'); assert.equal(await button('Yes').isDisabled(), true);
   await idle(); await selected('No');
@@ -344,7 +397,7 @@ try {
 
   failNext = true; requestDelay = 400;
   await button('Yes').click(); await page.evaluate(() => window.qa.select('b'));
-  await page.getByText('Not answered', { exact: true }).waitFor();
+  await drain.getByText('Not answered', { exact: true }).waitFor();
   await delay(600);
   assert.equal(await page.getByRole('alert').count(), 0);
   assert.equal(await button('Yes').getAttribute('aria-pressed'), 'false');
@@ -378,11 +431,51 @@ try {
   await page.getByText('Are drain valves present on the berms?', { exact: true }).waitFor();
   results.push('Account switch respects empty template; Settings badge, reorder, and restore keep Yes/No');
 
-  for (const width of [320, 390, 1280]) {
-    await page.setViewportSize({ width, height: 900 });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    const box = await button('Yes').boundingBox(); assert.ok(box.height >= 44);
+  const inventory = (day = false) => page.locator('li').filter({ has: page.getByText(day ? 'Are day tanks present on site?' : 'Are drums present on site?', { exact: true }) });
+  for (const day of [false, true]) {
+    await inventory(day).getByRole('button', { name: 'Yes', exact: true }).click(); await idle();
+    assert.equal(await inventory(day).locator('input').count(), 0);
+    await inventory(day).getByText('Yes · details not recorded', { exact: true }).waitFor();
   }
+  await page.screenshot({ path: join(output, 'mobile-presence-only.png'), fullPage: true });
+  await open();
+  await inventory().getByText('Yes · details not recorded', { exact: true }).waitFor();
+  await inventory(true).getByText('Yes · details not recorded', { exact: true }).waitFor();
+  results.push('Both immediate presence-only answers persist and reload with no detail editor or inferred count');
+  for (const day of [false, true]) {
+    await inventory(day).getByRole('button', { name: day ? '+ Add day tank' : '+ Add drum size', exact: true }).click();
+    assert.equal(await inventory(day).getByLabel('Quantity 1', { exact: true }).inputValue(), '');
+    await inventory(day).getByRole('button', { name: 'Save details', exact: true }).click();
+    await inventory(day).getByRole('alert').waitFor();
+    if (day) {
+      await inventory(day).getByLabel('Description 1', { exact: true }).selectOption('custom');
+      await inventory(day).getByLabel('Custom description 1', { exact: true }).fill('Custom tank fluid');
+    }
+    for (const width of [320, 390, 430, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      // Global overflow:hidden can conceal clipped controls, so check every
+      // control's actual geometry against its containing checklist card too.
+      const geometry = await inventory(day).evaluate(card => {
+        const bounds = card.getBoundingClientRect();
+        return [...card.querySelectorAll('button,input,select')].map(control => {
+          const rect = control.getBoundingClientRect();
+          return { label: control.getAttribute('aria-label') || control.textContent, left: rect.left, right: rect.right, height: rect.height, fontSize: getComputedStyle(control).fontSize, tag: control.tagName, cardLeft: bounds.left, cardRight: bounds.right, viewportWidth: innerWidth };
+        });
+      });
+      for (const control of geometry) {
+        assert.ok(control.left >= control.cardLeft - 1 && control.right <= control.cardRight + 1 && control.right <= control.viewportWidth, `Clipped ${control.label} at ${width}px`);
+        assert.ok(control.height >= 44, `Small touch target ${control.label}`);
+        if (control.tag !== 'BUTTON') assert.ok(parseFloat(control.fontSize) >= 16, `Small input text ${control.label}`);
+      }
+      await page.screenshot({ path: join(output, `${day ? 'day-tank' : 'drum'}-editor-${width}.png`), fullPage: true });
+    }
+    await inventory(day).getByLabel('Quantity 1', { exact: true }).fill('1');
+    await inventory(day).getByRole('button', { name: 'Save details', exact: true }).click(); await idle();
+    assert.equal(await inventory(day).locator('input').count(), 0);
+    await inventory(day).getByText(day ? '55 gal × 1 (Custom tank fluid)' : '55 gal × 1', { exact: true }).waitFor();
+  }
+  results.push('Drum/day-tank editors fit at 320/390/430/1280px; every control stays within card; targets ≥44px and inputs ≥16px; deliberate quantities save and collapse');
   await button('No').click(); await idle();
   await page.screenshot({ path: join(output, 'desktop-no.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

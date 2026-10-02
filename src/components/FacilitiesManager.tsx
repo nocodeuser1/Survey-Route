@@ -20,6 +20,7 @@ import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import CustomFilterBuilder from './CustomFilterBuilder';
 import {
   evaluateAllRules,
+  FILTER_FIELDS,
   describeRule,
   type CustomRule,
 } from '../utils/customFilters';
@@ -45,6 +46,11 @@ import { useFacilitiesPreferences } from '../hooks/useFacilitiesPreferences';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getFacilitiesWithPhotoHistory, getLatestPhotoDatesByFacility } from '../utils/photoHistory';
+import { normalizeChecklist, type ChecklistItem } from '../utils/siteVisitChecklist';
+import {
+  buildChecklistColumns, buildChecklistFilterFields, checklistMatchesSearch,
+  getChecklistColumnText, getChecklistColumnValue, type ChecklistColumnId,
+} from '../utils/checklistColumns';
 
 interface FacilitiesManagerProps {
   facilities: Facility[];
@@ -114,7 +120,7 @@ function TouchTooltipButton({
   );
 }
 
-type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'tags' | 'historical_name' |
+type BaseColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'tags' | 'historical_name' |
   'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'latest_photo_date' | 'field_visit_date' | 'estimated_oil_per_day' |
@@ -125,6 +131,7 @@ type ColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration'
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status' |
   'plan_invoice_status' | 'inspection_invoice_status' | 'invoiced_date';
+type ColumnId = BaseColumnId | ChecklistColumnId;
 
 // spcc_status sits immediately after name so the SPCC plan status is the
 // first thing the user sees in every mode that shows it (Israel's request
@@ -141,7 +148,7 @@ const INVOICE_VIEW_COLUMNS: Record<'plan' | 'inspection', ColumnId[]> = {
 };
 
 // Complete ordered list of all columns - this defines the display order
-const ALL_COLUMNS_ORDER: ColumnId[] = [
+const BASE_COLUMNS_ORDER: BaseColumnId[] = [
   // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
   // freshly-toggled column re-inserts into an order that keeps SPCC status
   // pinned right beside the facility name.
@@ -165,7 +172,7 @@ const ALL_COLUMNS_ORDER: ColumnId[] = [
   'created_at',
 ];
 
-const COLUMN_LABELS: Record<ColumnId, string> = {
+const COLUMN_LABELS: Record<BaseColumnId, string> = {
   name: 'Facility Name',
   address: 'Address',
   latitude: 'Latitude',
@@ -254,11 +261,51 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // column is still named `camino_facility_id` (historical) — only the
   // visible label switches. See src/hooks/useFacilityIdLabel.ts.
   const facilityIdLabel = useFacilityIdLabel();
-  // Reuse COLUMN_LABELS but override the one entry that's account-branded.
-  const columnLabels = useMemo<Record<ColumnId, string>>(
-    () => ({ ...COLUMN_LABELS, camino_facility_id: facilityIdLabel.long }),
-    [facilityIdLabel.long],
+  // Load the current account's live template. Missing templates use the same
+  // defaults as the checklist; a request failure must not invent a template.
+  const [checklistTemplate, setChecklistTemplate] = useState<{
+    accountId: string; items: ChecklistItem[]; error: string | null;
+  }>({ accountId, items: [], error: null });
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { data, error } = await supabase.from('accounts')
+          .select('site_visit_checklist').eq('id', accountId).maybeSingle();
+        if (cancelled) return;
+        if (error) throw error;
+        setChecklistTemplate({ accountId, items: normalizeChecklist(data?.site_visit_checklist), error: null });
+      } catch (error) {
+        console.error('[FacilitiesManager] checklist template load failed:', error);
+        if (!cancelled) setChecklistTemplate(previous => ({
+          accountId, items: previous.accountId === accountId ? previous.items : [],
+          error: 'Could not refresh checklist columns. Reload to try again.',
+        }));
+      }
+    };
+    void load();
+    // Refresh after returning from settings or another browser tab.
+    window.addEventListener('focus', load);
+    return () => { cancelled = true; window.removeEventListener('focus', load); };
+  }, [accountId]);
+  const checklistColumns = useMemo(() => buildChecklistColumns(
+    checklistTemplate.accountId === accountId ? checklistTemplate.items : [],
+  ), [accountId, checklistTemplate]);
+  const checklistColumnMap = useMemo(() => new Map(checklistColumns.map(column => [column.id, column])), [checklistColumns]);
+  const allColumnsOrder = useMemo<ColumnId[]>(
+    () => [...BASE_COLUMNS_ORDER, ...checklistColumns.map(column => column.id)], [checklistColumns],
   );
+  const availableColumnIds = useMemo(() => new Set<ColumnId>(allColumnsOrder), [allColumnsOrder]);
+  const filterFields = useMemo(() => [...FILTER_FIELDS, ...buildChecklistFilterFields(checklistColumns)], [checklistColumns]);
+  const columnLabels = useMemo<Record<ColumnId, string>>(
+    () => ({ ...COLUMN_LABELS, camino_facility_id: facilityIdLabel.long,
+      ...Object.fromEntries(checklistColumns.map(column => [column.id, column.label])),
+    }),
+    [facilityIdLabel.long, checklistColumns],
+  );
+  const columnMatchesSearch = (id: ColumnId, query: string) =>
+    (checklistColumnMap.get(id as ChecklistColumnId)?.searchText || columnLabels[id] || id)
+      .toLowerCase().includes(query.toLowerCase());
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
@@ -641,7 +688,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const customSurveyTypes = surveyTypes.filter(t => !t.is_system && t.enabled !== false);
 
   // Load column order and visibility per report type + spccMode combination
-  const getStorageKey = (key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`;
+  const getStorageKey = useCallback((key: string) => `facilities_${key}_${selectedReportType}_${spccMode}_${accountId}`, [selectedReportType, spccMode, accountId]);
   const getColumnsKey = () => `${selectedReportType}_${spccMode}`;
   // Column widths live in localStorage (per computer) rather than the shared
   // per-account prefs row, so each machine's display gets its own fitted
@@ -652,9 +699,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const getWidthsStorageKey = () =>
     `facilities_colw_${selectedReportType}_${spccMode}${invoiceView ? '_invoice' : ''}_${accountId}`;
 
-  // Merge saved column order with any new columns added to ALL_COLUMNS_ORDER
-  const mergeColumnOrder = (saved: ColumnId[]): ColumnId[] => {
-    const missing = ALL_COLUMNS_ORDER.filter(id => !saved.includes(id));
+  // Merge saved column order with any new columns added to allColumnsOrder
+  const mergeColumnOrder = useCallback((saved: ColumnId[]): ColumnId[] => {
+    const missing = allColumnsOrder.filter(id => !saved.includes(id));
     if (missing.length === 0) return saved;
 
     const merged = [...saved];
@@ -671,7 +718,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       merged.push(id);
     });
     return merged;
-  };
+  }, [allColumnsOrder]);
 
   const getDefaultVisibleColumns = (mode: string): ColumnId[] => {
     const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
@@ -694,7 +741,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const prefsCols = facPrefs.columns[getColumnsKey()];
     if (prefsCols?.order) return mergeColumnOrder(prefsCols.order as ColumnId[]);
     const saved = localStorage.getItem(getStorageKey('column_order'));
-    return saved ? mergeColumnOrder(JSON.parse(saved)) : ALL_COLUMNS_ORDER;
+    return saved ? mergeColumnOrder(JSON.parse(saved)) : allColumnsOrder;
   });
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
     const prefsCols = facPrefs.columns[getColumnsKey()];
@@ -713,9 +760,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       return INVOICE_VIEW_COLUMNS[spccMode];
     }
     return visibleColumns.filter(
-      c => c !== 'plan_invoice_status' && c !== 'inspection_invoice_status',
+      c => availableColumnIds.has(c) && c !== 'plan_invoice_status' && c !== 'inspection_invoice_status',
     );
-  }, [invoiceView, spccMode, visibleColumns]);
+  }, [invoiceView, spccMode, visibleColumns, availableColumnIds]);
   // Per-column pixel widths from auto-fit-to-display + drag-resize +
   // double-click auto-fit. Stored in localStorage (per computer, per mode)
   // so each machine keeps its own fitted layout — see getWidthsStorageKey
@@ -1002,11 +1049,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [draftVisibleColumns, setDraftVisibleColumns] = useState<ColumnId[]>([]);
   const [draftColumnOrder, setDraftColumnOrder] = useState<ColumnId[]>([]);
   const [showExportColumnSelector, setShowExportColumnSelector] = useState(false);
-  const [exportColumnOrder, setExportColumnOrder] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
-  const [exportVisibleColumns, setExportVisibleColumns] = useState<ColumnId[]>(ALL_COLUMNS_ORDER);
+  const [exportColumnOrder, setExportColumnOrder] = useState<ColumnId[]>(allColumnsOrder);
+  const [exportVisibleColumns, setExportVisibleColumns] = useState<ColumnId[]>(allColumnsOrder);
   const [draggedExportColumn, setDraggedExportColumn] = useState<ColumnId | null>(null);
   const [exportColumnSearch, setExportColumnSearch] = useState('');
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
+  useEffect(() => {
+    setDraftColumnOrder(previous => mergeColumnOrder(previous));
+    setExportColumnOrder(previous => mergeColumnOrder(previous).filter(id => availableColumnIds.has(id)));
+  }, [availableColumnIds, mergeColumnOrder]);
   const [mobileEditingFacility, setMobileEditingFacility] = useState<Facility | null>(null);
   const [mobileEditFormData, setMobileEditFormData] = useState<Record<ColumnId, string>>({} as Record<ColumnId, string>);
   const [showWellSection, setShowWellSection] = useState(false);
@@ -1236,7 +1287,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const handleDateBlur = (field: ColumnId) => (e: React.FocusEvent<HTMLInputElement>) => {
     const normalized = normalizeDateValue(e.target.value);
     if (field === 'field_visit_date') {
-      const updates: Partial<Record<ColumnId, string>> = { field_visit_date: normalized };
+      const updates: Partial<Record<BaseColumnId, string>> = { field_visit_date: normalized };
       if (normalized) updates.photos_taken = 'true';
       setMobileEditFormData(prev => ({ ...prev, ...updates }));
     } else {
@@ -1251,7 +1302,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (normalized !== pasted) {
       e.preventDefault();
       if (field === 'field_visit_date') {
-        const updates: Partial<Record<ColumnId, string>> = { field_visit_date: normalized };
+        const updates: Partial<Record<BaseColumnId, string>> = { field_visit_date: normalized };
         if (normalized) updates.photos_taken = 'true';
         setMobileEditFormData(prev => ({ ...prev, ...updates }));
       } else {
@@ -1335,7 +1386,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       setColumnOrder(mergeColumnOrder(prefsCols.order as ColumnId[]));
     } else {
       const savedOrder = localStorage.getItem(getStorageKey('column_order'));
-      setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : ALL_COLUMNS_ORDER);
+      setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : allColumnsOrder);
     }
 
     if (prefsCols?.visible) {
@@ -1354,7 +1405,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     if (userChangedMode.current) {
       userChangedMode.current = false;
     }
-  }, [selectedReportType, spccMode, facPrefs.columns]);
+  }, [selectedReportType, spccMode, accountId, facPrefs.columns, allColumnsOrder, getStorageKey, mergeColumnOrder]);
 
   useEffect(() => {
     // Wait for ref to be available
@@ -1847,7 +1898,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const matchesSearch = !searchQuery ||
         facility.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         facility.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        facility.camino_facility_id?.toLowerCase().includes(searchQuery.toLowerCase());
+        facility.camino_facility_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        checklistMatchesSearch(checklistColumns, facility.site_visit_checklist_progress, searchQuery);
 
       const matchesReportType = matchesReportTypeFilter(facility);
 
@@ -1927,7 +1979,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
 
       if (customFilterRules.length > 0) {
-        if (!evaluateAllRules(facility, customFilterRules)) return false;
+        if (!evaluateAllRules(facility, customFilterRules, filterFields)) return false;
       }
 
       return matchesSearch && matchesStatus && matchesReportType;
@@ -1940,6 +1992,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
       // Get values for comparison based on column
       const getColumnValue = (facility: Facility, col: ColumnId): string | number | Date | null => {
+        const checklistColumn = checklistColumnMap.get(col as ChecklistColumnId);
+        if (checklistColumn) return getChecklistColumnValue(checklistColumn, facility.site_visit_checklist_progress);
         switch (col) {
           case 'name':
             return facility.name || '';
@@ -2187,6 +2241,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       const valA = getColumnValue(a, sortColumn);
       const valB = getColumnValue(b, sortColumn);
 
+      // Unknown inventory totals stay empty, never zero, and sort last.
+      if (checklistColumnMap.has(sortColumn as ChecklistColumnId)) {
+        if (valA === null && valB !== null) return 1;
+        if (valB === null && valA !== null) return -1;
+      }
       if (typeof valA === 'string' && typeof valB === 'string') {
         comparison = valA.localeCompare(valB);
       } else if (typeof valA === 'number' && typeof valB === 'number') {
@@ -2807,7 +2866,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // the clipboard matches what the user sees on screen.
     const cols: ColumnId[] = [
       'name',
-      ...visibleColumns.filter((c) => c !== 'name' && extraColumns.includes(c)),
+      ...visibleColumns.filter((c) => availableColumnIds.has(c) && c !== 'name' && extraColumns.includes(c)),
     ];
     const sanitize = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
     const header = cols.map((c) => sanitize(columnLabels[c] ?? c)).join('\t');
@@ -3035,8 +3094,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const handleExportFacilities = () => {
-    setExportVisibleColumns([...visibleColumns]);
-    setExportColumnOrder([...ALL_COLUMNS_ORDER]);
+    setExportVisibleColumns(visibleColumns.filter(id => availableColumnIds.has(id)));
+    setExportColumnOrder([...allColumnsOrder]);
     setExportColumnSearch('');
     setShowExportColumnSelector(true);
   };
@@ -3049,6 +3108,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
    * `photos_taken`, which serialized as "[object Object]").
    */
   const getColumnExportText = (facility: Facility, columnId: ColumnId): string => {
+    const checklistColumn = checklistColumnMap.get(columnId as ChecklistColumnId);
+    if (checklistColumn) return getChecklistColumnText(checklistColumn, facility.site_visit_checklist_progress);
     if (columnId === 'spcc_status') {
       // Use the canonical SPCC Plan status label that SPCCStatusBadge / the
       // route filters / the SPCCPlanDetailModal all share — going through
@@ -3430,7 +3491,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
 
       const baseUrl = window.location.origin;
-      const otherColumns = visibleColumns.filter(c => c !== 'name');
+      const otherColumns = visibleColumns.filter(c => availableColumnIds.has(c) && c !== 'name');
 
       const headers = ['Facility Name', 'Share Links', ...otherColumns.map(c => columnLabels[c])];
 
@@ -3524,7 +3585,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const resetColumns = () => {
-    setDraftColumnOrder(ALL_COLUMNS_ORDER);
+    setDraftColumnOrder(allColumnsOrder);
     setDraftVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
   };
 
@@ -3587,8 +3648,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const resetExportColumns = () => {
-    setExportColumnOrder(ALL_COLUMNS_ORDER);
-    setExportVisibleColumns([...visibleColumns]);
+    setExportColumnOrder(allColumnsOrder);
+    setExportVisibleColumns(visibleColumns.filter(id => availableColumnIds.has(id)));
   };
 
   const handleExportDragStart = (columnId: ColumnId) => {
@@ -3774,6 +3835,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const renderCellContent = (facility: Facility, columnId: ColumnId, isEditing: boolean) => {
+    const checklistColumn = checklistColumnMap.get(columnId as ChecklistColumnId);
+    if (checklistColumn) {
+      const value = getChecklistColumnValue(checklistColumn, facility.site_visit_checklist_progress);
+      const text = getChecklistColumnText(checklistColumn, facility.site_visit_checklist_progress);
+      return <span className={value === null ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'} title={text}>
+        {checklistColumn.kind === 'date' && typeof value === 'string' ? formatDate(value) : text}
+      </span>;
+    }
     if (isEditing) {
       switch (columnId) {
         case 'name':
@@ -4911,7 +4980,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               {customFilterRules.length > 0 && (
                 <div className="hidden sm:flex items-center gap-1.5 flex-wrap ml-1">
                   {customFilterRules.map((r) => {
-                    const desc = describeRule(r, facilityIdLabel.long);
+                    const desc = describeRule(r, facilityIdLabel.long, filterFields);
                     return (
                       <button
                         key={r.id}
@@ -5100,6 +5169,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           </div>
 
+          {checklistTemplate.accountId === accountId && checklistTemplate.error && (
+            <p role="alert" className="px-4 py-2 text-sm text-amber-700 dark:text-amber-400">{checklistTemplate.error}</p>
+          )}
           {/* Row 2: Search + Toolbar */}
           {!isLoading && (
             <div className="px-3 pb-2 sm:px-4 sm:pb-3 flex items-center gap-1.5 sm:gap-2 flex-nowrap sm:flex-wrap">
@@ -5107,7 +5179,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder={`Search name, address, or ${facilityIdLabel.short}...`}
+                placeholder={`Search name, address, ${facilityIdLabel.short}, or checklist...`}
                 size="sm"
                 containerClassName="relative flex-1 min-w-0 sm:min-w-[180px]"
               />
@@ -5198,6 +5270,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             the one the user will reach for when the canned
                             options below don't combine. */}
                         <CustomFilterBuilder
+                          fields={filterFields}
                           rules={customFilterRules}
                           onChange={setCustomFilterRules}
                         />
@@ -5293,6 +5366,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             {spccMode !== 'plan' && <option value="spcc_inspection_date">SPCC Inspection Date</option>}
                             {spccMode !== 'plan' && <option value="inspection_status">Inspection Status</option>}
                             {invoiceView && <option value="invoiced_date">Invoice Date</option>}
+                            <optgroup label="Site Visit Checklist">
+                              {checklistColumns.map(column => <option key={column.id} value={column.id}>{column.label}</option>)}
+                            </optgroup>
                           </select>
                         </div>
                         {/* Sold toggle */}
@@ -5810,7 +5886,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         // options to be added to the copy"). Name is always
                         // included; we pull it out so it shows as a fixed
                         // header chip and not a togglable row.
-                        const extraOptions = visibleColumns.filter((c) => c !== 'name');
+                        const extraOptions = visibleColumns.filter((c) => availableColumnIds.has(c) && c !== 'name');
                         const allChecked =
                           extraOptions.length > 0 &&
                           extraOptions.every((c) => copyExtraColumns.has(c));
@@ -6272,10 +6348,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const selectedColumns = exportColumnOrder.filter(id => exportVisibleColumns.includes(id));
         const unselectedColumns = exportColumnOrder.filter(id => !exportVisibleColumns.includes(id));
         const filteredSelected = selectedColumns.filter(id =>
-          columnLabels[id].toLowerCase().includes(exportSearchLower)
+          columnMatchesSearch(id, exportSearchLower)
         );
         const filteredUnselected = unselectedColumns.filter(id =>
-          columnLabels[id].toLowerCase().includes(exportSearchLower)
+          columnMatchesSearch(id, exportSearchLower)
         );
         return (
           <div
@@ -7177,13 +7253,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         // The invoice columns are never offered in the Columns menu — they
         // only appear (with action buttons) inside the dedicated Invoice view.
         const isMenuColumn = (id: ColumnId) =>
-          id !== 'plan_invoice_status' && id !== 'inspection_invoice_status';
+          availableColumnIds.has(id) && id !== 'plan_invoice_status' && id !== 'inspection_invoice_status';
         const filteredVisible = draftVisibleColumns.filter(id =>
-          isMenuColumn(id) && columnLabels[id].toLowerCase().includes(searchLower)
+          isMenuColumn(id) && columnMatchesSearch(id, searchLower)
         );
         const hiddenColumns = draftColumnOrder.filter(id => isMenuColumn(id) && !draftVisibleColumns.includes(id));
         const filteredHidden = hiddenColumns.filter(id =>
-          columnLabels[id].toLowerCase().includes(searchLower)
+          columnMatchesSearch(id, searchLower)
         );
         const hasChanges = JSON.stringify(draftVisibleColumns) !== JSON.stringify(visibleColumns)
           || JSON.stringify(draftColumnOrder) !== JSON.stringify(columnOrder);

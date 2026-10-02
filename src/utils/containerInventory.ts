@@ -5,7 +5,6 @@ export interface ContainerInventory { answer: 'yes' | 'no'; containers: Containe
 const inventoryKey = (id: string) => `__inventory:${id}`;
 
 export function validateContainerCounts(rows: ContainerCount[]): string | null {
-  if (!rows.length) return 'Add at least one container size and quantity.';
   if (rows.length > 50) return 'Use no more than 50 sizes.';
   const seen = new Set<string>();
   for (const row of rows) {
@@ -23,13 +22,15 @@ export function getContainerInventory(progress: ChecklistProgress, id: string): 
   const answer = getChecklistAnswer(progress, id);
   if (answer === 'no') return { answer, containers: [] };
   if (answer !== 'yes') return null;
+  // Presence is an independent saved answer, even if no details were entered.
+  const presenceOnly: ContainerInventory = { answer, containers: [] };
   try {
     const value = JSON.parse(progress[inventoryKey(id)] || 'null');
-    if (!value || value.recordedAt !== progress[id] || !Array.isArray(value.containers)) return null;
+    if (!value || value.recordedAt !== progress[id] || !Array.isArray(value.containers)) return presenceOnly;
     const rows: ContainerCount[] = value.containers.map((row: ContainerCount) => ({ gallons: row?.gallons, quantity: row?.quantity, ...(row?.contents ? { contents: row.contents } : {}) }));
-    if (validateContainerCounts(rows)) return null;
+    if (validateContainerCounts(rows)) return presenceOnly;
     return { answer, containers: rows };
-  } catch { return null; }
+  } catch { return presenceOnly; }
 }
 
 export function setContainerInventory(progress: ChecklistProgress, id: string, value: ContainerInventory | null, at = new Date().toISOString()): ChecklistProgress {
@@ -39,10 +40,10 @@ export function setContainerInventory(progress: ChecklistProgress, id: string, v
   }
   const next = setChecklistAnswer(progress, id, value?.answer ?? null, at);
   delete next[inventoryKey(id)];
-  if (value?.answer === 'yes') next[inventoryKey(id)] = JSON.stringify({ recordedAt: at, containers: value.containers });
+  if (value?.answer === 'yes' && value.containers.length) next[inventoryKey(id)] = JSON.stringify({ recordedAt: at, containers: value.containers });
   return next;
 }
 
 export function inventorySummary(value: ContainerInventory): string {
-  return value.answer === 'no' ? 'No containers recorded' : value.containers.map(row => `${row.gallons.toLocaleString()} gal × ${row.quantity.toLocaleString()}${row.contents ? ` (${row.contents})` : ''}`).join(' · ');
+  return value.answer === 'no' ? 'No' : !value.containers.length ? 'Yes · details not recorded' : value.containers.map(row => `${row.gallons.toLocaleString()} gal × ${row.quantity.toLocaleString()}${row.contents ? ` (${row.contents})` : ''}`).join(' · ');
 }

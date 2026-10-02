@@ -206,7 +206,7 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
                   const selected = getChecklistAnswer(progress, item.id);
                   return (
                     <li key={item.id} className="rounded-lg bg-blue-50/60 px-2 py-3 dark:bg-blue-900/10">
-                      <fieldset disabled={!!busyId}>
+                      <fieldset disabled={!!busyId} className="min-w-0 w-full max-w-full">
                         <legend className="text-sm font-medium leading-snug text-gray-800 dark:text-gray-100">
                           {item.label}
                         </legend>

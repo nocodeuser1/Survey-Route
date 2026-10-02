@@ -32,7 +32,7 @@ export interface CustomRule {
   value: CustomRuleValue;
 }
 
-export type ValueInputType = 'none' | 'select' | 'date' | 'text';
+export type ValueInputType = 'none' | 'select' | 'date' | 'text' | 'number';
 
 export interface CustomFilterOperator {
   id: string;
@@ -49,7 +49,7 @@ export interface CustomFilterField {
   id: string;
   label: string;
   /** Used to group fields under headers in the dropdown. */
-  group: 'photos' | 'spcc' | 'ldar' | 'dates' | 'identity' | 'misc';
+  group: 'photos' | 'spcc' | 'ldar' | 'dates' | 'identity' | 'misc' | 'checklist';
   operators: CustomFilterOperator[];
   /** Reads the value from a facility — only used by date/text/numeric
    *  comparisons. Photos and SPCC status fields evaluate via custom
@@ -272,10 +272,11 @@ export const FIELD_GROUP_LABELS: Record<CustomFilterField['group'], string> = {
   dates: 'Dates',
   identity: 'Facility Info',
   misc: 'Other',
+  checklist: 'Site Visit Checklist',
 };
 
-export function findField(fieldId: string): CustomFilterField | undefined {
-  return FILTER_FIELDS.find((f) => f.id === fieldId);
+export function findField(fieldId: string, fields: CustomFilterField[] = FILTER_FIELDS): CustomFilterField | undefined {
+  return fields.find((f) => f.id === fieldId);
 }
 
 /**
@@ -310,11 +311,12 @@ export function findOperator(
 /** Evaluate a single rule against one facility. Unknown rules pass-through
  *  rather than reject — keeps the list usable if a saved rule references a
  *  field/operator that's been removed from the registry. */
-export function evaluateRule(facility: Facility, rule: CustomRule): boolean {
-  const field = findField(rule.fieldId);
+export function evaluateRule(facility: Facility, rule: CustomRule, fields: CustomFilterField[] = FILTER_FIELDS): boolean {
+  const field = findField(rule.fieldId, fields);
   if (!field) return true;
   const op = findOperator(field, rule.operatorId);
   if (!op) return true;
+  if (field.group === 'checklist' && op.needsValue && (rule.value == null || rule.value === '')) return true;
 
   // -- Field-specific predicates that don't fit the simple getValue model.
 
@@ -367,6 +369,16 @@ export function evaluateRule(facility: Facility, rule: CustomRule): boolean {
     );
   }
 
+  if (op.id.startsWith('number_')) {
+    if (raw == null || raw === '' || rule.value == null) return false;
+    const actual = Number(raw);
+    const expected = Number(rule.value);
+    if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+    if (op.id === 'number_equal') return actual === expected;
+    if (op.id === 'number_greater') return actual > expected;
+    if (op.id === 'number_less') return actual < expected;
+  }
+
   if (op.id === 'before') {
     if (raw == null || rule.value == null) return false;
     return raw < rule.value; // ISO yyyy-mm-dd compares lexically
@@ -383,18 +395,19 @@ export function evaluateRule(facility: Facility, rule: CustomRule): boolean {
  *  returns true (no constraint). */
 export function evaluateAllRules(
   facility: Facility,
-  rules: CustomRule[]
+  rules: CustomRule[],
+  fields: CustomFilterField[] = FILTER_FIELDS,
 ): boolean {
   for (const r of rules) {
-    if (!evaluateRule(facility, r)) return false;
+    if (!evaluateRule(facility, r, fields)) return false;
   }
   return true;
 }
 
 /** Tiny helper for `Array.filter` callsites. Captures the rules so the
  *  hot-loop callback doesn't carry them in the closure shape every render. */
-export function makeRulesPredicate(rules: CustomRule[]) {
-  return (f: Facility) => evaluateAllRules(f, rules);
+export function makeRulesPredicate(rules: CustomRule[], fields: CustomFilterField[] = FILTER_FIELDS) {
+  return (f: Facility) => evaluateAllRules(f, rules, fields);
 }
 
 /** Builds a description of the current rule that's safe to render in a
@@ -405,8 +418,9 @@ export function describeRule(
   /** Optional brand-aware override for the camino_facility_id field's
    *  display label. Pass the result of useFacilityIdLabel().long. */
   brandedFacilityIdLabel?: string,
+  fields: CustomFilterField[] = FILTER_FIELDS,
 ): string | null {
-  const field = findField(rule.fieldId);
+  const field = findField(rule.fieldId, fields);
   if (!field) return null;
   const op = findOperator(field, rule.operatorId);
   if (!op) return null;
