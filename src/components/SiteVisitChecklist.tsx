@@ -1,9 +1,12 @@
+import ContainerInventoryItem from './ContainerInventoryItem';
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Loader2, RotateCcw } from 'lucide-react';
 import { supabase, type Facility } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import {
   countDone,
+  isInventoryItem,
+  DAY_TANKS_ITEM_ID,
   getChecklistAnswer,
   isYesNoItem,
   normalizeChecklist,
@@ -36,6 +39,7 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
   const [progress, setProgress] = useState<ChecklistProgress>(() => normalizeProgress(facility.site_visit_checklist_progress));
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [resetEpoch, setResetEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const scope = `${currentAccount?.id ?? ''}:${facility.id}`;
   const activeScope = useRef(scope);
@@ -81,7 +85,7 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
 
   const saveProgress = async (next: ChecklistProgress, busyItemId: string) => {
     // A synchronous lock also catches repeated taps before React rerenders.
-    if (pendingSaves.current.has(scope)) return;
+    if (pendingSaves.current.has(scope)) return false;
     const operation = { next, busyItemId };
     pendingSaves.current.set(scope, operation);
     const previous = progress;
@@ -99,7 +103,11 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
       if (err) throw err;
       // Keep reopening the same facility in step with the acknowledged save.
       Object.assign(facility, { site_visit_checklist_progress: next });
-      if (isCurrent()) onChange?.();
+      if (isCurrent()) {
+        onChange?.();
+        if (busyItemId === '__reset__') setResetEpoch(value => value + 1);
+      }
+      return true;
     } catch (err) {
       console.error('[SiteVisitChecklist] save failed:', err);
       // A slow failure for a previous facility must not replace the next one.
@@ -107,6 +115,7 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
         setProgress(previous);
         setError('Could not save. Check your connection and try again.');
       }
+      return false;
     } finally {
       if (isCurrent()) setBusyId(null);
       if (pendingSaves.current.get(scope) === operation) pendingSaves.current.delete(scope);
@@ -192,6 +201,7 @@ export default function SiteVisitChecklist({ facility, defaultOpen = false, onCh
               {items.map((item) => {
                 const doneAt = progress[item.id];
                 const isBusy = busyId === item.id;
+                if (isInventoryItem(item)) return <ContainerInventoryItem key={`${scope}:${item.id}:${resetEpoch}`} id={item.id} label={item.label} dayTanks={item.id === DAY_TANKS_ITEM_ID} progress={progress} disabled={!!busyId} onSave={saveProgress} />;
                 if (isYesNoItem(item)) {
                   const selected = getChecklistAnswer(progress, item.id);
                   return (

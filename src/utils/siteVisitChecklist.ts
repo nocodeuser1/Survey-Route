@@ -1,3 +1,4 @@
+import { getContainerInventory } from './containerInventory.ts';
 /**
  * Site-visit checklist — what a tech confirms while standing at a facility.
  *
@@ -29,6 +30,9 @@ export interface ChecklistItem {
 export type ChecklistProgress = Record<string, string | undefined>;
 
 export type ChecklistAnswer = 'yes' | 'no';
+export const DRUMS_ITEM_ID = 'containers_over_55';
+export const DAY_TANKS_ITEM_ID = 'day_tanks_inventory';
+export const isInventoryItem = (item: ChecklistItem) => item.id === DRUMS_ITEM_ID || item.id === DAY_TANKS_ITEM_ID;
 export const DRAIN_VALVES_ITEM_ID = 'drain_valves_presence';
 
 const answerKey = (itemId: string) => `__answer:${itemId}`;
@@ -81,7 +85,8 @@ export function setChecklistAnswer(
  * template get this.
  */
 export const DEFAULT_SITE_VISIT_CHECKLIST: ChecklistItem[] = [
-  { id: 'containers_over_55', label: 'Document every container over 55 gallons, including day tanks' },
+  { id: DRUMS_ITEM_ID, label: 'Are drums present on site?' },
+  { id: DAY_TANKS_ITEM_ID, label: 'Are day tanks present on site?' },
   { id: 'containment_measurements', label: 'Record containment measurements for each container' },
   { id: 'berm_dimensions', label: 'Measure berm dimensions (length, width, depth)' },
   { id: DRAIN_VALVES_ITEM_ID, label: 'Are drain valves present on the berms?' },
@@ -98,10 +103,16 @@ export function normalizeChecklist(raw: unknown): ChecklistItem[] {
   const items = raw
     .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
     .map((r) => ({ id: String(r.id ?? '').trim(), label: String(r.label ?? '').trim() }))
-    .filter((r) => r.id && r.label && !r.id.startsWith('__answer:'));
+    .filter((r) => r.id && r.label && !r.id.startsWith('__answer:') && !r.id.startsWith('__inventory:'));
   // An account that deliberately saved an empty list keeps it empty; only a
   // malformed/missing value falls back to the defaults.
-  return raw.length > 0 && items.length === 0 ? DEFAULT_SITE_VISIT_CHECKLIST : items;
+  if (raw.length > 0 && items.length === 0) return DEFAULT_SITE_VISIT_CHECKLIST;
+  const index = items.findIndex(item => item.id === DRUMS_ITEM_ID);
+  if (index >= 0) {
+    items[index] = { ...items[index], label: 'Are drums present on site?' };
+    if (!items.some(item => item.id === DAY_TANKS_ITEM_ID)) items.splice(index + 1, 0, { id: DAY_TANKS_ITEM_ID, label: 'Are day tanks present on site?' });
+  }
+  return items;
 }
 
 export function normalizeProgress(raw: unknown): ChecklistProgress {
@@ -115,7 +126,9 @@ export function normalizeProgress(raw: unknown): ChecklistProgress {
 
 export function countDone(items: ChecklistItem[], progress: ChecklistProgress): number {
   return items.reduce((n, item) => {
-    const done = isYesNoItem(item)
+    const done = isInventoryItem(item)
+      ? getContainerInventory(progress, item.id) !== null
+      : isYesNoItem(item)
       ? getChecklistAnswer(progress, item.id) !== null
       : !!progress[item.id];
     return done ? n + 1 : n;

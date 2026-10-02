@@ -5,6 +5,7 @@ import {
   DEFAULT_SITE_VISIT_CHECKLIST,
   makeItemId,
   isYesNoItem,
+  isInventoryItem,
   normalizeChecklist,
   type ChecklistItem,
 } from '../utils/siteVisitChecklist';
@@ -140,8 +141,8 @@ export default function SiteVisitChecklistSettings({ accountId }: SiteVisitCheck
         {items.map((item, idx) => (
           <li key={item.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-3 py-2 dark:bg-gray-800">
             <span className="w-6 shrink-0 text-center text-xs font-semibold text-gray-400">{idx + 1}</span>
-            {isYesNoItem(item) && (
-              <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Yes / No</span>
+            {(isYesNoItem(item) || isInventoryItem(item)) && (
+              <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{isInventoryItem(item) ? 'Yes / No + inventory' : 'Yes / No'}</span>
             )}
             <input
               value={item.label}
