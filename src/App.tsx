@@ -555,6 +555,14 @@ function App() {
   });
   const [mapTargetCoords, setMapTargetCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const viewingFacilityRef = useRef(false);
+  // Every entry point keeps the request until a newer target or Find me replaces it.
+  // A fresh object also makes repeated taps on the same facility recenter.
+  const showFacilityOnMap = useCallback((latitude: number, longitude: number) => {
+    viewingFacilityRef.current = true;
+    setMapTargetCoords({ latitude, longitude });
+    setCurrentView('route-planning');
+    setIsFullScreenMap(true);
+  }, []);
   const mapRef = useRef<any>(null);
   const [showRefreshOptions, setShowRefreshOptions] = useState(false);
   const [triggerFitBounds, setTriggerFitBounds] = useState(0);
@@ -4509,23 +4517,7 @@ function App() {
             isLoading={isLoadingFacilities}
             initialFacilityToEdit={facilityToEdit}
             onFacilityEditHandled={() => setFacilityToEdit(null)}
-            onShowOnMap={(latitude, longitude) => {
-              console.log('[Show on Map] Showing facility on map and ensuring visibility');
-              // Ensure ALL facilities are visible by resetting visibility state
-              setCompletedVisibility({
-                hideAllCompleted: false,
-                hideInternallyCompleted: false,
-                hideExternallyCompleted: false,
-                hideValidPlans: false,
-                hideExpiringPlans: false,
-              });
-              // Switch to route planning view and set map to fullscreen mode
-              viewingFacilityRef.current = true;
-              setCurrentView('route-planning');
-              setIsFullScreenMap(true);
-              setMapTargetCoords({ latitude, longitude });
-              // Don't clear targetCoords - let the map handle it naturally
-            }}
+            onShowOnMap={showFacilityOnMap}
             onCoordinatesUpdated={(_facilityId, latitude, longitude) => {
               // Only auto-center the map on the saved coordinates when the
               // user is ALREADY in route-planning context. Saving lat/long
@@ -5098,6 +5090,7 @@ function App() {
                   {!isFullScreenMap && (
                     <div className="relative">
                       <RouteMap
+                        onShowOnMap={showFacilityOnMap}
                         key={`route-map-${routeVersion}`}
                         result={filteredOptimizationResult}
                         homeBase={visibleHomeBase}
@@ -5191,10 +5184,7 @@ function App() {
                       onFacilitiesUpdated={loadData}
                       isRefreshing={isGenerating}
                       showOnlyRouteList={true}
-                      onShowOnMap={(lat, lng) => {
-                        setMapTargetCoords({ latitude: lat, longitude: lng });
-                        setIsFullScreenMap(true);
-                      }}
+                      onShowOnMap={showFacilityOnMap}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                       surveyType={surveyType}
                       surveyTypeKind={surveyTypeKind}
@@ -5203,7 +5193,8 @@ function App() {
                       }}
                     />
                   )}
-
+                </>
+              )}
                   {isFullScreenMap && (
                     <>
                       <div className="fixed inset-0 z-[90] overflow-hidden overscroll-none bg-white dark:bg-gray-900">
@@ -5249,6 +5240,7 @@ function App() {
 
                         <div className="h-full w-full">
                           <RouteMap
+                            onShowOnMap={showFacilityOnMap}
                             key={`route-map-fullscreen-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
                             result={filteredOptimizationResult}
                             homeBase={visibleHomeBase}
@@ -5302,8 +5294,6 @@ function App() {
                       </div>
                     </>
                   )}
-                </>
-              )}
             </div>
           </div>
         )}
@@ -5351,14 +5341,7 @@ function App() {
                   }
                 }
               }}
-              onShowOnMap={(latitude: number, longitude: number) => {
-                // Switch to route planning view and set map to fullscreen mode
-                setCurrentView('route-planning');
-                setIsFullScreenMap(true);
-                setMapTargetCoords({ latitude, longitude });
-                // Clear target coords after a short delay to allow map to center
-                setTimeout(() => setMapTargetCoords(null), 1000);
-              }}
+              onShowOnMap={showFacilityOnMap}
             />
           </div>
         )}

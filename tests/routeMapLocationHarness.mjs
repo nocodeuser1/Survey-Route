@@ -1,6 +1,19 @@
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 const root = resolve(import.meta.dirname, '..');
+// Exercise the real shared App handoff without mounting authenticated services.
+const appSource = ts.createSourceFile('App.tsx', readFileSync(join(root, 'src/App.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let handoff;
+function inspect(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(appSource) === 'showFacilityOnMap') handoff = node.initializer.getText(appSource);
+  if (ts.isJsxAttribute(node) && node.name.getText(appSource) === 'onShowOnMap' && node.initializer?.expression?.getText(appSource) !== 'showFacilityOnMap') throw new Error('App entrypoint bypasses the common facility handoff');
+  ts.forEachChild(node, inspect);
+}
+inspect(appSource);
+if (!handoff) throw new Error('Missing App facility handoff');
+
 const realLeafletHarness = `
 import L from './node_modules/leaflet/dist/leaflet-src.js';
 const createMap = L.map;
@@ -39,7 +52,7 @@ class MapMock {
   setBearing(value) { this.bearing = value; this.fire('rotate'); return this; }
   invalidateSize() { return this; }
   distance(a, b) { const p = coordinates(a); const q = coordinates(b); return Math.hypot(p.lat - q.lat, p.lng - q.lng) * 111000; }
-  removeLayer() { return this; }
+  removeLayer(layer) { this.markers = this.markers.filter(marker => marker !== layer); return this; }
   closePopup() { return this; }
   remove() { this.removed = true; this.events.clear(); return this; }
   fitBounds(bounds) { this.center = coordinates(bounds.points[0]); this.zoom = 13; this.calls.push({ method: 'fitBounds' }); return this; }
@@ -79,9 +92,10 @@ export default {
 };
 `;
 const app = `
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import RouteMap from './src/components/RouteMap';
+import NavigationPopup from './src/components/NavigationPopup';
 const qa = window.__locationTest;
 const empty = [];
 const sampleHomeBase = { id: 'qa-home', latitude: 39.7, longitude: -105, address: 'Synthetic home base' };
@@ -95,23 +109,32 @@ function App() {
   const [tracking, setTracking] = useState(false);
   const [navigation, setNavigation] = useState(false);
   const [fullscreen, setFullscreen] = useState(true);
-  const [target, setTarget] = useState(null);
-  qa.state = { tracking, navigation, fullscreen, target, mounted };
+  const [target, setTarget] = useState(qa.initialTarget || null);
+  const [navigationTarget, setNavigationTarget] = useState(null);
+  const [currentView, setCurrentView] = useState('survey');
+  const viewingFacilityRef = useRef(false);
+  const setMapTargetCoords = setTarget;
+  const setIsFullScreenMap = setFullscreen;
+  const showFacilityOnMap = ${handoff};
+  qa.openNavigation = setNavigationTarget;
+  qa.state = { tracking, navigation, fullscreen, target, mounted, currentView };
   qa.setTarget = setTarget;
   qa.setFullscreen = setFullscreen;
   qa.remount = () => { setTracking(false); setNavigation(false); setTarget(null); setFullscreen(true); setEpoch(value => value + 1); };
   qa.unmount = () => setMounted(false);
+  qa.mount = () => setMounted(true);
   const changeTracking = value => { qa.trackingChanges.push(value); setTracking(value); };
-  return mounted ? <RouteMap key={epoch} result={qa.withMapData ? sampleResult : null} homeBase={qa.withMapData || qa.withHomeBase ? sampleHomeBase : null}
+  return <>{navigationTarget && <NavigationPopup {...navigationTarget} facilityName="Synthetic facility" mapPreference="google" includeGoogleEarth={false} onClose={() => setNavigationTarget(null)} onShowOnMap={() => showFacilityOnMap(navigationTarget.latitude, navigationTarget.longitude)} />}
+  {mounted ? <RouteMap key={epoch} result={qa.withMapData ? sampleResult : null} homeBase={qa.withMapData || qa.withHomeBase ? sampleHomeBase : null}
     facilities={qa.withMapData ? [...empty] : empty} inspections={empty} completedVisibility={visibility}
-    isFullScreen={fullscreen} targetCoords={target}
+    isFullScreen={fullscreen} targetCoords={target} onShowOnMap={showFacilityOnMap}
     locationTracking={tracking} onLocationTrackingChange={changeTracking}
     navigationMode={navigation} onNavigationModeChange={setNavigation}
     onClearTargetCoords={() => { qa.targetClears++; setTarget(null); }}
     onExitFullscreen={() => { qa.exits++; setFullscreen(false); }}
     onUpdateRoute={() => qa.routeUpdates++}
     onNavigateToView={view => qa.views.push(view)}
-  /> : null;
+  /> : null}</>;
 }
 const root = createRoot(document.getElementById('root'));
 qa.destroy = () => root.unmount();
@@ -119,7 +142,7 @@ root.render(<App />);
 `;
 export async function buildLocationHarness(output, { realLeaflet = false } = {}) {
 await build({
-  stdin: { contents: app, loader: 'jsx', resolveDir: root, sourcefile: 'location-test.jsx' },
+  stdin: { contents: app, loader: 'tsx', resolveDir: root, sourcefile: 'location-test.tsx' },
   outfile: join(output, 'app.js'), bundle: true, format: 'iife', jsx: 'automatic',
   plugins: [{ name: 'location-test-isolation', setup(plugin) {
     plugin.onResolve({ filter: /^leaflet(?:-rotate)?$/ }, args => realLeaflet && args.path === 'leaflet-rotate' ? undefined : ({ path: args.path, namespace: 'map-mock' }));
@@ -129,7 +152,7 @@ await build({
       args.path.endsWith('useOnlineStatus') ? 'export const useOnlineStatus = () => ({ isOnline: false });'
       : args.path.endsWith('osrm') ? 'export const getRouteGeometry = async () => { throw new Error("Unexpected routing request"); };'
       : 'export const supabase = { from() { throw new Error("Unexpected database request"); } };', loader: 'js' }));
-    plugin.onResolve({ filter: /^\.\/(?:ModalPortal|NavigationPopup|SearchInput|FacilityDetailModal|SPCCPlanDetailModal|FacilityInspectionsManager|SpeedDisplay)$/ }, args => ({ path: args.path, namespace: 'child-mock' }));
+    plugin.onResolve({ filter: /^\.\/(?:ModalPortal|SearchInput|FacilityDetailModal|SPCCPlanDetailModal|FacilityInspectionsManager|SpeedDisplay)$/ }, args => ({ path: args.path, namespace: 'child-mock' }));
     plugin.onLoad({ filter: /.*/, namespace: 'child-mock' }, args => ({ contents: args.path.endsWith('ModalPortal') ? 'export default ({ children }) => children;' : 'export default () => null;', loader: 'js' }));
   }}],
 });

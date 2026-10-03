@@ -45,6 +45,7 @@ interface RouteMapProps {
   userId?: string;
   teamNumber?: number;
   onFacilitiesChange?: () => void;
+  onShowOnMap?: (latitude: number, longitude: number) => void;
   targetCoords?: { latitude: number; longitude: number } | null;
   onNavigateToView?: (view: 'facilities' | 'route-planning' | 'survey' | 'settings') => void;
   onToggleHideCompleted?: () => void;
@@ -127,7 +128,7 @@ function findCurrentFacilityForRouteStop(
   return facilities.find(facility => facility.name === routeFacility.name);
 }
 
-export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
@@ -140,6 +141,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         ? 'spcc_inspection'
         : 'all');
   const mapRef = useRef<L.Map | null>(null);
+  const homeBaseRef = useRef(homeBase);
+  homeBaseRef.current = homeBase;
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapWrapperRef = useRef<HTMLDivElement>(null);
   const [isMapActive, setIsMapActive] = useState(false);
@@ -537,6 +540,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             .on(link, 'click', L.DomEvent.stopPropagation)
             .on(link, 'click', L.DomEvent.preventDefault)
             .on(link, 'click', function () {
+              const homeBase = homeBaseRef.current;
               if (mapRef.current && homeBase) {
                 const bounds = L.latLngBounds([[
                   Number(homeBase.latitude),
@@ -705,43 +709,58 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     };
   }, [isFullScreen, mapReady]);
 
-  // Center map on target coordinates when they change
+  // Apply a facility request after the map is mounted and laid out. Cancel an
+  // obsolete frame on rapid selection, fullscreen remount, or unmount.
   useEffect(() => {
-    if (mapRef.current && targetCoords) {
-      cancelPendingLocationRequest();
-      setLocationError(null);
-      autoCenteringRef.current = false;
-      // Disable auto-centering and location tracking when manually navigating to a location
-      setAutoCentering(false);
-
-      // Disable location tracking when viewing a facility (but keep navigation mode)
-      if (locationTracking && !navigationMode) {
-        if (onLocationTrackingChange) {
-          onLocationTrackingChange(false);
-        } else {
-          setInternalLocationTracking(false);
-        }
-      }
-
-      // Set flag to prevent saved view restoration and auto-centering
-      justNavigatedRef.current = true;
-
-      // Clear the saved view so we don't restore it
-      savedMapViewRef.current = null;
-
-      // Center on target immediately (removed 300ms delay that caused race conditions)
-      console.log('[RouteMap] Centering on targetCoords:', targetCoords);
-      mapRef.current.setView([targetCoords.latitude, targetCoords.longitude], 18, {
-        animate: true,
-        duration: 0.5
-      });
-    } else if (!targetCoords && justNavigatedRef.current) {
-      // Only clear the navigation flag when targetCoords is explicitly cleared
-      // (happens when user clicks location button)
-      console.log('[RouteMap] targetCoords cleared, resetting justNavigated flag');
+    const map = mapRef.current;
+    if (!mapReady || !map) return;
+    if (!targetCoords) {
       justNavigatedRef.current = false;
+      return;
     }
-  }, [targetCoords, cancelPendingLocationRequest]);
+    cancelPendingLocationRequest();
+    setLocationError(null);
+    autoCenteringRef.current = false;
+    setAutoCentering(false);
+    if (autoCenteringTimeoutRef.current) clearTimeout(autoCenteringTimeoutRef.current);
+    if (locationTracking && !navigationMode) {
+      if (onLocationTrackingChange) onLocationTrackingChange(false);
+      else setInternalLocationTracking(false);
+    }
+    justNavigatedRef.current = true;
+    initialLoadRef.current = false;
+    savedMapViewRef.current = null;
+    // Keep the chosen destination visible even if ordinary markers are filtered
+    // out or no route/home base exists. This overlay never changes those filters.
+    const targetMarker = L.marker([targetCoords.latitude, targetCoords.longitude], {
+      title: 'Selected facility location',
+      alt: 'Selected facility location',
+      zIndexOffset: 2000,
+      icon: L.divIcon({
+        className: 'facility-focus-marker',
+        html: '<div style="width:24px;height:24px;border:4px solid #16a34a;background:rgba(255,255,255,0.8);border-radius:50%;box-shadow:0 0 0 4px rgba(22,163,74,0.25)"></div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
+    }).addTo(map).bindPopup('Selected facility location');
+    const frame = requestAnimationFrame(() => {
+      if (mapRef.current !== map) return;
+      map.stop();
+      map.invalidateSize({ pan: false, animate: false });
+      const point: L.LatLngExpression = [targetCoords.latitude, targetCoords.longitude];
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        map.setView(point, 18, { animate: false });
+      } else {
+        map.flyTo(point, 18, { animate: true, duration: 0.8 });
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (mapRef.current === map) map.removeLayer(targetMarker);
+    };
+    // Tracking changes are consequences, not new facility requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetCoords, mapReady, cancelPendingLocationRequest]);
 
   useEffect(() => {
     if (!mapRef.current || !homeBase) return;
@@ -2366,7 +2385,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       const fitBoundsRequested = triggerFitBounds !== lastFitBoundsTriggerRef.current
         && Boolean(triggerFitBounds && triggerFitBounds > 0 && isFullScreen);
       lastFitBoundsTriggerRef.current = triggerFitBounds;
-      const shouldFitBounds = !locationTracking && !navigationMode && (initialLoadRef.current || fitBoundsRequested);
+      const shouldFitBounds = !targetCoords && !justNavigatedRef.current && !locationTracking && !navigationMode && (initialLoadRef.current || fitBoundsRequested);
 
       if (shouldFitBounds) {
         mapRef.current.fitBounds(bounds, { padding: [50, 50] });
@@ -4214,11 +4233,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           mapPreference={settings.map_preference}
           includeGoogleEarth={settings.include_google_earth}
           onClose={() => setNavigationTarget(null)}
-          onShowOnMap={!isFullScreen ? () => {
-            // Center map on the target facility
-            if (mapRef.current) {
-              mapRef.current.setView([navigationTarget.latitude, navigationTarget.longitude], 16);
-            }
+          onShowOnMap={onShowOnMap ? () => {
+            onShowOnMap(navigationTarget.latitude, navigationTarget.longitude);
           } : undefined}
         />
       )}
@@ -4241,6 +4257,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               onFacilitiesChange();
             }
           }}
+          onShowOnMap={onShowOnMap ? (latitude, longitude) => {
+            setSurveyFacility(null);
+            setForcedTab(null);
+            onShowOnMap(latitude, longitude);
+          } : undefined}
           onInspectionFormActiveChange={onInspectionFormActiveChange}
           onEdit={onEditFacility ? () => onEditFacility(surveyFacility) : undefined}
           facilities={facilities}

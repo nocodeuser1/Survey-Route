@@ -28,7 +28,7 @@ const bundled = await readFile(join(output, 'app.js'), 'utf8');
 const results = [];
 let failures = 0;
 
-async function mount({ reducedMotion = false, unsupported = false, throws = false, withMapData = false, withHomeBase = false } = {}) {
+async function mount({ reducedMotion = false, unsupported = false, throws = false, withMapData = false, withHomeBase = false, initialTarget = null } = {}) {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', error => errors.push(error));
@@ -36,7 +36,7 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
     url: 'https://location-test.invalid', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole,
   });
   const window = dom.window;
-  const qa = window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], errors, withMapData, withHomeBase };
+  const qa = window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], errors, withMapData, withHomeBase, initialTarget };
   window.alert = message => qa.alerts.push(message);
   window.fetch = () => { throw new Error('No network access is permitted in this test'); };
   window.matchMedia = query => ({ matches: query.includes('prefers-reduced-motion') && reducedMotion, media: query, addEventListener() {}, removeEventListener() {} });
@@ -60,7 +60,7 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
   window.clearTimeout = id => { scheduled.delete(id); nativeClearTimeout(id); };
   window.setInterval = (callback, ms) => { const id = nextId++; scheduled.set(id, { at: time + ms, callback, interval: ms }); return id; };
   window.clearInterval = id => scheduled.delete(id);
-  const flush = () => delay(15);
+  const flush = () => delay(40);
   const wait = async (condition, message = 'component state') => {
     for (let attempt = 0; attempt < 100; attempt++) { if (condition()) return; await delay(10); }
     throw new Error('Timed out waiting for ' + message + (errors.length ? ': ' + errors.map(e => e.message).join('; ') : ''));
@@ -106,6 +106,72 @@ async function test(name, callback, options) {
     failures++; results.push({ name, status: 'failed', error: error.stack }); console.error('FAIL ' + name + '\n' + error.stack);
   } finally { await harness?.close(); }
 }
+
+await test('Facility target on initial mount wins over route bounds', async h => {
+  assert.equal(h.map().getCenter().lat, 42.12);
+  assert.equal(h.map().getCenter().lng, -101.34);
+  assert.equal(h.map().getZoom(), 18);
+}, { withMapData: true, initialTarget: { latitude: 42.12, longitude: -101.34 } });
+
+await test('Rapid facility switches, repeat taps, redraws and clearing preserve the selected viewport', async h => {
+  h.qa.setTarget({ latitude: 35, longitude: -111 });
+  h.qa.setTarget({ latitude: 44, longitude: -102 });
+  await h.flush();
+  assert.equal(h.map().getCenter().lat, 44);
+  h.map().setView([25, -90], 4);
+  h.qa.setTarget({ latitude: 44, longitude: -102 }); await h.flush();
+  assert.equal(h.map().getCenter().lat, 44); assert.equal(h.map().getZoom(), 18);
+  assert.equal(h.map().markers.filter(marker => marker.options.title === 'Selected facility location').length, 1);
+  h.qa.rerender(); await h.flush(); await h.advance(100);
+  assert.equal(h.map().getCenter().lat, 44);
+  h.qa.setTarget(null); h.qa.rerender(); await h.flush(); await h.advance(100);
+  assert.equal(h.map().getCenter().lat, 44);
+  assert.equal(h.map().markers.filter(marker => marker.options.title === 'Selected facility location').length, 0);
+}, { withMapData: true });
+
+await test('Facility focus survives missing route and home base', async h => {
+  assert.ok(h.map().markers.some(marker => marker.options.title === 'Selected facility location' && marker.point.lat === 42.12));
+  assert.equal(h.map().getCenter().lat, 42.12); assert.equal(h.map().getZoom(), 18);
+}, { initialTarget: { latitude: 42.12, longitude: -101.34 } });
+
+await test('Unmount cancels pending facility animation', async h => {
+  h.qa.setTarget({ latitude: 50, longitude: -100 });
+  h.qa.unmount(); await h.flush();
+  const count = h.movements().length; await h.flush();
+  assert.equal(h.movements().length, count); assert.equal(h.map().removed, true);
+});
+
+await test('Actual Navigate popup and shared App handoff deliver selected coordinates repeatedly', async h => {
+  for (const latitude of [36.4, 47.2, 47.2]) {
+    h.map().setView([25, -80], 4);
+    h.qa.openNavigation({ latitude, longitude: -103.5 }); await h.flush();
+    const show = [...h.doc.querySelectorAll('button')].find(node => node.textContent.includes('Show on App Map'));
+    assert.ok(show); show.click(); await h.flush();
+    assert.equal(h.qa.state.currentView, 'route-planning');
+    assert.equal(h.qa.state.fullscreen, true);
+    assert.equal(h.map().getCenter().lat, latitude);
+    assert.equal(h.map().getCenter().lng, -103.5);
+    assert.equal(h.map().getZoom(), 18);
+    assert.ok(!h.doc.body.textContent.includes('Navigate to'));
+  }
+}, { withMapData: true });
+
+await test('Interrupted mount retains the latest facility request on reopening', async h => {
+  h.qa.setTarget({ latitude: 48.1, longitude: -107.2 });
+  h.qa.unmount(); await h.flush();
+  h.qa.mount(); await h.flush(); await h.flush();
+  assert.equal(h.map().getCenter().lat, 48.1);
+  assert.equal(h.map().getCenter().lng, -107.2);
+  assert.equal(h.map().getZoom(), 18);
+}, { withMapData: true });
+
+await test('Show all facilities uses home base loaded after the map mounts', async h => {
+  h.qa.withHomeBase = true; h.qa.rerender(); await h.flush();
+  h.map().setView([30, -90], 18);
+  h.doc.querySelector('[title="Show all facilities"]').click(); await h.flush();
+  assert.equal(h.map().getCenter().lat, 39.7);
+  assert.equal(h.map().getZoom(), 13);
+});
 
 await test('Fresh request, disabled duplicate taps, smooth first fix, and repeat recenter', async h => {
   h.idle(); assert.match(h.primary().textContent, /Find me/);

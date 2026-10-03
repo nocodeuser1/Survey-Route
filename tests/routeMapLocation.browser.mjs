@@ -68,7 +68,7 @@ try {
       else await route.fulfill({ status: 200, contentType: 'image/png', body: transparentPng });
     });
     await page.addInitScript(() => {
-      window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [] };
+      window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], withMapData: true, initialTarget: { latitude: 42.12, longitude: -101.34 } };
       window.alert = message => window.__locationTest.alerts.push(message);
       Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
         getCurrentPosition(success, error, options) { window.__locationTest.requests.push({ success, error, options }); },
@@ -77,6 +77,32 @@ try {
     });
     await page.goto(base); await page.getByRole('button', { name: 'Find my location', exact: true }).waitFor();
     await page.waitForFunction(() => window.__locationTest.maps.length === 1);
+    const waitForFacility = async (latitude, longitude) => {
+      await page.waitForFunction(({ latitude, longitude }) => {
+        const map = window.__locationTest.maps.at(-1), center = map.getCenter();
+        return Math.abs(center.lat - latitude) < 0.00001 && Math.abs(center.lng - longitude) < 0.00001 && map.getZoom() === 18;
+      }, { latitude, longitude });
+    };
+    await waitForFacility(42.12, -101.34);
+    for (const zoom of [4, 18]) {
+      await page.evaluate(zoom => {
+        const qa = window.__locationTest;
+        qa.maps.at(-1).setView([34, -118], zoom, { animate: false });
+        qa.setTarget({ latitude: 46.2, longitude: -104.3 });
+      }, zoom);
+      await waitForFacility(46.2, -104.3);
+    }
+    await page.evaluate(() => {
+      const qa = window.__locationTest;
+      qa.setTarget({ latitude: 32, longitude: -100 });
+      qa.setTarget({ latitude: 41, longitude: -108 });
+    });
+    await waitForFacility(41, -108);
+    await page.evaluate(() => window.__locationTest.rerender());
+    await page.waitForTimeout(200);
+    await waitForFacility(41, -108);
+    await page.screenshot({ path: join(output, width + '-facility-focus.png') });
+    results.push({ width, scenario: 'Facility mount, world/street zoom, repeated target, rapid switch and redraw', status: 'passed' });
     const layout = async state => {
       const measurements = await page.evaluate(() => {
         const labels = ['Update route settings', 'Exit fullscreen map', 'Turn on drive mode'];
