@@ -14,6 +14,7 @@ import TeamManagement from './components/TeamManagement';
 import UserSignatureManagement from './components/UserSignatureManagement';
 import SignaturePromptBar from './components/SignaturePromptBar';
 import DataBackup from './components/DataBackup';
+import SPCCConnectionKeys from './components/SPCCConnectionKeys';
 import SettingsTabs, { getSettingsIcon } from './components/SettingsTabs';
 import RoutePlanningSettings from './components/RoutePlanningSettings';
 import NavigationSettings from './components/NavigationSettings';
@@ -5537,6 +5538,7 @@ function App() {
                         </div>
                       ),
                     },
+                    { id: 'spcc-connections', label: 'SPCC connections', section: 'admin', icon: getSettingsIcon('security'), content: <SPCCConnectionKeys key={currentAccount.id} accountId={currentAccount.id} /> },
                     {
                       id: 'security',
                       label: 'Security',
