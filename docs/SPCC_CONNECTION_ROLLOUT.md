@@ -1,5 +1,7 @@
 # Draft deployment handoff
 
+Paired drafts: [Survey Route #2](https://github.com/nocodeuser1/Survey-Route/pull/2) and [myScribe #12](https://github.com/nocodeuser1/myscribe/pull/12).
+
 No production schema, function, key, source record or document was changed during implementation.
 
 Requires separate scoped approval before activation:
