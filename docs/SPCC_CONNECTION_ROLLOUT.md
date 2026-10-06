@@ -2,9 +2,11 @@
 
 Paired drafts: [Survey Route #2](https://github.com/nocodeuser1/Survey-Route/pull/2) and [myScribe #12](https://github.com/nocodeuser1/myscribe/pull/12).
 
-No production schema, function, key, source record or document was changed during implementation.
+No production schema, key, source record or document was changed, and no manual deployment was run during implementation. GitHub pushes triggered automatic Netlify frontend deploy previews; hosting secret/flag scope metadata remains unverified.
 
 Requires separate scoped approval before activation:
+- Resolve the pre-existing source profile-link authority weakness identified during read-only catalog review. Current intended source Auth identity and account administration were verified, but reusable key issuance must not rely on the unsafe direct unlinked-profile UPDATE path. Detailed synthetic reproduction and private authority evidence stay in the local handoff, outside this repository.
+- Verify production-only hosting secret/flag scope metadata without exposing values. The paired myScribe endpoint and assistant tool now require trusted Netlify runtime production/published context; automatic previews cannot enable the integration merely by inheriting its flag.
 - Review and apply `supabase/migrations/20261006182947_spcc_readonly_api.sql`.
 - Deploy only `spcc-read-api` with gateway JWT verification disabled (its `/keys` route verifies user JWTs with Auth; `/export` authenticates hashed `spcc:read` keys). Enable `SPCC_READ_API_ENABLED=true` only after staging validation.
 - Ship the matching myScribe draft and its migration/configuration, then the web frontend for authenticated `/connected-spcc/:facilityId?plan=:planId` links.
