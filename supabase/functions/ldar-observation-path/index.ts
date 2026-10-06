@@ -387,9 +387,7 @@ Deno.serve(async (req) => {
           },
         ],
         generationConfig: {
-          // Low temperature: the rules are deterministic; we don't want
-          // creativity, just adherence to the spec.
-          temperature: 0.15,
+          // Gemini 3 uses default sampling. The schema below constrains output.
           // 2048 → 4096 wasn't enough: even with thinkingLevel dropped to
           // 'medium', Pro still produces ~500-1500 thinking tokens before
           // a large structured-JSON output. The first real attempt at
