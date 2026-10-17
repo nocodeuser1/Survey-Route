@@ -121,3 +121,7 @@ The 20 focused tests are predominantly pure/source-contract tests. They do not r
 The additive migration compiled against a fresh PostgreSQL 17 database with a production-shaped minimal baseline. Runtime assertions passed for account-scoped Inspection, Plan, and atomic All resets; team/route stop derivation; same-key reset and completion replay; cross-account rejection; manual evidence completion; remove/re-add synchronization; and simultaneous same-key reset requests.
 
 The concurrent result contained one reset-journal row and exactly one active run per stored domain. This closes the isolated SQL compilation, core account-access, idempotency, and concurrency conditions. Browser/offline/second-device verification remains required before Stage 2B production release.
+
+## 2026-10-17 browser component verification
+
+A real Chromium run mounted the production reset modal and partial-completion notice. It verified three reset scopes; route, team, and 138-stop copy; All-domain copy; offline button disablement and explanation; modal persistence after a simulated server failure; queued partial-failure messaging; and successful Retry dismissal. Screenshots were visually inspected. Full authenticated map/list/Survey Mode parity and second-device convergence still require the migrated app environment.
