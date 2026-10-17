@@ -1,13 +1,15 @@
-import { CheckCircle, X } from 'lucide-react';
+import { CheckCircle, Loader2, X } from 'lucide-react';
 
 interface CompletionTypeModalProps {
   facilityCount: number;
-  onSelectInternal: () => void;
-  onSelectExternal: () => void;
+  onSelectInternal: () => void | Promise<void>;
+  onSelectExternal: () => void | Promise<void>;
   onClose: () => void;
+  busy?: boolean;
+  error?: string | null;
 }
 
-export default function CompletionTypeModal({ facilityCount, onSelectInternal, onSelectExternal, onClose }: CompletionTypeModalProps) {
+export default function CompletionTypeModal({ facilityCount, onSelectInternal, onSelectExternal, onClose, busy = false, error }: CompletionTypeModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
@@ -17,6 +19,7 @@ export default function CompletionTypeModal({ facilityCount, onSelectInternal, o
           </h3>
           <button
             onClick={onClose}
+            disabled={busy}
             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             aria-label="Close"
           >
@@ -28,19 +31,26 @@ export default function CompletionTypeModal({ facilityCount, onSelectInternal, o
           Choose how to mark {facilityCount} selected {facilityCount === 1 ? 'facility' : 'facilities'}:
         </p>
 
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-400 p-3 text-sm text-red-700 dark:text-red-300" role="alert">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-3">
           <button
             onClick={onSelectInternal}
-            className="w-full flex items-center gap-3 px-4 py-4 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-2 border-blue-200 dark:border-blue-700 hover:border-blue-400 rounded-lg transition-all group"
+            disabled={busy}
+            className="w-full flex items-center gap-3 px-4 py-4 border-2 border-blue-300 hover:border-blue-700 hover:bg-blue-700 hover:text-white rounded-lg transition-all group disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <div className="flex-shrink-0 w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-              <CheckCircle className="w-6 h-6 text-white" />
+            <div className="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center">
+              {busy ? <Loader2 className="w-6 h-6 animate-spin text-white" /> : <CheckCircle className="w-6 h-6 text-white" />}
             </div>
             <div className="flex-1 text-left">
-              <div className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-900 dark:group-hover:text-blue-300">
+              <div className="font-semibold text-gray-900 dark:text-white group-hover:text-white">
                 Mark as Completed Internally
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-white">
                 SPCC completed by your team
               </div>
             </div>
@@ -48,16 +58,17 @@ export default function CompletionTypeModal({ facilityCount, onSelectInternal, o
 
           <button
             onClick={onSelectExternal}
-            className="w-full flex items-center gap-3 px-4 py-4 bg-yellow-50 dark:bg-yellow-900/30 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 border-2 border-yellow-200 dark:border-yellow-700 hover:border-yellow-400 rounded-lg transition-all group"
+            disabled={busy}
+            className="w-full flex items-center gap-3 px-4 py-4 border-2 border-yellow-400 hover:border-yellow-700 hover:bg-yellow-700 hover:text-white rounded-lg transition-all group disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <div className="flex-shrink-0 w-10 h-10 bg-yellow-600 rounded-full flex items-center justify-center">
-              <CheckCircle className="w-6 h-6 text-white" />
+            <div className="flex-shrink-0 w-10 h-10 bg-yellow-600 text-white rounded-full flex items-center justify-center">
+              {busy ? <Loader2 className="w-6 h-6 animate-spin text-white" /> : <CheckCircle className="w-6 h-6 text-white" />}
             </div>
             <div className="flex-1 text-left">
-              <div className="font-semibold text-gray-900 dark:text-white group-hover:text-yellow-900 dark:group-hover:text-yellow-300">
+              <div className="font-semibold text-gray-900 dark:text-white group-hover:text-white">
                 Mark as Completed Externally
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-white">
                 SPCC completed by another company
               </div>
             </div>
@@ -65,7 +76,8 @@ export default function CompletionTypeModal({ facilityCount, onSelectInternal, o
 
           <button
             onClick={onClose}
-            className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg transition-colors font-medium"
+            disabled={busy}
+            className="w-full px-4 py-3 border border-gray-300 hover:bg-gray-700 hover:text-white text-gray-700 dark:text-gray-200 rounded-lg transition-colors font-medium disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel
           </button>

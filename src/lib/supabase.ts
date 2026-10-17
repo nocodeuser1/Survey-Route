@@ -42,12 +42,14 @@ export interface RouteVisitEvent {
 
 export type PlanRouteRunStatus = 'active' | 'completed' | 'abandoned';
 export type PlanRouteStopStatus = 'pending' | 'completed' | 'removed' | 'skipped';
+export type RouteStatusScope = 'spcc_inspection' | 'spcc_plan';
+export type ResetRouteStatusScope = RouteStatusScope | 'all';
 
 export interface PlanRouteRun {
   id: string;
   account_id: string;
   route_plan_id: string | null;
-  survey_type: 'spcc_plan';
+  survey_type: RouteStatusScope;
   team_number: number;
   status: PlanRouteRunStatus;
   started_at: string;
@@ -61,6 +63,9 @@ export interface PlanRouteRunStop {
   id: string;
   account_id: string;
   route_run_id: string;
+  route_plan_id?: string | null;
+  team_number?: number | null;
+  survey_type?: RouteStatusScope | null;
   facility_id: string | null;
   facility_name_snapshot: string;
   planned_day?: number | null;
@@ -71,6 +76,25 @@ export interface PlanRouteRunStop {
   removed_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type RouteStatusRun = PlanRouteRun;
+export type RouteStatusRunStop = PlanRouteRunStop;
+
+export interface RouteStatusResetDomainResult {
+  survey_type: RouteStatusScope;
+  run: RouteStatusRun;
+  stops: RouteStatusRunStop[];
+}
+
+export interface RouteStatusResetResult {
+  account_id: string;
+  route_plan_id: string;
+  team_number: number;
+  requested_scope: ResetRouteStatusScope;
+  runs: RouteStatusResetDomainResult[];
+  unique_facility_count: number;
+  domain_stop_count: number;
 }
 
 export interface PhotoVisitEvent {

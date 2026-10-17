@@ -53,7 +53,7 @@ interface InspectionFormProps {
   onClose?: () => void;
   accountId?: string;
   clonedResponses?: InspectionResponse[];
-  onInspectionCompletedWithFacility?: (facility: Facility) => void;
+  onInspectionCompletedWithFacility?: (facility: Facility, inspectionId: string) => void | Promise<void>;
 }
 
 export default function InspectionForm({ facility, userId, teamNumber, onSaved, onClose, accountId, clonedResponses, onInspectionCompletedWithFacility }: InspectionFormProps) {
@@ -719,19 +719,26 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         updated_at: new Date().toISOString(),
       };
 
+      let savedInspectionId = existingInspection?.id ?? null;
       if (existingInspection) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('inspections')
           .update(inspectionData)
-          .eq('id', existingInspection.id);
+          .eq('id', existingInspection.id)
+          .select('id')
+          .single();
 
         if (error) throw error;
+        savedInspectionId = data.id;
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('inspections')
-          .insert(inspectionData);
+          .insert(inspectionData)
+          .select('id')
+          .single();
 
         if (error) throw error;
+        savedInspectionId = data.id;
       }
 
       // Clear localStorage backup on successful save
@@ -747,8 +754,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       // Only close the form if status is 'completed'
       // Keep the form open for drafts so users can continue uploading photos
       if (status === 'completed') {
-        if (onInspectionCompletedWithFacility) {
-          onInspectionCompletedWithFacility(facility);
+        if (onInspectionCompletedWithFacility && savedInspectionId) {
+          await onInspectionCompletedWithFacility(facility, savedInspectionId);
         }
         if (onSaved) onSaved();
         if (onClose) onClose();

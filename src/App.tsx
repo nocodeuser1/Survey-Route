@@ -44,7 +44,8 @@ import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
-import { usePlanRouteRun } from './hooks/usePlanRouteRun';
+import { useRouteStatusRuns } from './hooks/useRouteStatusRuns';
+import RouteStatusCompletionNotice from './components/RouteStatusCompletionNotice';
 import {
   replaceFacilitiesForAccount as cacheOfflineFacilitiesForAccount,
   getFacilitiesByAccount as getOfflineFacilities,
@@ -3245,15 +3246,29 @@ function App() {
     setFacilities(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
   }, []);
 
-  const planRouteRun = usePlanRouteRun({
+  const routeStatusRuns = useRouteStatusRuns({
     accountId: currentAccount?.id,
     routePlanId: currentRouteId ?? undefined,
     teamNumber: effectiveUserTeam ?? 1,
     result: filteredOptimizationResult,
     facilities: filteredFacilities,
-    enabled: surveyTypeKind === 'spcc_plan',
     onFacilityPatch: handleFacilityPatch,
   });
+
+  const planActiveStops = routeStatusRuns.stopsByScope.spcc_plan.filter(stop =>
+    Boolean(stop.facility_id) && !stop.removed_at && stop.status !== 'removed'
+  );
+  const planRouteRun = {
+    run: routeStatusRuns.runsByScope.spcc_plan ?? null,
+    stopsByFacilityId: routeStatusRuns.stopsMapByScope.spcc_plan,
+    completedCount: planActiveStops.filter(stop => stop.status === 'completed').length,
+    totalCount: planActiveStops.length || routeStatusRuns.plannedStops.length,
+    loading: routeStatusRuns.loading,
+    savingFacilityId: routeStatusRuns.savingFacilityIdByScope.spcc_plan ?? null,
+    schemaUnavailable: routeStatusRuns.schemaUnavailable,
+    error: routeStatusRuns.error,
+    setFacilityCompleted: routeStatusRuns.setPlanStopCompleted,
+  };
 
   const planRouteProgressProps = useMemo(() => ({
     runId: planRouteRun.run?.id ?? null,
@@ -3264,8 +3279,15 @@ function App() {
     savingFacilityId: planRouteRun.savingFacilityId,
     schemaUnavailable: planRouteRun.schemaUnavailable,
     error: planRouteRun.error,
-    startNewRun: planRouteRun.startNewRun,
     setFacilityCompleted: planRouteRun.setFacilityCompleted,
+    isOnline: routeStatusRuns.isOnline,
+    resetting: routeStatusRuns.resetting,
+    resetRouteStatus: routeStatusRuns.resetRouteStatus,
+    inspectionStopsByFacilityId: routeStatusRuns.stopsMapByScope.spcc_inspection,
+    inspectionRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+    planRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+    completeInspectionStop: routeStatusRuns.completeInspectionStop,
+    recordManualInspectionCompletion: routeStatusRuns.recordManualInspectionCompletion,
   }), [
     planRouteRun.run?.id,
     planRouteRun.stopsByFacilityId,
@@ -3275,8 +3297,15 @@ function App() {
     planRouteRun.savingFacilityId,
     planRouteRun.schemaUnavailable,
     planRouteRun.error,
-    planRouteRun.startNewRun,
     planRouteRun.setFacilityCompleted,
+    routeStatusRuns.isOnline,
+    routeStatusRuns.resetting,
+    routeStatusRuns.resetRouteStatus,
+    routeStatusRuns.stopsMapByScope.spcc_inspection,
+    routeStatusRuns.runsByScope.spcc_inspection,
+    routeStatusRuns.runsByScope.spcc_plan,
+    routeStatusRuns.completeInspectionStop,
+    routeStatusRuns.recordManualInspectionCompletion,
   ]);
 
   const handleReassignFacility = async (facilityIndex: number, fromDay: number, toDay: number) => {
@@ -4159,6 +4188,13 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-200">
+      <RouteStatusCompletionNotice
+        pending={routeStatusRuns.pendingInspectionCompletion}
+        pendingCount={routeStatusRuns.pendingInspectionCompletionCount}
+        retrying={Boolean(routeStatusRuns.savingFacilityIdByScope.spcc_inspection)}
+        onRetry={routeStatusRuns.retryInspectionCompletion}
+        onDismiss={routeStatusRuns.dismissInspectionCompletionError}
+      />
       {showSignatureBanner && (
         <SignaturePromptBar onDismiss={() => setSignatureBannerDismissed(true)} />
       )}
@@ -4514,6 +4550,7 @@ function App() {
             accountId={currentAccount.id}
             userId={user?.authUserId || ''}
             onFacilitiesChange={loadData}
+            onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
             isLoading={isLoadingFacilities}
             initialFacilityToEdit={facilityToEdit}
             onFacilityEditHandled={() => setFacilityToEdit(null)}
@@ -5110,6 +5147,8 @@ function App() {
                         onFacilityPatch={handleFacilityPatch}
                         onAddFacilityToRoute={handleAddFacilityToRoute}
                         onInspectionFormActiveChange={setIsInspectionFormActive}
+                        onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+                        onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
                         surveyType={surveyType}
@@ -5119,6 +5158,11 @@ function App() {
                         onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
                         onEnterFullscreen={() => setIsFullScreenMap(true)}
                         planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                        routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+                        routeStatusRunInitialized={{
+                          spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                          spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                        }}
                         onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                         planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                       />
@@ -5275,6 +5319,8 @@ function App() {
                               setMapTargetCoords(null);
                             }}
                             onInspectionFormActiveChange={setIsInspectionFormActive}
+                            onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+                            onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
                             onToggleHideCompleted={() => setShowVisibilityModal(true)}
                             navigationMode={navigationMode}
                             onNavigationModeChange={setNavigationMode}
@@ -5287,6 +5333,11 @@ function App() {
                             showOnlyRouteFacilities={showOnlyRouteFacilities}
                             onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
                             planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                            routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+                            routeStatusRunInitialized={{
+                              spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                              spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                            }}
                             onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                             planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                           />
@@ -5327,6 +5378,12 @@ function App() {
               planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
               onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
               planRouteSavingFacilityId={planRouteRun.savingFacilityId}
+              onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+              routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+              routeStatusRunInitialized={{
+                spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+              }}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;
                 if (batchId) {

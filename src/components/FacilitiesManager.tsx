@@ -56,7 +56,8 @@ interface FacilitiesManagerProps {
   facilities: Facility[];
   accountId: string;
   userId: string;
-  onFacilitiesChange: () => void;
+  onFacilitiesChange: () => void | Promise<void>;
+  onManualInspectionCompletion: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onCoordinatesUpdated?: (facilityId: string, latitude: number, longitude: number) => void;
   initialFacilityToEdit?: Facility | null;
@@ -241,7 +242,7 @@ const COLUMN_LABELS: Record<BaseColumnId, string> = {
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onManualInspectionCompletion, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   // Only the agency owner's tweaks propagate to the shared per-account row
   // (visible columns per mode, column widths, sort, saved filters). Other
   // users still get a responsive local-only UI for their session, but the
@@ -422,6 +423,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [selectedFacilityIds, setSelectedFacilityIds] = useState<Set<string>>(new Set());
   const [showExportPopup, setShowExportPopup] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [bulkCompletionBusy, setBulkCompletionBusy] = useState(false);
+  const [bulkCompletionError, setBulkCompletionError] = useState<string | null>(null);
   // Bulk tagging: applies a free-form label to every selected facility.
   const [showTagModal, setShowTagModal] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
@@ -2933,26 +2936,37 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const handleBulkMarkComplete = async (completionType: 'internal' | 'external') => {
-    if (selectedFacilityIds.size === 0) return;
-
+    if (selectedFacilityIds.size === 0 || bulkCompletionBusy) return;
+    const facilityIds = Array.from(selectedFacilityIds);
+    const failedFacilityIds: string[] = [];
+    setBulkCompletionBusy(true);
+    setBulkCompletionError(null);
     try {
-      const facilityIds = Array.from(selectedFacilityIds);
-      const { error } = await supabase
-        .from('facilities')
-        .update({
-          spcc_completion_type: completionType,
-          spcc_inspection_date: new Date().toISOString()
-        })
-        .in('id', facilityIds);
-
-      if (error) throw error;
-
+      // Each facility uses the same account-scoped evidence RPC and active
+      // Inspection-stop completion path as the single-facility UI. A route
+      // failure never rolls back a compliance save; the shared coordinator
+      // queues the exact evidence/request pair for visible same-key retry.
+      for (const facilityId of facilityIds) {
+        const completed = await onManualInspectionCompletion(facilityId, completionType);
+        if (!completed) failedFacilityIds.push(facilityId);
+      }
+      await onFacilitiesChange();
+      if (failedFacilityIds.length > 0) {
+        setSelectedFacilityIds(new Set(failedFacilityIds));
+        setBulkCompletionError(
+          `${failedFacilityIds.length} ${failedFacilityIds.length === 1 ? 'facility needs' : 'facilities need'} attention. ` +
+          'Any saved compliance record was kept; use the route-status warning to retry its route check.',
+        );
+        return;
+      }
       setSelectedFacilityIds(new Set());
       setShowCompletionModal(false);
-      onFacilitiesChange();
     } catch (err) {
       console.error('Error marking facilities as complete:', err);
-      alert('Failed to update facilities');
+      setBulkCompletionError('Bulk completion stopped unexpectedly. Saved compliance records were not rolled back.');
+      await onFacilitiesChange();
+    } finally {
+      setBulkCompletionBusy(false);
     }
   };
 
@@ -5778,8 +5792,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <div className="flex items-center gap-1.5 md:gap-2">
                     {/* Mark Complete */}
                     <button
-                      onClick={() => setShowCompletionModal(true)}
-                      className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-500/10 dark:bg-blue-400/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-400/20 active:scale-95 transition-all text-xs font-medium"
+                      onClick={() => {
+                        setBulkCompletionError(null);
+                        setShowCompletionModal(true);
+                      }}
+                      className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all text-xs font-medium"
                       title="Mark as SPCC completed"
                     >
                       <CheckCircle className="w-4 h-4 md:w-3.5 md:h-3.5" />
@@ -7027,7 +7044,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             facilityCount={selectedFacilityIds.size}
             onSelectInternal={() => handleBulkMarkComplete('internal')}
             onSelectExternal={() => handleBulkMarkComplete('external')}
-            onClose={() => setShowCompletionModal(false)}
+            onClose={() => {
+              if (bulkCompletionBusy) return;
+              setShowCompletionModal(false);
+              setBulkCompletionError(null);
+            }}
+            busy={bulkCompletionBusy}
+            error={bulkCompletionError}
           />
         )
       }
