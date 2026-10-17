@@ -23,16 +23,25 @@
     color-scheme: dark;
   }
 
+  /* overflow-x makes body and #root scroll containers. When a page is only
+     a position:fixed overlay (the native login screen, which has no landing
+     page behind it), they collapse to 0px tall, and iOS WKWebView clips the
+     composited (backdrop-blur) overlay to that 0px box: a blank white app.
+     Giving both the viewport's height keeps the overlay visible. */
   body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
     max-width: 100vw;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   #root {
     overflow-x: hidden;
     max-width: 100vw;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* Better mobile input styling */
