@@ -1,0 +1,11 @@
+diff --git a/src/hooks/usePlanRouteRun.ts b/src/hooks/usePlanRouteRun.ts
+index 2a31d3f..71a1e46 100644
+--- a/src/hooks/usePlanRouteRun.ts
++++ b/src/hooks/usePlanRouteRun.ts
+@@ -220,6 +220,7 @@ export function usePlanRouteRun({
+         .eq('account_id', accountId)
+         .eq('route_plan_id', routePlanId)
+         .eq('team_number', teamNumber)
++        .eq('survey_type', 'spcc_plan')
+         .eq('status', 'active')
+         .maybeSingle();

@@ -5,12 +5,11 @@ import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
-import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, supabase } from '../lib/supabase';
+import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, ResetRouteStatusScope, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
-import { isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
+import { isFacilityInspectionCurrent, isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
-import { getFacilityPhotosState } from '../utils/spccPlans';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
 import VisitActionsPopover from './VisitActionsPopover';
 import { parseLocalDate, getAccountTimeZone, instantToZonedParts } from '../utils/dateUtils';
@@ -19,6 +18,8 @@ import ExportRoutes from './ExportRoutes';
 import SavedRoutesManager from './SavedRoutesManager';
 import { calculateDistanceMatrix } from '../services/osrm';
 import { getCoords } from '../utils/coordinates';
+import ResetRouteStatusModal from './ResetRouteStatusModal';
+import { getRouteStatusRenderModel } from '../utils/routeStatus';
 
 // Helper function to check if a facility is active (not excluded or removed)
 const isActiveFacility = (facility: Facility): boolean => {
@@ -93,8 +94,19 @@ interface RouteResultsProps {
     savingFacilityId: string | null;
     schemaUnavailable: boolean;
     error?: string | null;
-    startNewRun?: () => Promise<unknown>;
     setFacilityCompleted: (facilityId: string, completed: boolean) => Promise<boolean>;
+    isOnline?: boolean;
+    resetting?: boolean;
+    resetRouteStatus?: (scope: ResetRouteStatusScope, requestId: string) => Promise<unknown>;
+    inspectionStopsByFacilityId?: Map<string, PlanRouteRunStop>;
+    inspectionRunInitialized?: boolean;
+    planRunInitialized?: boolean;
+    completeInspectionStop?: (
+      facilityId: string,
+      source: 'inspection' | 'manual_internal' | 'manual_external',
+      sourceRecordId: string,
+    ) => Promise<boolean>;
+    recordManualInspectionCompletion?: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   };
 }
 
@@ -155,7 +167,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showRouteActionsMenu, setShowRouteActionsMenu] = useState(false);
   const [routeScopeChoice, setRouteScopeChoice] = useState<'current' | 'all'>('current');
-  const [isResettingOuting, setIsResettingOuting] = useState(false);
+  const [showResetRouteStatus, setShowResetRouteStatus] = useState(false);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState('');
   const routeActionsRef = useRef<HTMLDivElement>(null);
   const refreshDialogRef = useRef<HTMLDivElement>(null);
   const refreshDialogTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1029,21 +1042,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }, 0);
   };
 
-  const handleResetPlanOuting = async () => {
-    if (!planRouteProgress?.runId || !planRouteProgress.startNewRun || isResettingOuting) return;
-    const confirmed = window.confirm(
-      'Reset route progress for a new outing? The current outing remains in history. Facilities photo status and every photo-history record stay unchanged.',
-    );
-    if (!confirmed) return;
-
-    setIsResettingOuting(true);
-    try {
-      await planRouteProgress.startNewRun();
-    } finally {
-      setIsResettingOuting(false);
-    }
-  };
-
   const handleRestoreExcluded = async () => {
     if (!confirm('This will restore all excluded facilities to the route and regenerate it. Continue?')) {
       return;
@@ -1146,6 +1144,21 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     routeIdentity: { ids: Set<string>; legacyNames: Set<string> },
   ): boolean => routeIdentity.ids.has(facility.id) || routeIdentity.legacyNames.has(facility.name);
 
+  const getFacilityRouteRenderModel = (facility: Facility) => {
+    const inspection = inspections.get(facility.id);
+    const planStatus = getSPCCPlanStatus(facility).status;
+    return getRouteStatusRenderModel({
+      surveyTypeKind: effectiveKind,
+      isCurrentRouteStop: routeContainsFacility(facility, getRouteFacilityIdentity()),
+      inspectionRunInitialized: Boolean(planRouteProgress?.inspectionRunInitialized),
+      planRunInitialized: Boolean(planRouteProgress?.planRunInitialized),
+      inspectionStop: planRouteProgress?.inspectionStopsByFacilityId?.get(facility.id),
+      planStop: planRouteProgress?.stopsByFacilityId.get(facility.id),
+      inspectionComplianceCurrent: isFacilityInspectionCurrent(facility, inspection ? [inspection] : []),
+      planComplianceCurrent: planStatus === 'valid' || planStatus === 'recertified',
+    });
+  };
+
   /**
    * One stop per facility, in the order they were actually visited.
    *
@@ -1246,14 +1259,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const facility = getFacilityForStop(facilityName, facilityId);
     if (!facility) return false;
 
-    // Check for external completion
-    if (facility.spcc_completion_type === 'external') {
-      return true;
-    }
-
-    // Check for valid internal inspection
     const inspection = inspections.get(facility.id);
-    return isInspectionValid(inspection);
+    return isFacilityInspectionCurrent(facility, inspection ? [inspection] : []);
   };
 
   const shouldHideFacility = (facilityName: string, facilityId?: string): boolean => {
@@ -1269,13 +1276,14 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
     // Inspection-based hiding (applies in All and Inspections modes)
     if (hideAllCompleted || hideInternallyCompleted || hideExternallyCompleted) {
-      if (facility.spcc_completion_type === 'external' && (hideAllCompleted || hideExternallyCompleted)) {
-        return true;
-      }
-      if (facility.spcc_completion_type === 'internal' && (hideAllCompleted || hideInternallyCompleted)) {
-        return true;
-      }
       const inspection = inspections.get(facility.id);
+      const inspectionCurrent = isFacilityInspectionCurrent(facility, inspection ? [inspection] : []);
+      if (inspectionCurrent && facility.spcc_completion_type === 'external' && (hideAllCompleted || hideExternallyCompleted)) {
+        return true;
+      }
+      if (inspectionCurrent && facility.spcc_completion_type === 'internal' && (hideAllCompleted || hideInternallyCompleted)) {
+        return true;
+      }
       if (isInspectionValid(inspection) && hideAllCompleted) {
         return true;
       }
@@ -1293,14 +1301,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     }
 
     return false;
-  };
-
-  /** Photos on file = someone has physically been to the site. */
-  const isFacilityVisited = (facility: Facility): boolean => {
-    if (effectiveKind === 'spcc_plan') {
-      return planRouteProgress?.stopsByFacilityId.get(facility.id)?.status === 'completed';
-    }
-    return getFacilityPhotosState(facility) === 'all';
   };
 
   /**
@@ -1321,28 +1321,12 @@ export default function RouteResults({ result, settings, facilities, userId, tea
    * Inspection and All modes are unchanged — inspection completion.
    */
   const getCompletedFacilities = (): Facility[] => {
-    if (effectiveKind === 'spcc_plan') {
-      const inRoute = getRouteFacilityIdentity();
-      return facilities.filter(
-        f => f.status !== 'sold' && routeContainsFacility(f, inRoute) && isFacilityVisited(f)
-      );
-    }
-
-    return facilities.filter(f => {
-      if (f.status === 'sold') return false;
-
-      // For inspection and all modes, check inspection completion
-      const inspection = inspections.get(f.id);
-      if (!inspection || inspection.status !== 'completed') return false;
-
-      // When in SPCC inspection mode, don't show facilities that need inspection
-      // in the completed section - they belong in the day routes
-      if (effectiveKind === 'spcc_inspection' && facilityNeedsSPCCInspection(f)) {
-        return false;
-      }
-
-      return true;
-    });
+    const inRoute = getRouteFacilityIdentity();
+    return facilities.filter(f =>
+      f.status !== 'sold' &&
+      routeContainsFacility(f, inRoute) &&
+      getFacilityRouteRenderModel(f).showRouteCheck
+    );
   };
 
   const getInspection = (facilityName: string, facilityId?: string): Inspection | undefined => {
@@ -2267,6 +2251,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                     >
                       <Download className="h-4 w-4" /> Export route
                     </button>
+                    {effectiveKind !== 'custom' && planRouteProgress?.resetRouteStatus && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setShowRouteActionsMenu(false);
+                          setResetSuccessMessage('');
+                          setShowResetRouteStatus(true);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-red-700 hover:bg-red-600 hover:text-white dark:text-red-300 dark:hover:bg-red-600 dark:hover:text-white"
+                      >
+                        <RefreshCw className="h-4 w-4" /> Reset route status
+                      </button>
+                    )}
                     {onConfigureHomeBase && (
                       <>
                         <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
@@ -2411,17 +2409,6 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         </p>
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Facility photo status and photo history are never reset here.</p>
                       </div>
-                      {planRouteProgress.runId && planRouteProgress.startNewRun && (
-                        <button
-                          type="button"
-                          disabled={isResettingOuting || planRouteProgress.loading}
-                          onClick={handleResetPlanOuting}
-                          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
-                        >
-                          <RefreshCw className={`h-4 w-4 ${isResettingOuting ? 'animate-spin' : ''}`} />
-                          Reset for new outing
-                        </button>
-                      )}
                     </div>
                   </section>
                 )}
@@ -3453,6 +3440,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         const photosTaken = effectiveKind === 'spcc_plan'
                           ? routeStop?.status === 'completed'
                           : Boolean(facility?.photos_taken);
+                        const routeRenderModel = facility ? getFacilityRouteRenderModel(facility) : null;
+                        const inspectionComplianceCurrent = facility
+                          ? hasValidInspection(facility.name, facility.id)
+                          : false;
 
                         return (
                           <div
@@ -3599,17 +3590,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                     })()}
 
                                     {/* Standard inspection icons - show when not filtering by spcc_plan */}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && hasValidInspection(segment.to, facility?.id) && (
-                                      <span title="Verified - Inspection within last year">
+                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && routeRenderModel?.showRouteCheck && (
+                                      <span title="Completed on the current route status">
                                         <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !hasValidInspection(segment.to, facility?.id) && getInspection(segment.to, facility?.id) && (
+                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && inspectionComplianceCurrent && (
+                                      <span title="Inspection is compliant; current route status is pending">
+                                        <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                      </span>
+                                    )}
+                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && getInspection(segment.to, facility?.id) && (
                                       <span title="Inspection expired - Reinspection needed">
                                         <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {surveyType !== 'spcc_plan' && segment.to !== 'Home Base' && !getInspection(segment.to, facility?.id) && (
+                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && !getInspection(segment.to, facility?.id) && (
                                       <span title="No inspection yet">
                                         <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
                                       </span>
@@ -3895,6 +3891,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           onShowOnMap={onShowOnMap}
           facilities={facilities}
           allInspections={Array.from(inspections.values())}
+          onInspectionRouteStopCompleted={planRouteProgress?.completeInspectionStop}
+          onManualInspectionCompletion={planRouteProgress?.recordManualInspectionCompletion}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
           }}
@@ -4256,6 +4254,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       )}
 
       {/* Export Routes Popup */}
+      <ResetRouteStatusModal
+        open={showResetRouteStatus}
+        routeName={currentRouteName}
+        teamNumber={teamNumber}
+        stopCount={routeStopCount ?? result.totalFacilities}
+        defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' ? effectiveKind : 'all'}
+        canReset={Boolean(currentRouteId && accountId && teamNumber)}
+        offline={planRouteProgress?.isOnline === false}
+        resetting={Boolean(planRouteProgress?.resetting)}
+        error={planRouteProgress?.error}
+        onClose={() => { if (!planRouteProgress?.resetting) setShowResetRouteStatus(false); }}
+        onReset={async (scope, requestId) => {
+          if (!planRouteProgress?.resetRouteStatus) return;
+          await planRouteProgress.resetRouteStatus(scope, requestId);
+          setShowResetRouteStatus(false);
+          setResetSuccessMessage('Route status reset. Both maps and the route list now use the committed status.');
+        }}
+      />
+      <p className="sr-only" aria-live="polite">{resetSuccessMessage}</p>
+
       {showExportPopup && (
         <ModalPortal>
         <div

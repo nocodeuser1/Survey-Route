@@ -4,13 +4,14 @@ import L from 'leaflet';
 import 'leaflet-rotate';
 import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
-import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop } from '../lib/supabase';
+import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop, RouteStatusScope } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, minutesTo12Hour } from '../utils/sunset';
-import { isInspectionValid } from '../utils/inspectionUtils';
+import { getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
+import { getRouteStatusRenderModel } from '../utils/routeStatus';
 import { getSPCCPlanStatus, isRecertificationActive } from '../utils/spccStatus';
-import { formatDate, nowInAccountTimeZone, parseLocalDate } from '../utils/dateUtils';
+import { formatDate, nowInAccountTimeZone } from '../utils/dateUtils';
 import NavigationPopup from './NavigationPopup';
 import SearchInput from './SearchInput';
 import FacilityDetailModal from './FacilityDetailModal';
@@ -58,6 +59,12 @@ interface RouteMapProps {
   navigationMode?: boolean;
   onNavigationModeChange?: (enabled: boolean) => void;
   onInspectionFormActiveChange?: (active: boolean) => void;
+  onInspectionRouteStopCompleted?: (
+    facilityId: string,
+    source: 'inspection' | 'manual_internal' | 'manual_external',
+    sourceRecordId: string,
+  ) => Promise<boolean>;
+  onManualInspectionCompletion?: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   triggerFitBounds?: number;
   onEditFacility?: (facility: Facility) => void;
   locationTracking?: boolean;
@@ -78,6 +85,8 @@ interface RouteMapProps {
   surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
   showOnlyRouteFacilities?: boolean;
   planRouteStopsByFacilityId?: Map<string, PlanRouteRunStop>;
+  routeStatusStopsByScope?: Record<RouteStatusScope, Map<string, PlanRouteRunStop>>;
+  routeStatusRunInitialized?: Record<RouteStatusScope, boolean>;
   onPlanRouteStopChange?: (facilityId: string, completed: boolean) => Promise<boolean>;
   planRouteSavingFacilityId?: string | null;
 }
@@ -128,7 +137,7 @@ function findCurrentFacilityForRouteStop(
   return facilities.find(facility => facility.name === routeFacility.name);
 }
 
-export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, onInspectionRouteStopCompleted, onManualInspectionCompletion, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
   // prefers the prop when given (canonical post-refactor path) and falls back
@@ -160,27 +169,18 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     // hideAllCompleted or hideInternallyCompleted: also check inspections table
     // and spcc_inspection_date on the facility record (not just spcc_completion_type)
     if (hideAllCompleted || hideInternallyCompleted) {
-      // Facilities with valid inspections from inspections table
-      inspections
-        .filter(i => isInspectionValid(i))
-        .forEach(i => {
-          const facility = facilities.find(f => f.id === i.facility_id);
-          if (facility) completed.add(facility.id);
-        });
-      // Facilities with spcc_completion_type === 'internal'
       facilities
-        .filter(f => f.spcc_completion_type === 'internal')
-        .forEach(f => completed.add(f.id));
-      // Facilities with a valid spcc_inspection_date (within last year)
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      facilities
-        .filter(f => f.spcc_inspection_date && parseLocalDate(f.spcc_inspection_date) >= oneYearAgo)
+        .filter(f => {
+          const facilityInspections = inspections.filter(i => i.facility_id === f.id);
+          return f.spcc_completion_type !== 'external' && isFacilityInspectionCurrent(f, facilityInspections);
+        })
         .forEach(f => completed.add(f.id));
     }
     if (hideAllCompleted || hideExternallyCompleted) {
       facilities
-        .filter(f => f.spcc_completion_type === 'external')
+        .filter(f => f.spcc_completion_type === 'external' && isFacilityInspectionCurrent(
+          f, inspections.filter(i => i.facility_id === f.id),
+        ))
         .forEach(f => completed.add(f.id));
     }
 
@@ -892,20 +892,18 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           // Check if facility has a valid completed inspection (within last year)
           // using the stable route id (or the resolved legacy-name row).
           const facilityDatabaseId = latestFacilityData?.id;
-          const facilityInspections = facilityDatabaseId
-            ? inspections.filter(i => i.facility_id === facilityDatabaseId)
-              .sort((a, b) => new Date(b.conducted_at).getTime() - new Date(a.conducted_at).getTime())
-            : [];
-          const latestInspection = facilityInspections.length > 0 ? facilityInspections[0] : undefined;
-          const hasCompletedInspection = isInspectionValid(latestInspection);
+          const facilityInspections = facilityDatabaseId ? inspections.filter(i => i.facility_id === facilityDatabaseId) : [];
+          const latestInspection = getNewestCompletedInspection(facilityInspections);
+          const hasCompletedInspection = latestFacilityData
+            ? isFacilityInspectionCurrent(latestFacilityData, facilityInspections)
+            : isInspectionValid(latestInspection);
 
           // Check completion type from facility data
           const completionType = latestFacilityData?.spcc_completion_type ?? null;
 
           // Determine if valid completion exists (inspection or completion type)
-          const isInternalCompletion = completionType === 'internal';
-          const isExternalCompletion = completionType === 'external';
-          const hasAnyValidInspectionCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+          const isExternalCompletion = completionType === 'external' && hasCompletedInspection;
+          const hasAnyValidInspectionCompletion = hasCompletedInspection;
 
           // SPCC Plan status calculation using shared utility
           let hasValidSPCCPlan = false;
@@ -959,7 +957,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           }
 
           // Use appropriate completion status based on surveyType
-          const hasAnyValidCompletion = effectiveKind === 'spcc_plan' ? hasValidSPCCPlan : hasAnyValidInspectionCompletion;
+          const routeStatusModel = getRouteStatusRenderModel({
+            surveyTypeKind: effectiveKind,
+            isCurrentRouteStop: true,
+            inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
+            planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? Boolean(planRouteStopsByFacilityId),
+            inspectionStop: facilityDatabaseId ? routeStatusStopsByScope?.spcc_inspection.get(facilityDatabaseId) : undefined,
+            planStop: facilityDatabaseId
+              ? routeStatusStopsByScope?.spcc_plan.get(facilityDatabaseId) ?? planRouteStopsByFacilityId?.get(facilityDatabaseId)
+              : undefined,
+            inspectionComplianceCurrent: hasAnyValidInspectionCompletion,
+            planComplianceCurrent: hasValidSPCCPlan,
+          });
+          const hasAnyValidCompletion = routeStatusModel.showRouteCheck;
 
           // Debug logging for specific facilities the user mentioned
           if (facility.name.includes('11-2') || facility.name.includes('11-21')) {
@@ -1859,13 +1869,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           currentFacilityIndexes.add(markerKey);
 
           // Check if facility is completed
-          const facilityInspections = inspections.filter(i => i.facility_id === facility.id)
-            .sort((a, b) => new Date(b.conducted_at).getTime() - new Date(a.conducted_at).getTime());
-          const latestInspection = facilityInspections.length > 0 ? facilityInspections[0] : undefined;
-          const hasCompletedInspection = isInspectionValid(latestInspection);
-          const isInternalCompletion = facility.spcc_completion_type === 'internal';
-          const isExternalCompletion = facility.spcc_completion_type === 'external';
-          const hasAnyValidInspectionCompletion = hasCompletedInspection || isInternalCompletion || isExternalCompletion;
+          const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
+          const hasCompletedInspection = isFacilityInspectionCurrent(facility, facilityInspections);
+          const isExternalCompletion = facility.spcc_completion_type === 'external' && hasCompletedInspection;
 
           // In SPCC plan mode, completion is based on plan status, not inspection status
           let hasValidSPCCPlanForNonRoute = false;
@@ -1874,9 +1880,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             hasValidSPCCPlanForNonRoute = planResult.status === 'valid' || planResult.status === 'recertified';
           }
 
-          const hasAnyValidCompletion = effectiveKind === 'spcc_plan'
-            ? hasValidSPCCPlanForNonRoute
-            : hasAnyValidInspectionCompletion;
+          // Off-route markers retain compliance color/status, but never use a
+          // check glyph that can be mistaken for current-route completion.
+          const hasAnyValidCompletion = false;
           const isManuallyRemoved = facility.day_assignment === -2;
 
           // Determine marker appearance.
@@ -2433,7 +2439,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       }
       initialLoadRef.current = false;
     }
-  }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, locationTracking, navigationMode, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId]);
+  }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, locationTracking, navigationMode, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {
@@ -4257,6 +4263,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               onFacilitiesChange();
             }
           }}
+          onInspectionRouteStopCompleted={onInspectionRouteStopCompleted}
+          onManualInspectionCompletion={onManualInspectionCompletion}
           onShowOnMap={onShowOnMap ? (latitude, longitude) => {
             setSurveyFacility(null);
             setForcedTab(null);

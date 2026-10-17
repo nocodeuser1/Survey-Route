@@ -1,5 +1,7 @@
-import { Inspection } from '../lib/supabase';
+import type { Inspection } from '../lib/supabase';
 import { parseLocalDate } from './dateUtils';
+import { isFacilityInspectionCurrentAt } from './inspectionCompletion';
+export { getNewestCompletedInspection } from './inspectionCompletion';
 
 export function isInspectionValid(inspection: Inspection | undefined): boolean {
   if (!inspection || inspection.status !== 'completed') {
@@ -126,4 +128,16 @@ export function getFacilityInspectionExpiry(
   }
 
   return { status: 'no_ip_date', daysUntilExpiry: null, expiryDate: null };
+}
+
+/** Canonical compliance predicate used by visibility and route-display fallback. */
+export function isFacilityInspectionCurrent(
+  facility: {
+    spcc_completion_type?: string | null;
+    spcc_inspection_date?: string | null;
+    first_prod_date?: string | null;
+  },
+  inspections: Inspection[] = [],
+): boolean {
+  return isFacilityInspectionCurrentAt(facility, inspections, new Date(), INSPECTION_EXPIRING_DAYS);
 }

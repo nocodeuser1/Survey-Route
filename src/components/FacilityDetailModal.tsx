@@ -70,6 +70,15 @@ interface FacilityDetailModalProps {
   accountId?: string;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onInspectionCompleted?: () => void;
+  onInspectionRouteStopCompleted?: (
+    facilityId: string,
+    source: 'inspection' | 'manual_internal' | 'manual_external',
+    sourceRecordId: string,
+  ) => Promise<boolean>;
+  onManualInspectionCompletion?: (
+    facilityId: string,
+    completionType: 'internal' | 'external',
+  ) => Promise<boolean>;
   onInspectionFormActiveChange?: (active: boolean) => void;
   onEdit?: () => void;
   facilities?: Facility[];
@@ -133,6 +142,8 @@ export default function FacilityDetailModal({
   accountId,
   onShowOnMap,
   onInspectionCompleted,
+  onInspectionRouteStopCompleted,
+  onManualInspectionCompletion,
   onInspectionFormActiveChange,
   onEdit,
   facilities = [],
@@ -552,7 +563,8 @@ export default function FacilityDetailModal({
     }
   };
 
-  const handleInspectionCompletedWithFacility = (completedFacility: Facility) => {
+  const handleInspectionCompletedWithFacility = async (completedFacility: Facility, inspectionId: string) => {
+    await onInspectionRouteStopCompleted?.(completedFacility.id, 'inspection', inspectionId);
     if (facilities.length > 0) {
       const nearby = findNearbyFacilities(completedFacility, facilities, 200, allInspections);
 
@@ -573,16 +585,17 @@ export default function FacilityDetailModal({
 
   const handleMarkComplete = async (completionType: 'internal' | 'external' | null) => {
     try {
-      const completedAt = completionType ? new Date().toISOString() : null;
-      const { error } = await supabase
-        .from('facilities')
-        .update({
-          spcc_completion_type: completionType,
-          spcc_inspection_date: completedAt,
-        })
-        .eq('id', facility.id);
-
-      if (error) throw error;
+      const completedAt = completionType ? new Date().toISOString().slice(0, 10) : null;
+      if (completionType && onManualInspectionCompletion) {
+        const saved = await onManualInspectionCompletion(facility.id, completionType);
+        if (!saved) return;
+      } else {
+        const { error } = await supabase
+          .from('facilities')
+          .update({ spcc_completion_type: completionType, spcc_inspection_date: completedAt })
+          .eq('id', facility.id);
+        if (error) throw error;
+      }
 
       facility.spcc_completion_type = completionType;
       facility.spcc_inspection_date = completedAt;
