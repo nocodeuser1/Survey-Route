@@ -45,3 +45,17 @@ test('Plan mutation guards saved-route identity before fallback lookup', () => {
   assert.ok(guard >= 0 && fallback > guard);
   assert.match(hook.slice(guard, fallback + 500), /fallbackError/);
 });
+
+test('settings-only route toolbar mounts the reset dialog it opens', () => {
+  const branchStart = routeResults.indexOf('if (showOnlySettings)');
+  const branchEnd = routeResults.indexOf(
+    'return (\n    <div className="relative space-y-4',
+    branchStart,
+  );
+  assert.ok(branchStart >= 0 && branchEnd > branchStart);
+
+  const settingsOnlyBranch = routeResults.slice(branchStart, branchEnd);
+  assert.match(settingsOnlyBranch, /setShowResetRouteStatus\(true\)/);
+  assert.match(settingsOnlyBranch, /<ResetRouteStatusModal/);
+  assert.match(settingsOnlyBranch, /aria-live="polite"/);
+});
