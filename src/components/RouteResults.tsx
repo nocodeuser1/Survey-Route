@@ -2787,6 +2787,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           </ModalPortal>
         )}
 
+        <ResetRouteStatusModal
+          open={showResetRouteStatus}
+          routeName={currentRouteName}
+          teamNumber={teamNumber}
+          stopCount={routeStopCount ?? result.totalFacilities}
+          defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' ? effectiveKind : 'all'}
+          canReset={Boolean(currentRouteId && accountId && teamNumber)}
+          offline={planRouteProgress?.isOnline === false}
+          resetting={Boolean(planRouteProgress?.resetting)}
+          error={planRouteProgress?.error}
+          onClose={() => { if (!planRouteProgress?.resetting) setShowResetRouteStatus(false); }}
+          onReset={async (scope, requestId) => {
+            if (!planRouteProgress?.resetRouteStatus) return;
+            await planRouteProgress.resetRouteStatus(scope, requestId);
+            setShowResetRouteStatus(false);
+            setResetSuccessMessage('Route status reset. Both maps and the route list now use the committed status.');
+          }}
+        />
+        <p className="sr-only" aria-live="polite">{resetSuccessMessage}</p>
+
         {/* Export Routes Popup */}
         {showExportPopup && (
           <ModalPortal>
