@@ -1,0 +1,129 @@
+import assert from 'node:assert/strict';
+import { fakeDb } from './spcc-test-db.mjs';
+import { makeHandler, hashKey, sourceRecord } from '../supabase/functions/spcc-read-api/core.js';
+const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const account = id(1),
+  user = id(2),
+  profile = id(3),
+  agency = id(4),
+  facility = id(5),
+  plan = id(6),
+  otherAccount = id(7);
+const auth = {
+  id: user,
+  email: 'admin@example.invalid',
+  email_confirmed_at: '2026-01-01T00:00:00Z',
+};
+const raw = {
+  id: facility,
+  account_id: account,
+  name: 'Example Facility',
+  status: 'active',
+  created_at: '2026-01-01T00:00:00Z',
+  spcc_workflow_status: 'pe_stamped',
+  spcc_pe_stamp_date: null,
+  spcc_plan_url: 'https://private.invalid/never-export',
+  field_visit_date: '2026-01-01',
+};
+const db = fakeDb(
+  {
+    accounts: [
+      { id: account, agency_id: agency, account_name: 'Example', company_name: 'Example Operator' },
+    ],
+    agencies: [{ id: agency, owner_email: 'owner@example.invalid' }],
+    users: [{ id: profile, auth_user_id: user }],
+    account_users: [{ account_id: account, user_id: profile, role: 'account_admin' }],
+    agency_co_owners: [],
+    spcc_read_api_keys: [],
+    facilities: [raw, { ...raw, id: id(20), account_id: otherAccount, name: 'Other tenant' }],
+    spcc_plans: [
+      {
+        id: plan,
+        facility_id: facility,
+        plan_url: 'https://private.invalid/never-export',
+        workflow_status: 'completed_uploaded',
+        pe_stamp_date: null,
+        created_at: '2026-01-02T00:00:00Z',
+      },
+    ],
+  },
+  auth
+);
+const handle = makeHandler({ db }),
+  request = (path, method, token, body) =>
+    new Request(`https://edge.invalid/spcc-read-api/${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+let r = await handle(
+  request('keys', 'POST', 'jwt', { action: 'create', account_id: account, label: 'myScribe' })
+);
+assert.equal(r.status, 400);
+r = await handle(
+  request('keys', 'POST', 'jwt', {
+    action: 'create',
+    account_id: otherAccount,
+    label: 'myScribe',
+    confirm_read_access: true,
+  })
+);
+assert.equal(r.status, 403);
+r = await handle(
+  request('keys', 'POST', 'jwt', {
+    action: 'create',
+    account_id: account,
+    label: 'myScribe',
+    confirm_read_access: true,
+  })
+);
+assert.equal(r.status, 201);
+const created = await r.json(),
+  key = created.key;
+assert.match(key, /^sr_spcc_[a-f0-9]{64}$/);
+assert.ok(!JSON.stringify(db.tables).includes(key));
+assert.equal(db.tables.spcc_read_api_keys[0].key_hash, await hashKey(key));
+r = await handle(request('keys', 'POST', 'jwt', { action: 'list', account_id: account }));
+assert.ok(!JSON.stringify(await r.json()).includes('key_hash'));
+r = await handle(request('export', 'GET', key));
+assert.equal(r.status, 200);
+const data = await r.json();
+assert.equal(data.facility_count, 1);
+assert.equal(data.records.length, 1);
+assert.equal(data.records[0].pe_stamp_status, 'unknown');
+assert.ok(!JSON.stringify(data).includes('private.invalid'));
+assert.ok(!JSON.stringify(data).includes('Other tenant'));
+assert.equal((await handle(request('export', 'POST', key))).status, 405);
+assert.equal((await handle(request('export', 'GET', 'bogus'))).status, 401);
+assert.equal((await handle(request('export?after=invalid', 'GET', key))).status, 400);
+db.tables.account_users[0].role = 'viewer';
+assert.equal((await handle(request('export', 'GET', key))).status, 403);
+db.tables.account_users[0].role = 'account_admin';
+db.tables.spcc_read_api_keys[0].expires_at = '2020-01-01T00:00:00Z';
+assert.equal((await handle(request('export', 'GET', key))).status, 401);
+db.tables.spcc_read_api_keys[0].expires_at = '2099-01-01T00:00:00Z';
+r = await handle(
+  request('keys', 'POST', 'jwt', {
+    action: 'revoke',
+    account_id: account,
+    key_id: created.metadata.id,
+  })
+);
+assert.equal(r.status, 200);
+assert.equal((await handle(request('export', 'GET', key))).status, 401);
+assert.equal(sourceRecord(raw).external_id, `facility:${facility}`);
+assert.equal(
+  sourceRecord({ ...raw, spcc_pe_stamp_date: '2026-02-01' }).pe_stamp_status,
+  'date_recorded'
+);
+assert.equal(
+  db.calls.some((c) => ['facilities', 'spcc_plans'].includes(c.table) && c.method !== 'select'),
+  false
+);
+assert.equal(
+  (await makeHandler({ db, enabled: false })(request('export', 'GET', key))).status,
+  503
+);
+console.log(
+  'PASS source API: explicit account consent, scoped authority, hashed keys, one-time key disclosure, safe metadata, revocation/expiry/access-loss checks, source read-only, no public document URLs, missing PE dates unknown, stable IDs and disabled rollout gate.'
+);

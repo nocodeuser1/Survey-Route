@@ -17,6 +17,7 @@ import SPCCPlanViewerPage from './pages/SPCCPlanViewerPage';
 import SPCCPlanDownloadPage from './pages/SPCCPlanDownloadPage';
 import MobileSignaturePage from './pages/MobileSignaturePage';
 import App from './App';
+import ConnectedSPCCPlan from './pages/ConnectedSPCCPlan';
 import LoadingScreen from './components/LoadingScreen';
 import { safeReturnPath } from './lib/passwordRecovery';
 
@@ -126,6 +127,7 @@ export default function AppRouter() {
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/unsubscribe" element={<UnsubscribePage />} />
+              <Route path="/connected-spcc/:facilityId" element={<ConnectedSPCCPlan />} />
               <Route path="/spcc-plan/:facilityId" element={<SPCCPlanViewerPage />} />
               <Route
                 path="/spcc-plan/:facilityId/berm/:bermIndex/download"

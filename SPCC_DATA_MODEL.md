@@ -17,7 +17,7 @@ The system tracks two distinct types of SPCC compliance activities:
 
 1. **Initial Plan Requirement**: A facility must have an SPCC plan within 6 months of first production date (`first_prod_date`)
 2. **Plan Renewal**: Plans must be renewed (recertified) every 5 years from the PE stamp date (`spcc_pe_stamp_date`)
-3. **One Plan Per Facility**: Each facility has at most one active SPCC plan at a time
+3. **Per-berm plans**: `spcc_plans` can contain multiple berm plans for a facility. Facility-level plan fields are legacy/summary mirrors; integrations must preserve individual plan UUIDs.
 4. **Plan Storage**: Plans are uploaded as PDF files and stored with their PE stamp date
 
 ### Database Fields (Facility Table)
@@ -155,6 +155,10 @@ This allows users to:
 - `inspection_templates` - Inspection form templates
 - `spcc_compliance_tracking` - Compliance calculations and alerts
 - `facility_inspection_schedules` - Inspection scheduling configuration
+
+## Read-only account connections
+
+See [SPCC connections](docs/SPCC_CONNECTIONS.md) for administrator-issued account-scoped keys and myScribe setup. The versioned export preserves per-berm records and uses facility fallback records only when no plan rows exist. It does not export raw storage URLs. Missing PE-stamp dates remain unknown regardless of workflow status or PDF presence.
 
 ## API Integration Notes
 
