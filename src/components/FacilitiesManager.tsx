@@ -2278,6 +2278,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
 
   const filteredFacilities = getFilteredAndSortedFacilities();
+  // Only sold visibility changes the total; other filters affect the visible count.
+  const totalFacilityCount = showSoldFacilities
+    ? facilities.length
+    : facilities.filter(facility => facility.status !== 'sold').length;
 
   const handleEdit = (facility: Facility) => {
     // Always open modal/fullscreen edit view for all devices
@@ -4984,7 +4988,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
                 <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-white">Facilities</h2>
                 {!isLoading && (
-                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 font-normal">{filteredFacilities.length}/{facilities.length}</span>
+                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 font-normal">{filteredFacilities.length}/{totalFacilityCount}</span>
                 )}
               </div>
               {/* Active custom-filter chips — visible even when the Filters
