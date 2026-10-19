@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
-import { Home, Search, MapPin, X, Check, ChevronRight, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Home, Search, MapPin, X, Check, Loader2, LocateFixed, RefreshCw } from 'lucide-react';
 import { geocodeAddress } from '../services/osrm';
-import { supabase, HomeBase } from '../lib/supabase';
+import { supabase, type HomeBase } from '../lib/supabase';
+import { requestMapLocation } from '../utils/mapLocation';
 
 interface HomeBaseModalProps {
   userId: string;
@@ -10,11 +11,6 @@ interface HomeBaseModalProps {
   onTeamCountChange: (count: number) => void;
   onSaved: () => void;
   onClose: () => void;
-  /**
-   * Why the modal was opened, when something else triggered it (e.g. the user
-   * hit "Generate Routes" before setting a home base). Rendered as an inline
-   * explanation so the modal doesn't appear out of nowhere.
-   */
   contextMessage?: string;
 }
 
@@ -24,452 +20,284 @@ interface HomeBaseForm {
   address: string;
   latitude: number | null;
   longitude: number | null;
-  isGeocoding: boolean;
-  isSaved: boolean;
+  locating: 'address' | 'device' | null;
   error: string | null;
 }
 
 const TEAM_OPTIONS = [1, 2, 3, 4] as const;
+const validLocation = (form: HomeBaseForm) =>
+  form.latitude !== null && Number.isFinite(form.latitude) && Math.abs(form.latitude) <= 90 &&
+  form.longitude !== null && Number.isFinite(form.longitude) && Math.abs(form.longitude) <= 180;
 
-/**
- * Supabase returns PostgrestError plain objects, not Error instances, so an
- * `err instanceof Error` check swallows the real reason and shows "Unknown
- * error". Pull the message out of whatever shape we actually got, and
- * translate the one conflict users can realistically hit into plain language.
- */
+function createForms(bases: HomeBase[] = []): HomeBaseForm[] {
+  return TEAM_OPTIONS.map(teamNumber => {
+    const base = bases.find(candidate => candidate.team_number === teamNumber);
+    return {
+      teamNumber,
+      teamLabel: base?.team_label || `Team ${teamNumber}`,
+      address: base?.address || '',
+      latitude: base ? Number(base.latitude) : null,
+      longitude: base ? Number(base.longitude) : null,
+      locating: null,
+      error: null,
+    };
+  });
+}
+
 function describeSaveError(err: unknown): string {
-  const e = err as { code?: string; message?: string; details?: string; hint?: string } | null;
-
-  // 23505 = unique_violation. Before the account-scoped uniqueness migration
-  // this fired whenever a user set a home base on a second account.
-  if (e?.code === '23505') {
-    return 'a home base already exists for this team. If this account is new, the database still has the old one-home-base-per-user rule — the pending migration fixes it.';
-  }
-
-  const parts = [e?.message, e?.details, e?.hint].filter(Boolean);
-  if (parts.length > 0) return parts.join(' — ');
-  if (err instanceof Error) return err.message;
-  return 'Unknown error';
+  const error = err as { code?: string; message?: string } | null;
+  if (error?.code === '23505') return 'A home base already exists for this team. Close and reopen settings to load it before trying again.';
+  return error?.message || 'Please check your connection and try again.';
 }
 
 export default function HomeBaseModal({
-  userId,
-  accountId,
-  teamCount,
-  onTeamCountChange,
-  onSaved,
-  onClose,
-  contextMessage,
+  userId, accountId, teamCount, onTeamCountChange, onSaved, onClose, contextMessage,
 }: HomeBaseModalProps) {
-  const [localTeamCount, setLocalTeamCount] = useState(teamCount);
+  const [localTeamCount, setLocalTeamCount] = useState(Math.max(1, Math.min(4, teamCount || 1)));
   const [homeBases, setHomeBases] = useState<HomeBase[]>([]);
-  const [forms, setForms] = useState<HomeBaseForm[]>([]);
+  const [forms, setForms] = useState<HomeBaseForm[]>(() => createForms());
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const requestVersions = useRef<number[]>([0, 0, 0, 0]);
+  const locationCancels = useRef<Array<(() => void) | undefined>>([]);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const savingRef = useRef(false);
 
-  // Sliding selector state
-  const selectorRef = useRef<HTMLDivElement>(null);
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartIndexRef = useRef(0);
-
-  useEffect(() => {
-    loadHomeBases();
+  const loadHomeBases = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    setIsLoading(true);
+    setLoadError(null);
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const { data, error } = await supabase.from('home_base').select('*')
+        .eq('account_id', accountId).order('team_number', { ascending: true })
+        .abortSignal(controller.signal);
+      if (loadAbortRef.current !== controller) return;
+      if (error || controller.signal.aborted) throw error || new Error('Timed out');
+      setHomeBases(data || []);
+      setForms(createForms(data || []));
+    } catch {
+      if (loadAbortRef.current === controller) {
+        setLoadError('Could not load saved home bases. Try again before making changes.');
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (loadAbortRef.current === controller) setIsLoading(false);
+    }
   }, [accountId]);
 
-  // Close on Escape key
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    void loadHomeBases();
+    return () => {
+      const controller = loadAbortRef.current;
+      loadAbortRef.current = null;
+      controller?.abort();
+      locationCancels.current.forEach(cancel => cancel?.());
+      requestVersions.current = requestVersions.current.map(version => version + 1);
+      clearTimeout(closeTimer.current);
+    };
+  }, [loadHomeBases]);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    modalRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !savingRef.current) onClose();
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(modalRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), summary, [tabindex="0"]',
+      ) || []).filter(element => element.getClientRects().length > 0 && !element.closest('fieldset:disabled'));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === modalRef.current)) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === modalRef.current)) {
+        event.preventDefault(); first?.focus();
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const loadHomeBases = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('home_base')
-        .select('*')
-        .eq('account_id', accountId)
-        .order('team_number', { ascending: true });
-
-      if (error) throw error;
-
-      setHomeBases(data || []);
-
-      const newForms: HomeBaseForm[] = [];
-      for (let i = 1; i <= TEAM_OPTIONS.length; i++) {
-        const existing = data?.find(hb => hb.team_number === i);
-        newForms.push({
-          teamNumber: i,
-          teamLabel: existing?.team_label || `Team ${i}`,
-          address: existing?.address || '',
-          latitude: existing ? Number(existing.latitude) : null,
-          longitude: existing ? Number(existing.longitude) : null,
-          isGeocoding: false,
-          isSaved: !!existing,
-          error: null,
-        });
-      }
-      setForms(newForms);
-    } catch (err) {
-      console.error('Error loading home bases:', err);
-    }
-  };
-
   const updateForm = (index: number, updates: Partial<HomeBaseForm>) => {
-    setForms(prev =>
-      prev.map((form, i) => (i === index ? { ...form, ...updates } : form))
-    );
+    setSaveError(null);
+    setForms(previous => previous.map((form, i) => i === index ? { ...form, ...updates } : form));
   };
-
+  const cancelLocation = (index: number) => {
+    locationCancels.current[index]?.();
+    return ++requestVersions.current[index];
+  };
+  const editAddress = (index: number, address: string) => {
+    cancelLocation(index);
+    updateForm(index, { address, latitude: null, longitude: null, locating: null, error: null });
+  };
   const handleGeocode = async (index: number) => {
-    const form = forms[index];
-    if (!form.address.trim()) {
-      updateForm(index, { error: 'Please enter an address' });
-      return;
-    }
-
-    updateForm(index, { isGeocoding: true, error: null });
-
+    const address = forms[index].address.trim();
+    if (!address) return;
+    const version = cancelLocation(index);
+    updateForm(index, { locating: 'address', error: null, latitude: null, longitude: null });
+    // Bound a stalled address lookup, and ignore responses after edits or close.
+    const timeout = setTimeout(() => {
+      if (requestVersions.current[index] !== version) return;
+      requestVersions.current[index]++;
+      updateForm(index, { locating: null, error: 'Finding that address took too long. Try again or use coordinates.' });
+    }, 12000);
+    locationCancels.current[index] = () => clearTimeout(timeout);
     try {
-      const location = await geocodeAddress(form.address);
-
-      if (!location) {
-        updateForm(index, {
-          error: 'Could not find location. Try a more specific address.',
-          latitude: null,
-          longitude: null,
-          isGeocoding: false,
-        });
+      const location = await geocodeAddress(address);
+      if (requestVersions.current[index] !== version) return;
+      if (!location || !validLocation({ ...forms[index], ...location })) {
+        updateForm(index, { locating: null, error: 'Could not find that address. Include the city and state, or use coordinates.' });
       } else {
-        updateForm(index, {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          error: null,
-          isGeocoding: false,
-        });
+        updateForm(index, { ...location, locating: null, error: null });
       }
     } catch {
-      updateForm(index, {
-        error: 'Failed to geocode address',
-        isGeocoding: false,
+      if (requestVersions.current[index] === version) {
+        updateForm(index, { locating: null, error: 'Could not find that address. Please try again.' });
+      }
+    } finally { clearTimeout(timeout); }
+  };
+  const handleCurrentLocation = (index: number) => {
+    const version = cancelLocation(index);
+    updateForm(index, { locating: 'device', error: null });
+    locationCancels.current[index] = requestMapLocation(navigator.geolocation,
+      ({ coords: { latitude, longitude } }) => {
+        if (requestVersions.current[index] !== version) return;
+        updateForm(index, { latitude, longitude, address: `Current location (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`, locating: null, error: null });
+      },
+      message => {
+        if (requestVersions.current[index] === version) updateForm(index, { locating: null, error: message });
       });
-    }
   };
 
+  const activeForms = forms.slice(0, localTeamCount);
+  const busy = isLoading || isSaving || saveSuccess;
+  const canSave = !busy && !loadError && activeForms.every(form => validLocation(form) && !form.locating);
   const handleSave = async () => {
-    // Validate: at least team 1 must have a location
-    if (!forms[0]?.latitude || !forms[0]?.longitude) {
-      updateForm(0, { error: 'Please find a location for your home base' });
-      return;
-    }
-
-    // For multi-team, validate all active teams
-    const activeForms = forms.filter(f => f.teamNumber <= localTeamCount);
-    if (localTeamCount > 1) {
-      const invalid = activeForms.filter(f => !f.latitude || !f.longitude);
-      if (invalid.length > 0) {
-        invalid.forEach(f => {
-          const idx = forms.indexOf(f);
-          updateForm(idx, { error: 'Please find a location for this team' });
-        });
-        return;
-      }
-    }
-
+    if (!canSave || savingRef.current) return;
+    savingRef.current = true;
     setIsSaving(true);
-
+    setSaveError(null);
     try {
       for (const form of activeForms) {
-        const existing = homeBases.find(hb => hb.team_number === form.teamNumber);
-
-        if (existing) {
-          const { error } = await supabase
-            .from('home_base')
-            .update({
-              address: form.address,
-              latitude: form.latitude!,
-              longitude: form.longitude!,
-              team_label: form.teamLabel,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', existing.id);
-
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('home_base').insert({
-            user_id: userId,
-            account_id: accountId,
-            address: form.address,
-            latitude: form.latitude!,
-            longitude: form.longitude!,
-            team_number: form.teamNumber,
-            team_label: form.teamLabel,
-          });
-
-          if (error) throw error;
-        }
+        const values = {
+          address: form.address.trim() || `Coordinates (${form.latitude}, ${form.longitude})`,
+          latitude: form.latitude!, longitude: form.longitude!,
+          team_label: form.teamLabel.trim() || `Team ${form.teamNumber}`,
+        };
+        const existing = homeBases.find(base => base.team_number === form.teamNumber);
+        const query = existing
+          ? supabase.from('home_base').update({ ...values, updated_at: new Date().toISOString() })
+            .eq('id', existing.id).eq('account_id', accountId)
+          : supabase.from('home_base').insert({ ...values, user_id: userId, account_id: accountId, team_number: form.teamNumber });
+        const { data, error } = await query.select('*').single();
+        if (error) throw error;
+        if (!data) throw new Error('The home base was not saved. Please try again.');
+        // Keep successful teams available for a retry if another team fails.
+        setHomeBases(previous => [...previous.filter(base => base.team_number !== form.teamNumber), data]);
       }
-
       setSaveSuccess(true);
       onTeamCountChange(localTeamCount);
       onSaved();
-
-      // Auto-close after brief success indicator
-      setTimeout(() => {
-        onClose();
-      }, 600);
-    } catch (err) {
-      console.error('Error saving home bases:', err);
-      updateForm(0, {
-        error: `Failed to save: ${describeSaveError(err)}`,
-      });
+      closeTimer.current = setTimeout(onClose, 600);
+    } catch (error) {
+      setSaveError(`Could not save home base. ${describeSaveError(error)}`);
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
 
-  const activeForms = forms.filter(f => f.teamNumber <= localTeamCount);
-  const anyLocated = activeForms.some(f => f.latitude && f.longitude);
-
+  const inputClass = 'w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white disabled:opacity-60';
   return (
-    <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-[10000] p-0 sm:p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={modalRef}
-        className="bg-white dark:bg-gray-800 w-full sm:max-w-lg sm:rounded-2xl shadow-2xl max-h-screen sm:max-h-[90vh] flex flex-col overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
+    <div className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={event => { if (event.target === event.currentTarget && !savingRef.current && !saveSuccess) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="home-base-title" aria-describedby="home-base-description" tabIndex={-1}
+        className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl outline-none dark:bg-gray-800 sm:max-h-[90dvh] sm:max-w-xl sm:rounded-2xl">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
-              <Home className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><Home className="h-5 w-5" /></div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Home Base
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Routes start and end here
-              </p>
+              <h2 id="home-base-title" className="text-lg font-semibold text-gray-900 dark:text-white">Home base settings</h2>
+              <p id="home-base-description" className="text-xs text-gray-500 dark:text-gray-400">Choose where each team's routes start and end.</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <button type="button" onClick={onClose} disabled={isSaving || saveSuccess} aria-label="Close home base settings" title="Close without saving"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-50"><X className="h-5 w-5" /></button>
         </div>
-
-        {/* Scrollable content */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
-          {contextMessage && (
-            <div className="flex items-start gap-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 px-3.5 py-3">
-              <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-              <p className="text-sm text-blue-900 dark:text-blue-200 leading-snug">{contextMessage}</p>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
+          {contextMessage && <p className="text-sm text-gray-700 dark:text-gray-300">{contextMessage}</p>}
+          {isLoading && <p role="status" className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400"><Loader2 className="h-4 w-4 animate-spin" />Loading saved home bases...</p>}
+          {loadError && <div role="alert" className="space-y-2 rounded-lg border border-red-300 p-3 text-sm text-red-700 dark:border-red-800 dark:text-red-300">
+            <p>{loadError}</p>
+            <button type="button" onClick={() => void loadHomeBases()} title="Reload saved home bases" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-3 font-medium text-white hover:bg-blue-700"><RefreshCw className="h-4 w-4" />Try again</button>
+          </div>}
+          <fieldset disabled={busy || !!loadError} className="min-w-0 space-y-4 disabled:opacity-60">
+            <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Number of teams</legend>
+            <div className="grid grid-cols-4 gap-1 rounded-xl border border-gray-200 p-1 dark:border-gray-600">
+              {TEAM_OPTIONS.map(count => <button key={count} type="button" aria-pressed={localTeamCount === count}
+                title={`Set up ${count === 1 ? 'one team' : `${count} teams`}`} onClick={() => setLocalTeamCount(count)}
+                className={`min-h-11 rounded-lg px-1 text-sm font-medium transition-colors ${localTeamCount === count ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-white'}`}>
+                {count} {count === 1 ? 'Team' : 'Teams'}
+              </button>)}
             </div>
-          )}
-
-          {/* Team count selector - sliding segmented control */}
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-              Number of Teams
-            </label>
-            <div
-              ref={selectorRef}
-              className="relative flex bg-gray-100 dark:bg-gray-700 rounded-xl p-1 select-none"
-              onPointerMove={(e) => {
-                if (!isDraggingRef.current || !selectorRef.current) return;
-                const el = selectorRef.current;
-                const rect = el.getBoundingClientRect();
-                const padding = 4;
-                const trackWidth = rect.width - padding * 2;
-                const segmentWidth = trackWidth / TEAM_OPTIONS.length;
-                const relativeX = e.clientX - rect.left - padding;
-                const newIndex = Math.max(0, Math.min(TEAM_OPTIONS.length - 1, Math.floor(relativeX / segmentWidth)));
-                const newCount = TEAM_OPTIONS[newIndex];
-                if (newCount !== localTeamCount) {
-                  setLocalTeamCount(newCount);
-                }
-              }}
-              onPointerUp={() => {
-                isDraggingRef.current = false;
-              }}
-            >
-              {/* Sliding glass indicator */}
-              <div
-                className="absolute top-1 bottom-1 rounded-lg backdrop-blur-md bg-white/40 dark:bg-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),0_2px_8px_rgba(0,0,0,0.08)] border border-white/50 dark:border-white/15 transition-transform duration-300 ease-out"
-                style={{
-                  width: `calc((100% - 8px) / ${TEAM_OPTIONS.length})`,
-                  transform: `translateX(${(TEAM_OPTIONS.indexOf(localTeamCount as typeof TEAM_OPTIONS[number])) * 100}%)`,
-                }}
-                onPointerDown={(e) => {
-                  isDraggingRef.current = true;
-                  e.currentTarget.parentElement?.setPointerCapture(e.pointerId);
-                }}
-              />
-              {TEAM_OPTIONS.map(n => (
-                <button
-                  key={n}
-                  onClick={() => setLocalTeamCount(n)}
-                  className={`relative z-10 flex-1 py-2 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                    localTeamCount === n
-                      ? 'text-blue-700 dark:text-blue-300'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                  }`}
-                >
-                  {n === 1 ? '1 Team' : `${n} Teams`}
+            {activeForms.map((form, index) => <div key={form.teamNumber} className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-600">
+              {localTeamCount > 1 && <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">Team {form.teamNumber} name
+                <input value={form.teamLabel} onChange={event => updateForm(index, { teamLabel: event.target.value })} className={`${inputClass} mt-1`} />
+              </label>}
+              <button type="button" onClick={() => handleCurrentLocation(index)} disabled={!!form.locating} title="Use this device's location for this home base"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                {form.locating === 'device' ? <Loader2 className="h-4 w-4 animate-spin" /> : <LocateFixed className="h-4 w-4" />}
+                {form.locating === 'device' ? 'Finding your location...' : 'Use my current location'}
+              </button>
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400">or enter a street address</p>
+              <label htmlFor={`home-address-${index}`} className="block text-sm font-medium text-gray-800 dark:text-gray-200">Home base address</label>
+              <div className="flex gap-2">
+                <input id={`home-address-${index}`} value={form.address} onChange={event => editAddress(index, event.target.value)}
+                  placeholder="Street address, city, state" className={`${inputClass} flex-1`} autoComplete="street-address"
+                  onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void handleGeocode(index); } }} />
+                <button type="button" onClick={() => void handleGeocode(index)} disabled={!!form.locating || !form.address.trim()} title="Find the coordinates for this address"
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+                  {form.locating === 'address' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}Find
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Home base forms */}
-          {forms.map((form, index) => {
-            const isVisible = form.teamNumber <= localTeamCount;
-            return (
-              <div
-                key={form.teamNumber}
-                className="grid transition-all duration-300 ease-out"
-                style={{
-                  gridTemplateRows: isVisible ? '1fr' : '0fr',
-                  opacity: isVisible ? 1 : 0,
-                  marginTop: isVisible ? undefined : 0,
-                }}
-              >
-                <div className="overflow-hidden min-h-0">
-                  <div
-                    className={`rounded-xl border transition-colors ${
-                      form.latitude && form.longitude
-                        ? 'border-green-200 dark:border-green-800/50 bg-green-50/50 dark:bg-green-900/10'
-                        : 'border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50'
-                    } p-4`}
-                  >
-                    {/* Team header - only show for multi-team */}
-                    {localTeamCount > 1 && (
-                      <div className="flex items-center gap-2 mb-3">
-                        <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold whitespace-nowrap ${
-                            form.latitude && form.longitude
-                              ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                          }`}
-                        >
-                          {form.latitude && form.longitude ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            form.teamNumber
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={form.teamLabel}
-                          onChange={(e) => updateForm(index, { teamLabel: e.target.value })}
-                          className="text-sm font-semibold text-gray-800 dark:text-white bg-transparent border-none p-0 focus:outline-none focus:ring-0 flex-1"
-                          placeholder={`Team ${form.teamNumber}`}
-                        />
-                      </div>
-                    )}
-
-                    {/* Address input with integrated search */}
-                    <div className="flex gap-2">
-                      <div className="flex-1 relative">
-                        <input
-                          type="text"
-                          value={form.address}
-                          onChange={(e) =>
-                            updateForm(index, { address: e.target.value })
-                          }
-                          placeholder={localTeamCount === 1 ? 'Enter your home address' : 'Enter team address'}
-                          className="w-full pl-3 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleGeocode(index);
-                            }
-                          }}
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleGeocode(index)}
-                        disabled={form.isGeocoding || !form.address.trim()}
-                        className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors shrink-0 flex items-center gap-2"
-                      >
-                        {form.isGeocoding ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Search className="w-4 h-4" />
-                        )}
-                        <span className="hidden sm:inline text-sm">
-                          {form.isGeocoding ? 'Finding...' : 'Find'}
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* Location found indicator */}
-                    {form.latitude && form.longitude && (
-                      <div className="flex items-center gap-2 mt-2.5 px-1">
-                        <MapPin className="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
-                        <span className="text-xs text-green-700 dark:text-green-400 font-medium">
-                          {form.latitude.toFixed(5)}, {form.longitude.toFixed(5)}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Error */}
-                    {form.error && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-2 px-1">
-                        {form.error}
-                      </p>
-                    )}
-                  </div>
-                </div>
               </div>
-            );
-          })}
+              {validLocation(form) ? <p role="status" className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400"><MapPin className="h-4 w-4 shrink-0" />Location ready: {form.latitude!.toFixed(5)}, {form.longitude!.toFixed(5)}</p>
+                : <p className="text-xs text-gray-500 dark:text-gray-400">Find the address, use your location, or enter coordinates below.</p>}
+              <details className="text-sm text-gray-600 dark:text-gray-300">
+                <summary className="cursor-pointer py-1 font-medium">Enter or edit coordinates</summary>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {(['latitude', 'longitude'] as const).map(coordinate => <label key={coordinate} className="min-w-0 text-xs capitalize">{coordinate}
+                    <input type="number" step="any" min={coordinate === 'latitude' ? -90 : -180} max={coordinate === 'latitude' ? 90 : 180}
+                      value={form[coordinate] ?? ''} onChange={event => {
+                        cancelLocation(index);
+                        updateForm(index, { [coordinate]: event.target.value === '' ? null : Number(event.target.value), locating: null, error: null });
+                      }} className={`${inputClass} mt-1`} />
+                  </label>)}
+                </div>
+              </details>
+              {form.error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{form.error}</p>}
+            </div>)}
+          </fieldset>
+          {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{saveError}</p>}
+          <p className="text-xs text-gray-500 dark:text-gray-400">Changes apply when you save. Update your route afterward to use the new home base.</p>
         </div>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isSaving || !anyLocated}
-            className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 ${
-              saveSuccess
-                ? 'bg-green-600 text-white'
-                : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed'
-            }`}
-          >
-            {saveSuccess ? (
-              <>
-                <Check className="w-4 h-4" />
-                Saved
-              </>
-            ) : isSaving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                Save
-                <ChevronRight className="w-4 h-4" />
-              </>
-            )}
+        <div className="flex shrink-0 gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+          <button type="button" onClick={onClose} disabled={isSaving || saveSuccess} title="Close without saving changes" className="min-h-11 flex-1 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={() => void handleSave()} disabled={!canSave} title="Save home bases for the selected teams"
+            className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+            {saveSuccess ? <Check className="h-4 w-4" /> : isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {saveSuccess ? 'Saved' : isSaving ? 'Saving...' : 'Save home base'}
           </button>
         </div>
       </div>

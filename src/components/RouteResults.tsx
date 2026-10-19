@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import ModalPortal from './ModalPortal';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Pencil, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -2193,7 +2193,22 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         )}
         {settings && (
           <div className="relative z-[60] overflow-visible transition-all duration-200">
-            <div className="grid grid-cols-1 items-center gap-2 min-[360px]:grid-cols-2 sm:flex sm:justify-end">
+            <div className={`grid items-center gap-2 sm:flex sm:flex-wrap sm:justify-end ${onConfigureHomeBase ? 'grid-cols-[auto_minmax(0,1fr)] min-[420px]:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-1 min-[360px]:grid-cols-2'}`}>
+              {onConfigureHomeBase && (
+                <button
+                  type="button"
+                  onClick={onConfigureHomeBase}
+                  aria-label="Home base settings"
+                  title="Home base settings"
+                  data-contextual-help="Home base settings"
+                  className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:border-blue-500 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                >
+                  <Home className="h-5 w-5" aria-hidden="true" />
+                  <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-white ring-2 ring-white dark:ring-gray-800">
+                    <Pencil className="h-2.5 w-2.5" aria-hidden="true" />
+                  </span>
+                </button>
+              )}
               <div className="relative min-w-0" ref={routeActionsRef}>
                 <button
                   type="button"
@@ -2289,7 +2304,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 ref={refreshDialogTriggerRef}
                 type="button"
                 onClick={() => setShowRefreshOptions(true)}
-                className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
+                className="col-span-full inline-flex min-h-11 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] min-[420px]:col-span-1 sm:w-auto"
               >
                 <Settings className="h-4 w-4" />
                 <span>Update route</span>
