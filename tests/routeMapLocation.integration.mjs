@@ -330,7 +330,7 @@ await test('Mobile Update Route has visible words and still opens route settings
 
 await test('Fresh parent facilities props cannot restore an old map view after fast GPS success', async h => {
   assert.equal(h.map().markers.length, 1, 'Synthetic home marker renders');
-  assert.ok(h.map().calls.some(call => call.method === 'fitBounds'), 'Initial route bounds are fitted');
+  assert.ok(!h.map().calls.some(call => call.method === 'fitBounds'), 'Empty route does not frame home base');
   h.map().setView([30, -90], 4, { animate: false });
   h.qa.rerender(); await h.flush(); // Marker redraw schedules the old view restore.
   await h.click('Find my location');
@@ -372,6 +372,40 @@ await test('Silent follow polls are bounded, never stack, and recover without du
   assert.equal(h.map().markers.at(-1).point.lat, 49);
 });
 
+
+for (const initialFullscreen of [false, true]) {
+  await test(`Opening ${initialFullscreen ? 'full-screen' : 'embedded'} map frames facilities without home base`, async h => {
+    const fit = h.map().calls.filter(call => call.method === 'fitBounds').at(-1);
+    assert.deepEqual(JSON.parse(JSON.stringify(fit.points)), [{lat:35,lng:-97},{lat:35.2,lng:-97.2}]);
+    assert.equal(fit.options.maxZoom,16);
+    assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+    assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+    assert.equal(h.qa.requests.length,0,'Opening does not request device location');
+    await h.click('Show home base');
+    assert.equal(h.map().calls.filter(call=>call.method==='fitBounds').at(-1).points.length,3,'Home is included after explicit click');
+    const oldMap = h.map();
+    h.qa.remount(); await h.wait(() => h.map() !== oldMap && h.map().calls.some(call=>call.method==='fitBounds' && call.points.length===2) && h.button('Show home base')?.getAttribute('aria-pressed') === 'false','facilities on reopening');
+    assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+  }, {withFrameData:true,initialFullscreen});
+}
+
+await test('Fullscreen fit requests return to facilities-only framing', async h => {
+  await h.click('Show home base');
+  assert.equal(h.map().calls.filter(call=>call.method==='fitBounds').at(-1).points.length,3);
+  h.qa.refit(); await h.flush();
+  const fit=h.map().calls.filter(call=>call.method==='fitBounds').at(-1);
+  assert.equal(fit.points.length,2);
+  assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+}, {withFrameData:true});
+
+await test('Empty and delayed route data do not default to home base', async h => {
+  assert.equal(h.map().getCenter().lat,39.8283,'Empty map retains neutral initial view');
+  assert.ok(!h.map().calls.some(call=>call.method==='fitBounds'));
+  h.qa.withFrameData=true; h.qa.rerender();
+  await h.wait(() => h.map().calls.some(call=>call.method==='fitBounds') && h.button('Show home base')?.getAttribute('aria-pressed') === 'false','delayed facilities fit');
+  assert.equal(h.map().calls.filter(call=>call.method==='fitBounds').at(-1).points.length,2);
+  assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+}, {withMapData:true});
 
 await test('Facility framing excludes home, sold facilities and GPS', async h => {
   await h.click('Find my location'); await h.success(h.qa.requests[0], 48, -113);

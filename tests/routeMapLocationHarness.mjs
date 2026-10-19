@@ -127,6 +127,8 @@ const frameResult = { routes: [{ day: 1, facilities: frameFacilities }] };
 const visibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false };
 function App() {
   const [epoch, setEpoch] = useState(0);
+  const [fitTrigger, setFitTrigger] = useState(0);
+  qa.refit = () => setFitTrigger(value => value + 1);
   const [, setRevision] = useState(0);
   qa.rerender = () => setRevision(value => value + 1);
   const [mounted, setMounted] = useState(true);
@@ -151,7 +153,7 @@ function App() {
   return <>{navigationTarget && <NavigationPopup {...navigationTarget} facilityName="Synthetic facility" mapPreference="google" includeGoogleEarth={false} onClose={() => setNavigationTarget(null)} onShowOnMap={() => showFacilityOnMap(navigationTarget.latitude, navigationTarget.longitude)} />}
   {mounted ? <RouteMap key={epoch} result={qa.withFrameData ? frameResult : qa.withMapData ? sampleResult : null} homeBase={qa.withFrameData || qa.withMapData || qa.withHomeBase ? sampleHomeBase : null}
     facilities={qa.withFrameData ? frameFacilities : qa.withMapData ? [...empty] : empty} inspections={empty} completedVisibility={visibility}
-    isFullScreen={fullscreen} targetCoords={target} onShowOnMap={showFacilityOnMap}
+    isFullScreen={fullscreen} triggerFitBounds={fitTrigger} targetCoords={target} onShowOnMap={showFacilityOnMap}
     locationTracking={tracking} onLocationTrackingChange={changeTracking}
     navigationMode={navigation} onNavigationModeChange={setNavigation}
     onClearTargetCoords={() => { qa.targetClears++; setTarget(null); }}

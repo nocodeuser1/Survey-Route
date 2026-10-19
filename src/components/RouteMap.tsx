@@ -844,7 +844,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         routeFacilityIds.has(facility.id) || legacyRouteFacilityNames.has(facility.name);
 
       const currentFacilityIndexes = new Set<string>();
-      const bounds = L.latLngBounds([[Number(homeBase.latitude), Number(homeBase.longitude)]]);
       const facilityPoints: L.LatLng[] = [];
 
       // Update or create facility markers
@@ -886,7 +885,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           }
 
           if (!shouldBeHidden) {
-            bounds.extend([currentLat, currentLng]);
             facilityPoints.push(L.latLng(Number(currentLat), Number(currentLng)));
           }
 
@@ -2226,7 +2224,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             }
           });
 
-          bounds.extend([Number(facility.latitude), Number(facility.longitude)]);
           facilityPoints.push(L.latLng(Number(facility.latitude), Number(facility.longitude)));
           markersRef.current.set(markerKey, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
         });
@@ -2256,7 +2253,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             const shouldBeHidden = hideCompletedFacilities && completedVisibility.hideExternallyCompleted;
 
             if (!shouldBeHidden) {
-              bounds.extend([currentLat, currentLng]);
               facilityPoints.push(L.latLng(Number(currentLat), Number(currentLng)));
             }
 
@@ -2397,14 +2393,16 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       }
       drawRoutes();
 
-      // Fit bounds on initial load, when triggerFitBounds changes, or when there's a significant change
+      // Default framing matches the facilities button in both map modes.
+      // Home base is added to bounds only by the explicit home control.
       const fitBoundsRequested = triggerFitBounds !== lastFitBoundsTriggerRef.current
         && Boolean(triggerFitBounds && triggerFitBounds > 0 && isFullScreen);
       lastFitBoundsTriggerRef.current = triggerFitBounds;
       const shouldFitBounds = !targetCoords && !justNavigatedRef.current && !locationTracking && !navigationMode && (initialLoadRef.current || fitBoundsRequested);
 
-      if (shouldFitBounds) {
-        mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+      if (shouldFitBounds && facilityPoints.length > 0) {
+        homeOverviewRef.current = false;
+        mapRef.current.fitBounds(L.latLngBounds(facilityPoints), { padding: [40, 40], maxZoom: 16, animate: false });
         initialLoadRef.current = false;
         savedMapViewRef.current = null; // Clear saved view when fitting bounds
         console.log('[RouteMap] Fit bounds triggered');
@@ -2443,13 +2441,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       });
       polylinesRef.current.clear();
 
-      const fitBoundsRequested = triggerFitBounds !== lastFitBoundsTriggerRef.current
-        && Boolean(triggerFitBounds && triggerFitBounds > 0 && isFullScreen);
+      // Without facilities, preserve the current view and wait for data rather
+      // than centering home base before the user asks for it.
       lastFitBoundsTriggerRef.current = triggerFitBounds;
-      if (!locationTracking && !navigationMode && !targetCoords && (initialLoadRef.current || fitBoundsRequested)) {
-        mapRef.current.setView([Number(homeBase.latitude), Number(homeBase.longitude)], 13);
-      }
-      initialLoadRef.current = false;
     }
   }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, locationTracking, navigationMode, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId]);
 
