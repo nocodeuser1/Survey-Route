@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import ModalPortal from './ModalPortal';
+import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair, Home } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop, RouteStatusScope } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -214,6 +215,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans;
   const markersRef = useRef<Map<string, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
   const polylinesRef = useRef<Map<number, L.Polyline>>(new Map());
+  const frameFacilityPointsRef = useRef<L.LatLng[]>([]);
+  const homeOverviewRef = useRef(false);
+  const [frameControlContainer, setFrameControlContainer] = useState<HTMLElement | null>(null);
+  const [frameCoverage, setFrameCoverage] = useState({ facilities: false, home: false, hasFacilities: false, hasHome: false, homeOverview: false });
   const homeMarkerRef = useRef<L.Marker | null>(null);
   const initialLoadRef = useRef(true);
   const lastFitBoundsTriggerRef = useRef(triggerFitBounds);
@@ -513,59 +518,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       (mapRef.current as any).northResetControl = new northResetControl();
       (mapRef.current as any).northResetControl.addTo(mapRef.current);
 
-      // Add Fit All Facilities control
-      const fitAllControl = L.Control.extend({
-        options: {
-          position: 'topleft'
-        },
+      // Leaflet positions the controls below zoom/north; React supplies accessible
+      // buttons and keeps their active states in sync with the actual viewport.
+      const framingControl = L.Control.extend({
+        options: { position: 'topleft' },
         onAdd: function () {
-          const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
-          const link = L.DomUtil.create('a', '', container);
-          link.href = '#';
-          link.title = 'Show all facilities';
-          link.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 3 21 3 21 9"></polyline>
-            <polyline points="9 21 3 21 3 15"></polyline>
-            <line x1="21" y1="3" x2="14" y2="10"></line>
-            <line x1="3" y1="21" x2="10" y2="14"></line>
-          </svg>`;
-          link.style.width = '44px';
-          link.style.height = '44px';
-          link.style.display = 'flex';
-          link.style.alignItems = 'center';
-          link.style.justifyContent = 'center';
-          link.style.cursor = 'pointer';
-
-          L.DomEvent
-            .on(link, 'click', L.DomEvent.stopPropagation)
-            .on(link, 'click', L.DomEvent.preventDefault)
-            .on(link, 'click', function () {
-              const homeBase = homeBaseRef.current;
-              if (mapRef.current && homeBase) {
-                const bounds = L.latLngBounds([[
-                  Number(homeBase.latitude),
-                  Number(homeBase.longitude)
-                ]]);
-
-                // Add all visible markers to bounds
-                markersRef.current.forEach((markerData) => {
-                  const latLng = markerData.marker.getLatLng();
-                  bounds.extend(latLng);
-                });
-
-                if (bounds.isValid()) {
-                  mapRef.current.fitBounds(bounds, { padding: [50, 50] });
-                  savedMapViewRef.current = null; // Clear saved view
-                  console.log('[RouteMap] Fit all facilities manually triggered');
-                }
-              }
-            });
-
+          const container = L.DomUtil.create('div', 'leaflet-control map-framing-controls');
+          L.DomEvent.disableClickPropagation(container);
+          L.DomEvent.disableScrollPropagation(container);
+          setFrameControlContainer(container);
           return container;
-        }
+        },
       });
-
-      new fitAllControl().addTo(mapRef.current);
+      new framingControl().addTo(mapRef.current);
 
       // Add zoom event handler to force polyline updates during zoom
       // This fixes the issue where routes don't scale properly during zoom animations
@@ -709,6 +674,42 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     };
   }, [isFullScreen, mapReady]);
 
+  const getFrameHomePoint = useCallback(() => {
+    const home = homeBaseRef.current;
+    if (!home) return null;
+    const latitude = Number(home.latitude);
+    const longitude = Number(home.longitude);
+    return Number.isFinite(latitude) && Math.abs(latitude) <= 90 &&
+      Number.isFinite(longitude) && Math.abs(longitude) <= 180
+      ? L.latLng(latitude, longitude) : null;
+  }, []);
+
+  const syncFrameCoverage = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const viewport = map.getBounds();
+    const points = frameFacilityPointsRef.current;
+    const home = getFrameHomePoint();
+    const facilitiesInView = points.length > 0 && points.every(point => viewport.contains(point));
+    const homeInView = !!home && viewport.contains(home);
+    if (!facilitiesInView || !homeInView) homeOverviewRef.current = false;
+    const next = {
+      facilities: facilitiesInView, home: homeInView,
+      hasFacilities: points.length > 0, hasHome: !!home,
+      homeOverview: homeOverviewRef.current,
+    };
+    setFrameCoverage(previous => Object.keys(next).every(key =>
+      previous[key as keyof typeof previous] === next[key as keyof typeof next]) ? previous : next);
+  }, [getFrameHomePoint]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map) return;
+    map.on('moveend zoomend resize', syncFrameCoverage);
+    syncFrameCoverage();
+    return () => { map.off('moveend zoomend resize', syncFrameCoverage); };
+  }, [mapReady, homeBase, syncFrameCoverage]);
+
   // Apply a facility request after the map is mounted and laid out. Cancel an
   // obsolete frame on rapid selection, fullscreen remount, or unmount.
   useEffect(() => {
@@ -791,6 +792,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       })
         .addTo(mapRef.current)
         .bindPopup('<b>Home Base</b><br>' + homeBase.address);
+    } else {
+      homeMarkerRef.current.setLatLng([Number(homeBase.latitude), Number(homeBase.longitude)]);
     }
 
     if (result) {
@@ -842,6 +845,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
       const currentFacilityIndexes = new Set<string>();
       const bounds = L.latLngBounds([[Number(homeBase.latitude), Number(homeBase.longitude)]]);
+      const facilityPoints: L.LatLng[] = [];
 
       // Update or create facility markers
       routesToShow.forEach((route) => {
@@ -883,6 +887,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
           if (!shouldBeHidden) {
             bounds.extend([currentLat, currentLng]);
+            facilityPoints.push(L.latLng(Number(currentLat), Number(currentLng)));
           }
 
           const existingMarkerData = markersRef.current.get(markerKey);
@@ -2222,6 +2227,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           });
 
           bounds.extend([Number(facility.latitude), Number(facility.longitude)]);
+          facilityPoints.push(L.latLng(Number(facility.latitude), Number(facility.longitude)));
           markersRef.current.set(markerKey, { marker, day: 0, wasSelectionMode: false, wasSelected: false });
         });
       }
@@ -2251,6 +2257,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
             if (!shouldBeHidden) {
               bounds.extend([currentLat, currentLng]);
+              facilityPoints.push(L.latLng(Number(currentLat), Number(currentLng)));
             }
 
             // Style as externally completed (gray marker with external badge)
@@ -2314,6 +2321,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           markersRef.current.delete(facilityIndex);
         }
       });
+
+      frameFacilityPointsRef.current = facilityPoints;
+      syncFrameCoverage();
 
       // Redraw polylines (these need to be redrawn as routes change)
       polylinesRef.current.forEach(polyline => {
@@ -2425,6 +2435,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         mapRef.current?.removeLayer(markerData.marker);
       });
       markersRef.current.clear();
+      frameFacilityPointsRef.current = [];
+      syncFrameCoverage();
 
       polylinesRef.current.forEach(polyline => {
         mapRef.current?.removeLayer(polyline);
@@ -3407,6 +3419,37 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     });
   };
 
+  const frameMap = (mode: 'facilities' | 'overview' | 'home') => {
+    const map = mapRef.current;
+    if (!map) return;
+    const points = frameFacilityPointsRef.current;
+    const home = getFrameHomePoint();
+    if (mode === 'facilities' ? points.length === 0 : !home) return;
+
+    // An explicit framing choice takes over from GPS follow or a facility
+    // destination. Late location callbacks and queued restores cannot undo it.
+    stopLocationTracking();
+    if (autoCenteringTimeoutRef.current) clearTimeout(autoCenteringTimeoutRef.current);
+    if (navigationMode) {
+      if (onNavigationModeChange) onNavigationModeChange(false);
+      else setInternalNavigationMode(false);
+    }
+    onClearTargetCoords?.();
+    initialLoadRef.current = false;
+    justNavigatedRef.current = false;
+    (map as L.Map & { setBearing?: (bearing: number) => void }).setBearing?.(0);
+    homeOverviewRef.current = mode === 'overview' && points.length > 0;
+    if (mode === 'home' || (mode === 'overview' && points.length === 0)) {
+      map.setView(home!, 18, { animate: false });
+    } else {
+      const bounds = L.latLngBounds(points);
+      if (mode === 'overview' && home) bounds.extend(home);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16, animate: false });
+    }
+    savedMapViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+    syncFrameCoverage();
+  };
+
   useEffect(() => {
     if (!locationTracking && !navigationMode) cancelPendingLocationRequest();
   }, [locationTracking, navigationMode, cancelPendingLocationRequest]);
@@ -4067,20 +4110,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 </button>
               </div>
             )}
-            {!isFullScreen && onEnterFullscreen && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={onEnterFullscreen}
-                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 touch-manipulation dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
-                  title="Open full screen map"
-                  aria-label="Open full screen map"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                  <span className="hidden sm:inline">Full Screen</span>
-                </button>
-              </div>
-            )}
             {isFullScreen && (
               <div className="relative">
                 <button
@@ -4229,7 +4258,45 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           className="w-full h-full dark:[filter:invert(0.9)_hue-rotate(180deg)_brightness(0.95)_contrast(0.95)] transition-all duration-200"
           style={{ position: 'relative', zIndex: 0 }}
         />
+        {!isFullScreen && onEnterFullscreen && (
+          <button
+            type="button"
+            onClick={onEnterFullscreen}
+            className="absolute bottom-8 right-3 z-[500] flex h-11 w-11 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-md transition-colors hover:border-blue-500 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            title="Open full screen map"
+            aria-label="Open full screen map"
+          >
+            <Maximize2 className="h-5 w-5" aria-hidden="true" />
+          </button>
+        )}
       </div>
+
+      {frameControlContainer && createPortal(
+        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-md dark:border-gray-600 dark:bg-gray-800">
+          <button
+            type="button"
+            onClick={() => frameMap('facilities')}
+            disabled={!frameCoverage.hasFacilities}
+            aria-label="Show facilities"
+            aria-pressed={frameCoverage.facilities}
+            title="Center and fit the facilities shown on this map"
+            className={`flex h-11 w-11 items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:opacity-40 ${frameCoverage.facilities ? 'bg-blue-600 text-white hover:bg-blue-700' : 'text-gray-700 hover:text-blue-600 dark:text-white'}`}
+          >
+            <Building2 className="h-5 w-5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => frameMap(frameCoverage.homeOverview ? 'home' : 'overview')}
+            disabled={!frameCoverage.hasHome}
+            aria-label="Show home base"
+            aria-pressed={frameCoverage.home}
+            title={frameCoverage.homeOverview ? 'Zoom in to home base' : 'Show home base and facilities. Click again to zoom in to home base.'}
+            className={`flex h-11 w-11 items-center justify-center border-t border-gray-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:opacity-40 dark:border-gray-600 ${frameCoverage.home ? 'bg-blue-600 text-white hover:bg-blue-700' : 'text-gray-700 hover:text-blue-600 dark:text-white'}`}
+          >
+            <Home className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>, frameControlContainer,
+      )}
 
       {navigationTarget && settings && (
         <NavigationPopup

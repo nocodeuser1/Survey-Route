@@ -39,12 +39,21 @@ class MapMock {
   once(names, callback) { const wrapped = detail => { this.off(names, wrapped); callback(detail); }; return this.on(names, wrapped); }
   off(names, callback) { for (const name of names.split(' ')) this.events.get(name)?.delete(callback); return this; }
   fire(name, detail = {}) { for (const callback of [...(this.events.get(name) || [])]) callback(detail); return this; }
-  setView(point, zoom, options = {}) { this.center = coordinates(point); this.zoom = zoom; this.calls.push({ method: 'setView', point: this.center, zoom, options }); this.fire('moveend'); return this; }
-  flyTo(point, zoom, options = {}) { this.center = coordinates(point); this.zoom = zoom; this.calls.push({ method: 'flyTo', point: this.center, zoom, options }); this.fire('moveend'); return this; }
+  setView(point, zoom, options = {}) { this.fittedBounds = null; this.center = coordinates(point); this.zoom = zoom; this.calls.push({ method: 'setView', point: this.center, zoom, options }); this.fire('moveend'); return this; }
+  flyTo(point, zoom, options = {}) { this.fittedBounds = null; this.center = coordinates(point); this.zoom = zoom; this.calls.push({ method: 'flyTo', point: this.center, zoom, options }); this.fire('moveend'); return this; }
   panTo(point, options = {}) { return this.setView(point, this.zoom, options); }
   stop() { this.calls.push({ method: 'stop' }); return this; }
   getCenter() { return this.center; }
   getZoom() { return this.zoom; }
+  getBounds() {
+    const span = 360 / 2 ** this.zoom;
+    const fitted = this.fittedBounds;
+    return { contains: point => {
+      const p = coordinates(point);
+      return fitted ? p.lat >= fitted.south && p.lat <= fitted.north && p.lng >= fitted.west && p.lng <= fitted.east
+        : Math.abs(p.lat-this.center.lat) <= span && Math.abs(p.lng-this.center.lng) <= span;
+    } };
+  }
   setZoom(zoom) { this.zoom = zoom; return this; }
   getContainer() { return this.container; }
   getSize() { return { x: 390, y: 844 }; }
@@ -55,7 +64,14 @@ class MapMock {
   removeLayer(layer) { this.markers = this.markers.filter(marker => marker !== layer); return this; }
   closePopup() { return this; }
   remove() { this.removed = true; this.events.clear(); return this; }
-  fitBounds(bounds) { this.center = coordinates(bounds.points[0]); this.zoom = 13; this.calls.push({ method: 'fitBounds' }); return this; }
+  fitBounds(bounds, options = {}) {
+    const points = bounds.points.map(coordinates);
+    const south = Math.min(...points.map(p=>p.lat)), north = Math.max(...points.map(p=>p.lat));
+    const west = Math.min(...points.map(p=>p.lng)), east = Math.max(...points.map(p=>p.lng));
+    this.fittedBounds = { south: south - 0.001, north: north + 0.001, west: west - 0.001, east: east + 0.001 };
+    this.center = { lat: (south+north)/2, lng: (west+east)/2 }; this.zoom = 13;
+    this.calls.push({ method: 'fitBounds', points, options }); this.fire('moveend'); return this;
+  }
 }
 class MarkerMock {
   constructor(point, options) { this.point = coordinates(point); this.options = options; this.events = new Map(); }
@@ -64,6 +80,7 @@ class MarkerMock {
   setPopupContent(content) { this.popup = content; return this; }
   setLatLng(point) { this.point = coordinates(point); return this; }
   getLatLng() { return this.point; }
+  getElement() { return null; }
   setIcon(icon) { this.icon = icon; return this; }
   on(event, callback) { this.events.set(event, callback); return this; }
   off(event) { this.events.delete(event); return this; }
@@ -81,6 +98,7 @@ export default {
   latLng: (latitude, longitude) => typeof latitude === 'number' ? { lat: latitude, lng: longitude } : coordinates(latitude),
   marker: (point, options) => new MarkerMock(point, options),
   divIcon: value => value,
+  polyline: () => ({ addTo() { return this; }, redraw() {} }),
   latLngBounds: points => ({ points, extend(point) { this.points.push(point); return this; }, isValid() { return true; } }),
   tileLayer: () => ({ addTo() { return this; } }),
   Control: { extend: definition => class {
@@ -100,6 +118,12 @@ const qa = window.__locationTest;
 const empty = [];
 const sampleHomeBase = { id: 'qa-home', latitude: 39.7, longitude: -105, address: 'Synthetic home base' };
 const sampleResult = { routes: [] };
+const frameFacilities = [
+  { id: 'qa-a', index: 0, name: 'Sample Facility A', latitude: 35, longitude: -97, status: 'active', day_assignment: 1 },
+  { id: 'qa-b', index: 1, name: 'Sample Facility B', latitude: 35.2, longitude: -97.2, status: 'active', day_assignment: 1 },
+  { id: 'qa-hidden', index: 2, name: 'Sample Sold Facility', latitude: 44, longitude: -111, status: 'sold', day_assignment: 1 },
+];
+const frameResult = { routes: [{ day: 1, facilities: frameFacilities }] };
 const visibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false };
 function App() {
   const [epoch, setEpoch] = useState(0);
@@ -108,7 +132,7 @@ function App() {
   const [mounted, setMounted] = useState(true);
   const [tracking, setTracking] = useState(false);
   const [navigation, setNavigation] = useState(false);
-  const [fullscreen, setFullscreen] = useState(true);
+  const [fullscreen, setFullscreen] = useState(qa.initialFullscreen ?? true);
   const [target, setTarget] = useState(qa.initialTarget || null);
   const [navigationTarget, setNavigationTarget] = useState(null);
   const [currentView, setCurrentView] = useState('survey');
@@ -125,12 +149,13 @@ function App() {
   qa.mount = () => setMounted(true);
   const changeTracking = value => { qa.trackingChanges.push(value); setTracking(value); };
   return <>{navigationTarget && <NavigationPopup {...navigationTarget} facilityName="Synthetic facility" mapPreference="google" includeGoogleEarth={false} onClose={() => setNavigationTarget(null)} onShowOnMap={() => showFacilityOnMap(navigationTarget.latitude, navigationTarget.longitude)} />}
-  {mounted ? <RouteMap key={epoch} result={qa.withMapData ? sampleResult : null} homeBase={qa.withMapData || qa.withHomeBase ? sampleHomeBase : null}
-    facilities={qa.withMapData ? [...empty] : empty} inspections={empty} completedVisibility={visibility}
+  {mounted ? <RouteMap key={epoch} result={qa.withFrameData ? frameResult : qa.withMapData ? sampleResult : null} homeBase={qa.withFrameData || qa.withMapData || qa.withHomeBase ? sampleHomeBase : null}
+    facilities={qa.withFrameData ? frameFacilities : qa.withMapData ? [...empty] : empty} inspections={empty} completedVisibility={visibility}
     isFullScreen={fullscreen} targetCoords={target} onShowOnMap={showFacilityOnMap}
     locationTracking={tracking} onLocationTrackingChange={changeTracking}
     navigationMode={navigation} onNavigationModeChange={setNavigation}
     onClearTargetCoords={() => { qa.targetClears++; setTarget(null); }}
+    onEnterFullscreen={() => setFullscreen(true)}
     onExitFullscreen={() => { qa.exits++; setFullscreen(false); }}
     onUpdateRoute={() => qa.routeUpdates++}
     onNavigateToView={view => qa.views.push(view)}

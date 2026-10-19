@@ -6,6 +6,7 @@
  * PLAYWRIGHT_MODULE=/tmp/survey-route-test-tools/node_modules/playwright/index.mjs \
  *   node tests/routeMapLocation.browser.mjs
  * QA_PREVIEW=1 serves 390px/320px interactive fixtures without launching Chromium.
+ * QA_FRAMING=1 adds synthetic facilities/home base and starts in embedded mode.
  * CHROMIUM_PATH defaults to /usr/bin/chromium; QA_OUTPUT_DIR retains screenshots.
  */
 import assert from 'node:assert/strict';
@@ -24,7 +25,7 @@ execFileSync(process.execPath, [join(root, 'node_modules/tailwindcss/lib/cli.js'
 const leafletCss = await readFile(join(root, 'node_modules/leaflet/dist/leaflet.css'));
 const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/leaflet.css"><link rel="stylesheet" href="/app.css"><style>html,body,#root{height:100dvh;width:100%;margin:0;overflow:hidden}.leaflet-container{background:#e7edf0}</style></head><body><div id="root"></div><script src="/app.js"></script></body></html>';
 const previewInit = `<script>
-window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [] };
+window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], withFrameData: ${process.env.QA_FRAMING === '1'}, initialFullscreen: ${process.env.QA_FRAMING === '1' ? 'false' : 'true'} };
 window.alert = message => window.__locationTest.alerts.push(message);
 Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
   getCurrentPosition(success, error, options) { window.__locationTest.requests.push({ success, error, options }); },

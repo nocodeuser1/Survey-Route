@@ -28,7 +28,7 @@ const bundled = await readFile(join(output, 'app.js'), 'utf8');
 const results = [];
 let failures = 0;
 
-async function mount({ reducedMotion = false, unsupported = false, throws = false, withMapData = false, withHomeBase = false, initialTarget = null } = {}) {
+async function mount({ reducedMotion = false, unsupported = false, throws = false, withMapData = false, withHomeBase = false, withFrameData = false, initialFullscreen = true, initialTarget = null } = {}) {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', error => errors.push(error));
@@ -36,7 +36,7 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
     url: 'https://location-test.invalid', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole,
   });
   const window = dom.window;
-  const qa = window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], errors, withMapData, withHomeBase, initialTarget };
+  const qa = window.__locationTest = { maps: [], requests: [], trackingChanges: [], targetClears: 0, exits: 0, routeUpdates: 0, views: [], alerts: [], errors, withMapData, withHomeBase, withFrameData, initialFullscreen, initialTarget };
   window.alert = message => qa.alerts.push(message);
   window.fetch = () => { throw new Error('No network access is permitted in this test'); };
   window.matchMedia = query => ({ matches: query.includes('prefers-reduced-motion') && reducedMotion, media: query, addEventListener() {}, removeEventListener() {} });
@@ -79,7 +79,7 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
   const doc = window.document;
   const button = name => [...doc.querySelectorAll('button')].find(node => node.getAttribute('aria-label') === name || node.textContent.trim() === name);
   const primary = () => button('Find my location') || [...doc.querySelectorAll('button')].find(node => /Finding you/.test(node.textContent));
-  const click = async name => { const element = button(name); assert.ok(element, 'Missing button: ' + name); element.click(); await flush(); return element; };
+  const click = async name => { await wait(() => button(name) && !button(name).disabled, 'enabled ' + name); const element = button(name); element.click(); await flush(); return element; };
   const position = (latitude = 40.25, longitude = -104.8) => ({ coords: { latitude, longitude, accuracy: 5, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() });
   const success = async (request, latitude, longitude) => { request.success(position(latitude, longitude)); await flush(); };
   const reject = async (request, code) => { request.error({ code, message: 'Mock GPS error', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }); await flush(); };
@@ -116,10 +116,10 @@ await test('Facility target on initial mount wins over route bounds', async h =>
 await test('Rapid facility switches, repeat taps, redraws and clearing preserve the selected viewport', async h => {
   h.qa.setTarget({ latitude: 35, longitude: -111 });
   h.qa.setTarget({ latitude: 44, longitude: -102 });
-  await h.flush();
+  await h.wait(() => h.map().getCenter().lat === 44, 'latest facility focus');
   assert.equal(h.map().getCenter().lat, 44);
   h.map().setView([25, -90], 4);
-  h.qa.setTarget({ latitude: 44, longitude: -102 }); await h.flush();
+  h.qa.setTarget({ latitude: 44, longitude: -102 }); await h.wait(() => h.map().getCenter().lat === 44, 'repeat facility focus');
   assert.equal(h.map().getCenter().lat, 44); assert.equal(h.map().getZoom(), 18);
   assert.equal(h.map().markers.filter(marker => marker.options.title === 'Selected facility location').length, 1);
   h.qa.rerender(); await h.flush(); await h.advance(100);
@@ -165,12 +165,12 @@ await test('Interrupted mount retains the latest facility request on reopening',
   assert.equal(h.map().getZoom(), 18);
 }, { withMapData: true });
 
-await test('Show all facilities uses home base loaded after the map mounts', async h => {
+await test('Home framing uses home base loaded after the map mounts', async h => {
   h.qa.withHomeBase = true; h.qa.rerender(); await h.flush();
   h.map().setView([30, -90], 18);
-  h.doc.querySelector('[title="Show all facilities"]').click(); await h.flush();
+  await h.click('Show home base');
   assert.equal(h.map().getCenter().lat, 39.7);
-  assert.equal(h.map().getZoom(), 13);
+  assert.equal(h.map().getZoom(), 18);
 });
 
 await test('Fresh request, disabled duplicate taps, smooth first fix, and repeat recenter', async h => {
@@ -284,7 +284,7 @@ await test('Parent fullscreen transition also invalidates pending location', asy
 await test('Remount and unmount cannot leak GPS callbacks into the replacement map', async h => {
   await h.click('Find my location'); const abandoned = h.qa.requests[0]; const oldMap = h.map();
   h.qa.remount(); await h.flush(); assert.equal(oldMap.removed, true); assert.notEqual(h.map(), oldMap);
-  await h.click('Find my location'); const fresh = h.qa.requests.at(-1); h.busy();
+  await h.click('Find my location'); await h.wait(() => h.primary()?.disabled, 'fresh request busy state'); const fresh = h.qa.requests.at(-1); h.busy();
   const count = h.movements().length; await h.success(abandoned); await h.reject(abandoned, 1);
   h.busy(); assert.equal(h.movements().length, count); assert.equal(h.doc.querySelector('[role="alert"]'), null);
   await h.success(fresh, 46, -111); h.idle();
@@ -370,6 +370,71 @@ await test('Silent follow polls are bounded, never stack, and recover without du
   const count = h.movements().length; await h.success(stalled, 29, -99);
   assert.equal(h.movements().length, count, 'Late timed-out poll cannot move the map');
   assert.equal(h.map().markers.at(-1).point.lat, 49);
+});
+
+
+await test('Facility framing excludes home, sold facilities and GPS', async h => {
+  await h.click('Find my location'); await h.success(h.qa.requests[0], 48, -113);
+  await h.click('Show facilities');
+  const fit = h.map().calls.filter(call=>call.method==='fitBounds').at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(fit.points)), [{lat:35,lng:-97},{lat:35.2,lng:-97.2}]);
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+  assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+  assert.equal(h.qa.state.tracking,false,'Facility framing stops GPS follow');
+  const before=h.map().calls.length;
+  await h.success(h.qa.requests[0], 49, -114);
+  assert.equal(h.map().calls.length,before,'Late GPS cannot undo a facility frame');
+}, {withFrameData:true});
+
+await test('Home button cycles overview, home close-up, and overview again', async h => {
+  await h.click('Show facilities');
+  await h.click('Show home base');
+  const overview=h.map().calls.filter(call=>call.method==='fitBounds').at(-1);
+  assert.equal(overview.points.length,3);
+  assert.ok(overview.points.some(point=>point.lat===39.7 && point.lng===-105));
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+  assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'true');
+  assert.equal(h.button('Show home base').title,'Zoom in to home base');
+  await h.click('Show home base');
+  assert.equal(h.map().getZoom(),18); assert.equal(h.map().getCenter().lat,39.7);
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'false');
+  await h.click('Show home base');
+  assert.equal(h.map().calls.at(-1).method,'fitBounds');
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+}, {withFrameData:true});
+
+await test('Framing highlights follow manual panning and zooming', async h => {
+  await h.click('Show facilities');
+  h.map().setView([30,-90],18); await h.flush();
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'false');
+  assert.equal(h.button('Show home base').getAttribute('aria-pressed'),'false');
+  await h.click('Show home base');
+  h.map().setView([35,-97],18); await h.flush();
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'false','Partial facility coverage is not selected');
+  assert.notEqual(h.button('Show home base').title,'Zoom in to home base');
+  await h.click('Show facilities');
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+}, {withFrameData:true});
+
+await test('Embedded fullscreen control lives in the map corner and framing works in both modes', async h => {
+  const fullscreen=h.button('Open full screen map');
+  assert.ok(fullscreen.classList.contains('bottom-8') && fullscreen.classList.contains('right-3'));
+  assert.ok(fullscreen.parentElement.contains(h.map().getContainer()),'Fullscreen button belongs to the map wrapper');
+  await h.click('Show facilities');
+  await h.click('Open full screen map');
+  assert.equal(h.qa.state.fullscreen,true);
+  assert.equal(h.button('Open full screen map'),undefined);
+  await h.click('Show home base'); await h.click('Show home base');
+  assert.equal(h.map().getZoom(),18);
+  h.qa.setFullscreen(false); await h.flush();
+  assert.ok(h.button('Open full screen map'));
+  await h.click('Show facilities');
+  assert.equal(h.button('Show facilities').getAttribute('aria-pressed'),'true');
+}, {withFrameData:true,initialFullscreen:false});
+
+await test('No facilities or home base leaves framing controls safely disabled', async h => {
+  assert.equal(h.button('Show facilities').disabled,true);
+  assert.equal(h.button('Show home base').disabled,true);
 });
 
 await writeFile(join(output, 'results.json'), JSON.stringify(results, null, 2));
