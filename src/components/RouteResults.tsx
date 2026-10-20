@@ -750,6 +750,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         account_id: accountId,
         clustering_tightness: settings.clustering_tightness ?? 0.75,
         cluster_balance_weight: settings.cluster_balance_weight ?? 0.35,
+        start_time: settings.start_time || '08:00',
         lunch_break_minutes: settings.lunch_break_minutes ?? 0,
         max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
         // Only seed the seasonal default when the user has never set one.
@@ -924,7 +925,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             use_hours_constraint: tempSettings.use_hours_constraint,
             clustering_tightness: tempSettings.clustering_tightness,
             cluster_balance_weight: tempSettings.cluster_balance_weight,
-            start_time: settings?.start_time || '08:00',
+            start_time: tempSettings.start_time || '08:00',
             sunset_offset_minutes: settings?.sunset_offset_minutes ?? 0,
             map_preference: tempSettings.map_preference || 'google',
             include_google_earth: tempSettings.include_google_earth || false,
@@ -1004,7 +1005,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             use_hours_constraint: tempSettings.use_hours_constraint,
             clustering_tightness: tempSettings.clustering_tightness,
             cluster_balance_weight: tempSettings.cluster_balance_weight,
-            start_time: settings.start_time || '08:00',
+            start_time: tempSettings.start_time || '08:00',
             sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
             map_preference: tempSettings.map_preference || 'google',
             include_google_earth: tempSettings.include_google_earth || false,
@@ -2545,6 +2546,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                   <div className="flex items-start gap-3">
                     <div className="flex-1">
+                      <label htmlFor="update-route-start-time" className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <Clock className="inline w-4 h-4 mr-1" />
+                        Start Time for All Days
+                      </label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Sets the departure time for every day in this route</p>
+                      <input
+                        id="update-route-start-time"
+                        type="time"
+                        value={tempSettings.start_time || '08:00'}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          start_time: e.target.value || '08:00',
+                        })}
+                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Clock className="inline w-4 h-4 mr-1" />
                         Lunch / Break Time (minutes)
@@ -4042,6 +4063,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
               <div className="border-t dark:border-gray-700 pt-4 space-y-4">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Workday Constraints</p>
+
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="route-settings-start-time" className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
+                      <Clock className="inline w-4 h-4 mr-1" />
+                      Start Time for All Days
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Sets the departure time for every day in this route</p>
+                    <input
+                      id="route-settings-start-time"
+                      type="time"
+                      value={tempSettings.start_time || '08:00'}
+                      onChange={(e) => setTempSettings({
+                        ...tempSettings,
+                        start_time: e.target.value || '08:00',
+                      })}
+                      className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
 
                 <div className="flex items-start gap-3">
                   <div className="flex-1">
