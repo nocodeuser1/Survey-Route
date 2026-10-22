@@ -760,6 +760,39 @@ function timeToMinutes(time: string): number {
 }
 
 /**
+ * Minutes after midnight at which the day gets back to home base, NOT wrapped
+ * at 24h. `endTime` is a wall-clock "HH:MM" that addMinutesToTime wraps, so a
+ * long day reads "01:08" — and `"01:08" > "19:30"` is false. Every deadline
+ * check compared those strings, so a day that ran past midnight sailed under
+ * the "Return to Home Base By" limit it had blown by five hours.
+ */
+export function routeEndMinutes(route: Pick<DailyRoute, 'startTime' | 'totalTime'>): number {
+  return timeToMinutes(route.startTime) + route.totalTime;
+}
+
+/** When the crew leaves the last stop, unwrapped like routeEndMinutes. */
+export function lastDepartureMinutes(
+  route: Pick<DailyRoute, 'startTime' | 'totalTime' | 'segments'>,
+): number {
+  const driveHome = route.segments[route.segments.length - 1]?.duration || 0;
+  return routeEndMinutes(route) - driveHome;
+}
+
+/** "HH:MM" → minutes after midnight, for comparing against the helpers above. */
+export function deadlineMinutes(deadline: string): number {
+  return timeToMinutes(deadline);
+}
+
+/** True when the day gets home after `deadline` ("HH:MM"). Empty = no limit. */
+export function endsAfterDeadline(
+  route: Pick<DailyRoute, 'startTime' | 'totalTime'>,
+  deadline: string,
+): boolean {
+  if (!deadline) return false;
+  return routeEndMinutes(route) > timeToMinutes(deadline);
+}
+
+/**
  * What a day costs us. Drive time is the real currency — it's what the
  * "you drove right past that stop" complaint is actually about — with
  * mileage as a tie-breaker so two equal-time orderings pick the shorter one,
@@ -799,8 +832,8 @@ function dayViolation(route: DailyRoute, constraints: OptimizationConstraints): 
     violation += Math.max(0, route.totalDriveTime - maxDriveTime);
   }
   const returnByTime = constraints.returnByTime || '';
-  if (returnByTime && route.endTime > returnByTime) {
-    violation += timeToMinutes(route.endTime) - timeToMinutes(returnByTime);
+  if (returnByTime) {
+    violation += Math.max(0, routeEndMinutes(route) - timeToMinutes(returnByTime));
   }
 
   return violation;
@@ -1078,6 +1111,93 @@ export function improveAcrossDays(
   return [...working, ...empties];
 }
 
+/**
+ * Capacity-first day building. Grow Day 1 by cheapest insertion until the
+ * next stop would break one of the user's limits, then start Day 2 from what
+ * is left, and so on. This is the same strategy as the per-day "be back by"
+ * refit in RouteResults, which is the one that packs a trip into the fewest
+ * days — because only the user's real limits (hours, stops, drive time,
+ * return-by) decide when a day is full, never a geographic rule.
+ *
+ * optimizeRoutes builds this as a second candidate next to the clustered
+ * plan. Clustering decides how many days there are by geography first —
+ * k is inflated by the tightness setting and any day spanning more than
+ * MAX_INTRA_CLUSTER_PAIRWISE_MILES is split in two — so it regularly spread
+ * a one-day trip across three.
+ */
+function packDaysByCapacity(
+  facilities: FacilityWithIndex[],
+  distanceMatrix: DistanceMatrix,
+  constraints: OptimizationConstraints,
+  homeIndex: number,
+  lunchBreak: number,
+): DailyRoute[] {
+  const durations = distanceMatrix.durations;
+  const maxFacilities = constraints.useFacilitiesConstraint && constraints.maxFacilitiesPerDay
+    ? constraints.maxFacilitiesPerDay
+    : 0;
+  const maxMinutes = constraints.useHoursConstraint && constraints.maxHoursPerDay
+    ? constraints.maxHoursPerDay * 60
+    : 0;
+  const maxDrive = constraints.maxDriveTimeMinutes || 0;
+  const returnBy = constraints.returnByTime || '';
+
+  const fits = (route: DailyRoute): boolean =>
+    (!maxMinutes || route.totalTime <= maxMinutes) &&
+    (!maxDrive || route.totalDriveTime <= maxDrive) &&
+    !endsAfterDeadline(route, returnBy);
+
+  const build = (sequence: number[]): DailyRoute =>
+    calculateDayRoute(facilities, sequence, distanceMatrix, homeIndex, constraints.startTime, lunchBreak);
+
+  const remaining = new Set(facilities.map((_, idx) => idx + 1));
+  const routes: DailyRoute[] = [];
+
+  while (remaining.size > 0) {
+    let sequence: number[] = [];
+
+    while (remaining.size > 0 && (!maxFacilities || sequence.length < maxFacilities)) {
+      // Cheapest place to add any remaining stop, in added minutes. From an
+      // empty day that's home → stop → home, so each day starts at the stop
+      // nearest home and grows outward along the cheapest detours.
+      let bestStop = -1;
+      let bestCost = Infinity;
+      let bestPosition = 0;
+      const nodes = [homeIndex, ...sequence, homeIndex];
+      for (const stop of remaining) {
+        const visit = facilities[stop - 1]?.visitDuration || 0;
+        for (let i = 0; i < nodes.length - 1; i++) {
+          const a = nodes[i];
+          const b = nodes[i + 1];
+          const delta = (durations[a]?.[stop] || 0) + (durations[stop]?.[b] || 0) - (durations[a]?.[b] || 0) + visit;
+          if (delta < bestCost) {
+            bestCost = delta;
+            bestStop = stop;
+            bestPosition = i;
+          }
+        }
+      }
+      if (bestStop < 0) break;
+
+      const trial = [...sequence.slice(0, bestPosition), bestStop, ...sequence.slice(bestPosition)];
+      // A stop that can't fit even alone still needs a day, or it would
+      // never be placed and this would spin.
+      if (!fits(build(trial)) && sequence.length > 0) break;
+      sequence = trial;
+      remaining.delete(bestStop);
+    }
+
+    // Insertion order is good; 2-opt on miles is usually better. Keep the
+    // reordered version only if it doesn't cost time or break a limit.
+    const inserted = build(sequence);
+    const reordered = build(optimizeRouteOrder(distanceMatrix.distances, sequence, homeIndex));
+    const keepReordered = reordered.totalTime <= inserted.totalTime && (fits(reordered) || !fits(inserted));
+    routes.push(keepReordered ? reordered : inserted);
+  }
+
+  return routes.map((route, idx) => ({ ...route, day: idx + 1 }));
+}
+
 export function optimizeRoutes(
   facilities: FacilityWithIndex[],
   distanceMatrix: DistanceMatrix,
@@ -1249,8 +1369,7 @@ export function optimizeRoutes(
     const exceedsDriveTime = maxDriveTime > 0 &&
       fullRoute.totalDriveTime > maxDriveTime;
 
-    const exceedsReturnBy = returnByTime &&
-      fullRoute.endTime > returnByTime;
+    const exceedsReturnBy = endsAfterDeadline(fullRoute, returnByTime);
 
     if (!exceedsTime && !exceedsFacilities && !exceedsDriveTime && !exceedsReturnBy) {
       // Entire cluster fits in one day - perfect!
@@ -1294,15 +1413,16 @@ export function optimizeRoutes(
             constraints.maxHoursPerDay &&
             testDayRoute.totalTime / 60 > constraints.maxHoursPerDay;
 
+          // `>`, not `>=`: testRoute already includes the candidate, so `>=`
+          // turned a cap of 8 into days of 7 whenever a cluster was split.
           const wouldExceedFacilities = constraints.useFacilitiesConstraint &&
             constraints.maxFacilitiesPerDay &&
-            testRoute.length >= constraints.maxFacilitiesPerDay;
+            testRoute.length > constraints.maxFacilitiesPerDay;
 
           const wouldExceedDriveTime = maxDriveTime > 0 &&
             testDayRoute.totalDriveTime > maxDriveTime;
 
-          const wouldExceedReturnBy = returnByTime &&
-            testDayRoute.endTime > returnByTime;
+          const wouldExceedReturnBy = endsAfterDeadline(testDayRoute, returnByTime);
 
           if (wouldExceedTime || wouldExceedFacilities || wouldExceedDriveTime || wouldExceedReturnBy) {
             break; // Stop adding to this day
@@ -1390,7 +1510,7 @@ export function optimizeRoutes(
   // re-checks those choices against real road time now that every day is
   // fully built. It's what stops the "I drove right past a Day 1 stop on my
   // way out to a Day 2 stop" case — that stop now gets picked up en route.
-  const refinedRoutes = improveAcrossDays(
+  const clusteredRoutes = improveAcrossDays(
     routes,
     facilities,
     distanceMatrix,
@@ -1399,19 +1519,52 @@ export function optimizeRoutes(
     lunchBreak
   );
 
+  // Second candidate: the capacity-first fill (see packDaysByCapacity), given
+  // the same cross-day polish. Fewest days wins — finishing a trip a day
+  // sooner saves a whole drive out and back, which is what users ask a
+  // re-optimize to do. A packed plan is only taken if it breaks the user's
+  // limits no worse than the clustered one. On a tie in days, less driving
+  // wins.
+  const packedRoutes = improveAcrossDays(
+    packDaysByCapacity(facilities, distanceMatrix, constraints, homeIndex, lunchBreak),
+    facilities,
+    distanceMatrix,
+    constraints,
+    homeIndex,
+    lunchBreak
+  );
+  const totalViolation = (plan: DailyRoute[]) =>
+    plan.reduce((sum, route) => sum + dayViolation(route, constraints), 0);
+  const totalDrive = (plan: DailyRoute[]) =>
+    plan.reduce((sum, route) => sum + route.totalDriveTime, 0);
+  const packedIsNoWorse = totalViolation(packedRoutes) <= totalViolation(clusteredRoutes) + 1e-6;
+  const usePacked = packedIsNoWorse && (
+    packedRoutes.length < clusteredRoutes.length ||
+    (packedRoutes.length === clusteredRoutes.length && totalDrive(packedRoutes) < totalDrive(clusteredRoutes))
+  );
+  const refinedRoutes = usePacked ? packedRoutes : clusteredRoutes;
+
   // Proof-of-run marker: if this line isn't in the console, the optimizer
   // didn't run and whatever is on screen is a loaded/stale plan.
   console.log('[routeOptimizer] cross-day refinement complete:', {
     daysBefore: routes.length,
-    daysAfter: refinedRoutes.length,
+    clusteredDays: clusteredRoutes.length,
+    packedDays: packedRoutes.length,
+    chose: usePacked ? 'packed' : 'clustered',
     milesBefore: Math.round(routes.reduce((s, r) => s + r.totalMiles, 0)),
     milesAfter: Math.round(refinedRoutes.reduce((s, r) => s + r.totalMiles, 0)),
   });
 
-  // Membership shifted, so re-establish the "nearest days first" numbering
-  // the clustering phase set up. Without this, a day that gave up its close-in
-  // stops could keep a low day number while sitting far out.
+  // Number the days fullest-first, so Day 1 is packed and the lighter
+  // remainder lands on the last day — the conveyor order the per-day refit
+  // produces and the one users plan around. Among equally full days, nearest
+  // to home goes first: membership shifted during refinement, and without
+  // that a day that gave up its close-in stops could keep a low number while
+  // sitting far out.
   refinedRoutes.sort((a, b) => {
+    if (b.facilities.length !== a.facilities.length) {
+      return b.facilities.length - a.facilities.length;
+    }
     const distanceFromHome = (route: DailyRoute): number => {
       if (route.facilities.length === 0) return Infinity;
       const centroid = calculateCentroid(

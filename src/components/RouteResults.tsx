@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import ModalPortal from './ModalPortal';
 import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Pencil, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute } from '../services/routeOptimizer';
+import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute, endsAfterDeadline, lastDepartureMinutes, deadlineMinutes } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } from '../utils/sunset';
 import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, ResetRouteStatusScope, supabase } from '../lib/supabase';
@@ -553,8 +553,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         // Same builder every other path uses (order + clock + lunch break), so
         // the times this decides against are the times the day card shows.
         const trialRoute = rebuildDayRoute(calcFacilities, trial, distanceMatrix, 0, startTime, lunchBreak);
-        const fits = (!leaveByDeadline || trialRoute.lastFacilityDepartureTime <= leaveByDeadline)
-          && (!arriveByDeadline || trialRoute.endTime <= arriveByDeadline)
+        // Unwrapped minutes, not the "HH:MM" strings: those wrap at midnight,
+        // so a day ending "00:40" used to pass a "17:00" deadline.
+        const fits = (!leaveByDeadline || lastDepartureMinutes(trialRoute) <= deadlineMinutes(leaveByDeadline))
+          && !endsAfterDeadline(trialRoute, arriveByDeadline)
           && (!maxHours || trialRoute.totalTime / 60 <= maxHours)
           && (!maxDrive || trialRoute.totalDriveTime <= maxDrive);
 
@@ -2351,7 +2353,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6">
                 <section aria-labelledby="route-stop-scope-heading" className="space-y-3">
                   <div>
                     <h4 id="route-stop-scope-heading" className="text-sm font-semibold text-gray-900 dark:text-white">Included stops</h4>
@@ -2441,7 +2443,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       })}
                       className="mt-1 w-4 h-4 text-blue-600 rounded"
                     />
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label htmlFor="refresh-use-facilities" className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <MapPin className="inline w-4 h-4 mr-1" />
                         Maximum Facilities Per Day
@@ -2456,7 +2458,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           max_facilities_per_day: parseInt(e.target.value) || 8,
                         })}
                         disabled={!tempSettings.use_facilities_constraint}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                        className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
                       />
                     </div>
                   </div>
@@ -2472,7 +2474,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       })}
                       className="mt-1 w-4 h-4 text-blue-600 rounded"
                     />
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label htmlFor="refresh-use-hours" className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Clock className="inline w-4 h-4 mr-1" />
                         Maximum Hours Per Day
@@ -2489,7 +2491,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           max_hours_per_day: parseFloat(e.target.value) || 8,
                         })}
                         disabled={!tempSettings.use_hours_constraint}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                        className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
                       />
                     </div>
                   </div>
@@ -2513,7 +2515,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           ...tempSettings,
                           inspection_visit_duration_minutes: parseInt(e.target.value) || 30,
                         })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Inspections mode</p>
                     </div>
@@ -2533,7 +2535,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           ...tempSettings,
                           plan_visit_duration_minutes: parseInt(e.target.value) || 60,
                         })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Plans mode</p>
                     </div>
@@ -2545,7 +2547,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Workday Constraints</p>
 
                   <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label htmlFor="update-route-start-time" className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Clock className="inline w-4 h-4 mr-1" />
                         Start Time for All Days
@@ -2559,13 +2561,13 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           ...tempSettings,
                           start_time: e.target.value || '08:00',
                         })}
-                        className="w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full min-w-0 max-w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Clock className="inline w-4 h-4 mr-1" />
                         Lunch / Break Time (minutes)
@@ -2582,7 +2584,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ...tempSettings,
                             lunch_break_minutes: parseInt(e.target.value) || 0,
                           })}
-                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="min-w-0 max-w-full w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                         {(tempSettings.lunch_break_minutes ?? 0) > 0 && (
                           <button
@@ -2598,7 +2600,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Navigation className="inline w-4 h-4 mr-1" />
                         Max Drive Time Per Day (minutes)
@@ -2615,7 +2617,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ...tempSettings,
                             max_drive_time_minutes: parseInt(e.target.value) || 0,
                           })}
-                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="min-w-0 max-w-full w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                         {(tempSettings.max_drive_time_minutes ?? 0) > 0 && (
                           <button
@@ -2631,7 +2633,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">
                         <Home className="inline w-4 h-4 mr-1" />
                         Return to Home Base By
@@ -2650,7 +2652,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ...tempSettings,
                             return_by_time: e.target.value || '',
                           })}
-                          className="w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="min-w-0 max-w-full w-full px-4 py-2 pr-8 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                         {(tempSettings.return_by_time ?? '') !== '' && (
                           <button
@@ -2684,7 +2686,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           <span>Geographic Clustering Tightness: {((tempSettings.clustering_tightness ?? 0.75) * 100).toFixed(0)}%</span>
                           <div className="relative group">
                             <Info className="w-4 h-4 text-gray-400 cursor-help" />
-                            <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
+                            <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-64 max-w-[calc(100vw-3rem)] p-3 sm:left-0 sm:right-auto bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
                               Controls how geographically tight clusters are. Lower values create looser clusters that spread facilities further apart. Higher values create tighter clusters with facilities closer together.
                             </div>
                           </div>
@@ -2699,7 +2701,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ...tempSettings,
                             clustering_tightness: parseFloat(e.target.value),
                           })}
-                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                          className="min-w-0 max-w-full w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                         />
                         <div className="flex justify-between text-xs text-gray-500 mt-1">
                           <span>Looser</span>
@@ -2713,7 +2715,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                           <span>Cluster Balance Weight: {((tempSettings.cluster_balance_weight ?? 0.35) * 100).toFixed(0)}%</span>
                           <div className="relative group">
                             <Info className="w-4 h-4 text-gray-400 cursor-help" />
-                            <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
+                            <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-64 max-w-[calc(100vw-3rem)] p-3 sm:left-0 sm:right-auto bg-gray-900 text-white text-xs rounded-lg shadow-lg z-10">
                               Controls the balance between geographic proximity and even distribution. Lower values prioritize keeping facilities geographically close. Higher values prioritize evenly distributing facilities across days.
                             </div>
                           </div>
@@ -2728,7 +2730,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                             ...tempSettings,
                             cluster_balance_weight: parseFloat(e.target.value),
                           })}
-                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                          className="min-w-0 max-w-full w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                         />
                         <div className="flex justify-between text-xs text-gray-500 mt-1">
                           <span>Geography</span>

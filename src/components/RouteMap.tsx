@@ -3,7 +3,7 @@ import ModalPortal from './ModalPortal';
 import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet-rotate';
-import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, Eye, EyeOff, CheckCircle, CheckSquare, Maximize2, Car, Crosshair, Home } from 'lucide-react';
+import { Square, Route, RefreshCw, Navigation, MapPin, Search, X, Menu, Building2, Navigation2, UserCog, CheckCircle, CheckSquare, Maximize2, Car, Crosshair, Home, SlidersHorizontal, Layers, ListFilter } from 'lucide-react';
 import { OptimizationResult } from '../services/routeOptimizer';
 import { HomeBase, supabase, UserSettings, Inspection, Facility, PlanRouteRunStop, RouteStatusScope } from '../lib/supabase';
 import { getRouteGeometry } from '../services/osrm';
@@ -287,6 +287,64 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [internalLocationTracking, setInternalLocationTracking] = useState(false);
   const locationTracking = externalLocationTracking !== undefined ? externalLocationTracking : internalLocationTracking;
   const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
+  // Phone-sized overflow for the embedded map toolbar. Five unlabelled icons
+  // in a row read as noise on a phone, so only marker scope stays out (full
+  // screen is the button in the map's corner); the rest live behind this
+  // menu. Full screen has its own "Map tools" section in the navigation menu.
+  const [showMapToolsMenu, setShowMapToolsMenu] = useState(false);
+  const mapToolsMenuRef = useRef<HTMLDivElement>(null);
+  const mapToolsButtonRef = useRef<HTMLButtonElement>(null);
+  // The panel is portaled to document.body (see ModalPortal), so it is not a
+  // DOM descendant of mapToolsMenuRef. Outside-click detection has to test it
+  // separately or the pointerdown that opens an item would close the menu
+  // before the click lands on it.
+  const mapToolsPanelRef = useRef<HTMLDivElement>(null);
+
+  // Marker-scope feedback. On a phone the toggle is icon-only, and in SPCC
+  // Plan mode an all-eligible route already holds every facility that needs
+  // a plan — the rest have valid plans, which Visibility hides by default —
+  // so flipping to "all" often changed nothing on screen and read as broken.
+  // Say what happened, and why when nothing new appeared.
+  const [mapNotice, setMapNotice] = useState<{ text: string; showVisibilityLink: boolean } | null>(null);
+  const mapNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousMarkerScopeRef = useRef(showOnlyRouteFacilities);
+  useEffect(() => {
+    // Compare with the last value rather than skipping the first run, so a
+    // StrictMode double-invoke on mount can't announce a change that didn't happen.
+    if (previousMarkerScopeRef.current === showOnlyRouteFacilities) return;
+    previousMarkerScopeRef.current = showOnlyRouteFacilities;
+    let notice: { text: string; showVisibilityLink: boolean };
+    if (showOnlyRouteFacilities) {
+      notice = { text: 'Showing route stops only', showVisibilityLink: false };
+    } else {
+      const routeIds = new Set<string>();
+      const routeNames = new Set<string>();
+      result?.routes.forEach(route => route.facilities.forEach(stop => {
+        if (stop.id) routeIds.add(stop.id);
+        else routeNames.add(stop.name);
+      }));
+      let revealed = 0;
+      let hiddenByVisibility = 0;
+      facilities.forEach(facility => {
+        if (routeIds.has(facility.id) || routeNames.has(facility.name) || !getCoords(facility)) return;
+        if (hideCompletedFacilities && completedFacilityIds.has(facility.id)) hiddenByVisibility++;
+        else revealed++;
+      });
+      notice = revealed > 0
+        ? { text: `Showing all facilities (+${revealed} not on this route)`, showVisibilityLink: false }
+        : hiddenByVisibility > 0
+          ? { text: `No new markers: the other ${hiddenByVisibility} are completed and hidden by Visibility`, showVisibilityLink: true }
+          : { text: 'Every facility is already on this route', showVisibilityLink: false };
+    }
+    setMapNotice(notice);
+    if (mapNoticeTimerRef.current) clearTimeout(mapNoticeTimerRef.current);
+    mapNoticeTimerRef.current = setTimeout(() => setMapNotice(null), notice.showVisibilityLink ? 6000 : 3000);
+    // Fires on the toggle only; the counts are read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOnlyRouteFacilities]);
+  useEffect(() => () => {
+    if (mapNoticeTimerRef.current) clearTimeout(mapNoticeTimerRef.current);
+  }, []);
   const [isTogglingNavMode, setIsTogglingNavMode] = useState(false);
   const navModeToggleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const skipNextTrackingInitialPositionRef = useRef(false);
@@ -346,6 +404,32 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [showMenu]);
+
+  useEffect(() => {
+    if (!showMapToolsMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !mapToolsMenuRef.current?.contains(target) &&
+        !mapToolsPanelRef.current?.contains(target)
+      ) {
+        setShowMapToolsMenu(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowMapToolsMenu(false);
+        mapToolsButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showMapToolsMenu]);
 
   // Auto-focus search input when opened
   useEffect(() => {
@@ -3954,9 +4038,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                           className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                           aria-pressed={showOnlyRouteFacilities}
                         >
-                          {showOnlyRouteFacilities
-                            ? <EyeOff className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <Layers className={`h-4 w-4 ${showOnlyRouteFacilities ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} />
                           <span className="text-gray-900 dark:text-white">Marker Scope</span>
                           <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
                             {showOnlyRouteFacilities ? 'Route only' : 'All'}
@@ -3972,9 +4054,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                           }}
                           className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
                         >
-                          {hideCompletedFacilities
-                            ? <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-300" />
-                            : <Eye className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                          <ListFilter className="h-4 w-4 text-gray-600 dark:text-gray-300" />
                           <span className="text-gray-900 dark:text-white">Visibility</span>
                         </button>
                       )}
@@ -4046,13 +4126,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   aria-label="Route-only marker view"
                   aria-pressed={showOnlyRouteFacilities}
                 >
-                  {showOnlyRouteFacilities ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <Layers className="h-4 w-4" />
                   <span className="hidden sm:inline">{showOnlyRouteFacilities ? 'Route Only' : 'All Markers'}</span>
                 </button>
               </div>
             )}
             {onToggleHideCompleted && (
-              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+              <div className="relative hidden sm:block">
                 <button
                   type="button"
                   onClick={onToggleHideCompleted}
@@ -4064,12 +4144,12 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   aria-label="Adjust completed facilities visibility"
                   aria-pressed={hideCompletedFacilities}
                 >
-                  {hideCompletedFacilities ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <ListFilter className="w-4 h-4" />
                   <span className="hidden sm:inline">Visibility</span>
                 </button>
               </div>
             )}
-            <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+            <div className="relative hidden sm:block">
               <button
                 type="button"
                 onClick={() => void toggleRoadRouteVisibility()}
@@ -4087,7 +4167,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </button>
             </div>
             {onBulkReassignFacilities && (
-              <div className={isFullScreen ? 'relative hidden sm:block' : 'relative'}>
+              <div className="relative hidden sm:block">
                 <button
                   type="button"
                   onClick={toggleMultiSelectMode}
@@ -4102,6 +4182,96 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   {selectionMode ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                   <span className="hidden sm:inline">Multi-Select</span>
                 </button>
+              </div>
+            )}
+            {/* The "N selected" readout lives in the desktop-only title block,
+                so multi-select gave a phone no sign it was on until something
+                was actually selected. */}
+            {selectionMode && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-200 sm:hidden">
+                {selectedFacilities.size} selected
+              </span>
+            )}
+            {!isFullScreen && (
+              <div ref={mapToolsMenuRef} className="relative sm:hidden">
+                <button
+                  ref={mapToolsButtonRef}
+                  type="button"
+                  onClick={() => setShowMapToolsMenu(current => !current)}
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50 touch-manipulation dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                  title="Map tools"
+                  aria-label="Map tools"
+                  aria-expanded={showMapToolsMenu}
+                  aria-controls="map-tools-panel"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+                {showMapToolsMenu && (
+                  <ModalPortal>
+                  <div
+                    ref={mapToolsPanelRef}
+                    id="map-tools-panel"
+                    role="menu"
+                    aria-label="Map tools"
+                    className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[1300] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-2xl dark:border-gray-700 dark:bg-gray-800 sm:hidden"
+                  >
+                    <p className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Map tools
+                    </p>
+                    {onToggleHideCompleted && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onToggleHideCompleted();
+                          setShowMapToolsMenu(false);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        <ListFilter className="h-4 w-4 text-gray-600 dark:text-gray-300" />
+                        <span className="text-gray-900 dark:text-white">Visibility</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void toggleRoadRouteVisibility();
+                        setShowMapToolsMenu(false);
+                      }}
+                      disabled={isLoadingRoutes}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-700"
+                      aria-pressed={showRoadRoutes}
+                    >
+                      <Route className={`h-4 w-4 ${showRoadRoutes ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'}`} />
+                      <span className="text-gray-900 dark:text-white">Road Routes</span>
+                      <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                        {isLoadingRoutes ? 'Loading…' : showRoadRoutes ? 'On' : 'Off'}
+                      </span>
+                    </button>
+                    {onBulkReassignFacilities && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          toggleMultiSelectMode();
+                          setShowMapToolsMenu(false);
+                        }}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                        aria-pressed={selectionMode}
+                      >
+                        {selectionMode
+                          ? <CheckSquare className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          : <Square className="h-4 w-4 text-gray-600 dark:text-gray-300" />}
+                        <span className="text-gray-900 dark:text-white">Multi-Select</span>
+                        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                          {selectionMode ? 'On' : 'Off'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                  </ModalPortal>
+                )}
               </div>
             )}
             {isFullScreen && (
@@ -4174,9 +4344,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       )}
 
       {selectionMode && selectedFacilities.size > 0 && result && (
-        <div className={isFullScreen ? "shrink-0 max-h-[40dvh] overflow-y-auto px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-30" : "px-6 py-3 bg-blue-50 border-b border-blue-200 relative z-10"}>
-          <div className="flex items-center gap-4 flex-wrap">
-            <label className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+        <div className={isFullScreen
+          ? "shrink-0 max-h-[40dvh] overflow-y-auto px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 dark:bg-blue-900/30 dark:border-blue-800 relative z-30"
+          : "px-4 sm:px-6 py-3 bg-blue-50 border-b border-blue-200 dark:bg-blue-900/30 dark:border-blue-800 relative z-10"}>
+          <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+            <label className="text-sm font-semibold text-gray-700 dark:text-gray-100">
               Reassign {selectedFacilities.size} to:
             </label>
             <div className="flex gap-2 flex-wrap">
@@ -4224,13 +4396,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             </div>
             <button
               onClick={handleBulkReassign}
-              className="ml-4 px-4 py-1.5 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm font-semibold"
+              className="ml-4 min-h-11 px-4 py-1.5 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm font-semibold"
             >
               Apply
             </button>
             <button
               onClick={handleClearSelection}
-              className="px-4 py-1.5 bg-gray-300 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-400 transition-colors text-sm"
+              className="min-h-11 px-4 py-1.5 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors text-sm dark:bg-gray-600 dark:text-gray-100 dark:hover:bg-gray-500"
             >
               Clear
             </button>
@@ -4252,6 +4424,26 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           className="w-full h-full dark:[filter:invert(0.9)_hue-rotate(180deg)_brightness(0.95)_contrast(0.95)] transition-all duration-200"
           style={{ position: 'relative', zIndex: 0 }}
         />
+        {mapNotice && (
+          <div
+            role="status"
+            className="absolute left-1/2 top-3 z-[500] flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg bg-gray-900/90 px-3 py-2 text-xs font-medium text-white shadow-lg"
+          >
+            <span>{mapNotice.text}</span>
+            {mapNotice.showVisibilityLink && onToggleHideCompleted && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMapNotice(null);
+                  onToggleHideCompleted();
+                }}
+                className="min-h-8 shrink-0 rounded-md bg-white/15 px-2 font-semibold hover:bg-white/25"
+              >
+                Visibility
+              </button>
+            )}
+          </div>
+        )}
         {!isFullScreen && onEnterFullscreen && (
           <button
             type="button"
