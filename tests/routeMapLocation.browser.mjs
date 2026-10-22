@@ -107,7 +107,7 @@ try {
     const layout = async state => {
       const measurements = await page.evaluate(() => {
         const labels = ['Update route settings', 'Exit fullscreen map', 'Turn on drive mode'];
-        const primary = [...document.querySelectorAll('button')].find(button => /Find my location|Finding your location/.test(button.getAttribute('aria-label') || ''));
+        const primary = [...document.querySelectorAll('button')].find(button => /Find my location|Finding your location|Stop following my location|Back to my location/.test(button.getAttribute('aria-label') || ''));
         const buttons = [...labels.map(label => document.querySelector(`[aria-label="${label}"]`)), primary].filter(Boolean);
         const rects = buttons.map(button => { const rect = button.getBoundingClientRect(); return { label: button.getAttribute('aria-label'), text: button.textContent, x: rect.x, y: rect.y, width: rect.width, height: rect.height }; });
         const span = document.querySelector('[aria-label="Update route settings"] span');
@@ -134,6 +134,7 @@ try {
       [4, [39.8283, -98.5795], [40.25, -104.8]],
       [18, [40.25, -104.8], [34.05, -118.24]],
     ]) {
+      if (await page.evaluate(() => window.__locationTest.state.tracking)) await page.getByRole('button', { name: 'Stop following my location', exact: true }).click();
       await page.evaluate(({ zoom, start }) => window.__locationTest.maps[0].setView(start, zoom, { animate: false }), { zoom, start });
       await page.getByRole('button', { name: 'Find my location', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: 'Finding your location', exact: true }).isDisabled(), true);
@@ -145,13 +146,61 @@ try {
       }, target);
       await page.waitForFunction(target => {
         const map = window.__locationTest.maps[0]; const center = map.getCenter();
-        return Math.abs(center.lat - target[0]) < 0.00001 && Math.abs(center.lng - target[1]) < 0.00001 && map.getZoom() === 18;
+        return Math.abs(center.lat - target[0]) < 0.00001 && Math.abs(center.lng - target[1]) < 0.00001 && map.getZoom() === 16;
       }, target);
       const motion = await page.evaluate(() => ({ moveCount: window.__locationTest.moveCount, tracking: window.__locationTest.state.tracking, busy: !!document.querySelector('[aria-busy="true"]') }));
       assert.ok(motion.moveCount > 2, 'Real Leaflet animates multiple frames from zoom ' + zoom);
       assert.equal(motion.tracking, true); assert.equal(motion.busy, false);
       await layout(`success-from-zoom-${zoom}`);
     }
+
+    // Follow-me pauses on real gestures, ignores its own flights, and comes back.
+    const mapCenter = () => page.evaluate(() => { const c = window.__locationTest.maps[0].getCenter(); return { lat: c.lat, lng: c.lng, zoom: window.__locationTest.maps[0].getZoom() }; });
+    const followLabel = () => page.evaluate(() => [...document.querySelectorAll('button')].find(b => /Stop following my location|Back to my location|Find my location|Finding your location/.test(b.getAttribute('aria-label') || ''))?.getAttribute('aria-label'));
+    const box = await page.locator('.leaflet-container').first().boundingBox();
+    const drag = async () => {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 3);
+      await page.mouse.down();
+      for (let step = 1; step <= 8; step++) await page.mouse.move(box.x + box.width / 2 - step * 15, box.y + box.height / 3 + step * 10);
+      await page.mouse.up();
+    };
+    await drag();
+    assert.equal(await followLabel(), 'Back to my location', 'A real drag pauses following');
+    await page.screenshot({ path: join(output, `${width}-follow-paused.png`), fullPage: true });
+    assert.equal(await page.evaluate(() => window.__locationTest.state.tracking), true);
+    // Back to me flies to the last fix; a fresh fix lands mid-flight and redirects it.
+    await page.getByRole('button', { name: 'Back to my location', exact: true }).click();
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__locationTest.requests.at(-1).success({ coords: { latitude: 34.2, longitude: -118.5, accuracy: 5, heading: null, speed: null }, timestamp: Date.now() }));
+    await page.waitForFunction(() => { const c = window.__locationTest.maps[0].getCenter(); return Math.abs(c.lat - 34.2) < 0.00001 && Math.abs(c.lng + 118.5) < 0.00001; });
+    await page.waitForTimeout(300);
+    assert.equal(await followLabel(), 'Stop following my location', 'Our own interrupted flight is not read as the user');
+    // A real user zoom (the map's zoom-out control; wheel zoom is off) pauses
+    // too, and the zoom it settles on is kept.
+    await page.locator('.leaflet-control-zoom-out').first().click();
+    await page.waitForFunction(() => window.__locationTest.maps[0].getZoom() < 16);
+    await page.waitForTimeout(400);
+    const pinched = (await mapCenter()).zoom;
+    assert.equal(await followLabel(), 'Back to my location', 'A real zoom pauses following');
+    if (width === 390) {
+      await drag();
+      await page.waitForTimeout(1000); // let drag inertia settle
+      const away = await mapCenter();
+      await page.evaluate(() => { const qa = window.__locationTest; qa.pausedMoves = []; qa.maps[0].on('moveend', () => qa.pausedMoves.push(qa.maps[0].getCenter().lat)); });
+      await page.waitForTimeout(17500);
+      const stillAway = await mapCenter();
+      assert.ok(Math.abs(stillAway.lat - away.lat) < 0.00001, 'Nothing moves during the 20 s pause');
+      assert.deepEqual(await page.evaluate(() => window.__locationTest.pausedMoves), [], 'No recentre fired while paused');
+      await page.waitForFunction(zoom => { const map = window.__locationTest.maps[0]; const c = map.getCenter(); return Math.abs(c.lat - 34.2) < 0.00001 && map.getZoom() === zoom; }, pinched, { timeout: 5000 });
+      const back = await mapCenter();
+      assert.equal(back.zoom, pinched, 'Glide back keeps the zoom the user settled on');
+      assert.equal(await followLabel(), 'Stop following my location');
+      await page.screenshot({ path: join(output, `${width}-follow-resumed.png`), fullPage: true });
+      results.push({ width, scenario: 'Real drag and wheel pause, interrupted own flight, 20 s glide back at kept zoom', status: 'passed' });
+    }
+    // The status line's Stop following works from the paused state too.
+    await page.getByRole('button', { name: 'Stop following', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.__locationTest.state.tracking), false, 'Stop following turns it off from paused');
     await page.getByRole('button', { name: 'Find my location', exact: true }).click();
     await page.evaluate(() => window.__locationTest.requests.at(-1).error({ code: 1, message: 'Mock permission denied' }));
     await page.getByRole('alert').waitFor(); await layout('permission-error');

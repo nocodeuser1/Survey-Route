@@ -78,7 +78,8 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
   };
   const doc = window.document;
   const button = name => [...doc.querySelectorAll('button')].find(node => node.getAttribute('aria-label') === name || node.textContent.trim() === name);
-  const primary = () => button('Find my location') || [...doc.querySelectorAll('button')].find(node => /Finding you/.test(node.textContent));
+  const followLabels = ['Find my location', 'Stop following my location', 'Back to my location', 'Finding your location'];
+  const primary = () => [...doc.querySelectorAll('button')].find(node => followLabels.includes(node.getAttribute('aria-label')));
   const click = async name => { await wait(() => button(name) && !button(name).disabled, 'enabled ' + name); const element = button(name); element.click(); await flush(); return element; };
   const position = (latitude = 40.25, longitude = -104.8) => ({ coords: { latitude, longitude, accuracy: 5, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() });
   const success = async (request, latitude, longitude) => { request.success(position(latitude, longitude)); await flush(); };
@@ -86,12 +87,16 @@ async function mount({ reducedMotion = false, unsupported = false, throws = fals
   const map = () => qa.maps.at(-1);
   const movements = (target = map()) => target.calls.filter(call => ['setView', 'flyTo', 'panTo'].includes(call.method));
   const busy = () => { assert.ok(primary(), 'Location action remains present'); assert.equal(primary().disabled, true); assert.equal(primary().getAttribute('aria-busy'), 'true'); assert.match(primary().textContent, /Finding you/); };
-  const idle = () => { assert.ok(button('Find my location'), 'Find my location action is available'); assert.equal(button('Find my location').disabled, false); };
+  const idle = () => { assert.ok(primary(), 'Location action is available'); assert.equal(primary().disabled, false); assert.notEqual(primary().getAttribute('aria-busy'), 'true'); };
+  // A user pan: Leaflet fires dragstart/dragend only for real gestures.
+  const pan = async (to = [30, -90]) => { map().fire('dragstart'); map().setView(to, map().getZoom()); map().fire('dragend'); await flush(); };
+  // A user pinch: zoomstart/zoomend that our own moves never produce here.
+  const pinch = async zoom => { map().fire('zoomstart'); map().setZoom(zoom); map().fire('zoomend'); await flush(); };
   const noAlertDialogs = () => assert.deepEqual(qa.alerts, [], 'GPS failures must be inline rather than blocking alert dialogs');
   window.eval(bundled);
   await wait(() => qa.maps.length && doc.querySelector('button'), 'RouteMap mount');
   await flush();
-  return { qa, dom, window, doc, button, primary, click, position, success, reject, map, movements, busy, idle, flush, wait, advance, noAlertDialogs,
+  return { qa, dom, window, doc, button, primary, click, position, success, reject, map, movements, busy, idle, pan, pinch, flush, wait, advance, noAlertDialogs,
     close: async () => { qa.destroy(); await flush(); window.close(); } };
 }
 
@@ -187,12 +192,20 @@ await test('Fresh request, disabled duplicate taps, smooth first fix, and repeat
   const first = h.movements().at(-1); assert.equal(first.method, 'flyTo');
   assert.equal(first.point.lat, 40.25); assert.equal(first.point.lng, -104.8); assert.ok(first.zoom >= 16);
   assert.equal(h.map().markers.at(-1).point.lat, 40.25);
-  const count = h.movements().length;
+  assert.equal(first.zoom, 16, 'A fresh follow lands at street zoom');
+  assert.match(h.primary().textContent, /Following/);
+  assert.equal(h.primary().getAttribute('aria-pressed'), 'true');
+  const requests = h.qa.requests.length;
+  await h.click('Stop following my location');
+  assert.equal(h.qa.state.tracking, false, 'Tapping while following turns it off');
+  assert.equal(h.qa.requests.length, requests, 'Turning off does not request a fix');
+  const count = h.movements().length; await h.advance(25000);
+  assert.equal(h.movements().length, count, 'No snap-back after an explicit off');
   await h.click('Find my location'); h.busy();
-  assert.equal(h.qa.requests.length, 2); assert.equal(h.qa.state.tracking, true, 'Repeat primary tap does not toggle follow off');
-  assert.equal(h.qa.requests[1].options.maximumAge, 0);
-  await h.success(h.qa.requests[1]); h.idle();
-  assert.equal(h.movements().length, count + 1, 'Same-coordinate repeat still recenters');
+  assert.equal(h.movements().length, count + 1, 'Turning on moves at once to the last known fix');
+  assert.equal(h.qa.requests.at(-1).options.maximumAge, 0);
+  await h.success(h.qa.requests.at(-1), 40.3, -104.9); h.idle();
+  assert.equal(h.movements().at(-1).point.lat, 40.3, 'The fresh fix corrects the position');
   await h.click('Stop following'); assert.equal(h.qa.state.tracking, false);
 });
 
@@ -232,21 +245,72 @@ await test('Cancel locating invalidates both stale success and stale error callb
   await h.success(newest, 42, -106); h.idle(); assert.equal(h.movements().at(-1).point.lat, 42);
 });
 
-await test('Panning during initial request cancels follow and ignores late GPS', async h => {
+await test('Panning during initial request pauses follow and ignores late GPS', async h => {
   await h.click('Find my location'); const pending = h.qa.requests[0];
-  h.map().fire('dragstart'); h.map().fire('dragend'); await h.flush();
-  h.idle(); assert.equal(h.qa.state.tracking, false);
+  await h.pan();
+  h.idle(); assert.equal(h.qa.state.tracking, true, 'Panning pauses rather than ends following');
+  assert.ok(h.button('Back to my location'), 'Paused follow offers a way straight back');
   const count = h.movements().length; await h.success(pending);
-  assert.equal(h.movements().length, count); assert.equal(h.qa.state.tracking, false);
+  assert.equal(h.movements().length, count, 'The cancelled request cannot move the map');
 });
 
-await test('Panning after success stops follow and cancels an in-flight poll', async h => {
+await test('Panning after success pauses follow for 20 s from the finger lifting, then glides back', async h => {
   await h.click('Find my location'); await h.success(h.qa.requests[0]);
   await h.advance(3000); assert.equal(h.qa.requests.length, 2, 'Follow polling remains available'); const pending = h.qa.requests[1];
-  h.map().fire('dragstart'); h.map().fire('dragend'); await h.flush();
-  assert.equal(h.qa.state.tracking, false); const count = h.movements().length;
-  await h.success(pending, 44, -106); assert.equal(h.movements().length, count);
-  const requests = h.qa.requests.length; await h.advance(15000); assert.equal(h.qa.requests.length, requests);
+  await h.pan([30, -90]);
+  assert.equal(h.qa.state.tracking, true); const count = h.movements().length;
+  await h.success(pending, 44, -106); assert.equal(h.movements().length, count, 'The in-flight poll is cancelled');
+  await h.advance(3000); await h.success(h.qa.requests.at(-1), 40.26, -104.81);
+  assert.equal(h.map().markers.at(-1).point.lat, 40.26, 'The blue dot keeps updating while paused');
+  assert.equal(h.movements().length, count, 'Nothing recentres while paused');
+  await h.advance(10000); await h.pan([31, -91]);
+  await h.advance(19000);
+  assert.equal(h.map().getCenter().lat, 31, 'A second pan restarts the 20 s from its finger lift');
+  await h.advance(1000);
+  assert.equal(h.map().getCenter().lat, 40.26, 'Following glides back to the latest fix');
+  assert.equal(h.map().getZoom(), 16);
+  assert.match(h.primary().textContent, /Following/);
+});
+
+await test('Pinch zoom pauses follow and the zoom you settle on is kept', async h => {
+  await h.click('Find my location'); await h.success(h.qa.requests[0]);
+  await h.pinch(13);
+  assert.ok(h.button('Back to my location'));
+  await h.advance(20000);
+  assert.equal(h.map().getZoom(), 13, 'Glide back keeps the pinched zoom');
+  assert.equal(h.map().getCenter().lat, 40.25);
+  await h.advance(3000); await h.success(h.qa.requests.at(-1), 40.3, -104.9);
+  assert.equal(h.map().getCenter().lat, 40.3); assert.equal(h.map().getZoom(), 13, 'Later fixes move the centre only');
+});
+
+await test('Our own moves do not pause follow', async h => {
+  await h.click('Find my location'); await h.success(h.qa.requests[0]);
+  await h.advance(3000); await h.success(h.qa.requests.at(-1), 40.5, -105.2);
+  assert.equal(h.map().getCenter().lat, 40.5);
+  assert.match(h.primary().textContent, /Following/, 'A programmatic recentre is not read as the user');
+});
+
+await test('Back to me snaps back at once and refreshes the fix', async h => {
+  await h.click('Find my location'); await h.success(h.qa.requests[0]);
+  await h.pan([30, -90]); const requests = h.qa.requests.length;
+  await h.click('Back to my location');
+  assert.equal(h.map().getCenter().lat, 40.25, 'Moves straight back to the last fix');
+  assert.equal(h.qa.requests.length, requests + 1); h.busy();
+  await h.success(h.qa.requests.at(-1), 40.27, -104.82); h.idle();
+  assert.equal(h.map().getCenter().lat, 40.27); assert.match(h.primary().textContent, /Following/);
+  const count = h.movements().length; await h.advance(20000);
+  assert.equal(h.map().getCenter().lat, 40.27, 'No stale glide-back fires after coming back early');
+  assert.ok(h.movements().length >= count);
+});
+
+await test('A drag that outlasts the pause is not yanked mid-gesture', async h => {
+  await h.click('Find my location'); await h.success(h.qa.requests[0]);
+  h.map().fire('dragstart'); h.map().setView([30, -90], 16); await h.flush();
+  await h.advance(25000);
+  assert.equal(h.map().getCenter().lat, 30, 'Still dragging: no snap-back');
+  h.map().fire('dragend'); await h.flush();
+  await h.advance(19000); assert.equal(h.map().getCenter().lat, 30);
+  await h.advance(1000); assert.equal(h.map().getCenter().lat, 40.25);
 });
 
 await test('Manual facility target wins over pending GPS, and Find me clears target', async h => {
@@ -262,7 +326,7 @@ await test('Manual facility target wins over pending GPS, and Find me clears tar
 await test('New explicit recenter supersedes an older follow poll', async h => {
   await h.click('Find my location'); await h.success(h.qa.requests[0]);
   await h.advance(3000); const oldPoll = h.qa.requests[1]; assert.ok(oldPoll);
-  await h.click('Find my location'); const fresh = h.qa.requests.at(-1);
+  await h.pinch(16); await h.click('Back to my location'); const fresh = h.qa.requests.at(-1);
   assert.notEqual(fresh, oldPoll); await h.success(fresh, 45, -110);
   const count = h.movements().length; await h.success(oldPoll, 39, -100);
   assert.equal(h.movements().length, count); assert.equal(h.map().markers.at(-1).point.lat, 45);
@@ -288,7 +352,7 @@ await test('Remount and unmount cannot leak GPS callbacks into the replacement m
   const count = h.movements().length; await h.success(abandoned); await h.reject(abandoned, 1);
   h.busy(); assert.equal(h.movements().length, count); assert.equal(h.doc.querySelector('[role="alert"]'), null);
   await h.success(fresh, 46, -111); h.idle();
-  await h.click('Find my location'); const pending = h.qa.requests.at(-1); const currentMap = h.map(); const currentCount = h.movements(currentMap).length;
+  await h.pan(); await h.click('Back to my location'); const pending = h.qa.requests.at(-1); const currentMap = h.map(); const currentCount = h.movements(currentMap).length;
   h.qa.unmount(); await h.flush(); await h.success(pending); await h.advance(15000);
   assert.equal(currentMap.removed, true); assert.equal(h.movements(currentMap).length, currentCount);
 });
@@ -338,7 +402,7 @@ await test('Fresh parent facilities props cannot restore an old map view after f
   const count = h.movements().length;
   await h.advance(50);
   assert.equal(h.movements().length, count, 'Delayed restore cannot overwrite accepted GPS');
-  assert.equal(h.map().getCenter().lat, 47); assert.equal(h.map().getZoom(), 18);
+  assert.equal(h.map().getCenter().lat, 47); assert.equal(h.map().getZoom(), 16);
   h.qa.rerender(); await h.flush(); await h.advance(50);
   assert.equal(h.map().getCenter().lat, 47, 'Fresh props while following preserve GPS viewport');
   assert.equal(h.movements().length, count, 'Fresh parent rerenders do not refit or restore');
@@ -355,7 +419,7 @@ await test('No-route home base never steals manual viewport on GPS failure or St
   const beforeStop = h.movements().length;
   await h.click('Stop following');
   assert.equal(h.movements().length, beforeStop, 'Stop following preserves the accepted viewport');
-  assert.equal(h.map().getCenter().lat, 48); assert.equal(h.map().getZoom(), 18);
+  assert.equal(h.map().getCenter().lat, 48); assert.equal(h.map().getZoom(), 16);
 }, { withHomeBase: true });
 
 await test('Silent follow polls are bounded, never stack, and recover without duplicate requests', async h => {
