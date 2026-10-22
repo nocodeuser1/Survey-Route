@@ -37,7 +37,7 @@ interface PendingRequest {
 
 export default function AgencyDashboard() {
   const { user, signOut } = useAuth();
-  const { selectAccount } = useAccount();
+  const { selectAccount, refreshAccounts } = useAccount();
   const navigate = useNavigate();
   const [agency, setAgency] = useState<Agency | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -238,6 +238,11 @@ export default function AgencyDashboard() {
       setNewAccountName('');
       setNewAccountAdminEmail('');
       await loadAgencyData();
+      // loadAgencyData only refreshes this page's own list. AccountContext
+      // keeps a separate list that selectAccount() looks the id up in, so
+      // without this the account you just created cannot be entered until a
+      // full page reload.
+      await refreshAccounts();
       if (invitationWarning) setError(invitationWarning);
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
@@ -248,7 +253,16 @@ export default function AgencyDashboard() {
 
   async function handleEnterAccount(accountId: string) {
     try {
-      const selected = await selectAccount(accountId);
+      let selected = await selectAccount(accountId);
+
+      if (!selected) {
+        // selectAccount fails when the id isn't in AccountContext's cached
+        // list — which happens for an account created in another tab or on
+        // another device, not just one made a moment ago. Re-sync once and
+        // retry before telling the user they have no access.
+        await refreshAccounts();
+        selected = await selectAccount(accountId);
+      }
 
       if (!selected) {
         throw new Error('Could not access the selected account');

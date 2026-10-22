@@ -3,6 +3,7 @@ import AppRouter from './AppRouter.tsx';
 import { registerServiceWorker } from './lib/registerSW';
 import { initAutoSync } from './lib/syncQueue';
 import ContextualHelpProvider from './components/ContextualHelpProvider';
+import UpdateAvailableBanner from './components/UpdateAvailableBanner';
 import 'leaflet/dist/leaflet.css';
 import './index.css';
 
@@ -23,5 +24,6 @@ initAutoSync();
 createRoot(document.getElementById('root')!).render(
   <ContextualHelpProvider>
     <AppRouter />
+    <UpdateAvailableBanner />
   </ContextualHelpProvider>
 );

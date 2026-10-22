@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
-import { Facility, Inspection, PlanRouteRunStop, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
+import { Facility, Inspection, PlanRouteRunStop, RouteStatusScope, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
 import InspectionForm from './InspectionForm';
 import InspectionViewer from './InspectionViewer';
@@ -10,7 +10,8 @@ import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
-import { isInspectionValid } from '../utils/inspectionUtils';
+import { getFacilityInspectionExpiry, getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
+import { getRouteStatusRenderModel } from '../utils/routeStatus';
 import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
@@ -59,6 +60,13 @@ interface SurveyModeProps {
   planRouteStopsByFacilityId?: Map<string, PlanRouteRunStop>;
   onPlanRouteStopChange?: (facilityId: string, completed: boolean) => Promise<boolean>;
   planRouteSavingFacilityId?: string | null;
+  onInspectionRouteStopCompleted?: (
+    facilityId: string,
+    source: 'inspection' | 'manual_internal' | 'manual_external',
+    sourceRecordId: string,
+  ) => Promise<boolean>;
+  routeStatusStopsByScope?: Record<RouteStatusScope, Map<string, PlanRouteRunStop>>;
+  routeStatusRunInitialized?: Record<RouteStatusScope, boolean>;
 }
 
 interface FacilityWithDistance extends Facility {
@@ -72,7 +80,7 @@ type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
 type ViewModeType = 'all' | 'inspections' | 'plans';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId }: SurveyModeProps) {
+export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId, onInspectionRouteStopCompleted, routeStatusStopsByScope, routeStatusRunInitialized }: SurveyModeProps) {
   // Helper: normalize a surveyType prop (which can be 'all', a legacy SPCC enum
   // string, or a survey_types.id UUID) to an internal ViewModeType.
   const mapSurveyTypeToViewMode = (st: string | undefined): 'all' | 'inspections' | 'plans' | null => {
@@ -323,9 +331,11 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }, [userId, accountId]);
 
   useEffect(() => {
-    if (currentPosition) {
-      updateFacilitiesWithDistance();
-    }
+    // Build the list whether or not we have a GPS fix. Gating this on
+    // currentPosition meant a denied/unavailable or still-acquiring location
+    // left the list permanently empty — in the field that reads as "this
+    // account has no sites", and the empty state blamed the user's filters.
+    updateFacilitiesWithDistance();
   }, [currentPosition, facilities, result, inspections, routeFacilityIds, showOffRoute]);
 
   // Refresh plan rows whenever the parent's facility list changes (e.g.
@@ -528,8 +538,6 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   function updateFacilitiesWithDistance() {
-    if (!currentPosition) return;
-
     // Source for the visible list:
     //   - No custom route active → every passed-in facility (existing behavior).
     //   - Custom route active + "Show off-route" OFF → only route members.
@@ -545,7 +553,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       // sit at 0,0 off the coast of Africa.
       const coords = getCoords(facility);
 
-      const distance = coords
+      // Unknown distance (no fix yet) sorts last, same as a facility with no
+      // coordinates — it is "not measurable", not "zero miles away".
+      const distance = coords && currentPosition
         ? calculateDistance(
             currentPosition.lat,
             currentPosition.lng,
@@ -554,7 +564,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           )
         : Infinity;
 
-      const bearing = coords
+      const bearing = coords && currentPosition
         ? calculateBearing(
             currentPosition.lat,
             currentPosition.lng,
@@ -582,7 +592,11 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
 
     switch (sortBy) {
       case 'distance':
-        sorted.sort((a, b) => a.distance - b.distance);
+        // Without a fix every distance is Infinity, which would leave the
+        // list in arbitrary order. Fall back to something stable.
+        sorted.sort((a, b) =>
+          currentPosition ? a.distance - b.distance : a.name.localeCompare(b.name),
+        );
         break;
       case 'name':
         sorted.sort((a, b) => a.name.localeCompare(b.name));
@@ -694,43 +708,29 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   function getInspectionStatus(facility: Facility): 'completed' | 'incomplete' | 'expired' | 'draft' {
-    // Check for internal or external completion
-    if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-      const spccDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromSpcc = new Date(spccDate);
-      oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
-      const now = new Date();
-
-      if (now > oneYearFromSpcc) {
-        return 'expired';
-      }
-      return 'completed';
-    }
-
     const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
+    if (isFacilityInspectionCurrent(facility, facilityInspections)) return 'completed';
+    const newestCompleted = getNewestCompletedInspection(facilityInspections);
+    const expiry = getFacilityInspectionExpiry(facility, newestCompleted);
+    if (expiry.status === 'expired' || expiry.status === 'expiring' || expiry.status === 'initial_overdue') return 'expired';
+    if (!newestCompleted && !facility.spcc_inspection_date && facilityInspections.some(i => i.status === 'draft')) return 'draft';
+    return 'incomplete';
+  }
 
-    if (facilityInspections.length === 0) return 'incomplete';
-
-    // Check for draft inspections
-    const draftInspections = facilityInspections.filter(i => i.status === 'draft');
-    if (draftInspections.length > 0) return 'draft';
-
-    const validInspections = facilityInspections.filter(i => isInspectionValid(i));
-
-    if (validInspections.length > 0) return 'completed';
-
-    // Check if SPCC is expired based on spcc_inspection_date
-    if (facility.spcc_inspection_date) {
-      const spccDate = parseLocalDate(facility.spcc_inspection_date);
-      const oneYearFromSpcc = new Date(spccDate);
-      oneYearFromSpcc.setFullYear(oneYearFromSpcc.getFullYear() + 1);
-      const now = new Date();
-      if (now > oneYearFromSpcc) {
-        return 'expired';
-      }
-    }
-
-    return 'expired';
+  function getFacilityRouteRenderModel(facility: Facility) {
+    const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
+    const planStatus = getSPCCPlanStatus(facility);
+    const kind = viewMode === 'inspections' ? 'spcc_inspection' : viewMode === 'plans' ? 'spcc_plan' : 'all';
+    return getRouteStatusRenderModel({
+      surveyTypeKind: kind,
+      isCurrentRouteStop: !routeFacilityIds || routeFacilityIds.includes(facility.id),
+      inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
+      planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? false,
+      inspectionStop: routeStatusStopsByScope?.spcc_inspection.get(facility.id),
+      planStop: routeStatusStopsByScope?.spcc_plan.get(facility.id) ?? planRouteStopsByFacilityId?.get(facility.id),
+      inspectionComplianceCurrent: isFacilityInspectionCurrent(facility, facilityInspections),
+      planComplianceCurrent: planStatus === 'valid' || planStatus === 'recertified',
+    });
   }
 
   function getSPCCPlanStatus(facility: Facility): SPCCPlanStatusType {
@@ -808,26 +808,16 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     let filtered = facilitiesWithDistance;
 
     if (filter !== 'all') {
-      if (viewMode === 'inspections' || viewMode === 'all') {
-        filtered = filtered.filter(f => getInspectionStatus(f) === filter);
-      } else {
-        // SPCC Plans mode - map filter types to plan statuses
-        filtered = filtered.filter(f => {
+      filtered = filtered.filter(f => {
+        if (filter === 'completed') return getFacilityRouteRenderModel(f).showRouteCheck;
+        if (filter === 'incomplete') return !getFacilityRouteRenderModel(f).showRouteCheck;
+        if (filter === 'draft') return viewMode !== 'plans' && getInspectionStatus(f) === 'draft';
+        if (viewMode === 'plans') {
           const planStatus = getSPCCPlanStatus(f);
-          switch (filter) {
-            case 'incomplete':
-              return planStatus === 'missing' || planStatus === 'pending';
-            case 'completed':
-              return planStatus === 'valid' || planStatus === 'recertified';
-            case 'expired':
-              return planStatus === 'expired' || planStatus === 'expiring' || planStatus === 'overdue';
-            case 'draft':
-              return false; // Drafts don't apply to plans
-            default:
-              return true;
-          }
-        });
-      }
+          return planStatus === 'expired' || planStatus === 'expiring' || planStatus === 'overdue';
+        }
+        return getInspectionStatus(f) === 'expired';
+      });
     }
 
     if (searchQuery.trim()) {
@@ -848,6 +838,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   }
 
   function formatDistance(meters: number): string {
+    // Infinity = no coordinates on file (or no fix). toFixed() would print
+    // the literal "Infinitykm".
+    if (!Number.isFinite(meters)) return '--';
     if (meters < 1000) {
       return `${Math.round(meters)}m`;
     }
@@ -865,13 +858,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const filteredFacilities = getFilteredFacilities();
 
   // Calculate counts based on view mode
-  const incompleteCount = viewMode === 'plans'
-    ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'missing' || s === 'pending'; }).length
-    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'incomplete').length;
+  const incompleteCount = facilitiesWithDistance.filter(f => !getFacilityRouteRenderModel(f).showRouteCheck).length;
 
-  const completedCount = viewMode === 'plans'
-    ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'valid' || s === 'recertified'; }).length
-    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'completed').length;
+  const completedCount = facilitiesWithDistance.filter(f => getFacilityRouteRenderModel(f).showRouteCheck).length;
 
   const expiredCount = viewMode === 'plans'
     ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'expired' || s === 'expiring' || s === 'overdue'; }).length
@@ -889,6 +878,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         teamNumber={teamNumber}
         accountId={accountId}
         onSaved={handleInspectionComplete}
+        onInspectionCompletedWithFacility={async (facility, inspectionId) => {
+          await onInspectionRouteStopCompleted?.(facility.id, 'inspection', inspectionId);
+        }}
         onClose={() => setInspectingFacility(null)}
       />
     );
@@ -1183,6 +1175,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           ) : (
             filteredFacilities.map((facility, index) => {
               const status = getInspectionStatus(facility);
+              const routeRenderModel = getFacilityRouteRenderModel(facility);
               const isExpanded = expandedFacility === facility.id;
               const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
               const latestInspection = facilityInspections[0];
@@ -1215,7 +1208,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
               } else if (isOnRouteHighlighted) {
                 cardBorderClass = 'border-2 border-emerald-500';
               } else {
-                cardBorderClass = getBorderColorClass(facility, status);
+                cardBorderClass = getBorderColorClass(facility, routeRenderModel.showRouteCheck ? 'completed' : 'incomplete');
               }
 
               return (
@@ -1320,6 +1313,13 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                 </span>
                               )}
                             </>
+                          )}
+
+                          {!isOffRoute && (
+                            <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold ${routeRenderModel.showRouteCheck ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'}`}>
+                              {routeRenderModel.showRouteCheck ? <CheckCircle className="h-2.5 w-2.5" /> : <Clock className="h-2.5 w-2.5" />}
+                              {routeRenderModel.showRouteCheck ? 'Route Complete' : 'Route Pending'}
+                            </span>
                           )}
 
                           {facility.day && (

@@ -99,6 +99,7 @@ export function findNearbyFacilities(
 }
 
 export function formatDistance(meters: number): string {
+  if (!Number.isFinite(meters)) return '--';
   if (meters < 1000) {
     return `${Math.round(meters)}m`;
   } else {
@@ -107,6 +108,7 @@ export function formatDistance(meters: number): string {
 }
 
 export function formatDistanceWithFeet(meters: number): string {
+  if (!Number.isFinite(meters)) return '--';
   const feet = Math.round(meters * 3.28084);
   if (meters < 1000) {
     return `${Math.round(meters)}m (${feet}ft)`;

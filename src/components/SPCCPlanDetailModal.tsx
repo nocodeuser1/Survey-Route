@@ -793,18 +793,24 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   Visual feedback: a brief inline "Copied!" pill that fades
                   back to a subtle copy hint. */}
               <h2
-                className="text-xl font-bold truncate cursor-pointer select-text inline-flex items-center gap-2 group max-w-full hover:text-white/90 transition-colors"
+                className="text-xl font-bold cursor-pointer select-text inline-flex items-center gap-2 group max-w-full hover:text-white/90 transition-colors"
                 title={`${facility.name}\n(click to copy)`}
                 onClick={async (e) => {
                   // Toggle the truncate behavior on the heading element so the
                   // full name shows even when it would otherwise be cut off.
                   const el = e.currentTarget;
-                  if (el.classList.contains('truncate')) {
-                    el.classList.remove('truncate');
-                    el.classList.add('whitespace-normal', 'break-words');
-                  } else {
-                    el.classList.add('truncate');
-                    el.classList.remove('whitespace-normal', 'break-words');
+                  // Truncation lives on the child span: the h2 is an
+                  // inline-flex container and text-overflow does not apply
+                  // to one, so an ellipsis there never renders.
+                  const nameEl = el.querySelector('[data-facility-name]');
+                  if (nameEl) {
+                    if (nameEl.classList.contains('truncate')) {
+                      nameEl.classList.remove('truncate');
+                      nameEl.classList.add('whitespace-normal', 'break-words');
+                    } else {
+                      nameEl.classList.add('truncate');
+                      nameEl.classList.remove('whitespace-normal', 'break-words');
+                    }
                   }
                   // Copy the full facility name to the OS clipboard. We
                   // intentionally don't await before toggling truncate above
@@ -819,7 +825,7 @@ export default function SPCCPlanDetailModal({ facility, onClose, onFacilitiesCha
                   }
                 }}
               >
-                <span className="min-w-0">{facility.name}</span>
+                <span data-facility-name className="min-w-0 truncate">{facility.name}</span>
                 {nameCopied ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/30 text-xs font-semibold whitespace-nowrap flex-shrink-0">
                     <Check className="w-3 h-3" />

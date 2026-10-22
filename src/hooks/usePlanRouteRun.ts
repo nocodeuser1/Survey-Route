@@ -220,6 +220,7 @@ export function usePlanRouteRun({
         .eq('account_id', accountId)
         .eq('route_plan_id', routePlanId)
         .eq('team_number', teamNumber)
+        .eq('survey_type', 'spcc_plan')
         .eq('status', 'active')
         .maybeSingle();
 

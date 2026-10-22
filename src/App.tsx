@@ -44,7 +44,8 @@ import { hasCoords } from './utils/coordinates';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useSurveyTypes } from './hooks/useSurveyTypes';
-import { usePlanRouteRun } from './hooks/usePlanRouteRun';
+import { useRouteStatusRuns } from './hooks/useRouteStatusRuns';
+import RouteStatusCompletionNotice from './components/RouteStatusCompletionNotice';
 import {
   replaceFacilitiesForAccount as cacheOfflineFacilitiesForAccount,
   getFacilitiesByAccount as getOfflineFacilities,
@@ -555,6 +556,14 @@ function App() {
   });
   const [mapTargetCoords, setMapTargetCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const viewingFacilityRef = useRef(false);
+  // Every entry point keeps the request until a newer target or Find me replaces it.
+  // A fresh object also makes repeated taps on the same facility recenter.
+  const showFacilityOnMap = useCallback((latitude: number, longitude: number) => {
+    viewingFacilityRef.current = true;
+    setMapTargetCoords({ latitude, longitude });
+    setCurrentView('route-planning');
+    setIsFullScreenMap(true);
+  }, []);
   const mapRef = useRef<any>(null);
   const [showRefreshOptions, setShowRefreshOptions] = useState(false);
   const [triggerFitBounds, setTriggerFitBounds] = useState(0);
@@ -3237,15 +3246,29 @@ function App() {
     setFacilities(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
   }, []);
 
-  const planRouteRun = usePlanRouteRun({
+  const routeStatusRuns = useRouteStatusRuns({
     accountId: currentAccount?.id,
     routePlanId: currentRouteId ?? undefined,
     teamNumber: effectiveUserTeam ?? 1,
     result: filteredOptimizationResult,
     facilities: filteredFacilities,
-    enabled: surveyTypeKind === 'spcc_plan',
     onFacilityPatch: handleFacilityPatch,
   });
+
+  const planActiveStops = routeStatusRuns.stopsByScope.spcc_plan.filter(stop =>
+    Boolean(stop.facility_id) && !stop.removed_at && stop.status !== 'removed'
+  );
+  const planRouteRun = {
+    run: routeStatusRuns.runsByScope.spcc_plan ?? null,
+    stopsByFacilityId: routeStatusRuns.stopsMapByScope.spcc_plan,
+    completedCount: planActiveStops.filter(stop => stop.status === 'completed').length,
+    totalCount: planActiveStops.length || routeStatusRuns.plannedStops.length,
+    loading: routeStatusRuns.loading,
+    savingFacilityId: routeStatusRuns.savingFacilityIdByScope.spcc_plan ?? null,
+    schemaUnavailable: routeStatusRuns.schemaUnavailable,
+    error: routeStatusRuns.error,
+    setFacilityCompleted: routeStatusRuns.setPlanStopCompleted,
+  };
 
   const planRouteProgressProps = useMemo(() => ({
     runId: planRouteRun.run?.id ?? null,
@@ -3256,8 +3279,15 @@ function App() {
     savingFacilityId: planRouteRun.savingFacilityId,
     schemaUnavailable: planRouteRun.schemaUnavailable,
     error: planRouteRun.error,
-    startNewRun: planRouteRun.startNewRun,
     setFacilityCompleted: planRouteRun.setFacilityCompleted,
+    isOnline: routeStatusRuns.isOnline,
+    resetting: routeStatusRuns.resetting,
+    resetRouteStatus: routeStatusRuns.resetRouteStatus,
+    inspectionStopsByFacilityId: routeStatusRuns.stopsMapByScope.spcc_inspection,
+    inspectionRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+    planRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+    completeInspectionStop: routeStatusRuns.completeInspectionStop,
+    recordManualInspectionCompletion: routeStatusRuns.recordManualInspectionCompletion,
   }), [
     planRouteRun.run?.id,
     planRouteRun.stopsByFacilityId,
@@ -3267,8 +3297,15 @@ function App() {
     planRouteRun.savingFacilityId,
     planRouteRun.schemaUnavailable,
     planRouteRun.error,
-    planRouteRun.startNewRun,
     planRouteRun.setFacilityCompleted,
+    routeStatusRuns.isOnline,
+    routeStatusRuns.resetting,
+    routeStatusRuns.resetRouteStatus,
+    routeStatusRuns.stopsMapByScope.spcc_inspection,
+    routeStatusRuns.runsByScope.spcc_inspection,
+    routeStatusRuns.runsByScope.spcc_plan,
+    routeStatusRuns.completeInspectionStop,
+    routeStatusRuns.recordManualInspectionCompletion,
   ]);
 
   const handleReassignFacility = async (facilityIndex: number, fromDay: number, toDay: number) => {
@@ -4151,6 +4188,13 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-200">
+      <RouteStatusCompletionNotice
+        pending={routeStatusRuns.pendingInspectionCompletion}
+        pendingCount={routeStatusRuns.pendingInspectionCompletionCount}
+        retrying={Boolean(routeStatusRuns.savingFacilityIdByScope.spcc_inspection)}
+        onRetry={routeStatusRuns.retryInspectionCompletion}
+        onDismiss={routeStatusRuns.dismissInspectionCompletionError}
+      />
       {showSignatureBanner && (
         <SignaturePromptBar onDismiss={() => setSignatureBannerDismissed(true)} />
       )}
@@ -4351,6 +4395,7 @@ function App() {
                 <button
                   onClick={() => setCurrentView('survey')}
                   disabled={!optimizationResult}
+                  title={optimizationResult ? 'Survey Mode' : 'Generate a route first — Survey Mode follows your planned route'}
                   className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors whitespace-nowrap ${currentView === 'survey'
                     ? 'bg-blue-100 dark:bg-gray-800 dark:shadow-[inset_0_2px_4px_0_rgba(0,0,0,0.3)] text-blue-700 dark:text-blue-200 font-medium'
                     : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -4439,7 +4484,17 @@ function App() {
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <Navigation2 className="w-5 h-5" />
-                    <span>Survey Mode</span>
+                    <span className="flex flex-col items-start leading-tight">
+                      <span>Survey Mode</span>
+                      {/* A greyed-out item with no reason reads as broken.
+                          Survey Mode follows a planned route, so it only
+                          unlocks once one exists. */}
+                      {!optimizationResult && (
+                        <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">
+                          Generate a route first
+                        </span>
+                      )}
+                    </span>
                   </button>
                   <button
                     onClick={() => {
@@ -4495,26 +4550,11 @@ function App() {
             accountId={currentAccount.id}
             userId={user?.authUserId || ''}
             onFacilitiesChange={loadData}
+            onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
             isLoading={isLoadingFacilities}
             initialFacilityToEdit={facilityToEdit}
             onFacilityEditHandled={() => setFacilityToEdit(null)}
-            onShowOnMap={(latitude, longitude) => {
-              console.log('[Show on Map] Showing facility on map and ensuring visibility');
-              // Ensure ALL facilities are visible by resetting visibility state
-              setCompletedVisibility({
-                hideAllCompleted: false,
-                hideInternallyCompleted: false,
-                hideExternallyCompleted: false,
-                hideValidPlans: false,
-                hideExpiringPlans: false,
-              });
-              // Switch to route planning view and set map to fullscreen mode
-              viewingFacilityRef.current = true;
-              setCurrentView('route-planning');
-              setIsFullScreenMap(true);
-              setMapTargetCoords({ latitude, longitude });
-              // Don't clear targetCoords - let the map handle it naturally
-            }}
+            onShowOnMap={showFacilityOnMap}
             onCoordinatesUpdated={(_facilityId, latitude, longitude) => {
               // Only auto-center the map on the saved coordinates when the
               // user is ALREADY in route-planning context. Saving lat/long
@@ -5109,6 +5149,7 @@ function App() {
                   {!isFullScreenMap && (
                     <div className="relative">
                       <RouteMap
+                        onShowOnMap={showFacilityOnMap}
                         key={`route-map-${routeVersion}`}
                         result={filteredOptimizationResult}
                         homeBase={visibleHomeBase}
@@ -5128,6 +5169,8 @@ function App() {
                         onFacilityPatch={handleFacilityPatch}
                         onAddFacilityToRoute={handleAddFacilityToRoute}
                         onInspectionFormActiveChange={setIsInspectionFormActive}
+                        onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+                        onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
                         triggerFitBounds={triggerFitBounds}
                         onEditFacility={handleEditFacility}
                         surveyType={surveyType}
@@ -5137,6 +5180,11 @@ function App() {
                         onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
                         onEnterFullscreen={() => setIsFullScreenMap(true)}
                         planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                        routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+                        routeStatusRunInitialized={{
+                          spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                          spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                        }}
                         onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                         planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                       />
@@ -5202,10 +5250,7 @@ function App() {
                       onFacilitiesUpdated={loadData}
                       isRefreshing={isGenerating}
                       showOnlyRouteList={true}
-                      onShowOnMap={(lat, lng) => {
-                        setMapTargetCoords({ latitude: lat, longitude: lng });
-                        setIsFullScreenMap(true);
-                      }}
+                      onShowOnMap={showFacilityOnMap}
                       onApplyWithTimeRefresh={handleApplyWithTimeRefresh}
                       surveyType={surveyType}
                       surveyTypeKind={surveyTypeKind}
@@ -5214,7 +5259,8 @@ function App() {
                       }}
                     />
                   )}
-
+                </>
+              )}
                   {isFullScreenMap && (
                     <>
                       <div className="fixed inset-0 z-[90] overflow-hidden overscroll-none bg-white dark:bg-gray-900">
@@ -5260,6 +5306,7 @@ function App() {
 
                         <div className="h-full w-full">
                           <RouteMap
+                            onShowOnMap={showFacilityOnMap}
                             key={`route-map-fullscreen-hide-${completedVisibility.hideAllCompleted}-${completedVisibility.hideInternallyCompleted}-${completedVisibility.hideExternallyCompleted}-${completedVisibility.hideValidPlans}-${completedVisibility.hideExpiringPlans}`}
                             result={filteredOptimizationResult}
                             homeBase={visibleHomeBase}
@@ -5294,6 +5341,8 @@ function App() {
                               setMapTargetCoords(null);
                             }}
                             onInspectionFormActiveChange={setIsInspectionFormActive}
+                            onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+                            onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
                             onToggleHideCompleted={() => setShowVisibilityModal(true)}
                             navigationMode={navigationMode}
                             onNavigationModeChange={setNavigationMode}
@@ -5306,6 +5355,11 @@ function App() {
                             showOnlyRouteFacilities={showOnlyRouteFacilities}
                             onToggleMarkerScope={() => setShowOnlyRouteFacilities(current => !current)}
                             planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
+                            routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+                            routeStatusRunInitialized={{
+                              spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                              spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                            }}
                             onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                             planRouteSavingFacilityId={planRouteRun.savingFacilityId}
                           />
@@ -5313,8 +5367,6 @@ function App() {
                       </div>
                     </>
                   )}
-                </>
-              )}
             </div>
           </div>
         )}
@@ -5348,6 +5400,12 @@ function App() {
               planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
               onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
               planRouteSavingFacilityId={planRouteRun.savingFacilityId}
+              onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
+              routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
+              routeStatusRunInitialized={{
+                spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
+                spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+              }}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;
                 if (batchId) {
@@ -5362,14 +5420,7 @@ function App() {
                   }
                 }
               }}
-              onShowOnMap={(latitude: number, longitude: number) => {
-                // Switch to route planning view and set map to fullscreen mode
-                setCurrentView('route-planning');
-                setIsFullScreenMap(true);
-                setMapTargetCoords({ latitude, longitude });
-                // Clear target coords after a short delay to allow map to center
-                setTimeout(() => setMapTargetCoords(null), 1000);
-              }}
+              onShowOnMap={showFacilityOnMap}
             />
           </div>
         )}

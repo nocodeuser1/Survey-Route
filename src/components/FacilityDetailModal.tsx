@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useReducer, useCallback } from 'react';
+import ScrollableTabStrip from './ScrollableTabStrip';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { createPortal } from 'react-dom';
 import {
@@ -69,6 +70,15 @@ interface FacilityDetailModalProps {
   accountId?: string;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onInspectionCompleted?: () => void;
+  onInspectionRouteStopCompleted?: (
+    facilityId: string,
+    source: 'inspection' | 'manual_internal' | 'manual_external',
+    sourceRecordId: string,
+  ) => Promise<boolean>;
+  onManualInspectionCompletion?: (
+    facilityId: string,
+    completionType: 'internal' | 'external',
+  ) => Promise<boolean>;
   onInspectionFormActiveChange?: (active: boolean) => void;
   onEdit?: () => void;
   facilities?: Facility[];
@@ -132,6 +142,8 @@ export default function FacilityDetailModal({
   accountId,
   onShowOnMap,
   onInspectionCompleted,
+  onInspectionRouteStopCompleted,
+  onManualInspectionCompletion,
   onInspectionFormActiveChange,
   onEdit,
   facilities = [],
@@ -182,6 +194,7 @@ export default function FacilityDetailModal({
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [showCompletionMenu, setShowCompletionMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<FacilityTab>(initialTab);
+
   const [editingIpDate, setEditingIpDate] = useState(false);
   const [ipDateValue, setIpDateValue] = useState(facility.first_prod_date ? formatDate(facility.first_prod_date) : '');
   const [editingPeDate, setEditingPeDate] = useState(false);
@@ -550,7 +563,8 @@ export default function FacilityDetailModal({
     }
   };
 
-  const handleInspectionCompletedWithFacility = (completedFacility: Facility) => {
+  const handleInspectionCompletedWithFacility = async (completedFacility: Facility, inspectionId: string) => {
+    await onInspectionRouteStopCompleted?.(completedFacility.id, 'inspection', inspectionId);
     if (facilities.length > 0) {
       const nearby = findNearbyFacilities(completedFacility, facilities, 200, allInspections);
 
@@ -571,16 +585,17 @@ export default function FacilityDetailModal({
 
   const handleMarkComplete = async (completionType: 'internal' | 'external' | null) => {
     try {
-      const completedAt = completionType ? new Date().toISOString() : null;
-      const { error } = await supabase
-        .from('facilities')
-        .update({
-          spcc_completion_type: completionType,
-          spcc_inspection_date: completedAt,
-        })
-        .eq('id', facility.id);
-
-      if (error) throw error;
+      const completedAt = completionType ? new Date().toISOString().slice(0, 10) : null;
+      if (completionType && onManualInspectionCompletion) {
+        const saved = await onManualInspectionCompletion(facility.id, completionType);
+        if (!saved) return;
+      } else {
+        const { error } = await supabase
+          .from('facilities')
+          .update({ spcc_completion_type: completionType, spcc_inspection_date: completedAt })
+          .eq('id', facility.id);
+        if (error) throw error;
+      }
 
       facility.spcc_completion_type = completionType;
       facility.spcc_inspection_date = completedAt;
@@ -1552,7 +1567,7 @@ export default function FacilityDetailModal({
                     </div>
                   )}
                   <button
-                    onClick={() => handleDeleteInspection(inspection.id, event)}
+                    onClick={(e) => handleDeleteInspection(inspection.id, e)}
                     className="w-10 h-10 flex items-center justify-center text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 rounded transition-colors flex-shrink-0"
                     title="Delete inspection"
                   >
@@ -1713,7 +1728,7 @@ export default function FacilityDetailModal({
                 <select
                   value={facility.state_code ?? ''}
                   onChange={(e) => updateFacilityField('state_code', e.target.value || null)}
-                  className="text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded px-2 py-2 sm:py-1 min-h-[44px] sm:min-h-0 focus:ring-2 focus:ring-blue-500 outline-none"
                   aria-label="State"
                 >
                   <option value="">— None —</option>
@@ -3012,7 +3027,7 @@ export default function FacilityDetailModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex-shrink-0">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-5">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 sm:px-5 sm:py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3025,19 +3040,25 @@ export default function FacilityDetailModal({
                       hover; on click it flips to a green "Copied" pill for
                       1.5s. Mirrors the same affordance in SPCCPlanDetailModal. */}
                   <h2
-                    className="text-2xl font-bold truncate max-w-[16rem] sm:max-w-xs md:max-w-sm lg:max-w-md cursor-pointer select-text inline-flex items-center gap-2 group hover:text-white/90 transition-colors"
+                    className="text-xl sm:text-2xl font-bold max-w-full sm:max-w-xs md:max-w-sm lg:max-w-md cursor-pointer select-text inline-flex items-center gap-2 group hover:text-white/90 transition-colors"
                     title={`${facility.name}\n(click to copy)`}
                     onClick={async (e) => {
                       // Toggle the truncate class on the heading element so
                       // the full name shows even when it would otherwise be
                       // cut off.
-                      const el = e.currentTarget;
-                      if (el.classList.contains('truncate')) {
-                        el.classList.remove('truncate');
-                        el.classList.add('whitespace-normal', 'break-words');
-                      } else {
-                        el.classList.add('truncate');
-                        el.classList.remove('whitespace-normal', 'break-words');
+                      // The name lives in the child span, not the h2 — the
+                      // h2 is an inline-flex container and text-overflow does
+                      // not apply to one, so truncation has to sit on the
+                      // text element itself.
+                      const el = e.currentTarget.querySelector('[data-facility-name]');
+                      if (el) {
+                        if (el.classList.contains('truncate')) {
+                          el.classList.remove('truncate');
+                          el.classList.add('whitespace-normal', 'break-words');
+                        } else {
+                          el.classList.add('truncate');
+                          el.classList.remove('whitespace-normal', 'break-words');
+                        }
                       }
                       // Write the full name to the OS clipboard. Don't await
                       // before the truncate toggle above so the visual response
@@ -3052,7 +3073,7 @@ export default function FacilityDetailModal({
                       }
                     }}
                   >
-                    <span className="min-w-0">{facility.name}</span>
+                    <span data-facility-name className="min-w-0 truncate">{facility.name}</span>
                     {nameCopied ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/30 text-xs font-semibold whitespace-nowrap flex-shrink-0">
                         <Check className="w-3 h-3" />
@@ -3144,7 +3165,11 @@ export default function FacilityDetailModal({
           </div>
 
           <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-700 px-3 sm:px-5">
-            <div className="flex items-center gap-1 overflow-x-auto py-2 -mx-1 px-1 scrollbar-hide">
+            <ScrollableTabStrip
+              activeKey={activeTab}
+              className="flex items-center gap-1 overflow-x-auto py-2 -mx-1 px-1 scrollbar-hide"
+              fadeClassName="from-white dark:from-gray-900"
+            >
               {tabItems.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -3152,6 +3177,7 @@ export default function FacilityDetailModal({
                 return (
                   <button
                     key={tab.id}
+                    data-tab-active={isActive ? 'true' : undefined}
                     onClick={() => setActiveTab(tab.id)}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-2 sm:py-2.5 text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                       isActive
@@ -3164,7 +3190,7 @@ export default function FacilityDetailModal({
                   </button>
                 );
               })}
-            </div>
+            </ScrollableTabStrip>
           </div>
         </div>
 

@@ -80,7 +80,17 @@ const ICON_HELP: Record<string, string> = {
 
 function getButton(target: EventTarget | null): HTMLButtonElement | null {
   if (!(target instanceof Element)) return null;
-  return target.closest('button');
+  const button = target.closest('button');
+  if (!button) return null;
+  // Full-screen scrims are <button> elements so the backdrop is clickable and
+  // keyboard-reachable, but they are not controls a tooltip should describe —
+  // labelling one puts "Close facility actions" in a floating bubble pinned to
+  // the bottom of the screen. Anything covering most of the viewport is a
+  // backdrop, not a button the user is pointing at.
+  const r = button.getBoundingClientRect();
+  const coversViewport =
+    r.width >= window.innerWidth * 0.9 && r.height >= window.innerHeight * 0.9;
+  return coversViewport ? null : button;
 }
 
 function getIconHelp(button: HTMLButtonElement): string | null {
@@ -129,25 +139,78 @@ function ensureAccessibleName(button: HTMLButtonElement) {
  */
 export default function ContextualHelpProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<ActiveHelp | null>(null);
+  const activeRef = useRef<ActiveHelp | null>(null);
+  const suppressedTitlesRef = useRef(new WeakMap<HTMLButtonElement, string>());
   const touchRef = useRef<TouchTracking | null>(null);
   const suppressClickRef = useRef<HTMLButtonElement | null>(null);
   const lastTouchAtRef = useRef(0);
 
-  const hide = () => setActive(null);
+  const restoreNativeTitle = (button: HTMLButtonElement) => {
+    const title = suppressedTitlesRef.current.get(button);
+    if (!title) return;
+
+    suppressedTitlesRef.current.delete(button);
+    if (button.isConnected && !button.hasAttribute('title')) button.setAttribute('title', title);
+  };
+
+  const suppressNativeTitle = (button: HTMLButtonElement) => {
+    const title = button.getAttribute('title');
+    if (!title) return;
+
+    suppressedTitlesRef.current.set(button, title);
+    button.removeAttribute('title');
+  };
+
+  const hide = () => {
+    const current = activeRef.current;
+    activeRef.current = null;
+    if (current) restoreNativeTitle(current.button);
+    setActive(null);
+  };
 
   const show = (button: HTMLButtonElement) => {
+    if (activeRef.current?.button === button) {
+      // React can re-apply a title attribute while the same button remains
+      // hovered. Keep it suppressed so the browser cannot open a second,
+      // native tooltip alongside this provider's help bubble.
+      suppressNativeTitle(button);
+      return;
+    }
+
+    const previous = activeRef.current;
+    if (previous) {
+      activeRef.current = null;
+      restoreNativeTitle(previous.button);
+    }
+
     const text = getHelpText(button);
-    if (!text || button.disabled) return;
+    if (!text || button.disabled) {
+      if (previous) setActive(null);
+      return;
+    }
 
     ensureAccessibleName(button);
+    suppressNativeTitle(button);
 
     const rect = button.getBoundingClientRect();
-    setActive({
+    // Clamping the tooltip's TOP to the viewport still let its body hang off
+    // the bottom, because the bubble has height. Flip it above the control
+    // when there isn't room below, and only then clamp.
+    const EST_H = 34;   // one line of text + padding; two lines still fit the 12px gutter
+    const GAP = 8;
+    const below = rect.bottom + GAP;
+    const fitsBelow = below + EST_H <= window.innerHeight - 12;
+    const top = fitsBelow
+      ? below
+      : Math.max(12, Math.min(rect.top - GAP - EST_H, window.innerHeight - EST_H - 12));
+    const next = {
       button,
       text,
       left: Math.min(Math.max(rect.left + rect.width / 2, 12), window.innerWidth - 12),
-      top: Math.min(rect.bottom + 8, window.innerHeight - 12),
-    });
+      top,
+    };
+    activeRef.current = next;
+    setActive(next);
   };
 
   useEffect(() => {
@@ -176,6 +239,7 @@ export default function ContextualHelpProvider({ children }: { children: ReactNo
       for (const record of records) {
         if (record.type === 'attributes' && record.target instanceof HTMLButtonElement) {
           ensureAccessibleName(record.target);
+          if (activeRef.current?.button === record.target) suppressNativeTitle(record.target);
         }
         record.addedNodes.forEach((node) => {
           if (node instanceof HTMLButtonElement) ensureAccessibleName(node);
@@ -291,6 +355,9 @@ export default function ContextualHelpProvider({ children }: { children: ReactNo
 
     return () => {
       clearTouch();
+      const current = activeRef.current;
+      activeRef.current = null;
+      if (current) restoreNativeTitle(current.button);
       document.removeEventListener('pointerover', onPointerOver, true);
       document.removeEventListener('pointerout', onPointerOut, true);
       document.removeEventListener('focusin', onFocusIn, true);

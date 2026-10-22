@@ -26,11 +26,13 @@ import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 
 interface CustomFilterBuilderProps {
   rules: CustomRule[];
+  fields?: CustomFilterField[];
   onChange: (next: CustomRule[]) => void;
 }
 
 export default function CustomFilterBuilder({
   rules,
+  fields = FILTER_FIELDS,
   onChange,
 }: CustomFilterBuilderProps) {
   // Brand-aware override for the "Camino Facility ID" field in the rule
@@ -41,7 +43,7 @@ export default function CustomFilterBuilder({
     // Default to the first field with the first operator. The user almost
     // always edits at least one of these on add anyway, so picking sensible
     // defaults keeps the UX one-click.
-    const field = FILTER_FIELDS[0];
+    const field = fields[0];
     const op = field.operators[0];
     onChange([
       ...rules,
@@ -65,7 +67,7 @@ export default function CustomFilterBuilder({
   // When the field changes we have to reset the operator + value because
   // the previous values may not be valid for the new field.
   const onFieldChange = (rule: CustomRule, fieldId: string) => {
-    const field = findField(fieldId);
+    const field = findField(fieldId, fields);
     if (!field) return;
     const op = field.operators[0];
     updateRule(rule.id, {
@@ -78,7 +80,7 @@ export default function CustomFilterBuilder({
   // When the operator changes, keep the field but clear the value if the
   // new operator doesn't need one (or expects a different input type).
   const onOperatorChange = (rule: CustomRule, operatorId: string) => {
-    const field = findField(rule.fieldId);
+    const field = findField(rule.fieldId, fields);
     if (!field) return;
     const op = findOperator(field, operatorId);
     if (!op) return;
@@ -121,6 +123,7 @@ export default function CustomFilterBuilder({
             <CustomFilterRuleRow
               key={rule.id}
               rule={rule}
+              fields={fields}
               brandedFacilityIdLabel={brandedFacilityIdLabel}
               onFieldChange={(id) => onFieldChange(rule, id)}
               onOperatorChange={(id) => onOperatorChange(rule, id)}
@@ -149,6 +152,7 @@ export default function CustomFilterBuilder({
 
 interface RuleRowProps {
   rule: CustomRule;
+  fields: CustomFilterField[];
   /** Brand-aware override forwarded from the parent. Substituted for the
    *  static "Camino Facility ID" label of that one registry entry. */
   brandedFacilityIdLabel?: string;
@@ -160,13 +164,14 @@ interface RuleRowProps {
 
 function CustomFilterRuleRow({
   rule,
+  fields,
   brandedFacilityIdLabel,
   onFieldChange,
   onOperatorChange,
   onValueChange,
   onRemove,
 }: RuleRowProps) {
-  const field = findField(rule.fieldId);
+  const field = findField(rule.fieldId, fields);
   const op = field ? findOperator(field, rule.operatorId) : undefined;
 
   return (
@@ -181,7 +186,7 @@ function CustomFilterRuleRow({
             className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
             title="Choose the field to filter on"
           >
-            {groupFields().map(([group, fields]) => (
+            {groupFields(fields).map(([group, fields]) => (
               <optgroup
                 key={group}
                 label={FIELD_GROUP_LABELS[group as CustomFilterField['group']]}
@@ -282,7 +287,8 @@ function RuleValueInput({
   // text fallback
   return (
     <input
-      type="text"
+      type={op.valueInputType === 'number' ? 'number' : 'text'}
+      step={op.valueInputType === 'number' ? 'any' : undefined}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value || null)}
       placeholder="Value…"
@@ -296,9 +302,9 @@ function RuleValueInput({
 // ---------------------------------------------------------------------------
 
 /** Group the registry by `group` so the field <select> can use <optgroup>. */
-function groupFields(): [string, CustomFilterField[]][] {
+function groupFields(fields: CustomFilterField[]): [string, CustomFilterField[]][] {
   const map = new Map<string, CustomFilterField[]>();
-  for (const f of FILTER_FIELDS) {
+  for (const f of fields) {
     if (!map.has(f.group)) map.set(f.group, []);
     map.get(f.group)!.push(f);
   }

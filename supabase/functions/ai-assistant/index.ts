@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
         generationConfig: {
-          temperature: 0.4,
+          // Gemini 3 uses default sampling; low temperature can degrade reasoning.
           maxOutputTokens: 2048,
           // Per ALLOWED_MODELS: Pro reasons at 'high', Flash variants
           // run at 'minimal' for low latency. NEVER send both
