@@ -138,6 +138,12 @@ function findCurrentFacilityForRouteStop(
   return facilities.find(facility => facility.name === routeFacility.name);
 }
 
+// Follow-me lands at this zoom the first time; after that it keeps whatever
+// zoom you settle on. Panning or pinching pauses it, and it glides back this
+// long after your finger lifts.
+const FOLLOW_START_ZOOM = 16;
+const FOLLOW_PAUSE_MS = 20_000;
+
 export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, onInspectionRouteStopCompleted, onManualInspectionCompletion, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
   // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
@@ -286,7 +292,17 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [nextFacility, setNextFacility] = useState<{ facility: any, distance: number, routeIndex: number, facilityIndex: number } | null>(null);
   const [internalLocationTracking, setInternalLocationTracking] = useState(false);
   const locationTracking = externalLocationTracking !== undefined ? externalLocationTracking : internalLocationTracking;
-  const [locationTrackingZoom, setLocationTrackingZoom] = useState(18);
+  // Zoom follow-me keeps; null until a fresh follow first lands.
+  const followZoomRef = useRef<number | null>(null);
+  // Moving the map while following pauses it instead of switching it off.
+  const [followPaused, setFollowPaused] = useState(false);
+  const followPausedRef = useRef(false);
+  const followResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userInteractingRef = useRef(false);
+  const pauseFollowRef = useRef<() => void>(() => {});
+  const locationTrackingRef = useRef(locationTracking);
+  locationTrackingRef.current = locationTracking;
+  const programmaticMoveCleanupRef = useRef<(() => void) | null>(null);
   // Phone-sized overflow for the embedded map toolbar. Five unlabelled icons
   // in a row read as noise on a phone, so only marker scope stays out (full
   // screen is the button in the map's corner); the rest live behind this
@@ -2570,17 +2586,72 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       }
     }
     const shouldAnimate = animate && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // Flag our own move so the interaction listeners don't take its zoom
+    // events for the user pinching. The flag clears when the map comes to rest
+    // at the target, not on the first moveend: a fresh fix arriving mid-flight
+    // interrupts this flight, and the interruption fires a moveend of its own.
+    // Clearing on that let the next flight's zoomstart pause following.
+    programmaticMoveCleanupRef.current?.();
+    programmaticLocationMoveRef.current = true;
+    const target: [number, number] = [centerLatitude, longitude];
+    const detach = () => {
+      map.off('moveend', onArrive);
+      clearTimeout(backstop);
+      if (programmaticMoveCleanupRef.current === detach) programmaticMoveCleanupRef.current = null;
+    };
+    const finish = () => {
+      detach();
+      programmaticLocationMoveRef.current = false;
+    };
+    const onArrive = () => {
+      if (map.distance(map.getCenter(), target) < 10) finish();
+    };
     map.stop();
     map.invalidateSize({ pan: false, animate: false });
-    programmaticLocationMoveRef.current = true;
-    map.once('moveend', () => { programmaticLocationMoveRef.current = false; });
+    map.on('moveend', onArrive);
+    // Backstop for a move that never reports arriving (already there, or cut short).
+    const backstop = setTimeout(finish, shouldAnimate ? 1600 : 0);
+    programmaticMoveCleanupRef.current = detach;
     if (shouldAnimate) {
-      map.flyTo([centerLatitude, longitude], zoom, { animate: true, duration: 0.8 });
+      map.flyTo(target, zoom, { animate: true, duration: 0.8 });
     } else {
-      map.setView([centerLatitude, longitude], zoom, { animate: false });
-      programmaticLocationMoveRef.current = false;
+      map.setView(target, zoom, { animate: false });
     }
   };
+
+  const clearFollowPause = () => {
+    followPausedRef.current = false;
+    if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+    followResumeTimerRef.current = null;
+    setFollowPaused(false);
+  };
+
+  /** Glide back to the user now, if following is still on. */
+  const resumeFollow = () => {
+    if (!locationTrackingRef.current) return;
+    // A drag or pinch that outlasts the pause isn't yanked mid-gesture.
+    if (userInteractingRef.current) {
+      followResumeTimerRef.current = setTimeout(resumeFollow, 1000);
+      return;
+    }
+    clearFollowPause();
+    autoCenteringRef.current = true;
+    setAutoCentering(true);
+    const here = userLocationRef.current;
+    if (here) centerMapOnLocation(here.lat, here.lng, followZoomRef.current ?? FOLLOW_START_ZOOM, true, false);
+  };
+
+  /** The user moved the map: hold off following for another FOLLOW_PAUSE_MS. */
+  const pauseFollow = () => {
+    if (!locationTrackingRef.current) return;
+    followPausedRef.current = true;
+    autoCenteringRef.current = false;
+    setAutoCentering(false);
+    if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+    followResumeTimerRef.current = setTimeout(resumeFollow, FOLLOW_PAUSE_MS);
+    setFollowPaused(true);
+  };
+  pauseFollowRef.current = pauseFollow;
 
   // Create user location icon based on navigation mode
   const createUserIcon = (isNavigationMode: boolean) => {
@@ -2748,7 +2819,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
       // Use ref for autoCentering so polling closures always see the latest value
       const currentAutoCentering = autoCenteringRef.current;
-      const shouldAutoCenter = mapRef.current && !isDraggingRef.current && (navigationMode || (locationTracking && (currentAutoCentering || forceCenter)));
+      const shouldAutoCenter = mapRef.current && !isDraggingRef.current
+        && (navigationMode || (locationTracking && !followPausedRef.current && (currentAutoCentering || forceCenter)));
 
       if (!shouldAutoCenter) {
         console.log('[RouteMap] Auto-center SKIPPED:', {
@@ -2819,8 +2891,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             const zoom = getZoomForSpeed(speedMph);
             centerMapOnLocation(latitude, longitude, zoom, shouldAnimate);
           } else if (locationTracking) {
-            // Manual location tracking: Use fixed zoom level (user's preferred)
-            centerMapOnLocation(latitude, longitude, locationTrackingZoom, shouldAnimate);
+            // Follow moves the centre only and keeps the zoom the user settled on.
+            const zoom = followZoomRef.current ?? FOLLOW_START_ZOOM;
+            followZoomRef.current = zoom;
+            centerMapOnLocation(latitude, longitude, zoom, shouldAnimate);
           }
         }
       }
@@ -3346,11 +3420,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       autoCenteringRef.current = false;
       setAutoCentering(false);
       if (!navigationMode) {
-        if (onLocationTrackingChange) onLocationTrackingChange(false);
-        else setInternalLocationTracking(false);
-        // The effect is removed once follow turns off, so don't leave this ref
-        // stuck while waiting for a dragend listener that has been removed.
-        isDraggingRef.current = false;
+        // Looking around pauses following; it doesn't switch it off.
+        userInteractingRef.current = true;
+        pauseFollowRef.current();
       }
       if (interactionTimer) return;
       interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
@@ -3369,17 +3441,18 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           userInteractedWithMapRef.current = false;
         }, 5000);
       } else if (locationTracking) {
-        // Location tracking mode: turn it OFF completely when user pans
-        // User must tap the button again to re-enable
-        setAutoCentering(false);
-        autoCenteringRef.current = false;
-        if (onLocationTrackingChange) onLocationTrackingChange(false);
-        else setInternalLocationTracking(false);
+        // Count the pause from when the finger lifts.
+        userInteractingRef.current = false;
+        pauseFollowRef.current();
       }
     };
 
     const handleZoomStart = () => {
       if (programmaticLocationMoveRef.current) return;
+      if (!navigationMode) {
+        userInteractingRef.current = true;
+        pauseFollowRef.current();
+      }
       if (interactionTimer) return;
       interactionTimer = setTimeout(() => { interactionTimer = null; }, 500);
 
@@ -3392,20 +3465,29 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           userInteractedWithMapRef.current = false;
         }, 5000);
       }
-      // For location tracking: pinch-to-zoom shouldn't kill tracking
-      // Only drag/pan kills it
+    };
+
+    const handleZoomEnd = () => {
+      if (navigationMode || programmaticLocationMoveRef.current) return;
+      userInteractingRef.current = false;
+      // Keep the zoom the user settled on for the rest of this follow.
+      const settled = mapRef.current?.getZoom();
+      if (typeof settled === 'number') followZoomRef.current = settled;
+      pauseFollowRef.current();
     };
 
     // Listen for drag and zoom interactions
     mapRef.current.on('dragstart', handleDragStart);
     mapRef.current.on('dragend', handleDragEnd);
     mapRef.current.on('zoomstart', handleZoomStart);
+    mapRef.current.on('zoomend', handleZoomEnd);
 
     return () => {
       if (mapRef.current) {
         mapRef.current.off('dragstart', handleDragStart);
         mapRef.current.off('dragend', handleDragEnd);
         mapRef.current.off('zoomstart', handleZoomStart);
+        mapRef.current.off('zoomend', handleZoomEnd);
       }
       if (autoCenteringTimeoutRef.current) {
         clearTimeout(autoCenteringTimeoutRef.current);
@@ -3465,19 +3547,25 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     setIsLocating(true);
     setLocationError(null);
     onClearTargetCoords?.();
-    // Follow is the existing opt-in behavior. Repeated taps now recenter rather
-    // than silently toggling it off; Stop following is a separate action.
+    clearFollowPause();
+    // A fresh follow lands at FOLLOW_START_ZOOM; coming back from a pause
+    // keeps the zoom the user had settled on.
+    if (!locationTracking) followZoomRef.current = null;
     skipNextTrackingInitialPositionRef.current = !locationTracking;
     if (onLocationTrackingChange) onLocationTrackingChange(true);
     else setInternalLocationTracking(true);
-    const trackingZoom = 18;
-    setLocationTrackingZoom(trackingZoom);
+    const trackingZoom = followZoomRef.current ?? FOLLOW_START_ZOOM;
+    followZoomRef.current = trackingZoom;
     setAutoCentering(true);
     autoCenteringRef.current = true;
     justNavigatedRef.current = false;
     userInteractedWithMapRef.current = false;
     isDraggingRef.current = false;
     if (autoCenteringTimeoutRef.current) clearTimeout(autoCenteringTimeoutRef.current);
+    // Move at once to the last known fix so the tap visibly does something;
+    // the fresh fix below corrects it a moment later.
+    const lastFix = userLocationRef.current;
+    if (lastFix) centerMapOnLocation(lastFix.lat, lastFix.lng, trackingZoom, true, false);
 
     locationRequestCancelRef.current = requestMapLocation(navigator.geolocation, position => {
       if (locationRequestGenerationRef.current !== requestGeneration) return;
@@ -3496,6 +3584,39 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       else setInternalLocationTracking(false);
     });
   };
+
+  // One button, three states:
+  //   off               → turn following on and fly to you
+  //   following, paused → you moved the map away; bring it straight back
+  //   following         → turn following off, and it stays off
+  const toggleFollow = () => {
+    if (locationTracking && !followPausedRef.current) {
+      stopLocationTracking();
+      return;
+    }
+    goToCurrentLocation();
+  };
+
+  // Following switched off (button, drive mode, a facility focus, framing,
+  // leaving full screen, a failed fix): drop any pending glide back.
+  useEffect(() => {
+    if (locationTracking && !navigationMode) return;
+    userInteractingRef.current = false;
+    clearFollowPause();
+  }, [locationTracking, navigationMode]);
+
+  useEffect(() => () => {
+    if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+    programmaticMoveCleanupRef.current?.();
+  }, []);
+
+  const followButtonLabel = isLocating
+    ? 'Finding your location'
+    : !locationTracking
+      ? 'Find my location'
+      : followPaused
+        ? 'Back to my location'
+        : 'Stop following my location';
 
   const frameMap = (mode: 'facilities' | 'overview' | 'home') => {
     const map = mapRef.current;
@@ -4762,7 +4883,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 </>
               ) : (
                 <div className="flex flex-wrap items-center gap-x-3">
-                  <span role="status">{isLocating ? 'Finding your location…' : 'Following your location'}</span>
+                  <span role="status">{isLocating ? 'Finding your location…' : followPaused ? 'Paused while you move the map' : 'Following your location'}</span>
                   {!navigationMode && <button type="button" onClick={stopLocationTracking} className="min-h-11 rounded px-2 font-semibold text-blue-700 dark:text-blue-300">{isLocating ? 'Cancel locating' : 'Stop following'}</button>}
                 </div>
               )}
@@ -4788,18 +4909,22 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             {!navigationMode && (
               <button
                 type="button"
-                onClick={goToCurrentLocation}
+                onClick={toggleFollow}
                 disabled={isLocating || !mapReady}
-                aria-label={isLocating ? 'Finding your location' : 'Find my location'}
+                aria-label={followButtonLabel}
                 aria-busy={isLocating}
-                className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-white shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${locationTracking
-                  ? 'border-green-600 bg-green-600 hover:bg-green-700'
-                  : 'border-blue-600 bg-blue-600 hover:bg-blue-700'
+                aria-pressed={locationTracking}
+                className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border-2 px-3 py-2 shadow-lg transition-colors disabled:cursor-wait disabled:opacity-70 ${!locationTracking
+                  ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+                  : followPaused
+                    // Following, but you've moved the map: outlined = "tap to come back".
+                    ? 'border-green-600 bg-white text-green-700 hover:bg-green-50 dark:bg-gray-800 dark:text-green-400 dark:hover:bg-gray-700'
+                    : 'border-green-600 bg-green-600 text-white hover:bg-green-700'
                   }`}
-                title="Find and follow my location"
+                title={followButtonLabel}
               >
                 <Crosshair aria-hidden="true" className={`h-5 w-5 ${isLocating ? 'motion-safe:animate-pulse' : ''}`} />
-                <span className="text-sm font-medium">{isLocating ? 'Finding you…' : 'Find me'}</span>
+                <span className="text-sm font-medium">{isLocating ? 'Finding you…' : !locationTracking ? 'Find me' : followPaused ? 'Back to me' : 'Following'}</span>
               </button>
             )}
           </div>
