@@ -16,6 +16,8 @@ import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
 import { getCoords } from '../utils/coordinates';
+import { pickLatestDraft } from '../utils/inspectionDraft';
+import { prefetchInspectionTemplate } from '../utils/inspectionTemplateCache';
 
 const COLORS = [
   '#3B82F6', // Blue
@@ -227,6 +229,8 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   useEffect(() => {
     console.log('[SurveyMode] Component mounted/updated', { userId, accountId, timestamp: new Date().toISOString() });
     lastInspectionLoadRef.current = Date.now();
+    // Have the inspection form's template on hand before Inspect is tapped.
+    prefetchInspectionTemplate(accountId || userId);
     loadUserSettings();
     loadInspections();
     loadPlans();
@@ -892,6 +896,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         userId={userId}
         teamNumber={teamNumber}
         accountId={accountId}
+        initialDraft={pickLatestDraft(inspections, inspectingFacility.id)}
         onSaved={handleInspectionComplete}
         onInspectionCompletedWithFacility={async (facility, inspectionId) => {
           await onInspectionRouteStopCompleted?.(facility.id, 'inspection', inspectionId);

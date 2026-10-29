@@ -61,6 +61,7 @@ import InlineEditField from './InlineEditField';
 import { useAuth } from '../contexts/AuthContext';
 import SiteVisitChecklist from './SiteVisitChecklist';
 import { useAccount } from '../contexts/AccountContext';
+import { prefetchInspectionTemplate } from '../utils/inspectionTemplateCache';
 
 interface FacilityDetailModalProps {
   facility: Facility;
@@ -284,6 +285,7 @@ export default function FacilityDetailModal({
   }, [showInspectionForm, onInspectionFormActiveChange]);
 
   useEffect(() => {
+    prefetchInspectionTemplate(accountId || userId);
     loadInspections();
     loadSettings();
     loadComments();
@@ -2940,6 +2942,7 @@ export default function FacilityDetailModal({
         teamNumber={teamNumber}
         accountId={accountId}
         clonedResponses={selectedInspection?.status === 'completed' ? selectedInspection.responses : undefined}
+        initialDraft={selectedInspection?.status === 'draft' ? selectedInspection : null}
         onSaved={handleInspectionSaved}
         onClose={() => {
           setShowInspectionForm(false);

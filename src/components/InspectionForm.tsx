@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
 import { resolveInspectionIdentity } from '../utils/inspectionIdentity';
+import { alignResponses, formatDraftTimestamp, isDeviceBackupNewer } from '../utils/inspectionDraft';
+import { fetchInspectionTemplate, readCachedInspectionTemplate } from '../utils/inspectionTemplateCache';
 import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
 
@@ -56,14 +58,91 @@ interface InspectionFormProps {
   onClose?: () => void;
   accountId?: string;
   clonedResponses?: InspectionResponse[];
+  /** Latest unsubmitted draft the caller already has in memory, so the form
+   *  can open on it without waiting for the network. Verified in background. */
+  initialDraft?: Inspection | null;
   onInspectionCompletedWithFacility?: (facility: Facility, inspectionId: string) => void | Promise<void>;
 }
 
-export default function InspectionForm({ facility, userId, teamNumber, onSaved, onClose, accountId, clonedResponses, onInspectionCompletedWithFacility }: InspectionFormProps) {
-  const [template, setTemplate] = useState<InspectionTemplate | null>(null);
-  const [responses, setResponses] = useState<InspectionResponse[]>([]);
+const blankResponse = (questionId: string): InspectionResponse => ({
+  question_id: questionId,
+  answer: null,
+  comments: '',
+  action_required: false,
+  action_notes: '',
+});
+
+interface DeviceBackup {
+  responses: InspectionResponse[];
+  timestamp: string;
+}
+
+function readDeviceBackup(key: string): DeviceBackup | null {
+  try {
+    const stored = localStorage.getItem(key);
+    if (!stored) return null;
+    const backup = JSON.parse(stored) as Partial<DeviceBackup>;
+    if (!Array.isArray(backup.responses) || typeof backup.timestamp !== 'string') return null;
+    // Only restore if the backup is less than 24 hours old.
+    if (Date.now() - new Date(backup.timestamp).getTime() >= 86400000) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return backup as DeviceBackup;
+  } catch (error) {
+    console.error('[InspectionForm] Failed to check localStorage:', error);
+    return null;
+  }
+}
+
+/** Slender banner content: when the opened draft was started and last saved. */
+interface OpenedDraft {
+  startedAt: string | null;
+  savedAt: string;
+  deviceOnly: boolean;
+}
+
+/** What the form shows when it opens, decided once from data already on hand. */
+function chooseOpening(
+  clonedResponses: InspectionResponse[] | undefined,
+  draft: Inspection | null,
+  backup: DeviceBackup | null,
+): { responses: InspectionResponse[] | null; draft: Inspection | null; unsaved: boolean; shownAt: number; opened: OpenedDraft | null } {
+  if (clonedResponses) return { responses: clonedResponses, draft, unsaved: true, shownAt: Infinity, opened: null };
+  const opened = draft ? { startedAt: draft.created_at, savedAt: draft.updated_at, deviceOnly: false } : null;
+  if (backup && isDeviceBackupNewer(backup.timestamp, draft?.updated_at)) {
+    return {
+      responses: backup.responses,
+      draft,
+      unsaved: true,
+      shownAt: new Date(backup.timestamp).getTime(),
+      opened: opened ?? { startedAt: null, savedAt: backup.timestamp, deviceOnly: true },
+    };
+  }
+  if (draft) return { responses: draft.responses, draft, unsaved: false, shownAt: new Date(draft.updated_at).getTime(), opened };
+  return { responses: null, draft: null, unsaved: false, shownAt: 0, opened: null };
+}
+
+export default function InspectionForm({ facility, userId, teamNumber, onSaved, onClose, accountId, clonedResponses, initialDraft = null, onInspectionCompletedWithFacility }: InspectionFormProps) {
+  const templateScope = accountId || userId;
+  const localStorageKey = `inspection_draft_${facility.id}_${userId}`;
+  // Everything needed to show the form is read synchronously from memory and
+  // the device, so it opens immediately; the network only refreshes it.
+  const [opening] = useState(() => chooseOpening(clonedResponses, initialDraft, readDeviceBackup(localStorageKey)));
+  const [template, setTemplate] = useState<InspectionTemplate | null>(() => readCachedInspectionTemplate(templateScope));
+  const [responses, setResponses] = useState<InspectionResponse[]>(() =>
+    template ? alignResponses(template.questions, opening.responses, blankResponse) : [],
+  );
+  const templateRef = useRef(template);
+  // Responses waiting for a template when none was cached on this device.
+  const pendingResponsesRef = useRef<InspectionResponse[] | null>(template ? null : opening.responses);
+  // Set on the first user edit; background loads never overwrite their answers.
+  const userEditedRef = useRef(false);
+  const shownAtRef = useRef(opening.shownAt);
+  const [openedDraft, setOpenedDraft] = useState<OpenedDraft | null>(opening.opened);
   const [generalComments, setGeneralComments] = useState('');
   const [signature, setSignature] = useState<UserSignature | null>(null);
+  const [signatureChecked, setSignatureChecked] = useState(false);
   // user_signatures.user_id and the identity row are keyed by the profile id
   // (users.id). The userId prop is the auth user id, which only matches
   // users.id on older profiles — invited users saw "Signature Required" even
@@ -71,17 +150,15 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const { user } = useAuth();
   const profileId = user?.id ?? null;
   const [inspectionIdentity, setInspectionIdentity] = useState<{ fullName: string | null; inspectionEmail: string | null } | null>(null);
-  const [existingInspection, setExistingInspection] = useState<Inspection | null>(null);
+  const [existingInspection, setExistingInspection] = useState<Inspection | null>(opening.draft);
   const [isSaving, setIsSaving] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(opening.unsaved);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
   const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
-  const hasLoadedRef = useRef(false);
-  const localStorageKey = `inspection_draft_${facility.id}_${userId}`;
   const [uploadingPhotos, setUploadingPhotos] = useState<Record<string, boolean>>({});
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -107,32 +184,6 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     }
   }, [responses, generalComments, facility.id, facility.name, userId, accountId, localStorageKey]);
 
-  const checkForLocalStorageBackup = useCallback(() => {
-    try {
-      const stored = localStorage.getItem(localStorageKey);
-      if (stored && !hasLoadedRef.current) {
-        const draftData = JSON.parse(stored);
-        const draftAge = Date.now() - new Date(draftData.timestamp).getTime();
-        // Only restore if draft is less than 24 hours old
-        if (draftAge < 86400000) {
-          console.log('[InspectionForm] Found localStorage backup', {
-            facilityId: draftData.facilityId,
-            age: Math.round(draftAge / 1000) + 's',
-            responseCount: draftData.responses.length
-          });
-          // Store for potential restoration after template loads
-          hasLoadedRef.current = true;
-          return draftData;
-        } else {
-          // Clear old draft
-          localStorage.removeItem(localStorageKey);
-        }
-      }
-    } catch (error) {
-      console.error('[InspectionForm] Failed to check localStorage:', error);
-    }
-    return null;
-  }, [localStorageKey]);
 
   useEffect(() => {
     console.log('[InspectionForm] Component mounted', {
@@ -148,7 +199,6 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     loadTemplate();
     loadExistingInspection();
     loadAccountBranding();
-    checkForLocalStorageBackup();
 
     return () => {
       console.log('[InspectionForm] Component unmounting', {
@@ -186,78 +236,37 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     };
   }, [hasUnsavedChanges, saveToLocalStorage]);
 
-  useEffect(() => {
-    if (clonedResponses && template) {
-      setResponses(clonedResponses);
-      setHasUnsavedChanges(true);
-    } else if (existingInspection && template) {
-      setResponses(existingInspection.responses);
-      setHasUnsavedChanges(false);
+  // Show answers in the form, or hold them until a template is available.
+  const applyResponses = (source: InspectionResponse[] | null) => {
+    const current = templateRef.current;
+    if (!current) {
+      pendingResponsesRef.current = source;
+      return;
     }
-  }, [existingInspection, template, clonedResponses]);
+    setResponses(alignResponses(current.questions, source, blankResponse));
+  };
+
+  const applyTemplate = (fresh: InspectionTemplate) => {
+    const current = templateRef.current;
+    if (current && current.id === fresh.id && JSON.stringify(current.questions) === JSON.stringify(fresh.questions)) return;
+    templateRef.current = fresh;
+    setTemplate(fresh);
+    const pending = pendingResponsesRef.current;
+    pendingResponsesRef.current = null;
+    setResponses(prev => alignResponses(fresh.questions, prev.length > 0 ? prev : pending, blankResponse));
+  };
 
   const loadTemplate = async () => {
+    setLoadError(null);
     try {
-      console.log('[InspectionForm] Loading template...', {
-        facilityId: facility.id,
-        facilityName: facility.name,
-        userId,
-        accountId,
-        timestamp: new Date().toISOString()
-      });
-      setLoadError(null);
-
-      const { data, error } = await supabase
-        .from('inspection_templates')
-        .select('*')
-        .eq('name', 'SPCC Inspection')
-        .maybeSingle();
-
-      console.log('[InspectionForm] Template query result:', {
-        hasData: !!data,
-        hasError: !!error,
-        errorDetails: error,
-        dataId: data?.id,
-        questionCount: data?.questions?.length
-      });
-
-      if (error) {
-        console.error('[InspectionForm] Database error loading template:', error);
-        setLoadError(`Database error: ${error.message}. Please check your internet connection and try again.`);
-        return;
-      }
-
-      if (!data) {
-        console.error('[InspectionForm] No template found - data is null/undefined');
-        setLoadError('Inspection template not found in database. Please contact your administrator to set up the inspection template.');
-        return;
-      }
-
-      if (!data.questions || !Array.isArray(data.questions) || data.questions.length === 0) {
-        console.error('[InspectionForm] Template exists but has no questions:', data);
-        setLoadError('Inspection template is empty or corrupted. Please contact your administrator.');
-        return;
-      }
-
-      console.log('[InspectionForm] Template loaded successfully', {
-        templateId: data.id,
-        templateName: data.name,
-        questionCount: data.questions.length,
-        firstQuestion: data.questions[0]?.text
-      });
-
-      setTemplate(data);
-      const initialResponses: InspectionResponse[] = data.questions.map((q: any) => ({
-        question_id: q.id,
-        answer: null,
-        comments: '',
-        action_required: false,
-        action_notes: '',
-      }));
-      setResponses(initialResponses);
-      console.log('[InspectionForm] Initial responses created:', initialResponses.length);
+      applyTemplate(await fetchInspectionTemplate(templateScope));
     } catch (err: any) {
-      console.error('[InspectionForm] Unexpected error loading template:', err);
+      // With a device copy the form is already usable; keep it.
+      if (templateRef.current) {
+        console.warn('[InspectionForm] Template refresh failed; using device copy:', err);
+        return;
+      }
+      console.error('[InspectionForm] Error loading template:', err);
       setLoadError(err.message || 'Failed to load inspection template. Please try again.');
     }
   };
@@ -283,6 +292,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       setSignature(data);
     } catch (err) {
       console.error('Error loading signature:', err);
+    } finally {
+      setSignatureChecked(true);
     }
   };
 
@@ -332,61 +343,46 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     }
   };
 
+  // Background check for the facility's latest draft. Opens it when it is
+  // newer than what the form is showing and the user hasn't started typing;
+  // otherwise just links to it so saves update that draft, not a duplicate.
   const loadExistingInspection = async () => {
     try {
-      // First check for database draft
       const { data, error } = await supabase
         .from('inspections')
         .select('*')
         .eq('facility_id', facility.id)
         .eq('status', 'draft')
+        // Several drafts made maybeSingle() error, so no draft opened at all.
+        .order('updated_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) throw error;
+      if (!data) return;
 
-      // Check for localStorage backup
-      const localBackup = checkForLocalStorageBackup();
-
-      if (data && localBackup) {
-        // Both exist - use the newer one
-        const dbTime = new Date(data.updated_at).getTime();
-        const localTime = new Date(localBackup.timestamp).getTime();
-
-        if (localTime > dbTime) {
-          console.log('[InspectionForm] Using localStorage backup (newer than database)');
-          setExistingInspection(data); // Keep reference for updating
-          setResponses(localBackup.responses);
-          await loadPhotosForInspection(data.id);
-          setHasUnsavedChanges(true);
-        } else {
-          console.log('[InspectionForm] Using database draft (newer than localStorage)');
-          setExistingInspection(data);
-          setResponses(data.responses);
-          await loadPhotosForInspection(data.id);
-          // Clear old localStorage backup
-          localStorage.removeItem(localStorageKey);
-        }
-      } else if (data) {
-        console.log('[InspectionForm] Loading database draft');
-        setExistingInspection(data);
-        setResponses(data.responses);
-        await loadPhotosForInspection(data.id);
-      } else if (localBackup) {
-        console.log('[InspectionForm] Loading localStorage backup (no database draft)');
-        setResponses(localBackup.responses);
-        setHasUnsavedChanges(true);
+      const serverSavedAt = new Date(data.updated_at).getTime();
+      if (!userEditedRef.current && !clonedResponses && serverSavedAt > shownAtRef.current) {
+        shownAtRef.current = serverSavedAt;
+        applyResponses(data.responses);
+        setHasUnsavedChanges(false);
+        setOpenedDraft({ startedAt: data.created_at, savedAt: data.updated_at, deviceOnly: false });
+        localStorage.removeItem(localStorageKey);
+      } else if (!clonedResponses) {
+        setOpenedDraft(prev => prev && { ...prev, startedAt: data.created_at, deviceOnly: false });
       }
+      setExistingInspection(data);
     } catch (err) {
+      // The form is already open on whatever was available locally.
       console.error('[InspectionForm] Error loading existing inspection:', err);
-      // Try localStorage backup as fallback
-      const localBackup = checkForLocalStorageBackup();
-      if (localBackup) {
-        console.log('[InspectionForm] Using localStorage backup (database error)');
-        setResponses(localBackup.responses);
-        setHasUnsavedChanges(true);
-      }
     }
   };
+
+  // Photos live in their own table; merge them in once a draft and template exist.
+  useEffect(() => {
+    if (existingInspection?.id && template) loadPhotosForInspection(existingInspection.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingInspection?.id, template?.id]);
 
   const loadAccountBranding = async () => {
     try {
@@ -530,6 +526,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         return r;
       })
     );
+    userEditedRef.current = true;
     setHasUnsavedChanges(true);
   };
 
@@ -671,6 +668,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
               : r
           )
         );
+        userEditedRef.current = true;
         setHasUnsavedChanges(true);
       } else {
         console.error('No photos were uploaded successfully');
@@ -710,6 +708,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
             : r
         )
       );
+      userEditedRef.current = true;
       setHasUnsavedChanges(true);
     } catch (err: any) {
       console.error('Error deleting photo:', err);
@@ -727,6 +726,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
   const confirmClose = () => {
     setShowCloseWarning(false);
+    // "Discard Changes" must not come back as a restored backup next time.
+    localStorage.removeItem(localStorageKey);
     onClose?.();
   };
 
@@ -808,6 +809,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         if (onSaved) onSaved();
         if (onClose) onClose();
       } else {
+        setLastAutoSave(new Date());
         // For drafts, just show a success message and keep form open
         alert('Draft saved successfully! You can continue uploading photos.');
         // Optionally refresh the inspection data to get the ID if it was a new inspection
@@ -1034,6 +1036,17 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         </div>
       </div>
 
+      {openedDraft && (
+        <div className="flex-shrink-0 flex items-center gap-1.5 border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+          <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+          <span className="truncate">
+            {openedDraft.deviceOnly
+              ? `Unsaved answers restored from this device · ${formatDraftTimestamp(openedDraft.savedAt)}`
+              : `${openedDraft.startedAt ? `Draft started ${formatDraftTimestamp(openedDraft.startedAt)} · ` : 'Draft · '}Last saved ${formatDraftTimestamp(lastAutoSave ?? openedDraft.savedAt)}`}
+          </span>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 max-w-full">
         {template.questions.map((question: any, index: number) => {
           const response = responses.find(r => r.question_id === question.id);
@@ -1182,7 +1195,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           );
         })}
 
-        {!signature && (
+        {signatureChecked && !signature && (
           <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 mb-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
