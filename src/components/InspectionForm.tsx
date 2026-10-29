@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
+import { resolveInspectionInspectorName } from '../utils/inspectionDraft';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -383,7 +384,10 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         account_id: effectiveAccountId,
         team_number: teamNumber,
         template_id: template.id,
-        inspector_name: signature?.inspector_name || 'Draft',
+        inspector_name: resolveInspectionInspectorName(
+          signature?.signature_name,
+          existingInspection?.inspector_name,
+        ),
         conducted_at: new Date().toISOString(),
         responses,
         signature_data: null,
@@ -709,7 +713,10 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         account_id: effectiveAccountId,
         team_number: teamNumber,
         template_id: template?.id,
-        inspector_name: signature.signature_name,
+        inspector_name: resolveInspectionInspectorName(
+          signature?.signature_name,
+          existingInspection?.inspector_name,
+        ),
         conducted_at: new Date().toISOString(),
         responses: responsesToSave,
         signature_data: status === 'completed' ? signature.signature_data : null,
