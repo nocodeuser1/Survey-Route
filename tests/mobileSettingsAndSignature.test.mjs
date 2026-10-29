@@ -6,6 +6,7 @@ const settingsTabs = await readFile(new URL('../src/components/SettingsTabs.tsx'
 const teamManagement = await readFile(new URL('../src/components/TeamManagement.tsx', import.meta.url), 'utf8');
 const signatures = await readFile(new URL('../src/components/UserSignatureManagement.tsx', import.meta.url), 'utf8');
 const agencySettings = await readFile(new URL('../src/components/AgencySettings.tsx', import.meta.url), 'utf8');
+const signatureSetup = await readFile(new URL('../src/pages/SignatureSetupPage.tsx', import.meta.url), 'utf8');
 
 test('mobile settings use a native section list while desktop tabs remain available', () => {
   assert.match(settingsTabs, /aria-label="Settings sections"/);
@@ -34,4 +35,11 @@ test('landscape signature pad recalibrates its backing store after rotation', ()
   assert.match(signatures, /canvas\.width = expectedWidth/);
   assert.match(signatures, /canvas\.height = expectedHeight/);
   assert.match(signatures, /signatureCanvasShell/);
+});
+
+test('signup signature refreshes the profile before entering the app', () => {
+  // Without the refresh, the cached profile still says signature_completed
+  // is false and the "Complete your signature" banner greets the new user.
+  assert.match(signatureSetup, /\.from\('user_signatures'\)\s*\.insert[\s\S]*?await reloadUserProfile\(\);\s*navigate\('\/app'/);
+  assert.match(signatureSetup, /localStorage\.removeItem\('signatureDeferred'\);\s*await reloadUserProfile\(\);\s*navigate\('\/app'/);
 });

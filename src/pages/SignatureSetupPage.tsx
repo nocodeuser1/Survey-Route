@@ -7,7 +7,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SignatureSetupPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, reloadUserProfile } = useAuth();
   const navigate = useNavigate();
   const sigCanvas = useRef<SignatureCanvas>(null);
 
@@ -186,6 +186,7 @@ export default function SignatureSetupPage() {
           setShowQRCode(false);
           localStorage.removeItem('needsSignature');
           localStorage.removeItem('signatureDeferred');
+          await reloadUserProfile();
           navigate('/app', { replace: true });
         }
       } catch {
@@ -194,7 +195,7 @@ export default function SignatureSetupPage() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [qrPolling, user, accountId, navigate]);
+  }, [qrPolling, user, accountId, navigate, reloadUserProfile]);
 
   const handleSave = async () => {
     if (!sigCanvas.current || sigCanvas.current.isEmpty()) {
@@ -244,6 +245,12 @@ export default function SignatureSetupPage() {
 
       localStorage.removeItem('needsSignature');
       localStorage.removeItem('signatureDeferred');
+
+      // The insert trigger sets users.signature_completed, but the profile in
+      // AuthContext (and its localStorage cache) still says false. Refresh it
+      // before entering the app, or the "Complete your signature" banner
+      // greets someone who just signed.
+      await reloadUserProfile();
 
       navigate('/app', { replace: true });
     } catch (err: any) {
