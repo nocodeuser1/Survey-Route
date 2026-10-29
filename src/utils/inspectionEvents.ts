@@ -75,3 +75,29 @@ export function stripPhotosForClone<R extends ResponseWithEvents & { photos?: un
     ...(response.events ? { events: response.events.map((event) => ({ ...event, photo_ids: [] })) } : {}),
   };
 }
+
+/**
+ * Photos added while editing a saved report: those aimed at a later event are
+ * claimed by it (newest first); those for event 1 (eventId null) need nothing,
+ * since unclaimed photos already belong to event 1.
+ */
+export function assignAddedPhotosToEvents<R extends { question_id: string; events?: InspectionEvent[] | null }>(
+  responses: R[],
+  added: ReadonlyArray<{ questionId: string; eventId: string | null; photoId: string }>,
+): R[] {
+  return responses.map((response) => {
+    const byEvent = new Map<string, string[]>();
+    for (const photo of added) {
+      if (photo.questionId !== response.question_id || !photo.eventId) continue;
+      if (!response.events?.some((event) => event.id === photo.eventId)) continue;
+      byEvent.set(photo.eventId, [...(byEvent.get(photo.eventId) ?? []), photo.photoId]);
+    }
+    if (byEvent.size === 0) return response;
+    let events = response.events ?? [];
+    for (const [eventId, photoIds] of byEvent) {
+      // Inserted oldest-first; list the newest first to match photo order.
+      events = claimPhotosForEvent(events, eventId, [...photoIds].reverse());
+    }
+    return { ...response, events };
+  });
+}
