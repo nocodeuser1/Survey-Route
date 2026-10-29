@@ -68,11 +68,17 @@ export function getRouteStatusRenderModel(input: RouteStatusRenderInput): RouteS
     };
   }
 
+  const hasInitializedDomain = input.inspectionRunInitialized || input.planRunInitialized;
   const showRouteCheck = input.surveyTypeKind === 'spcc_inspection'
     ? inspection === 'completed'
     : input.surveyTypeKind === 'spcc_plan'
       ? plan === 'completed'
-      : inspection === 'completed' || plan === 'completed';
+      : hasInitializedDomain
+        // Once a route cycle exists, legacy compliance from a domain without
+        // an active run must not make a freshly reset stop look completed.
+        ? (input.inspectionRunInitialized && inspection === 'completed') ||
+          (input.planRunInitialized && plan === 'completed')
+        : inspection === 'completed' || plan === 'completed';
 
   return {
     showRouteCheck,

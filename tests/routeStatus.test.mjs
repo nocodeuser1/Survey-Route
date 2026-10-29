@@ -83,6 +83,30 @@ test('All Facilities is the union of committed domain stops', () => {
   });
 });
 
+test('All ignores legacy completion from a domain without an active route cycle', () => {
+  const resetInspectionOnly = getRouteStatusRenderModel({
+    surveyTypeKind: 'all',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: true,
+    planRunInitialized: false,
+    inspectionStop: pending,
+    inspectionComplianceCurrent: true,
+    planComplianceCurrent: true,
+  });
+  assert.equal(resetInspectionOnly.showRouteCheck, false);
+
+  const submittedInspection = getRouteStatusRenderModel({
+    surveyTypeKind: 'all',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: true,
+    planRunInitialized: false,
+    inspectionStop: completed,
+    inspectionComplianceCurrent: true,
+    planComplianceCurrent: true,
+  });
+  assert.equal(submittedInspection.showRouteCheck, true);
+});
+
 test('off-route facilities never render a current-route completion check', () => {
   const model = getRouteStatusRenderModel({
     surveyTypeKind: 'spcc_plan',
