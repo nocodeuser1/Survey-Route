@@ -79,7 +79,8 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         const { data: photos } = await supabase
           .from('inspection_photos')
           .select('*')
-          .in('inspection_id', loadedInspections.map(i => i.id));
+          .in('inspection_id', loadedInspections.map(i => i.id))
+          .order('created_at', { ascending: false });
 
         console.log('[InspectionReportExport] Loaded photos:', photos?.length || 0);
 

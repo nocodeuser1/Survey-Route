@@ -216,7 +216,8 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       const { data, error } = await supabase
         .from('inspection_photos')
         .select('*')
-        .eq('inspection_id', inspection.id);
+        .eq('inspection_id', inspection.id)
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('[InspectionViewer] Error loading photos from DB:', error);

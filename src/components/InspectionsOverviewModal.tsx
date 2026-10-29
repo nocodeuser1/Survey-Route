@@ -79,7 +79,8 @@ export default function InspectionsOverviewModal({
                 const { data: photos } = await supabase
                     .from('inspection_photos')
                     .select('*')
-                    .in('inspection_id', loadedInspections.map(i => i.id));
+                    .in('inspection_id', loadedInspections.map(i => i.id))
+                    .order('created_at', { ascending: false });
 
                 if (photos && photos.length > 0) {
                     const photoMap = new Map<string, InspectionPhoto[]>();

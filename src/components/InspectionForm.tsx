@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
 import { resolveInspectionInspectorName } from '../utils/inspectionDraft';
+import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -276,7 +277,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       const { data, error } = await supabase
         .from('inspection_photos')
         .select('*')
-        .eq('inspection_id', inspectionId);
+        .eq('inspection_id', inspectionId)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
@@ -517,6 +519,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     try {
       const uploadedPhotos: InspectionPhoto[] = [];
       const filesArray = Array.from(files);
+      const batchStartedAt = Date.now();
 
       for (let i = 0; i < filesArray.length; i++) {
         const file = filesArray[i];
@@ -612,6 +615,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
             photo_url: fileName,
             file_name: file.name,
             file_size: file.size,
+            created_at: photoCreatedAtForBatch(batchStartedAt, i),
           })
           .select()
           .single();
@@ -629,7 +633,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         setResponses(prev =>
           prev.map(r =>
             r.question_id === questionId
-              ? { ...r, photos: [...(r.photos || []), ...uploadedPhotos] }
+              ? { ...r, photos: prependPhotoBatch(r.photos || [], uploadedPhotos) }
               : r
           )
         );
