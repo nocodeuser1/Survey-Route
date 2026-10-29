@@ -4078,7 +4078,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             : 'gap-1 overflow-x-auto sm:gap-2'
             }`}>
             {isFullScreen && onNavigateToView && (
-              <div ref={fullscreenMenuRef} className="relative">
+              <div className="relative">
                 <button
                   ref={fullscreenMenuButtonRef}
                   type="button"
@@ -4098,8 +4098,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   <Menu className="w-4 h-4" />
                   <span className="hidden sm:inline">Menu</span>
                 </button>
-                {showMenu && (
-                  <div id="fullscreen-navigation-panel" className="fixed left-3 top-[calc(72px+env(safe-area-inset-top))] z-[10000] max-h-[calc(100dvh-84px-env(safe-area-inset-top))] min-w-[220px] overflow-y-auto rounded-lg border border-gray-200 bg-white py-2 shadow-xl transition-colors duration-200 dark:border-gray-700 dark:bg-gray-800 sm:left-6 sm:top-[80px] sm:max-h-[calc(100dvh-92px)] sm:min-w-[200px]">
+                {showMenu && createPortal(
+                  <div className="fixed inset-0 z-[2147483000]" role="presentation">
+                    <button
+                      type="button"
+                      className="absolute inset-0 h-full w-full cursor-default bg-black/10"
+                      aria-label="Close navigation menu"
+                      onClick={() => setShowMenu(false)}
+                    />
+                    <div
+                      ref={fullscreenMenuRef}
+                      id="fullscreen-navigation-panel"
+                      className="absolute left-3 top-[calc(72px+env(safe-area-inset-top))] z-10 max-h-[calc(100dvh-84px-env(safe-area-inset-top))] min-w-[220px] overflow-y-auto rounded-lg border border-gray-200 bg-white py-2 shadow-xl transition-colors duration-200 dark:border-gray-700 dark:bg-gray-800 sm:left-6 sm:top-[80px] sm:max-h-[calc(100dvh-92px)] sm:min-w-[200px]"
+                    >
                     <button
                       onClick={() => {
                         exitFullscreenMap();
@@ -4211,7 +4222,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         </button>
                       )}
                     </div>
-                  </div>
+                    </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
             )}
