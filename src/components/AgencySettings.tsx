@@ -566,12 +566,12 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 sm:p-4">
+      <div className="h-full w-full overflow-y-auto bg-white sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg sm:shadow-xl">
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <Building2 className="w-6 h-6 text-blue-600" />
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Agency Settings</h2>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">Agency Settings</h2>
           </div>
           <button
             onClick={onClose}
@@ -581,7 +581,23 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
           </button>
         </div>
 
-        <div className="border-b border-gray-200">
+        <div className="border-b border-gray-200 p-4 sm:hidden">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">Settings section</label>
+          <select
+            value={activeTab}
+            onChange={(event) => setActiveTab(event.target.value as typeof activeTab)}
+            className="mt-2 min-h-12 w-full rounded-xl border border-gray-300 bg-white px-4 text-base font-medium text-gray-900"
+          >
+            <option value="users">User Management</option>
+            {isPrimaryOwner && <option value="coOwners">Co-Owners</option>}
+            {currentAccount && <option value="stripe">Stripe Products</option>}
+            <option value="rename">Rename Agency</option>
+            <option value="transfer">Transfer Ownership</option>
+            <option value="notifications">Notifications</option>
+          </select>
+        </div>
+
+        <div className="hidden border-b border-gray-200 sm:block">
           <div className="flex overflow-x-auto">
             <button
               onClick={() => setActiveTab('users')}
@@ -644,10 +660,10 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
           </div>
         </div>
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           {activeTab === 'users' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
                   <p className="text-sm text-blue-800">
                     Manage all users across all accounts in your agency. You can view user details, invite new users, and set/change passwords.
@@ -655,7 +671,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                 </div>
                 <button
                   onClick={() => setShowAddUserModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+                  className="flex min-h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 sm:w-auto"
                 >
                   <UserPlus className="w-5 h-5" />
                   Invite User
@@ -684,11 +700,11 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                       key={invitation.id}
                       className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
                             <Mail className="w-5 h-5 text-amber-600" />
-                            <h4 className="text-lg font-semibold text-gray-900">
+                            <h4 className="min-w-0 break-all text-base font-semibold text-gray-900 sm:text-lg">
                               {invitation.email}
                             </h4>
                             <span className={`px-2 py-1 text-xs font-medium rounded ${expired ? 'bg-gray-200 text-gray-700' : 'bg-amber-200 text-amber-800'}`}>
@@ -707,7 +723,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                             </p>
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="grid grid-cols-2 gap-2 sm:flex">
                           <button
                             onClick={() => handleResendInvitation(invitation)}
                             className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm whitespace-nowrap"
@@ -747,9 +763,9 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                       key={user.id}
                       className="bg-gray-50 border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
                             <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
                               {user.full_name || 'Unnamed User'}
                             </h4>
@@ -759,7 +775,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-600 mb-2">{user.email}</p>
+                          <p className="mb-2 break-all text-sm text-gray-600">{user.email}</p>
                           <div className="flex flex-wrap gap-2">
                             {user.accounts.map((acc, idx) => (
                               <span
@@ -771,7 +787,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                             ))}
                           </div>
                         </div>
-                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                        <span className="text-xs text-gray-500 sm:whitespace-nowrap">
                           User-managed password
                         </span>
                       </div>
@@ -814,7 +830,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                   Add Co-Owner by Email
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
                     <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                     <input
