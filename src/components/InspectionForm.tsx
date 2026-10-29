@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
 import { resolveInspectionIdentity } from '../utils/inspectionIdentity';
+import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
@@ -63,6 +64,12 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const [responses, setResponses] = useState<InspectionResponse[]>([]);
   const [generalComments, setGeneralComments] = useState('');
   const [signature, setSignature] = useState<UserSignature | null>(null);
+  // user_signatures.user_id and the identity row are keyed by the profile id
+  // (users.id). The userId prop is the auth user id, which only matches
+  // users.id on older profiles — invited users saw "Signature Required" even
+  // with a signature on file.
+  const { user } = useAuth();
+  const profileId = user?.id ?? null;
   const [inspectionIdentity, setInspectionIdentity] = useState<{ fullName: string | null; inspectionEmail: string | null } | null>(null);
   const [existingInspection, setExistingInspection] = useState<Inspection | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -139,8 +146,6 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     });
 
     loadTemplate();
-    loadSignature();
-    loadInspectionIdentity();
     loadExistingInspection();
     loadAccountBranding();
     checkForLocalStorageBackup();
@@ -257,14 +262,21 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     }
   };
 
-  const loadSignature = async () => {
+  useEffect(() => {
+    if (!profileId) return;
+    loadSignature(profileId);
+    loadInspectionIdentity(profileId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, accountId]);
+
+  const loadSignature = async (profileId: string) => {
     try {
       const effectiveAccountId = accountId || userId;
       const { data, error } = await supabase
         .from('user_signatures')
         .select('*')
         .eq('account_id', effectiveAccountId)
-        .eq('user_id', userId)
+        .eq('user_id', profileId)
         .maybeSingle();
 
       if (error) throw error;
@@ -274,12 +286,12 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     }
   };
 
-  const loadInspectionIdentity = async () => {
+  const loadInspectionIdentity = async (profileId: string) => {
     try {
       const { data, error } = await supabase
         .from('users')
         .select('full_name, inspection_email')
-        .eq('id', userId)
+        .eq('id', profileId)
         .maybeSingle();
       if (error) throw error;
       setInspectionIdentity(data ? {
