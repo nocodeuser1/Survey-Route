@@ -7,6 +7,7 @@ interface User {
   id: string;
   email: string;
   fullName: string | null;
+  inspectionEmail: string | null;
   isAgencyOwner: boolean;
   authUserId: string;
   signatureCompleted: boolean;
@@ -26,8 +27,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const USER_PROFILE_CACHE_VERSION = 1;
-const USER_PROFILE_CACHE_PREFIX = 'survey-route:user-profile:v1:';
+const USER_PROFILE_CACHE_VERSION = 2;
+const USER_PROFILE_CACHE_PREFIX = 'survey-route:user-profile:v2:';
 const SUPABASE_AUTH_STORAGE_KEY = 'surveyroute-auth';
 
 interface CachedUserProfile {
@@ -78,6 +79,7 @@ function readCachedUserProfile(authUserId: string): User | null {
       || typeof profile.id !== 'string'
       || typeof profile.email !== 'string'
       || (profile.fullName !== null && typeof profile.fullName !== 'string')
+      || (profile.inspectionEmail !== null && typeof profile.inspectionEmail !== 'string')
       || typeof profile.isAgencyOwner !== 'boolean'
       || typeof profile.signatureCompleted !== 'boolean'
     ) {
@@ -117,6 +119,7 @@ function profilesMatch(left: User | null, right: User) {
   return left?.id === right.id
     && left.email === right.email
     && left.fullName === right.fullName
+    && left.inspectionEmail === right.inspectionEmail
     && left.isAgencyOwner === right.isAgencyOwner
     && left.authUserId === right.authUserId
     && left.signatureCompleted === right.signatureCompleted;
@@ -288,6 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: data.id,
           email: data.email,
           fullName: data.full_name,
+          inspectionEmail: data.inspection_email ?? null,
           isAgencyOwner: data.is_agency_owner,
           authUserId: data.auth_user_id,
           signatureCompleted: data.signature_completed || false,
@@ -332,6 +336,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               id: newUser.id,
               email: newUser.email,
               fullName: newUser.full_name,
+              inspectionEmail: newUser.inspection_email ?? null,
               isAgencyOwner: newUser.is_agency_owner,
               authUserId: newUser.auth_user_id,
               signatureCompleted: newUser.signature_completed || false,

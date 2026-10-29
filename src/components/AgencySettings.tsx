@@ -5,6 +5,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import StripeProductConfig from './StripeProductConfig';
 import CompanyNotificationSettings from './CompanyNotificationSettings';
+import { isInvitationExpired } from '../utils/invitationStatus';
 
 interface AgencySettingsProps {
   agency: {
@@ -387,6 +388,33 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not authenticated');
 
+      const wasExpired = isInvitationExpired(invitation);
+      let invitationToSend = invitation;
+
+      if (wasExpired) {
+        const { data: renewResult, error: renewError } = await supabase
+          .rpc('renew_invitation', {
+            invitation_id: invitation.id,
+            days_to_extend: 7,
+          });
+
+        if (renewError) throw renewError;
+        if (!renewResult?.success) {
+          throw new Error(renewResult?.error || 'Failed to renew invitation');
+        }
+
+        const { data: renewedInvitation, error: reloadError } = await supabase
+          .from('user_invitations')
+          .select('id, email, role, account_id, status, created_at, expires_at, token')
+          .eq('id', invitation.id)
+          .single();
+
+        if (reloadError || !renewedInvitation) {
+          throw reloadError || new Error('Failed to reload renewed invitation');
+        }
+        invitationToSend = { ...invitation, ...renewedInvitation };
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
 
       const response = await fetch(
@@ -399,7 +427,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
-            inviteToken: invitation.token,
+            inviteToken: invitationToSend.token,
           }),
         }
       );
@@ -407,11 +435,14 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
       if (!response.ok) {
         const errorData = await response.json();
         console.error('Failed to send email:', errorData);
-        throw new Error('Failed to send invitation email');
+        throw new Error(errorData?.error || 'Failed to send invitation email');
       }
 
-      setAddUserSuccess(`Invitation resent to ${invitation.email}`);
+      setAddUserSuccess(wasExpired
+        ? `Invitation renewed and sent to ${invitation.email}`
+        : `Invitation resent to ${invitation.email}`);
       setTimeout(() => setAddUserSuccess(''), 3000);
+      await loadInvitations();
     } catch (err: any) {
       setAddUserError(err.message || 'Failed to resend invitation');
       setTimeout(() => setAddUserError(''), 5000);
@@ -646,7 +677,9 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
               {invitations.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-gray-900">Pending Invitations</h3>
-                  {invitations.map((invitation) => (
+                  {invitations.map((invitation) => {
+                    const expired = isInvitationExpired(invitation);
+                    return (
                     <div
                       key={invitation.id}
                       className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4"
@@ -658,8 +691,8 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                             <h4 className="text-lg font-semibold text-gray-900">
                               {invitation.email}
                             </h4>
-                            <span className="px-2 py-1 bg-amber-200 text-amber-800 text-xs font-medium rounded">
-                              Pending
+                            <span className={`px-2 py-1 text-xs font-medium rounded ${expired ? 'bg-gray-200 text-gray-700' : 'bg-amber-200 text-amber-800'}`}>
+                              {expired ? 'Expired' : 'Pending'}
                             </span>
                           </div>
                           <div className="space-y-1">
@@ -680,7 +713,7 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                             className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm whitespace-nowrap"
                           >
                             <RefreshCw className="w-4 h-4" />
-                            Resend
+                            {expired ? 'Renew & Send' : 'Resend'}
                           </button>
                           <button
                             onClick={() => handleRevokeInvitation(invitation.id)}
@@ -692,7 +725,8 @@ export default function AgencySettings({ agency, onClose, onUpdate }: AgencySett
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 

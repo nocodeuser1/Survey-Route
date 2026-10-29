@@ -202,7 +202,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             </div>
             <div class="meta-row">
               <span class="label">Prepared by:</span>
-              <span class="value">${inspection.inspector_name}</span>
+              <span class="value">${inspection.inspector_name}${inspection.inspector_email ? `<br><small>${inspection.inspector_email}</small>` : ''}</span>
             </div>
           </div>
         </div>
@@ -271,6 +271,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             <img src="${inspection.signature_data}" alt="Signature" class="signature-image" />
             <div class="signature-info">
               <div>${inspection.inspector_name}</div>
+              ${inspection.inspector_email ? `<div>${inspection.inspector_email}</div>` : ''}
               <div>${formatInspectionTimestamp(inspection, hideReportTimestamps)}</div>
             </div>
           </div>

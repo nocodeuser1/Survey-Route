@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
-import { resolveInspectionInspectorName } from '../utils/inspectionDraft';
+import { resolveInspectionIdentity } from '../utils/inspectionIdentity';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
@@ -63,6 +63,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const [responses, setResponses] = useState<InspectionResponse[]>([]);
   const [generalComments, setGeneralComments] = useState('');
   const [signature, setSignature] = useState<UserSignature | null>(null);
+  const [inspectionIdentity, setInspectionIdentity] = useState<{ fullName: string | null; inspectionEmail: string | null } | null>(null);
   const [existingInspection, setExistingInspection] = useState<Inspection | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -139,6 +140,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
     loadTemplate();
     loadSignature();
+    loadInspectionIdentity();
     loadExistingInspection();
     loadAccountBranding();
     checkForLocalStorageBackup();
@@ -272,6 +274,23 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     }
   };
 
+  const loadInspectionIdentity = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('full_name, inspection_email')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      setInspectionIdentity(data ? {
+        fullName: data.full_name,
+        inspectionEmail: data.inspection_email,
+      } : null);
+    } catch (error) {
+      console.error('Error loading inspection profile:', error);
+    }
+  };
+
   const loadPhotosForInspection = async (inspectionId: string) => {
     try {
       const { data, error } = await supabase
@@ -381,15 +400,18 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       const { flaggedCount, actionsCount } = calculateCounts();
       const effectiveAccountId = accountId || userId;
 
+      const resolvedIdentity = resolveInspectionIdentity(
+        inspectionIdentity,
+        signature?.signature_name,
+        existingInspection?.inspector_name,
+      );
       const inspectionData = {
         facility_id: facility.id,
         account_id: effectiveAccountId,
         team_number: teamNumber,
         template_id: template.id,
-        inspector_name: resolveInspectionInspectorName(
-          signature?.signature_name,
-          existingInspection?.inspector_name,
-        ),
+        inspector_name: resolvedIdentity.inspectorName,
+        inspector_email: resolvedIdentity.inspectorEmail,
         conducted_at: new Date().toISOString(),
         responses,
         signature_data: null,
@@ -432,7 +454,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     } finally {
       setIsAutoSaving(false);
     }
-  }, [template, responses, isSaving, facility.id, accountId, userId, teamNumber, signature, existingInspection, saveToLocalStorage]);
+  }, [template, responses, isSaving, facility.id, accountId, userId, teamNumber, signature, inspectionIdentity, existingInspection, saveToLocalStorage]);
 
   // Auto-save effect - triggers 30 seconds after changes
   useEffect(() => {
@@ -712,18 +734,21 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       const actionsCount = responsesToSave.filter(r => r.action_required).length;
 
       const effectiveAccountId = accountId || userId;
+      const resolvedIdentity = resolveInspectionIdentity(
+        inspectionIdentity,
+        signature?.signature_name,
+        existingInspection?.inspector_name,
+      );
       const inspectionData = {
         facility_id: facility.id,
         account_id: effectiveAccountId,
         team_number: teamNumber,
         template_id: template?.id,
-        inspector_name: resolveInspectionInspectorName(
-          signature?.signature_name,
-          existingInspection?.inspector_name,
-        ),
+        inspector_name: resolvedIdentity.inspectorName,
+        inspector_email: resolvedIdentity.inspectorEmail,
         conducted_at: new Date().toISOString(),
         responses: responsesToSave,
-        signature_data: status === 'completed' ? signature.signature_data : null,
+        signature_data: status === 'completed' ? signature?.signature_data ?? null : null,
         status,
         flagged_items_count: flaggedCount,
         actions_count: actionsCount,
@@ -967,7 +992,9 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
             <p className="text-sm text-blue-100 mt-1">{facility.name}</p>
           </div>
           <div className="text-right text-sm">
-            <p className="font-semibold">{signature?.inspector_name || 'No Signature'}</p>
+            <p className="font-semibold">
+              {resolveInspectionIdentity(inspectionIdentity, signature?.signature_name, existingInspection?.inspector_name).inspectorName}
+            </p>
             <p className="text-blue-100">{new Date().toLocaleDateString()}</p>
           </div>
         </div>

@@ -704,7 +704,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+      <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-gray-800 sm:rounded-lg sm:p-6 sm:shadow-md">
         <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
           <Database className="w-5 h-5" />
           Data Backup & Export
@@ -780,7 +780,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border-2 border-green-200 dark:border-green-700">
+      <div className="rounded-2xl border-2 border-green-200 bg-white p-4 shadow-sm dark:border-green-700 dark:bg-gray-800 sm:rounded-lg sm:p-6 sm:shadow-md">
         <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
           <Upload className="w-5 h-5 text-green-600" />
           Restore from Backup
@@ -882,7 +882,7 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border-2 border-red-200 dark:border-red-700">
+      <div className="rounded-2xl border-2 border-red-200 bg-white p-4 shadow-sm dark:border-red-700 dark:bg-gray-800 sm:rounded-lg sm:p-6 sm:shadow-md">
         <h3 className="text-xl font-semibold text-red-700 dark:text-red-400 mb-4 flex items-center gap-2">
           <AlertTriangle className="w-5 h-5" />
           Danger Zone

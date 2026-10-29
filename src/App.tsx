@@ -12,6 +12,7 @@ import StickyStatsBar from './components/StickyStatsBar';
 import { supabase, Facility, HomeBase as HomeBaseType, UserSettings, RoutePlan, Inspection, SurveyType } from './lib/supabase';
 import TeamManagement from './components/TeamManagement';
 import UserSignatureManagement from './components/UserSignatureManagement';
+import InspectionIdentitySettings from './components/InspectionIdentitySettings';
 import SignaturePromptBar from './components/SignaturePromptBar';
 import DataBackup from './components/DataBackup';
 import SettingsTabs, { getSettingsIcon } from './components/SettingsTabs';
@@ -5426,11 +5427,11 @@ function App() {
         )}
 
         {currentView === 'settings' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="mx-auto max-w-7xl px-0 py-0 sm:px-6 sm:py-8 lg:px-8">
             <div className="max-w-5xl mx-auto">
-              <div className="mb-6">
+              <div className="mb-2 px-4 py-4 sm:mb-6 sm:px-0 sm:py-0">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Settings</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Settings</h2>
                   {optimizationResult && (
                     <button
                       onClick={() => setCurrentView('route-planning')}
@@ -5443,7 +5444,7 @@ function App() {
                 <p className="text-gray-600 dark:text-gray-300">Configure your account settings, route planning, and team management</p>
               </div>
 
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 transition-colors duration-200">
+              <div className="bg-white p-0 transition-colors duration-200 dark:bg-gray-800 sm:rounded-lg sm:p-6 sm:shadow-md">
                 <SettingsTabs
                   tabs={[
                     // — Operations —
@@ -5553,6 +5554,7 @@ function App() {
                       icon: getSettingsIcon('team'),
                       content: accountRole === 'account_admin' ? (
                         <div className="space-y-8">
+                          <InspectionIdentitySettings />
                           <div>
                             <UserSignatureManagement />
                           </div>
@@ -5562,6 +5564,7 @@ function App() {
                         </div>
                       ) : (
                         <div className="space-y-8">
+                          <InspectionIdentitySettings />
                           <div>
                             <UserSignatureManagement />
                           </div>

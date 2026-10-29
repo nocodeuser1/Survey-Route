@@ -619,6 +619,9 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                 <span className="text-sm font-medium">Inspector</span>
               </div>
               <p className="text-gray-900 dark:text-white font-semibold">{inspection.inspector_name}</p>
+              {inspection.inspector_email && (
+                <p className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">{inspection.inspector_email}</p>
+              )}
             </div>
 
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors">

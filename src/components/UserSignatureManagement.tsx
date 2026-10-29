@@ -31,6 +31,7 @@ export default function UserSignatureManagement() {
   const { currentAccount, accountRole, isAgencyAdmin } = useAccount();
   const { darkMode } = useDarkMode();
   const sigCanvas = useRef<SignatureCanvas>(null);
+  const signatureCanvasShell = useRef<HTMLDivElement>(null);
 
   const [signature, setSignature] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -93,6 +94,49 @@ export default function UserSignatureManagement() {
       orientationQuery.removeEventListener('change', handleOrientationChange);
     };
   }, []);
+
+  // react-signature-canvas measures itself as soon as it mounts. On iOS,
+  // orientation settles in multiple layout passes, so that first measurement
+  // can keep the portrait backing-store size while CSS stretches the pad into
+  // landscape. The resulting coordinate scale drifts farther from the finger
+  // toward the lower-right corner. Re-measure after the flex layout settles.
+  useEffect(() => {
+    if (!showFullscreenSignature) return;
+    const shell = signatureCanvasShell.current;
+    if (!shell || typeof ResizeObserver === 'undefined') return;
+
+    let frame = 0;
+    const calibrate = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const canvas = sigCanvas.current?.getCanvas();
+        if (!canvas) return;
+        const rect = shell.getBoundingClientRect();
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        const expectedWidth = Math.round(rect.width * ratio);
+        const expectedHeight = Math.round(rect.height * ratio);
+        if (expectedWidth <= 0 || expectedHeight <= 0) return;
+        if (Math.abs(canvas.width - expectedWidth) <= 2 && Math.abs(canvas.height - expectedHeight) <= 2) return;
+
+        canvas.width = expectedWidth;
+        canvas.height = expectedHeight;
+        canvas.getContext('2d')?.scale(ratio, ratio);
+        sigCanvas.current?.clear();
+      });
+    };
+
+    const observer = new ResizeObserver(calibrate);
+    observer.observe(shell);
+    calibrate();
+    const settleTimer = window.setTimeout(calibrate, 300);
+    window.addEventListener('orientationchange', calibrate);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      window.clearTimeout(settleTimer);
+      window.removeEventListener('orientationchange', calibrate);
+    };
+  }, [showFullscreenSignature, isLandscape]);
 
   async function loadSignature() {
     if (!user || !currentAccount) return;
@@ -367,7 +411,7 @@ export default function UserSignatureManagement() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
             <PenTool className="w-5 h-5" />
@@ -380,7 +424,7 @@ export default function UserSignatureManagement() {
         {!editing && signature && (
           <button
             onClick={handleEdit}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 sm:w-auto"
           >
             <Edit className="w-4 h-4" />
             Edit Signature
@@ -402,7 +446,7 @@ export default function UserSignatureManagement() {
       )}
 
       {editing ? (
-        <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-6 transition-colors duration-200">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 transition-colors duration-200 dark:border-gray-600 dark:bg-gray-700 sm:p-6">
           <div className="space-y-4">
             <div className="bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 p-4">
               <div className="flex items-start gap-3">
@@ -668,7 +712,7 @@ export default function UserSignatureManagement() {
           </div>
 
           {/* Signature Canvas - Takes remaining space */}
-          <div className="flex-1 bg-white dark:bg-gray-800 border-y-2 border-gray-300 dark:border-gray-600 relative overflow-hidden transition-colors duration-200">
+          <div ref={signatureCanvasShell} className="relative flex-1 overflow-hidden border-y-2 border-gray-300 bg-white transition-colors duration-200 dark:border-gray-600 dark:bg-gray-800">
             <SignatureCanvas
               ref={sigCanvas}
               penColor={darkMode ? '#ffffff' : '#2563eb'}

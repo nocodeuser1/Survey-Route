@@ -44,6 +44,12 @@ self.addEventListener('install', function (event) {
 // the one path allowed to activate early: the user is about to reload anyway,
 // so no open page is left reaching for a chunk from the previous build.
 self.addEventListener('message', function (event) {
+  if (event.data && event.data.type === 'GET_BUILD_VERSION') {
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage({ buildVersion: BUILD_VERSION });
+    }
+    return;
+  }
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }

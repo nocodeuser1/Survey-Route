@@ -37,6 +37,45 @@ function announce(): void {
   for (const listener of listeners) listener(!!waitingWorker);
 }
 
+function readWorkerBuildVersion(worker: ServiceWorker): Promise<string | null> {
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    const timer = window.setTimeout(() => resolve(null), 1200);
+    channel.port1.onmessage = event => {
+      window.clearTimeout(timer);
+      const version = event.data?.buildVersion;
+      resolve(typeof version === 'string' ? version : null);
+    };
+    worker.postMessage({ type: 'GET_BUILD_VERSION' }, [channel.port2]);
+  });
+}
+
+async function considerWaitingWorker(worker: ServiceWorker): Promise<void> {
+  const workerVersion = await readWorkerBuildVersion(worker);
+  // A freshly loaded page can install a worker for the exact same build when
+  // an older controller still owns Safari's cache. That is worker catch-up,
+  // not a newer app version, so never show the reload banner for it.
+  if (workerVersion === __BUILD_COMMIT__) {
+    if (waitingWorker === worker) waitingWorker = null;
+    announce();
+    return;
+  }
+
+  // Compatibility fallback for one release while older workers lack the
+  // build-version message. Their registration URL carries the page commit.
+  if (!workerVersion) {
+    try {
+      const stampedVersion = new URL(worker.scriptURL).searchParams.get('v');
+      if (stampedVersion === __BUILD_COMMIT__) return;
+    } catch {
+      // A malformed URL should not hide a real update.
+    }
+  }
+
+  waitingWorker = worker;
+  announce();
+}
+
 /** Subscribe to "a newer build is installed and waiting". Fires immediately
  *  if one is already waiting. Returns an unsubscribe function. */
 export function onUpdateAvailable(listener: UpdateListener): () => void {
@@ -76,8 +115,7 @@ function track(reg: ServiceWorkerRegistration): void {
   const isUpdate = () => !!navigator.serviceWorker.controller;
 
   if (reg.waiting && isUpdate()) {
-    waitingWorker = reg.waiting;
-    announce();
+    void considerWaitingWorker(reg.waiting);
   }
 
   reg.addEventListener('updatefound', () => {
@@ -88,8 +126,7 @@ function track(reg: ServiceWorkerRegistration): void {
       // every asset it references are on disk, so Reload cannot strand the
       // user on a half-cached build.
       if (installing.state === 'installed' && isUpdate()) {
-        waitingWorker = reg.waiting ?? installing;
-        announce();
+        void considerWaitingWorker(reg.waiting ?? installing);
       }
     });
   });

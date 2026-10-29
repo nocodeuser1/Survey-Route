@@ -3,6 +3,7 @@ import { Users, Mail, Shield, Trash2, AlertCircle, Copy, RefreshCw, UserPlus, Ch
 import { supabase } from '../lib/supabase';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { isInvitationExpired } from '../utils/invitationStatus';
 
 interface TeamMember {
   id: string;
@@ -313,6 +314,34 @@ export default function TeamManagement() {
 
       if (!invitation) throw new Error('Invitation not found');
 
+      const wasExpired = isInvitationExpired(invitation);
+      let invitationToSend = invitation;
+
+      if (wasExpired) {
+        const { data: renewResult, error: renewError } = await supabase
+          .rpc('renew_invitation', {
+            invitation_id: invitation.id,
+            days_to_extend: 7,
+          });
+
+        if (renewError) throw renewError;
+        if (!renewResult?.success) {
+          throw new Error(renewResult?.error || 'Failed to renew invitation');
+        }
+
+        const { data: renewedInvitation, error: reloadError } = await supabase
+          .from('user_invitations')
+          .select('id, email, role, status, expires_at, token')
+          .eq('id', invitation.id)
+          .eq('account_id', currentAccount.id)
+          .single();
+
+        if (reloadError || !renewedInvitation) {
+          throw reloadError || new Error('Failed to reload renewed invitation');
+        }
+        invitationToSend = renewedInvitation;
+      }
+
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not authenticated');
 
@@ -328,18 +357,22 @@ export default function TeamManagement() {
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({
-            inviteToken: invitation.token,
+            inviteToken: invitationToSend.token,
           }),
         }
       );
 
       if (!response.ok) {
-        console.error('Failed to resend invitation email:', await response.json());
-        throw new Error('Failed to send invitation email');
+        const errorData = await response.json().catch(() => null);
+        console.error('Failed to resend invitation email:', errorData);
+        throw new Error(errorData?.error || 'Failed to send invitation email');
       }
 
-      setSuccess(`Invitation resent to ${email}`);
+      setSuccess(wasExpired
+        ? `Invitation renewed and sent to ${email}`
+        : `Invitation resent to ${email}`);
       setTimeout(() => setSuccess(''), 3000);
+      await loadTeamData();
     } catch (err: any) {
       setError(err.message || 'Failed to resend invitation');
     }
@@ -590,9 +623,15 @@ export default function TeamManagement() {
     );
   }
 
+  const visibleTeamMembers = teamMembers.filter(member => {
+    if (isCurrentUserAgencyOwner) return true;
+    if (agencyOwnerEmail && member.email?.toLowerCase() === agencyOwnerEmail.toLowerCase()) return false;
+    return member.full_name?.toLowerCase() !== 'agency owner';
+  });
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
             <Users className="w-5 h-5" />
@@ -602,13 +641,13 @@ export default function TeamManagement() {
             Manage team members and their access to this account
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[auto_1fr] gap-2 sm:flex">
           <button
             onClick={() => {
               setLoading(true);
               loadTeamData();
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 sm:px-4"
             title="Refresh team data"
           >
             <RefreshCw className="w-4 h-4" />
@@ -616,7 +655,7 @@ export default function TeamManagement() {
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-white transition-colors hover:bg-blue-700 sm:px-4"
           >
             <UserPlus className="w-4 h-4" />
             Invite Team Member
@@ -625,7 +664,7 @@ export default function TeamManagement() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg text-red-700 dark:text-red-200 text-sm fixed top-4 right-4 max-w-md shadow-lg z-[60]">
+        <div className="fixed inset-x-4 top-4 z-[110] rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-lg dark:border-red-700 dark:bg-red-900/30 dark:text-red-200 sm:left-auto sm:max-w-md">
           <div className="flex items-start gap-2">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div className="flex-1">{error}</div>
@@ -637,7 +676,7 @@ export default function TeamManagement() {
       )}
 
       {success && (
-        <div className="p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg text-green-700 dark:text-green-200 text-sm fixed top-4 right-4 max-w-md shadow-lg z-[60]">
+        <div className="fixed inset-x-4 top-4 z-[110] rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 shadow-lg dark:border-green-700 dark:bg-green-900/30 dark:text-green-200 sm:left-auto sm:max-w-md">
           <div className="flex items-start gap-2">
             <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div className="flex-1">{success}</div>
@@ -651,7 +690,7 @@ export default function TeamManagement() {
       {invitations.length > 0 && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
           <div className="border-b border-gray-200 dark:border-gray-600">
-            <div className="flex gap-4 px-4">
+            <div className="grid grid-cols-2 px-2 sm:flex sm:gap-4 sm:px-4">
               <button
                 onClick={() => setInvitationFilter('pending')}
                 className={`relative px-4 py-3 text-sm font-medium transition-colors ${invitationFilter === 'pending'
@@ -691,16 +730,17 @@ export default function TeamManagement() {
               {invitations
                 .filter(invite => invitationFilter === 'all' || invite.status === 'pending')
                 .map((invite) => {
-                  const isPending = invite.status === 'pending';
+                  const isOpenInvitation = invite.status === 'pending';
+                  const isExpired = isInvitationExpired(invite);
+                  const isPending = isOpenInvitation && !isExpired;
                   const isAccepted = invite.status === 'accepted';
-                  const isExpired = invite.status === 'expired';
                   const isRevoked = invite.status === 'revoked';
 
                   return (
-                    <div key={invite.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded border border-gray-200 dark:border-gray-600">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="font-medium text-gray-900 dark:text-white">{invite.email}</p>
+                    <div key={invite.id} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-600 dark:bg-gray-700/50 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 break-all font-medium text-gray-900 dark:text-white">{invite.email}</p>
                           {isPending && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full whitespace-nowrap">
                               <Clock className="w-3 h-3" />
@@ -734,30 +774,32 @@ export default function TeamManagement() {
                           {isRevoked && ` Revoked ${new Date(invite.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}`}
                         </p>
                       </div>
-                      <div className="flex gap-2">
-                        {isPending && (
+                      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                        {isOpenInvitation && (
                           <>
-                            <button
-                              onClick={() => copyInviteLink(invite.id, invite.token)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors font-medium"
-                              title="Copy invite link"
-                            >
-                              {copiedInviteId === invite.id ? (
-                                <>
-                                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                                  <span className="text-green-600 dark:text-green-400">Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-4 h-4" />
-                                  Copy Link
-                                </>
-                              )}
-                            </button>
+                            {!isExpired && (
+                              <button
+                                onClick={() => copyInviteLink(invite.id, invite.token)}
+                                className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                title="Copy invite link"
+                              >
+                                {copiedInviteId === invite.id ? (
+                                  <>
+                                    <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                    <span className="text-green-600 dark:text-green-400">Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-4 h-4" />
+                                    Copy Link
+                                  </>
+                                )}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleRenewInvitation(invite.id, invite.email)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors font-medium"
+                              className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-green-600 transition-colors hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30"
                               title="Extend invitation expiration by 7 days"
                             >
                               <RefreshCw className="w-4 h-4" />
@@ -766,11 +808,11 @@ export default function TeamManagement() {
                             <button
                               type="button"
                               onClick={() => handleResendInvitation(invite.id, invite.email)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors font-medium"
-                              title="Resend invitation email"
+                              className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                              title={isExpired ? 'Renew invitation and send email' : 'Resend invitation email'}
                             >
                               <Mail className="w-4 h-4" />
-                              Resend
+                              {isExpired ? 'Renew & Send' : 'Resend'}
                             </button>
                             <button
                               type="button"
@@ -778,7 +820,7 @@ export default function TeamManagement() {
                                 e.preventDefault();
                                 handleRevokeInvitation(invite.id, invite.email);
                               }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors font-medium"
+                              className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
                               title="Revoke invitation and clean up orphaned auth accounts"
                             >
                               <XCircle className="w-4 h-4" />
@@ -786,7 +828,7 @@ export default function TeamManagement() {
                             </button>
                           </>
                         )}
-                        {!isPending && (
+                        {!isOpenInvitation && (
                           <button
                             type="button"
                             onClick={() => handleDeleteInvitation(invite.id, invite.email)}
@@ -806,7 +848,54 @@ export default function TeamManagement() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden transition-colors duration-200">
+      <div className="space-y-3 sm:hidden">
+        {visibleTeamMembers.map(member => (
+          <article key={member.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 dark:text-white">{member.full_name || 'No name'}</p>
+                <p className="break-all text-sm text-gray-500 dark:text-gray-400">{member.email}</p>
+              </div>
+              {member.signature_completed ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200"><CheckCircle className="h-3 w-3" /> Signed</span>
+              ) : (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300"><Clock className="h-3 w-3" /> Pending</span>
+              )}
+            </div>
+            <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-700">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Role
+                <select
+                  value={member.role}
+                  disabled={member.id === authUser?.id || member.is_agency_owner}
+                  onChange={(event) => handleChangeRole(member.id, event.target.value as 'account_admin' | 'user')}
+                  className="mt-1.5 min-h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-base normal-case text-gray-900 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="user">Team member</option>
+                  <option value="account_admin">Account administrator</option>
+                </select>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {isAgencyAdmin && (
+                  <button type="button" onClick={() => openManageAccounts(member)} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-purple-200 px-3 text-sm font-medium text-purple-700 dark:border-purple-800 dark:text-purple-300">
+                    <Layers className="h-4 w-4" /> Accounts
+                  </button>
+                )}
+                {member.email !== agencyOwnerEmail && !member.is_agency_owner && member.id !== authUser?.id && (
+                  <button type="button" onClick={() => handleRemoveMember(member.id, member.email)} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 px-3 text-sm font-medium text-red-600 dark:border-red-800 dark:text-red-300">
+                    <Trash2 className="h-4 w-4" /> Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          </article>
+        ))}
+        {visibleTeamMembers.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-600 dark:text-gray-400">No team members yet.</div>
+        )}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white transition-colors duration-200 dark:border-gray-600 dark:bg-gray-800 sm:block">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 transition-colors duration-200">
@@ -832,26 +921,7 @@ export default function TeamManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-              {teamMembers
-                // Filter out agency owner for non-agency-owner users (admin/user shouldn't see agency owner)
-                .filter(member => {
-                  // If current user is agency owner, show all members
-                  if (isCurrentUserAgencyOwner) {
-                    return true;
-                  }
-                  // Otherwise, hide the agency owner from the list (case-insensitive comparison)
-                  if (agencyOwnerEmail && member.email && member.email.toLowerCase() === agencyOwnerEmail.toLowerCase()) {
-                    return false;
-                  }
-
-                  // Fallback: also hide by name if it's "Agency Owner"
-                  if (member.full_name && member.full_name.toLowerCase() === 'agency owner') {
-                    return false;
-                  }
-
-                  return true;
-                })
-                .map((member) => (
+              {visibleTeamMembers.map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-800 transition-colors duration-200">
                     <td className="px-6 py-4">
                       <div>

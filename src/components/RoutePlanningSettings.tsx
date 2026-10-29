@@ -238,7 +238,7 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
             <Clock className="inline w-4 h-4 mr-1" />

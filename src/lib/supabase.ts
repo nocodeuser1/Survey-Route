@@ -631,6 +631,7 @@ export interface Inspection {
   team_number: number;
   template_id: string;
   inspector_name: string;
+  inspector_email?: string | null;
   conducted_at: string;
   manual_timestamp?: string | null;
   responses: InspectionResponse[];
