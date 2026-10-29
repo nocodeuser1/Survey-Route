@@ -22,6 +22,31 @@ test('inspection reset state overrides historical compliance', () => {
   assert.equal(resolveInspectionDisplayStatus('expired', model.routeStatusByDomain.spcc_inspection), 'incomplete');
 });
 
+test('unresolved saved-route hydration stays pending instead of flashing historical completion', () => {
+  const hydrating = getRouteStatusRenderModel({
+    surveyTypeKind: 'spcc_inspection',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: true,
+    planRunInitialized: false,
+    inspectionComplianceCurrent: true,
+    planComplianceCurrent: false,
+  });
+  assert.equal(hydrating.showRouteCheck, false);
+  assert.equal(hydrating.routeStatusByDomain.spcc_inspection, 'pending');
+
+  const submitted = getRouteStatusRenderModel({
+    surveyTypeKind: 'spcc_inspection',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: true,
+    planRunInitialized: false,
+    inspectionStop: completed,
+    inspectionComplianceCurrent: true,
+    planComplianceCurrent: false,
+  });
+  assert.equal(submitted.showRouteCheck, true);
+  assert.equal(submitted.routeStatusByDomain.spcc_inspection, 'completed');
+});
+
 test('inspection reset preserves a draft and completed route work wins after saving', () => {
   assert.equal(resolveInspectionDisplayStatus('draft', 'pending'), 'draft');
   assert.equal(resolveInspectionDisplayStatus('completed', 'completed'), 'completed');

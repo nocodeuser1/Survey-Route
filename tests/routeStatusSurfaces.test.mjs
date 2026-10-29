@@ -26,6 +26,13 @@ test('initialized domain runs synchronize through the authoritative RPC', () => 
   assert.match(hook, /plannedStopsSignature/);
 });
 
+test('saved-route hydration stays authoritative until active runs resolve', () => {
+  assert.match(hook, /resolvedIdentityByScope/);
+  assert.match(hook, /authoritativeByScope/);
+  assert.match(app, /routeStatusRuns\.authoritativeByScope\.spcc_inspection/);
+  assert.doesNotMatch(app, /inspectionRunInitialized: Boolean\(routeStatusRuns\.runsByScope\.spcc_inspection\)/);
+});
+
 test('partial inspection completion retains its request key for retry', () => {
   assert.match(hook, /queuePendingInspectionCompletion\(\{ facilityId, source, sourceRecordId, requestId, message \}\)/);
   assert.match(hook, /pendingInspectionCompletion\.requestId/);

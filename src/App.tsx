@@ -3285,8 +3285,8 @@ function App() {
     resetting: routeStatusRuns.resetting,
     resetRouteStatus: routeStatusRuns.resetRouteStatus,
     inspectionStopsByFacilityId: routeStatusRuns.stopsMapByScope.spcc_inspection,
-    inspectionRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
-    planRunInitialized: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+    inspectionRunInitialized: routeStatusRuns.authoritativeByScope.spcc_inspection,
+    planRunInitialized: routeStatusRuns.authoritativeByScope.spcc_plan,
     completeInspectionStop: routeStatusRuns.completeInspectionStop,
     recordManualInspectionCompletion: routeStatusRuns.recordManualInspectionCompletion,
   }), [
@@ -3303,8 +3303,8 @@ function App() {
     routeStatusRuns.resetting,
     routeStatusRuns.resetRouteStatus,
     routeStatusRuns.stopsMapByScope.spcc_inspection,
-    routeStatusRuns.runsByScope.spcc_inspection,
-    routeStatusRuns.runsByScope.spcc_plan,
+    routeStatusRuns.authoritativeByScope.spcc_inspection,
+    routeStatusRuns.authoritativeByScope.spcc_plan,
     routeStatusRuns.completeInspectionStop,
     routeStatusRuns.recordManualInspectionCompletion,
   ]);
@@ -5183,8 +5183,8 @@ function App() {
                         planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
                         routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
                         routeStatusRunInitialized={{
-                          spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
-                          spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                          spcc_inspection: routeStatusRuns.authoritativeByScope.spcc_inspection,
+                          spcc_plan: routeStatusRuns.authoritativeByScope.spcc_plan,
                         }}
                         onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                         planRouteSavingFacilityId={planRouteRun.savingFacilityId}
@@ -5358,8 +5358,8 @@ function App() {
                             planRouteStopsByFacilityId={planRouteRun.stopsByFacilityId}
                             routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
                             routeStatusRunInitialized={{
-                              spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
-                              spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                              spcc_inspection: routeStatusRuns.authoritativeByScope.spcc_inspection,
+                              spcc_plan: routeStatusRuns.authoritativeByScope.spcc_plan,
                             }}
                             onPlanRouteStopChange={planRouteRun.setFacilityCompleted}
                             planRouteSavingFacilityId={planRouteRun.savingFacilityId}
@@ -5404,8 +5404,8 @@ function App() {
               onInspectionRouteStopCompleted={routeStatusRuns.completeInspectionStop}
               routeStatusStopsByScope={routeStatusRuns.stopsMapByScope}
               routeStatusRunInitialized={{
-                spcc_inspection: Boolean(routeStatusRuns.runsByScope.spcc_inspection),
-                spcc_plan: Boolean(routeStatusRuns.runsByScope.spcc_plan),
+                spcc_inspection: routeStatusRuns.authoritativeByScope.spcc_inspection,
+                spcc_plan: routeStatusRuns.authoritativeByScope.spcc_plan,
               }}
               onFacilitiesChange={async () => {
                 const batchId = facilities[0]?.upload_batch_id;

@@ -117,6 +117,7 @@ export function useRouteStatusRuns({
   const loadSequence = useRef(0);
   const identityKey = `${accountId ?? ''}:${routePlanId ?? ''}:${teamNumber}`;
   const [stateIdentityKey, setStateIdentityKey] = useState(identityKey);
+  const [resolvedIdentityByScope, setResolvedIdentityByScope] = useState<Partial<Record<RouteStatusScope, string>>>({});
 
   const facilitiesByName = useMemo(() => {
     const map = new Map<string, Facility[]>();
@@ -139,8 +140,9 @@ export function useRouteStatusRuns({
   const adoptScope = useCallback((scope: RouteStatusScope, run: RouteStatusRun, stops: RouteStatusRunStop[]) => {
     setRunsByScope(current => ({ ...current, [scope]: run }));
     setStopsByScope(current => ({ ...current, [scope]: stops }));
+    setResolvedIdentityByScope(current => ({ ...current, [scope]: identityKey }));
     if (accountId && routePlanId) writeCache({ version: 2, accountId, routePlanId, teamNumber, scope, run, stops });
-  }, [accountId, routePlanId, teamNumber]);
+  }, [accountId, identityKey, routePlanId, teamNumber]);
 
   const queuePendingInspectionCompletion = useCallback((pending: PendingInspectionRouteCompletion) => {
     setPendingInspectionCompletions(current => {
@@ -156,6 +158,7 @@ export function useRouteStatusRuns({
     const sequence = ++loadSequence.current;
     setRunsByScope({});
     setStopsByScope({ spcc_inspection: [], spcc_plan: [] });
+    setResolvedIdentityByScope({});
     setStateIdentityKey(identityKey);
     setError(null);
     if (!accountId || !routePlanId) return;
@@ -168,6 +171,9 @@ export function useRouteStatusRuns({
     });
     setRunsByScope(cachedRuns);
     setStopsByScope(cachedStops);
+    setResolvedIdentityByScope(Object.fromEntries(
+      SCOPES.filter(scope => Boolean(cachedRuns[scope])).map(scope => [scope, identityKey]),
+    ));
     if (!isOnline) return;
 
     setLoading(true);
@@ -196,6 +202,7 @@ export function useRouteStatusRuns({
       if (sequence !== loadSequence.current) return;
       setRunsByScope(nextRuns);
       setStopsByScope(nextStops);
+      setResolvedIdentityByScope({ spcc_inspection: identityKey, spcc_plan: identityKey });
       setSchemaUnavailable(false);
       SCOPES.forEach(scope => {
         const run = nextRuns[scope];
@@ -260,6 +267,11 @@ export function useRouteStatusRuns({
         return next;
       });
       replacements.forEach((item, domain) => writeCache({ version: 2, accountId, routePlanId, teamNumber, scope: domain, run: item.run, stops: item.stops }));
+      setResolvedIdentityByScope(current => {
+        const next = { ...current };
+        replacements.forEach((_item, domain) => { next[domain] = identityKey; });
+        return next;
+      });
       return response;
     } catch (resetError: unknown) {
       const message = errorDetails(resetError).message ?? 'Unable to reset route status.';
@@ -268,7 +280,7 @@ export function useRouteStatusRuns({
     } finally {
       setResetting(false);
     }
-  }, [accountId, isOnline, routePlanId, teamNumber]);
+  }, [accountId, identityKey, isOnline, routePlanId, teamNumber]);
 
   const startPlanRun = useCallback(async () => {
     if (!accountId || !routePlanId || !isOnline || plannedStops.length === 0) return null;
@@ -441,11 +453,23 @@ export function useRouteStatusRuns({
   const visibleStopsMapByScope = identityMatches
     ? stopsMapByScope
     : { spcc_inspection: new Map<string, RouteStatusRunStop>(), spcc_plan: new Map<string, RouteStatusRunStop>() };
+  // While a saved route's active-run lookup is unresolved, route status must
+  // remain authoritative. Falling back to historical compliance during this
+  // gap briefly paints last year's checks before a reset run hydrates.
+  const authoritativeByScope: Record<RouteStatusScope, boolean> = {
+    spcc_inspection: Boolean(visibleRunsByScope.spcc_inspection) || Boolean(
+      accountId && routePlanId && resolvedIdentityByScope.spcc_inspection !== identityKey
+    ),
+    spcc_plan: Boolean(visibleRunsByScope.spcc_plan) || Boolean(
+      accountId && routePlanId && resolvedIdentityByScope.spcc_plan !== identityKey
+    ),
+  };
 
   return {
     runsByScope: visibleRunsByScope,
     stopsByScope: visibleStopsByScope,
     stopsMapByScope: visibleStopsMapByScope,
+    authoritativeByScope,
     plannedStops, loading, resetting,
     savingFacilityIdByScope, error, schemaUnavailable, isOnline,
     pendingInspectionCompletion, pendingInspectionCompletionCount: pendingInspectionCompletions.length,
