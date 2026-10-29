@@ -11,7 +11,7 @@ import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { getFacilityInspectionExpiry, getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
-import { getRouteStatusRenderModel } from '../utils/routeStatus';
+import { getRouteStatusRenderModel, resolveInspectionDisplayStatus, type InspectionDisplayStatus } from '../utils/routeStatus';
 import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
@@ -707,14 +707,29 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     setFacilitiesWithDistance(sorted);
   }
 
-  function getInspectionStatus(facility: Facility): 'completed' | 'incomplete' | 'expired' | 'draft' {
+  function getInspectionStatus(facility: Facility): InspectionDisplayStatus {
     const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
-    if (isFacilityInspectionCurrent(facility, facilityInspections)) return 'completed';
     const newestCompleted = getNewestCompletedInspection(facilityInspections);
-    const expiry = getFacilityInspectionExpiry(facility, newestCompleted);
-    if (expiry.status === 'expired' || expiry.status === 'expiring' || expiry.status === 'initial_overdue') return 'expired';
-    if (!newestCompleted && !facility.spcc_inspection_date && facilityInspections.some(i => i.status === 'draft')) return 'draft';
-    return 'incomplete';
+    let lifecycleStatus: InspectionDisplayStatus = 'incomplete';
+
+    if (isFacilityInspectionCurrent(facility, facilityInspections)) {
+      lifecycleStatus = 'completed';
+    } else {
+      const expiry = getFacilityInspectionExpiry(facility, newestCompleted);
+      if (expiry.status === 'expired' || expiry.status === 'expiring' || expiry.status === 'initial_overdue') {
+        lifecycleStatus = 'expired';
+      } else if (!newestCompleted && !facility.spcc_inspection_date && facilityInspections.some(i => i.status === 'draft')) {
+        lifecycleStatus = 'draft';
+      }
+    }
+
+    const isCurrentRouteStop = !routeFacilityIds || routeFacilityIds.includes(facility.id);
+    const currentRouteInspectionStop = routeStatusStopsByScope?.spcc_inspection.get(facility.id);
+    const currentRouteStatus = isCurrentRouteStop && routeStatusRunInitialized?.spcc_inspection && currentRouteInspectionStop
+      ? getFacilityRouteRenderModel(facility).routeStatusByDomain.spcc_inspection
+      : undefined;
+
+    return resolveInspectionDisplayStatus(lifecycleStatus, currentRouteStatus);
   }
 
   function getFacilityRouteRenderModel(facility: Facility) {

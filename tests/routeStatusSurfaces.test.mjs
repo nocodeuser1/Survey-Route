@@ -16,6 +16,11 @@ test('all three current-route surfaces consume the shared render model', () => {
   }
 });
 
+test('Survey Mode turns a reset Inspection stop into actionable pending status', () => {
+  assert.match(surveyMode, /resolveInspectionDisplayStatus/);
+  assert.match(surveyMode, /routeStatusByDomain\.spcc_inspection/);
+});
+
 test('initialized domain runs synchronize through the authoritative RPC', () => {
   assert.match(hook, /sync_route_status_run_stops/);
   assert.match(hook, /plannedStopsSignature/);

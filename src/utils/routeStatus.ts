@@ -19,6 +19,25 @@ export interface RouteStatusRenderModel {
   markerRole: 'current-route' | 'off-route';
 }
 
+export type InspectionDisplayStatus = 'completed' | 'incomplete' | 'expired' | 'draft';
+
+/**
+ * A fresh current-route Inspection run is the active work cycle. Historical
+ * compliance remains in History, but a pending stop must look actionable in
+ * Survey Mode instead of continuing to look completed from last year's data.
+ * Preserve an in-progress draft so the user can resume it rather than start a
+ * duplicate inspection.
+ */
+export function resolveInspectionDisplayStatus(
+  lifecycleStatus: InspectionDisplayStatus,
+  currentRouteStatus?: 'completed' | 'pending' | 'legacy',
+): InspectionDisplayStatus {
+  if (currentRouteStatus === 'pending') {
+    return lifecycleStatus === 'draft' ? 'draft' : 'incomplete';
+  }
+  return lifecycleStatus;
+}
+
 const domainStatus = (
   initialized: boolean,
   stop: PlanRouteRunStop | undefined,

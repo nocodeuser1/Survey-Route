@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getRouteStatusRenderModel } from '../src/utils/routeStatus.ts';
+import { getRouteStatusRenderModel, resolveInspectionDisplayStatus } from '../src/utils/routeStatus.ts';
 import { getNewestCompletedInspection, isFacilityInspectionCurrentAt } from '../src/utils/inspectionCompletion.ts';
 
 const pending = { id: 'pending', status: 'pending' };
@@ -18,6 +18,14 @@ test('inspection reset state overrides historical compliance', () => {
   });
   assert.equal(model.showRouteCheck, false);
   assert.equal(model.routeStatusByDomain.spcc_inspection, 'pending');
+  assert.equal(resolveInspectionDisplayStatus('completed', model.routeStatusByDomain.spcc_inspection), 'incomplete');
+  assert.equal(resolveInspectionDisplayStatus('expired', model.routeStatusByDomain.spcc_inspection), 'incomplete');
+});
+
+test('inspection reset preserves a draft and completed route work wins after saving', () => {
+  assert.equal(resolveInspectionDisplayStatus('draft', 'pending'), 'draft');
+  assert.equal(resolveInspectionDisplayStatus('completed', 'completed'), 'completed');
+  assert.equal(resolveInspectionDisplayStatus('expired', 'legacy'), 'expired');
 });
 
 test('legacy compliance remains a fallback before first reset', () => {

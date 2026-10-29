@@ -76,7 +76,11 @@ export default function ResetRouteStatusModal({
               : `${stopCount} current-route stops are affected.`}
           </p>
           <p className="mt-3 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-900/50 dark:text-gray-200">
-            This clears route completion checks and starts fresh route status. Inspection records, SPCC plans, photos, schedules, and route assignments are not changed.
+            {scope === 'spcc_inspection'
+              ? 'Every current-route facility will return to Pending in Survey Mode so you can start a new inspection. Prior inspection records and dates stay in History.'
+              : scope === 'all'
+                ? 'Every current-route facility will start fresh in both status domains. Prior inspection records, SPCC plans, photos, schedules, and route assignments are preserved.'
+                : 'This starts fresh Plan route status. SPCC plans, photos, schedules, route assignments, and inspection history are preserved.'}
           </p>
 
           {(disabledReason || error) && (
