@@ -1041,17 +1041,25 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
   const formContent = (
     <div className="fixed inset-0 bg-white dark:bg-gray-900 flex flex-col overflow-hidden" style={{ zIndex: 99999 }}>
-      <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 z-[101]">
+      <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 pb-3 pt-3 sm:p-4 z-[101]">
         {accountBranding.logo_url && (
-          <div className="flex justify-center mb-4 bg-white dark:bg-gray-800 rounded-lg p-2">
+          <div className="relative flex justify-center mb-3 bg-white dark:bg-gray-800 rounded-lg p-1.5 sm:mb-4 sm:p-2">
+            <button
+              onClick={handleClose}
+              className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-blue-500 hover:bg-blue-50 hover:text-blue-700 active:bg-blue-100 sm:hidden"
+              aria-label="Back"
+              data-testid="inspection-mobile-back-in-brand"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
             <img
               src={accountBranding.logo_url}
               alt="Company Logo"
-              className="h-12 w-auto object-contain"
+              className="h-11 w-auto object-contain sm:h-12"
             />
           </div>
         )}
-        <div className="flex items-center justify-between mb-3">
+        <div className={`${accountBranding.logo_url ? 'hidden sm:flex' : 'flex'} items-center justify-between mb-3`}>
           <button
             onClick={handleClose}
             className="p-2 hover:bg-white/20 rounded-md transition-colors sm:hidden"
