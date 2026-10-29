@@ -1217,6 +1217,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       window.removeEventListener('scroll', computeCoords, true);
     };
   }, [showFilters]);
+
+  useEffect(() => {
+    if (!showFilters) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowFilters(false);
+    };
+    const isMobile = window.matchMedia('(max-width: 639px)').matches;
+    const previousOverflow = document.body.style.overflow;
+
+    window.addEventListener('keydown', handleKeyDown);
+    if (isMobile) document.body.style.overflow = 'hidden';
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (isMobile) document.body.style.overflow = previousOverflow;
+    };
+  }, [showFilters]);
   const [mobileContextMenu, setMobileContextMenu] = useState<{ facilityId: string, x: number, y: number } | null>(null);
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [showSoldFacilities, setShowSoldFacilities] = useState(facPrefs.show_sold_facilities);
@@ -5364,25 +5382,44 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       />
                     </button>
                   )}
-                  {showFilters && (
+                  {showFilters && createPortal(
                     <>
-                      <div
-                        className="fixed inset-0 bg-black/50 sm:bg-transparent z-40"
+                      <button
+                        type="button"
+                        aria-label="Close filters"
+                        className="fixed inset-0 z-[1000000] cursor-default bg-black/50 text-white sm:bg-transparent"
                         onClick={() => setShowFilters(false)}
                       />
                       {/* Desktop/tablet: viewport-anchored with computed
                           maxHeight so the panel never extends past the
                           bottom edge — its own scrollbar is always
-                          reachable. Mobile (<sm): centered modal-style
-                          with 80vh cap, same as before. */}
+                          reachable. Mobile (<sm): bottom sheet with a sticky
+                          close control that stays clear of the app headers. */}
                       <div
-                        className="fixed inset-x-4 top-1/2 -translate-y-1/2 sm:inset-x-auto sm:translate-y-0 sm:left-auto sm:right-auto w-auto sm:w-80 max-h-[80vh] sm:max-h-none overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 z-50 p-3 flex flex-col gap-3"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="facilities-filters-title"
+                        className="fixed inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] z-[1000001] flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-auto flex-col gap-3 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-3 pt-0 shadow-2xl dark:border-gray-600 dark:bg-gray-800 sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-auto sm:w-80 sm:max-h-none sm:rounded-lg sm:shadow-xl"
                         style={filtersDropdownStyle ? {
                           top: filtersDropdownStyle.top,
                           right: filtersDropdownStyle.right,
                           maxHeight: filtersDropdownStyle.maxHeight,
                         } : undefined}
                       >
+                        <div className="sticky top-0 z-10 -mx-3 flex items-center justify-between border-b border-gray-200 bg-white px-3 pb-2 pt-3 dark:border-gray-700 dark:bg-gray-800">
+                          <h3 id="facilities-filters-title" className="text-base font-semibold text-gray-900 dark:text-white">
+                            Filters
+                          </h3>
+                          <button
+                            type="button"
+                            autoFocus
+                            onClick={() => setShowFilters(false)}
+                            aria-label="Close filters"
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
                         {/* Custom-rule builder. Stays at the top of the
                             dropdown — it's the most expressive control and
                             the one the user will reach for when the canned
@@ -5536,7 +5573,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           </div>
                         </button>
                       </div>
-                    </>
+                    </>,
+                    document.body,
                   )}
                 </div>
 
