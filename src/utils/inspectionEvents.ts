@@ -67,6 +67,32 @@ export function releasePhoto(events: InspectionEvent[] | undefined, photoId: str
   return events?.map((event) => (event.photo_ids.includes(photoId) ? { ...event, photo_ids: event.photo_ids.filter((id) => id !== photoId) } : event));
 }
 
+/**
+ * Delete one visible event group and keep numbering contiguous.
+ *
+ * Event 1 is stored in the response's base `comments` field and owns every
+ * photo not claimed by a later event. Deleting it therefore promotes Event 2:
+ * its description becomes the base comments and removing its event record
+ * makes its photos unclaimed, which moves them to Event 1 automatically.
+ * Later events are ordinary array entries, so deleting one simply closes the
+ * numbering gap on the next render.
+ */
+export function deleteInspectionEvent<R extends ResponseWithEvents>(response: R, eventId: string | null): R {
+  const events = response.events ?? [];
+  if (eventId === null) {
+    const [promoted, ...remaining] = events;
+    return {
+      ...response,
+      comments: promoted?.description ?? '',
+      events: remaining,
+    };
+  }
+  return {
+    ...response,
+    events: events.filter((event) => event.id !== eventId),
+  };
+}
+
 /** A cloned report starts a new inspection: keep the words, not the source's photos. */
 export function stripPhotosForClone<R extends ResponseWithEvents & { photos?: unknown[] }>(response: R): R {
   return {

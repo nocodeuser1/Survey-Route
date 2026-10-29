@@ -7,7 +7,7 @@ import { alignResponses, draftStarterName, formatDraftTimestamp, isDeviceBackupN
 import { fetchInspectionTemplate, readCachedInspectionTemplate } from '../utils/inspectionTemplateCache';
 import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
-import { claimPhotosForEvent, createInspectionEvent, groupResponseEvents, releasePhoto, stripPhotosForClone } from '../utils/inspectionEvents';
+import { claimPhotosForEvent, createInspectionEvent, deleteInspectionEvent, groupResponseEvents, releasePhoto, stripPhotosForClone } from '../utils/inspectionEvents';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -569,16 +569,19 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     setHasUnsavedChanges(true);
   };
 
-  const removeEvent = async (questionId: string, eventId: string, photos: InspectionPhoto[]) => {
-    const message = photos.length > 0
-      ? `Remove this event and its ${photos.length} photo${photos.length === 1 ? '' : 's'}?`
-      : 'Remove this event?';
+  const removeEvent = async (questionId: string, eventId: string | null, eventNumber: number, photos: InspectionPhoto[]) => {
+    const response = responses.find(r => r.question_id === questionId);
+    const promotesNext = eventId === null && Boolean(response?.events?.length);
+    const photoText = photos.length > 0
+      ? ` and its ${photos.length} photo${photos.length === 1 ? '' : 's'}`
+      : '';
+    const message = `Delete Event ${eventNumber}${photoText}?${promotesNext ? ' Event 2 will become Event 1.' : ''}`;
     if (!confirm(message)) return;
     for (const photo of photos) {
       if (!(await handlePhotoDelete(questionId, photo, { skipConfirm: true }))) return;
     }
     setResponses(prev => prev.map(r => r.question_id === questionId
-      ? { ...r, events: (r.events ?? []).filter(e => e.id !== eventId) }
+      ? deleteInspectionEvent(r, eventId)
       : r));
     userEditedRef.current = true;
     setHasUnsavedChanges(true);
@@ -1200,16 +1203,15 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                               {numbered && (
                                 <div className="mb-1 flex items-center justify-between">
                                   <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Event {eventIndex + 1}</span>
-                                  {group.eventId && (
-                                    <button
-                                      type="button"
-                                      onClick={() => removeEvent(question.id, group.eventId!, group.photos)}
-                                      className="p-1 text-gray-400 hover:text-red-600 rounded"
-                                      aria-label={`Remove event ${eventIndex + 1}`}
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeEvent(question.id, group.eventId, eventIndex + 1, group.photos)}
+                                    className="p-1 text-gray-400 hover:text-red-600 rounded"
+                                    aria-label={`Delete event ${eventIndex + 1}`}
+                                    title={`Delete Event ${eventIndex + 1}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </div>
                               )}
                               <textarea

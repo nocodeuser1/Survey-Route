@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  groupResponseEvents, reportableEvents, claimPhotosForEvent, releasePhoto, stripPhotosForClone, assignAddedPhotosToEvents,
+  groupResponseEvents, reportableEvents, claimPhotosForEvent, releasePhoto, stripPhotosForClone, assignAddedPhotosToEvents, deleteInspectionEvent,
 } from '../src/utils/inspectionEvents.ts';
 import { escapeHtml } from '../src/utils/escapeHtml.ts';
 
@@ -39,6 +39,36 @@ test('claiming and releasing photos keeps event membership in sync', () => {
   assert.deepEqual(claimed[0].photo_ids, ['p4', 'p5', 'p1']);
   assert.deepEqual(releasePhoto(claimed, 'p5')[0].photo_ids, ['p4', 'p1']);
   assert.equal(releasePhoto(undefined, 'p1'), undefined);
+});
+
+test('deleting event 1 promotes event 2 and keeps its photos with the promoted event', () => {
+  const response = {
+    comments: 'Before cleanup',
+    events: [
+      { id: 'e2', description: 'After cleanup', photo_ids: ['p2'] },
+      { id: 'e3', description: 'Final check', photo_ids: ['p3'] },
+    ],
+  };
+  const next = deleteInspectionEvent(response, null);
+  assert.equal(next.comments, 'After cleanup');
+  assert.deepEqual(next.events, [{ id: 'e3', description: 'Final check', photo_ids: ['p3'] }]);
+  assert.deepEqual(groupResponseEvents(next, photos).map(group => [group.description, group.photos.map(photo => photo.id)]), [
+    ['After cleanup', ['p2', 'p1']],
+    ['Final check', ['p3']],
+  ]);
+});
+
+test('deleting a later event closes the numbering gap without changing the others', () => {
+  const response = {
+    comments: 'Event one',
+    events: [
+      { id: 'e2', description: 'Event two', photo_ids: ['p2'] },
+      { id: 'e3', description: 'Event three', photo_ids: ['p3'] },
+    ],
+  };
+  assert.deepEqual(deleteInspectionEvent(response, 'e2').events, [
+    { id: 'e3', description: 'Event three', photo_ids: ['p3'] },
+  ]);
 });
 
 test('cloning keeps event text but not the source inspection\'s photos', () => {

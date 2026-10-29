@@ -1,6 +1,6 @@
-import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin } from 'lucide-react';
+import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin, Trash2 } from 'lucide-react';
 import { Inspection, Facility, InspectionTemplate, InspectionPhoto, InspectionResponse, supabase } from '../lib/supabase';
-import { groupResponseEvents, reportableEvents, assignAddedPhotosToEvents, releasePhoto } from '../utils/inspectionEvents';
+import { groupResponseEvents, reportableEvents, assignAddedPhotosToEvents, deleteInspectionEvent, releasePhoto } from '../utils/inspectionEvents';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -370,6 +370,27 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       ...prev,
       [questionId]: prev[questionId].filter((_, i) => i !== index)
     }));
+  };
+
+  const handleDeleteEvent = (questionId: string, eventId: string | null, eventNumber: number) => {
+    const response = editedResponses.find(r => r.question_id === questionId);
+    if (!response) return;
+    const eventPhotos = groupResponseEvents(response, photos[questionId] || [])
+      .find(group => group.eventId === eventId)?.photos ?? [];
+    const stagedCount = (newPhotos[questionId] || []).filter(photo => photo.eventId === eventId).length;
+    const photoCount = eventPhotos.length + stagedCount;
+    const promotesNext = eventId === null && Boolean(response.events?.length);
+    const photoText = photoCount > 0 ? ` and its ${photoCount} photo${photoCount === 1 ? '' : 's'}` : '';
+    if (!confirm(`Delete Event ${eventNumber}${photoText}?${promotesNext ? ' Event 2 will become Event 1.' : ''}`)) return;
+
+    for (const photo of eventPhotos) handleRemoveExistingPhoto(photo.id);
+    setNewPhotos(prev => ({
+      ...prev,
+      [questionId]: (prev[questionId] || []).filter(photo => photo.eventId !== eventId),
+    }));
+    setEditedResponses(prev => prev.map(r => r.question_id === questionId
+      ? deleteInspectionEvent(r, eventId)
+      : r));
   };
 
   const handleSaveEdit = async () => {
@@ -786,9 +807,22 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                       ) : (
                         <div className="mt-3 space-y-2">
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">
-                              {response?.events?.length ? 'Event 1:' : 'Comments:'}
-                            </label>
+                            <div className="mb-1 flex items-center justify-between">
+                              <label className="block text-xs font-medium text-gray-600">
+                                {response?.events?.length ? 'Event 1:' : 'Comments:'}
+                              </label>
+                              {response?.events?.length ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteEvent(question.id, null, 1)}
+                                  className="rounded p-1 text-gray-400 hover:text-red-600"
+                                  aria-label="Delete event 1"
+                                  title="Delete Event 1"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                            </div>
                             <textarea
                               value={response?.comments || ''}
                               onChange={(e) => handleResponseChange(question.id, 'comments', e.target.value)}
@@ -798,7 +832,18 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                           </div>
                           {response?.events?.map((event, eventIndex) => (
                             <div key={event.id}>
-                              <label className="block text-xs font-medium text-gray-600 mb-1">Event {eventIndex + 2}:</label>
+                              <div className="mb-1 flex items-center justify-between">
+                                <label className="block text-xs font-medium text-gray-600">Event {eventIndex + 2}:</label>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteEvent(question.id, event.id, eventIndex + 2)}
+                                  className="rounded p-1 text-gray-400 hover:text-red-600"
+                                  aria-label={`Delete event ${eventIndex + 2}`}
+                                  title={`Delete Event ${eventIndex + 2}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
                               <textarea
                                 value={event.description}
                                 onChange={(e) => handleEventChange(question.id, event.id, e.target.value)}

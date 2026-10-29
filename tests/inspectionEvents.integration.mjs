@@ -40,7 +40,7 @@ export const supabase = {
    const rows = () => { const r = raw(table); return Array.isArray(r) ? r.filter(row => filters.every(([k, v]) => !(k in row) || row[k] === v)) : r; };
    const chain = {
    select() { return this }, eq(k, v) { filters.push([k, v]); return this }, in() { return this }, order() { return this }, limit() { return this },
-   update() { return this }, insert() { return this },
+   update() { return this }, insert() { return this }, delete() { return this },
    async single() { const r = rows(); return { data: Array.isArray(r) ? r[0] ?? null : r ?? null, error: null } },
    async maybeSingle() { return this.single() },
    then(resolve, reject) { const r = rows(); return Promise.resolve({ data: Array.isArray(r) ? r : r ? [r] : [], error: null }).then(resolve, reject) },
@@ -49,6 +49,7 @@ export const supabase = {
    async createSignedUrl(path) { return { data: { signedUrl: 'https://signed.test/' + path }, error: null } },
    async createSignedUrls(paths) { return { data: paths.map(p => ({ signedUrl: 'https://signed.test/' + p })), error: null } },
    async download(path) { return path.includes('broken') ? { data: null, error: { message: 'missing' } } : { data: new Blob(['img:' + path], { type: 'image/jpeg' }), error: null } },
+   async remove() { return { data: null, error: null } },
  } } },
 };`;
 await build({stdin:{contents:app,loader:'jsx',resolveDir:root},outfile:join(output,'app.js'),bundle:true,format:'iife',jsx:'automatic',logLevel:'error',plugins:[{name:'mock-services',setup(plugin){
@@ -100,10 +101,17 @@ try {
   assert.deepEqual(labels(), ['Event 1', 'Event 2', 'Event 3']);
   await type(areas()[2], 'After cleanup');
   assert.equal(areas()[2].value, 'After cleanup');
-  doc().querySelector('[aria-label="Remove event 3"]').click();
+  doc().querySelector('[aria-label="Delete event 3"]').click();
   await delay(30);
   assert.deepEqual(labels(), ['Event 1', 'Event 2']);
   results.push('Events can be added, described, and removed');
+
+  doc().querySelector('[aria-label="Delete event 1"]').click();
+  await delay(60);
+  assert.deepEqual(labels(), []);
+  assert.deepEqual(areas().map(a => a.value), ['Pan drained & <re>checked']);
+  assert.deepEqual(badges(), ['1']);
+  results.push('Deleting Event 1 removes its photos, promotes Event 2, and closes the numbering gap');
 
   const completed = { ...draft, status: 'completed', template_id: 't1', inspector_name: 'Jordan Ray', conducted_at: '2026-10-29T10:00:00Z', flagged_items_count: 1, actions_count: 0, signature_data: null };
   await render({ view: 'viewer', completed, rows: { inspection_photos: photoRows, inspection_templates: template, user_settings: null, accounts: {}, account_users: null } });
