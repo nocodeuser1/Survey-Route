@@ -906,27 +906,33 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         updated_at: new Date().toISOString(),
       };
 
-      let savedInspectionId = existingInspection?.id ?? null;
+      let savedInspection: Inspection;
       if (existingInspection) {
         const { data, error } = await supabase
           .from('inspections')
           .update(inspectionData)
           .eq('id', existingInspection.id)
-          .select('id')
+          .select('*')
           .single();
 
         if (error) throw error;
-        savedInspectionId = data.id;
+        savedInspection = data as Inspection;
       } else {
         const { data, error } = await supabase
           .from('inspections')
           .insert(inspectionData)
-          .select('id')
+          .select('*')
           .single();
 
         if (error) throw error;
-        savedInspectionId = data.id;
+        savedInspection = data as Inspection;
       }
+
+      // Link the exact row returned by the write immediately. The old flow
+      // performed a second "find latest draft" request here, leaving the form
+      // stuck with photos and footer actions disabled whenever that lookup
+      // stalled on mobile even though the draft had already been created.
+      setExistingInspection(savedInspection);
 
       // Clear localStorage backup on successful save
       try {
@@ -941,8 +947,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       // Only close the form if status is 'completed'
       // Keep the form open for drafts so users can continue uploading photos
       if (status === 'completed') {
-        if (onInspectionCompletedWithFacility && savedInspectionId) {
-          await onInspectionCompletedWithFacility(facility, savedInspectionId);
+        if (onInspectionCompletedWithFacility) {
+          await onInspectionCompletedWithFacility(facility, savedInspection.id);
         }
         if (onSaved) onSaved();
         if (onClose) onClose();
@@ -950,23 +956,6 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         setLastAutoSave(new Date());
         // For drafts, just show a success message and keep form open
         alert('Draft saved successfully! You can continue uploading photos.');
-        // Optionally refresh the inspection data to get the ID if it was a new inspection
-        if (!existingInspection) {
-          // Reload the inspection to get the newly created ID
-          const { data: newInspection, error: loadError } = await supabase
-            .from('inspections')
-            .select('*')
-            .eq('facility_id', facility.id)
-            .eq('account_id', effectiveAccountId)
-            .eq('status', 'draft')
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (!loadError && newInspection) {
-            setExistingInspection(newInspection);
-          }
-        }
       }
     } catch (err) {
       console.error('[InspectionForm] Error saving inspection:', err);
