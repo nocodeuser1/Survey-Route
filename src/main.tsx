@@ -4,6 +4,7 @@ import { registerServiceWorker } from './lib/registerSW';
 import { initAutoSync } from './lib/syncQueue';
 import ContextualHelpProvider from './components/ContextualHelpProvider';
 import UpdateAvailableBanner from './components/UpdateAvailableBanner';
+import AppErrorBoundary from './components/AppErrorBoundary';
 import 'leaflet/dist/leaflet.css';
 import './index.css';
 
@@ -22,8 +23,10 @@ registerServiceWorker();
 initAutoSync();
 
 createRoot(document.getElementById('root')!).render(
-  <ContextualHelpProvider>
-    <AppRouter />
-    <UpdateAvailableBanner />
-  </ContextualHelpProvider>
+  <AppErrorBoundary>
+    <ContextualHelpProvider>
+      <AppRouter />
+      <UpdateAvailableBanner />
+    </ContextualHelpProvider>
+  </AppErrorBoundary>
 );

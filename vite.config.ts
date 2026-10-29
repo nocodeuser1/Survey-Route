@@ -9,7 +9,11 @@ function stampServiceWorker(): Plugin {
   return {
     name: 'stamp-service-worker',
     apply: 'build',
-    async closeBundle() {
+    // `closeBundle` also runs after a failed Rollup build. In that case the
+    // previous dist/sw.js may still be present and already stamped, which can
+    // mask the real build error with "token is missing". `writeBundle` runs
+    // only after Vite has written the fresh public assets for this build.
+    async writeBundle() {
       const workerPath = resolve(process.cwd(), 'dist/sw.js');
       const workerSource = await readFile(workerPath, 'utf8');
       const buildToken = '__SURVEY_ROUTE_BUILD__';

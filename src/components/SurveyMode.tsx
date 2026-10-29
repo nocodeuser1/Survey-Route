@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera } from 'lucide-react';
+import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera, CheckCircle } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { Facility, Inspection, PlanRouteRunStop, RouteStatusScope, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
@@ -340,7 +340,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     // left the list permanently empty — in the field that reads as "this
     // account has no sites", and the empty state blamed the user's filters.
     updateFacilitiesWithDistance();
-  }, [currentPosition, facilities, result, inspections, routeFacilityIds, showOffRoute]);
+  }, [currentPosition, facilities, result, inspections, routeFacilityIds, showOffRoute, sortBy, teamNumber]);
 
   // Refresh plan rows whenever the parent's facility list changes (e.g.
   // switching accounts or saving a new route). Skipped on initial mount —
