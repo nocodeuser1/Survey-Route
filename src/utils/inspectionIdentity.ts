@@ -25,3 +25,24 @@ export function resolveInspectionIdentity(
     inspectorEmail: normalized.inspectionEmail,
   };
 }
+
+interface StoredAuthorship {
+  inspector_name?: string | null;
+  inspector_email?: string | null;
+}
+
+/**
+ * Name and email written on a save. Drafts are shared across the workspace:
+ * while anyone edits one it keeps the name of whoever started it, so others
+ * can see whose draft it is. Submitting always records the submitter, who
+ * signs it, never the person who started the draft.
+ */
+export function inspectionAuthorship(
+  status: 'draft' | 'completed',
+  me: { inspectorName: string; inspectorEmail: string | null },
+  existingDraft?: StoredAuthorship | null,
+) {
+  const starter = existingDraft?.inspector_name?.trim();
+  if (status === 'completed' || !starter || starter === 'Draft') return me;
+  return { inspectorName: starter, inspectorEmail: existingDraft?.inspector_email ?? null };
+}

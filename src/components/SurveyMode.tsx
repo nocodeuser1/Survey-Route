@@ -16,7 +16,7 @@ import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
 import { getCoords } from '../utils/coordinates';
-import { pickLatestDraft } from '../utils/inspectionDraft';
+import { draftStarterName, formatDraftTimestamp, pickLatestDraft } from '../utils/inspectionDraft';
 import { prefetchInspectionTemplate } from '../utils/inspectionTemplateCache';
 
 const COLORS = [
@@ -1326,6 +1326,16 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                   Expired
                                 </span>
                               )}
+                              {status === 'draft' && (() => {
+                                const draft = pickLatestDraft(inspections, facility.id);
+                                const starter = draft ? draftStarterName(draft) : null;
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
+                                    <FileText className="w-2.5 h-2.5" />
+                                    {starter ? `Draft · ${starter}` : 'Draft'}
+                                  </span>
+                                );
+                              })()}
                               {status === 'incomplete' && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200">
                                   <Clock className="w-2.5 h-2.5" />
@@ -1579,24 +1589,34 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                     <span className="text-xs font-semibold text-gray-900 dark:text-white">
                                       {new Date(inspection.conducted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
                                     </span>
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isInspectionValid(inspection)
-                                      ? 'bg-green-100 text-green-700'
-                                      : 'bg-red-100 text-red-700'
-                                      }`}>
-                                      {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
-                                    </span>
+                                    {inspection.status === 'draft' ? (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-yellow-100 text-yellow-800">Draft</span>
+                                    ) : (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isInspectionValid(inspection)
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-red-100 text-red-700'
+                                        }`}>
+                                        {isInspectionValid(inspection) ? 'Valid' : 'Expired'}
+                                      </span>
+                                    )}
                                   </div>
-                                  {inspection.inspector_name && (
+                                  {inspection.status === 'draft' ? (
+                                    // Shared with the whole workspace; anyone can finish and sign it.
+                                    <p className="text-[10px] text-gray-500 mt-0.5">
+                                      Started by {draftStarterName(inspection) ?? 'a teammate'} · {formatDraftTimestamp(inspection.created_at)}
+                                    </p>
+                                  ) : inspection.inspector_name && (
                                     <p className="text-[10px] text-gray-500 mt-0.5">By {inspection.inspector_name}</p>
                                   )}
                                 </div>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setViewingInspection(inspection);
+                                    if (inspection.status === 'draft') setInspectingFacility(facility);
+                                    else setViewingInspection(inspection);
                                   }}
                                   className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                  title="View"
+                                  title={inspection.status === 'draft' ? 'Continue draft' : 'View'}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>

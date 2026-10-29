@@ -39,3 +39,18 @@ test('identity migration is additive and does not rewrite historical records', (
   assert.match(migration, /ADD COLUMN IF NOT EXISTS inspector_email/i);
   assert.doesNotMatch(migration, /\b(?:DELETE|TRUNCATE|DROP|UPDATE)\b/i);
 });
+
+import { inspectionAuthorship } from '../src/utils/inspectionIdentity.ts';
+
+test('a shared draft keeps the name of whoever started it while others edit', () => {
+  const me = { inspectorName: 'Jordan Ray', inspectorEmail: 'jordan@example.test' };
+  const draft = { inspector_name: 'Sam Lee', inspector_email: 'sam@example.test' };
+  assert.deepEqual(inspectionAuthorship('draft', me, draft), { inspectorName: 'Sam Lee', inspectorEmail: 'sam@example.test' });
+  assert.deepEqual(inspectionAuthorship('draft', me, null), me);
+  assert.deepEqual(inspectionAuthorship('draft', me, { inspector_name: 'Draft' }), me);
+});
+
+test('submitting someone else\'s draft records the submitter, not the starter', () => {
+  const me = { inspectorName: 'Jordan Ray', inspectorEmail: 'jordan@example.test' };
+  assert.deepEqual(inspectionAuthorship('completed', me, { inspector_name: 'Sam Lee', inspector_email: 'sam@example.test' }), me);
+});

@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
-import { resolveInspectionIdentity } from '../utils/inspectionIdentity';
-import { alignResponses, formatDraftTimestamp, isDeviceBackupNewer } from '../utils/inspectionDraft';
+import { inspectionAuthorship, resolveInspectionIdentity } from '../utils/inspectionIdentity';
+import { alignResponses, draftStarterName, formatDraftTimestamp, isDeviceBackupNewer } from '../utils/inspectionDraft';
 import { fetchInspectionTemplate, readCachedInspectionTemplate } from '../utils/inspectionTemplateCache';
 import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
@@ -97,6 +97,7 @@ function readDeviceBackup(key: string): DeviceBackup | null {
 
 /** Slender banner content: when the opened draft was started and last saved. */
 interface OpenedDraft {
+  startedBy: string | null;
   startedAt: string | null;
   savedAt: string;
   deviceOnly: boolean;
@@ -109,14 +110,14 @@ function chooseOpening(
   backup: DeviceBackup | null,
 ): { responses: InspectionResponse[] | null; draft: Inspection | null; unsaved: boolean; shownAt: number; opened: OpenedDraft | null } {
   if (clonedResponses) return { responses: clonedResponses, draft, unsaved: true, shownAt: Infinity, opened: null };
-  const opened = draft ? { startedAt: draft.created_at, savedAt: draft.updated_at, deviceOnly: false } : null;
+  const opened = draft ? { startedBy: draftStarterName(draft), startedAt: draft.created_at, savedAt: draft.updated_at, deviceOnly: false } : null;
   if (backup && isDeviceBackupNewer(backup.timestamp, draft?.updated_at)) {
     return {
       responses: backup.responses,
       draft,
       unsaved: true,
       shownAt: new Date(backup.timestamp).getTime(),
-      opened: opened ?? { startedAt: null, savedAt: backup.timestamp, deviceOnly: true },
+      opened: opened ?? { startedBy: null, startedAt: null, savedAt: backup.timestamp, deviceOnly: true },
     };
   }
   if (draft) return { responses: draft.responses, draft, unsaved: false, shownAt: new Date(draft.updated_at).getTime(), opened };
@@ -366,10 +367,10 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         shownAtRef.current = serverSavedAt;
         applyResponses(data.responses);
         setHasUnsavedChanges(false);
-        setOpenedDraft({ startedAt: data.created_at, savedAt: data.updated_at, deviceOnly: false });
+        setOpenedDraft({ startedBy: draftStarterName(data), startedAt: data.created_at, savedAt: data.updated_at, deviceOnly: false });
         localStorage.removeItem(localStorageKey);
       } else if (!clonedResponses) {
-        setOpenedDraft(prev => prev && { ...prev, startedAt: data.created_at, deviceOnly: false });
+        setOpenedDraft(prev => prev && { ...prev, startedBy: draftStarterName(data), startedAt: data.created_at, deviceOnly: false });
       }
       setExistingInspection(data);
     } catch (err) {
@@ -408,10 +409,10 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       const { flaggedCount, actionsCount } = calculateCounts();
       const effectiveAccountId = accountId || userId;
 
-      const resolvedIdentity = resolveInspectionIdentity(
-        inspectionIdentity,
-        signature?.signature_name,
-        existingInspection?.inspector_name,
+      const resolvedIdentity = inspectionAuthorship(
+        'draft',
+        resolveInspectionIdentity(inspectionIdentity, signature?.signature_name),
+        existingInspection,
       );
       const inspectionData = {
         facility_id: facility.id,
@@ -747,10 +748,11 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       const actionsCount = responsesToSave.filter(r => r.action_required).length;
 
       const effectiveAccountId = accountId || userId;
-      const resolvedIdentity = resolveInspectionIdentity(
-        inspectionIdentity,
-        signature?.signature_name,
-        existingInspection?.inspector_name,
+      // Whoever submits signs it and is the inspector of record.
+      const resolvedIdentity = inspectionAuthorship(
+        status,
+        resolveInspectionIdentity(inspectionIdentity, signature?.signature_name),
+        existingInspection,
       );
       const inspectionData = {
         facility_id: facility.id,
@@ -1007,7 +1009,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           </div>
           <div className="text-right text-sm">
             <p className="font-semibold">
-              {resolveInspectionIdentity(inspectionIdentity, signature?.signature_name, existingInspection?.inspector_name).inspectorName}
+              {resolveInspectionIdentity(inspectionIdentity, signature?.signature_name).inspectorName}
             </p>
             <p className="text-blue-100">{new Date().toLocaleDateString()}</p>
           </div>
@@ -1042,7 +1044,11 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           <span className="truncate">
             {openedDraft.deviceOnly
               ? `Unsaved answers restored from this device · ${formatDraftTimestamp(openedDraft.savedAt)}`
-              : `${openedDraft.startedAt ? `Draft started ${formatDraftTimestamp(openedDraft.startedAt)} · ` : 'Draft · '}Last saved ${formatDraftTimestamp(lastAutoSave ?? openedDraft.savedAt)}`}
+              : [
+                  openedDraft.startedBy ? `Started by ${openedDraft.startedBy}` : 'Draft started',
+                  openedDraft.startedAt ? formatDraftTimestamp(openedDraft.startedAt) : null,
+                  `Last saved ${formatDraftTimestamp(lastAutoSave ?? openedDraft.savedAt)}`,
+                ].filter(Boolean).join(' · ')}
           </span>
         </div>
       )}

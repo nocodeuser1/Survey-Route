@@ -71,3 +71,9 @@ export function formatDraftTimestamp(value: string | Date, now: Date = new Date(
   });
   return `${day}, ${clock}`;
 }
+
+/** Who started a shared draft; its stored name stays theirs until submitted. */
+export function draftStarterName(draft: { inspector_name?: string | null }): string | null {
+  const name = draft.inspector_name?.trim();
+  return name && name !== 'Draft' ? name : null;
+}

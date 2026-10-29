@@ -62,6 +62,7 @@ import { useAuth } from '../contexts/AuthContext';
 import SiteVisitChecklist from './SiteVisitChecklist';
 import { useAccount } from '../contexts/AccountContext';
 import { prefetchInspectionTemplate } from '../utils/inspectionTemplateCache';
+import { draftStarterName, formatDraftTimestamp } from '../utils/inspectionDraft';
 
 interface FacilityDetailModalProps {
   facility: Facility;
@@ -1554,9 +1555,17 @@ export default function FacilityDetailModal({
                     {new Date(inspection.conducted_at).toLocaleDateString()} at{' '}
                     {formatTimeTo12Hour(new Date(inspection.conducted_at).toTimeString().slice(0, 5))}
                   </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                    Inspector: {inspection.inspector_name}
-                  </p>
+                  {inspection.status === 'draft' ? (
+                    // Drafts are shared; whoever submits signs as the inspector.
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                      Started by {draftStarterName(inspection) ?? 'a teammate'} · {formatDraftTimestamp(inspection.created_at)}
+                      {' · '}Last saved {formatDraftTimestamp(inspection.updated_at)}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                      Inspector: {inspection.inspector_name}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col sm:flex-row items-end gap-2">
                   {inspection.signature_data && (
