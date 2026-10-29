@@ -413,11 +413,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showUpload, setShowUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(facPrefs.search_query || '');
-  const [statusFilters, setStatusFilters] = useState<string[]>(() => {
-    const stored = (facPrefs.status_filter as string) || 'all';
-    if (!stored || stored === 'all') return [];
-    try { const p = JSON.parse(stored); return Array.isArray(p) ? p : [stored]; } catch { return [stored]; }
-  });
+  // Mode-scoped filters (status, the plan overdue/current chip, the report
+  // type refinement) are not restored on load. They belong to the mode they
+  // were picked in, and restoring them opened the app on an empty "0/25"
+  // list — on mobile with no visible chip — until the user toggled modes,
+  // which is what clears them. Landing in a mode now matches entering it.
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [sortColumn, setSortColumn] = useState<ColumnId | null>((facPrefs.sort_column as ColumnId) || 'name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(facPrefs.sort_direction);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
@@ -492,9 +493,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // arrive or the global type changes. Only writes the INTERNAL state (never
   // calls onGlobalSurveyTypeChange) so it can't fight a user's manual tab
   // click — after a click globalSurveyType already matches and this no-ops.
+  //
+  // A real change here means the mode was switched somewhere other than this
+  // toggle (Route Planning, Survey Mode). Drop the previous mode's filters the
+  // same way setSpccMode does; otherwise e.g. an Inspections status filter
+  // carries into Plans, where it matches nothing and empties the list.
   useEffect(() => {
     const resolved = resolveSpccMode(globalSurveyType, surveyTypes);
-    setSpccModeInternal((prev) => (prev === resolved ? prev : resolved));
+    if (resolved === spccMode) return;
+    setSpccModeInternal(resolved);
+    setSelectedReportType(resolved === 'plan' ? 'spcc_plan' : resolved === 'inspection' ? 'spcc_inspection' : 'all');
+    setStatusFilters([]);
+    setSpccPlanFilter('all');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSurveyType, surveyTypes]);
 
@@ -1312,7 +1322,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showNotesSymbols, setShowNotesSymbols] = useState(false);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
-  const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>((facPrefs.spcc_plan_filter as 'all' | 'overdue' | 'current') || 'all');
+  const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>('all');
   // LDAR Site Plan filter (in the Filters menu). Session-local, not persisted.
   //  - 'all'      → no LDAR constraint
   //  - 'required' → all Quad Ob sites (IP date after the cutoff), whether or
@@ -1549,35 +1559,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return () => observer.disconnect();
   }, [tableContainerRef.current]); // Re-run if ref changes (e.g. initial render)
 
-  useEffect(() => {
-    const loadReportTypePreference = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('user_settings')
-          .select('selected_report_type')
-          .eq('account_id', accountId)
-          .maybeSingle();
-
-        if (error) throw error;
-        if (data?.selected_report_type) {
-          setSelectedReportType(data.selected_report_type);
-        } else {
-          // No saved preference — default to 'all' so a brand-new
-          // account opens with every facility visible. We don't auto-
-          // persist anything; the row only picks up a value once the
-          // user actually picks a report type via the Filters dropdown.
-          // (Older builds auto-saved 'spcc_inspection_internal' here,
-          // which hid every facility on accounts with no inspections.)
-          setSelectedReportType('all');
-        }
-      } catch (err) {
-        console.error('Error loading report type preference:', err);
-      }
-    };
-
-    loadReportTypePreference();
-  }, [accountId]);
-
   // Handle initial facility to edit from parent component (e.g., when clicking edit from map)
   useEffect(() => {
     if (initialFacilityToEdit) {
@@ -1613,7 +1594,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     setStatusFilters(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
   };
 
-  const handleReportTypeChange = async (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
+  const handleReportTypeChange = (reportType: 'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external') => {
     userChangedMode.current = true;
 
     // Auto-switch app-wide mode based on report type filter — but ONLY when the
@@ -1638,22 +1619,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // reset-to-default (literal-value setters: the final write in the batch
     // wins) when a mode switch did happen.
     setSelectedReportType(reportType);
-
-    try {
-      const { error } = await supabase
-        .from('user_settings')
-        .upsert({
-          account_id: accountId,
-          user_id: userId,
-          selected_report_type: reportType
-        }, {
-          onConflict: 'account_id'
-        });
-
-      if (error) throw error;
-    } catch (err) {
-      console.error('Error saving report type preference:', err);
-    }
   };
 
   useEffect(() => {
@@ -1705,12 +1670,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   useEffect(() => {
     updateFacPrefs({
       search_query: searchQuery,
-      status_filter: statusFilters.length > 0 ? JSON.stringify(statusFilters) : 'all',
-      spcc_plan_filter: spccPlanFilter,
       show_sold_facilities: showSoldFacilities,
       custom_filter_rules: customFilterRules,
     });
-  }, [searchQuery, statusFilters, spccPlanFilter, showSoldFacilities, customFilterRules]);
+  }, [searchQuery, showSoldFacilities, customFilterRules]);
 
   // Close edit modal on Escape key
   useEffect(() => {
