@@ -1,6 +1,30 @@
 import { useState, useEffect } from 'react';
 import { Download, X, FileText } from 'lucide-react';
-import { supabase, Facility, Inspection } from '../lib/supabase';
+import { supabase, Facility, Inspection, InspectionPhoto } from '../lib/supabase';
+import { buildSurveysExportHtml, type ExportQuestion } from '../utils/surveyExportHtml';
+
+/** Same approach as InspectionReportExport: embed photos so the file works offline. */
+async function loadPhotoDataUrl(photoUrl: string | null): Promise<string> {
+  if (!photoUrl) return '';
+  if (photoUrl.startsWith('data:')) return photoUrl;
+  try {
+    const storagePath = photoUrl.replace(/^.*\/inspection-photos\//, '');
+    const { data: blob, error } = await supabase.storage.from('inspection-photos').download(storagePath);
+    if (error || !blob) {
+      console.warn('[ExportSurveys] Failed to load photo:', storagePath, error);
+      return '';
+    }
+    return await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.warn('[ExportSurveys] Error loading photo:', err);
+    return '';
+  }
+}
 
 interface ExportSurveysProps {
   facilityIds: string[];
@@ -21,6 +45,7 @@ export default function ExportSurveys({
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     loadInspections();
@@ -63,7 +88,7 @@ export default function ExportSurveys({
     });
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const filteredInspections = getFilteredInspections();
 
     if (filteredInspections.length === 0) {
@@ -71,92 +96,61 @@ export default function ExportSurveys({
       return;
     }
 
-    // Generate HTML report for all selected inspections
-    let htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Inspection Reports - ${selectedYear === 'all' ? 'All Years' : selectedYear}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .inspection-report { page-break-after: always; margin-bottom: 40px; border: 1px solid #ddd; padding: 20px; }
-          .header { text-align: center; margin-bottom: 20px; }
-          .section { margin: 20px 0; }
-          .section-title { font-weight: bold; font-size: 14px; margin-bottom: 10px; color: #333; }
-          .item { margin: 10px 0; padding: 10px; border-left: 3px solid #ddd; }
-          .compliant { border-left-color: #10b981; }
-          .non-compliant { border-left-color: #ef4444; }
-          .signature { margin-top: 30px; border-top: 1px solid #000; padding-top: 10px; }
-          table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-          td { padding: 5px; }
-        </style>
-      </head>
-      <body>
-    `;
+    setExporting(true);
+    try {
+      const [templateResult, photosResult] = await Promise.all([
+        supabase
+          .from('inspection_templates')
+          .select('*')
+          .eq('name', 'SPCC Inspection')
+          .maybeSingle(),
+        supabase
+          .from('inspection_photos')
+          .select('*')
+          .in('inspection_id', filteredInspections.map(i => i.id))
+          .order('created_at', { ascending: false }),
+      ]);
+      if (templateResult.error) throw templateResult.error;
+      if (photosResult.error) throw photosResult.error;
 
-    filteredInspections.forEach((inspection, index) => {
-      const facility = facilities.find(f => f.id === inspection.facility_id);
-      if (!facility) return;
+      const questions = (templateResult.data?.questions || []) as ExportQuestion[];
+      const loadedPhotos = await Promise.all(((photosResult.data || []) as InspectionPhoto[]).map(async (photo) => ({
+        ...photo,
+        photo_url: await loadPhotoDataUrl(photo.photo_url),
+      })));
+      // Photos that failed to download are left out rather than printed broken.
+      const photosByInspection = new Map<string, InspectionPhoto[]>();
+      for (const photo of loadedPhotos) {
+        if (!photo.photo_url) continue;
+        photosByInspection.set(photo.inspection_id, [...(photosByInspection.get(photo.inspection_id) || []), photo]);
+      }
 
-      const conductedDate = new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
-      const items = inspection.inspection_items || [];
+      const htmlContent = buildSurveysExportHtml({
+        title: `Inspection Reports - ${selectedYear === 'all' ? 'All Years' : selectedYear}`,
+        inspections: filteredInspections,
+        facilities,
+        questions,
+        photosByInspection,
+      });
 
-      htmlContent += `
-        <div class="inspection-report">
-          <div class="header">
-            <h1>SPCC Inspection Report</h1>
-            <h2>${facility.name}</h2>
-            <p>${facility.address || 'No address provided'}</p>
-            <p>Inspection Date: ${conductedDate}</p>
-          </div>
+      // Create blob and download
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Inspection_Reports_${selectedYear}_${new Date().toISOString().split('T')[0]}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
-          <div class="section">
-            <div class="section-title">Facility Information</div>
-            <table>
-              <tr><td><strong>Name:</strong></td><td>${facility.name}</td></tr>
-              <tr><td><strong>Address:</strong></td><td>${facility.address || 'N/A'}</td></tr>
-              <tr><td><strong>Coordinates:</strong></td><td>${facility.latitude}, ${facility.longitude}</td></tr>
-            </table>
-          </div>
-
-          <div class="section">
-            <div class="section-title">Inspection Items</div>
-            ${items.map(item => `
-              <div class="item ${item.compliant ? 'compliant' : 'non-compliant'}">
-                <strong>${item.item_number}. ${item.description}</strong><br>
-                Status: <strong>${item.compliant ? 'Compliant' : 'Non-Compliant'}</strong>
-                ${item.notes ? `<br>Notes: ${item.notes}` : ''}
-                ${item.requires_action ? '<br><em>Action Required</em>' : ''}
-              </div>
-            `).join('')}
-          </div>
-
-          ${inspection.inspector_signature ? `
-            <div class="signature">
-              <p><strong>Inspector Signature:</strong></p>
-              <img src="${inspection.inspector_signature}" style="max-width: 160px; max-height: 80px;" />
-              <p>Date: ${conductedDate}</p>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    });
-
-    htmlContent += '</body></html>';
-
-    // Create blob and download
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Inspection_Reports_${selectedYear}_${new Date().toISOString().split('T')[0]}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    onClose();
+      onClose();
+    } catch (err) {
+      console.error('Error exporting inspections:', err);
+      alert('Failed to export inspection reports. Please try again.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const filteredInspections = getFilteredInspections();
@@ -232,11 +226,13 @@ export default function ExportSurveys({
 
                   <button
                     onClick={handleExport}
-                    disabled={filteredInspections.length === 0}
+                    disabled={filteredInspections.length === 0 || exporting}
                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
                   >
                     <Download className="w-5 h-5" />
-                    Export {filteredInspections.length} {filteredInspections.length === 1 ? 'Report' : 'Reports'} (HTML)
+                    {exporting
+                      ? 'Preparing reports...'
+                      : `Export ${filteredInspections.length} ${filteredInspections.length === 1 ? 'Report' : 'Reports'} (HTML)`}
                   </button>
                   <p className="text-xs text-gray-600 mt-2 text-center">
                     Download as HTML file, then open in browser and print to PDF

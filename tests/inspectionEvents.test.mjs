@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  groupResponseEvents, reportableEvents, claimPhotosForEvent, releasePhoto, stripPhotosForClone,
+  groupResponseEvents, reportableEvents, claimPhotosForEvent, releasePhoto, stripPhotosForClone, assignAddedPhotosToEvents,
 } from '../src/utils/inspectionEvents.ts';
 import { escapeHtml } from '../src/utils/escapeHtml.ts';
 
@@ -50,4 +50,22 @@ test('cloning keeps event text but not the source inspection\'s photos', () => {
 test('report text is escaped before going into generated HTML', () => {
   assert.equal(escapeHtml('Tank <A> & "B"'), 'Tank &lt;A&gt; &amp; &quot;B&quot;');
   assert.equal(escapeHtml(null), '');
+});
+
+test('photos added in admin edit go to the chosen event; event 1 and unknown events stay unclaimed', () => {
+  const responses = [
+    { question_id: 'q1', comments: 'Leak', events: [{ id: 'e2', description: 'Fix', photo_ids: ['p1'] }] },
+    { question_id: 'q2', comments: '' },
+  ];
+  const out = assignAddedPhotosToEvents(responses, [
+    { questionId: 'q1', eventId: 'e2', photoId: 'n1' },
+    { questionId: 'q1', eventId: 'e2', photoId: 'n2' },
+    { questionId: 'q1', eventId: null, photoId: 'n3' },
+    { questionId: 'q1', eventId: 'gone', photoId: 'n4' },
+    { questionId: 'q2', eventId: null, photoId: 'n5' },
+  ]);
+  assert.deepEqual(out[0].events[0].photo_ids, ['n2', 'n1', 'p1']);
+  assert.equal(out[1], responses[1]);
+  const groups = groupResponseEvents(out[0], [{ id: 'n4' }, { id: 'n3' }, { id: 'n2' }, { id: 'n1' }, { id: 'p1' }]);
+  assert.deepEqual(groups.map(g => g.photos.map(p => p.id)), [['n4', 'n3'], ['n2', 'n1', 'p1']]);
 });

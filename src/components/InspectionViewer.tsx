@@ -1,6 +1,6 @@
 import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin } from 'lucide-react';
 import { Inspection, Facility, InspectionTemplate, InspectionPhoto, InspectionResponse, supabase } from '../lib/supabase';
-import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
+import { groupResponseEvents, reportableEvents, assignAddedPhotosToEvents, releasePhoto } from '../utils/inspectionEvents';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -100,7 +100,8 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [localInspection, setLocalInspection] = useState<Inspection>(inspection);
   const [photosToDelete, setPhotosToDelete] = useState<string[]>([]);
-  const [newPhotos, setNewPhotos] = useState<Record<string, File[]>>({});
+  // New photos per question, each aimed at an event (null = event 1).
+  const [newPhotos, setNewPhotos] = useState<Record<string, { file: File; eventId: string | null }[]>>({});
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const conductedDate = new Date(getDisplayTimestamp(localInspection));
 
@@ -317,6 +318,11 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
     if (confirm('Are you sure you want to cancel? All changes will be lost.')) {
       setIsEditMode(false);
       setEditedResponses([]);
+      setNewPhotos({});
+      if (photosToDelete.length > 0) {
+        setPhotosToDelete([]);
+        loadPhotos();
+      }
     }
   };
 
@@ -338,16 +344,18 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
     );
   };
 
-  const handleAddPhotos = (questionId: string, files: FileList) => {
-    const fileArray = Array.from(files);
+  const handleAddPhotos = (questionId: string, files: FileList, eventId: string | null = null) => {
+    const added = Array.from(files).map(file => ({ file, eventId }));
     setNewPhotos(prev => ({
       ...prev,
-      [questionId]: [...(prev[questionId] || []), ...fileArray]
+      [questionId]: [...(prev[questionId] || []), ...added]
     }));
   };
 
   const handleRemoveExistingPhoto = (photoId: string) => {
     setPhotosToDelete(prev => [...prev, photoId]);
+    // A deleted photo must not stay claimed by an event.
+    setEditedResponses(prev => prev.map(r => (r.events?.length ? { ...r, events: releasePhoto(r.events, photoId) } : r)));
     setPhotos(prev => {
       const updated = { ...prev };
       Object.keys(updated).forEach(questionId => {
@@ -391,8 +399,9 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           .eq('id', photoId);
       }
 
-      for (const [questionId, files] of Object.entries(newPhotos)) {
-        for (const file of files) {
+      const addedPhotos: { questionId: string; eventId: string | null; photoId: string }[] = [];
+      for (const [questionId, additions] of Object.entries(newPhotos)) {
+        for (const { file, eventId } of additions) {
           const fileExt = file.name.split('.').pop();
           const fileName = `${inspection.id}/${questionId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
@@ -402,7 +411,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
           if (uploadError) throw uploadError;
 
-          const { error: dbError } = await supabase
+          const { data: insertedPhoto, error: dbError } = await supabase
             .from('inspection_photos')
             .insert({
               inspection_id: inspection.id,
@@ -411,27 +420,33 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
               file_name: file.name,
               // file_size is NOT NULL; there is no uploaded_by column.
               file_size: file.size,
-            });
+            })
+            .select('id')
+            .single();
 
           if (dbError) throw dbError;
+          if (insertedPhoto?.id) addedPhotos.push({ questionId, eventId, photoId: insertedPhoto.id });
         }
       }
 
-      const flaggedCount = editedResponses.filter(r => r.answer === 'no').length;
-      const actionsCount = editedResponses.filter(r => r.answer === 'no' && r.action_required).length;
+      // Photos added to a later event are claimed by it; event 1 needs nothing.
+      const savedResponses = assignAddedPhotosToEvents(editedResponses, addedPhotos);
+
+      const flaggedCount = savedResponses.filter(r => r.answer === 'no').length;
+      const actionsCount = savedResponses.filter(r => r.answer === 'no' && r.action_required).length;
 
       const changes = {
         before: localInspection.responses,
-        after: editedResponses,
+        after: savedResponses,
         timestamp: new Date().toISOString(),
         photosDeleted: photosToDelete.length,
-        photosAdded: Object.values(newPhotos).reduce((sum, files) => sum + files.length, 0)
+        photosAdded: Object.values(newPhotos).reduce((sum, additions) => sum + additions.length, 0)
       };
 
       const { error: inspectionError } = await supabase
         .from('inspections')
         .update({
-          responses: editedResponses,
+          responses: savedResponses,
           flagged_items_count: flaggedCount,
           actions_count: actionsCount,
           last_edited_by: userId,
@@ -453,9 +468,10 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
       if (auditError) throw auditError;
 
+      setEditedResponses(savedResponses);
       setLocalInspection({
         ...localInspection,
-        responses: editedResponses,
+        responses: savedResponses,
         flagged_items_count: flaggedCount,
         actions_count: actionsCount,
         last_edited_by: userId,
@@ -855,13 +871,18 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                                 )}
                               </div>
                             ))}
-                            {isEditMode && newPhotos[question.id]?.map((file, index) => (
-                              <div key={`new-${index}`} className="relative group">
+                            {isEditMode && newPhotos[question.id]?.map(({ file, eventId }, index) => (
+                              <div key={`new-${index}`} className="relative group" data-new-photo-event={eventId ?? 'event-1'}>
                                 <div className="w-full h-24 bg-gray-100 rounded-md border-2 border-dashed border-blue-400 flex flex-col items-center justify-center p-2">
                                   <ImageIcon className="w-6 h-6 text-blue-600 mb-1" />
                                   <span className="text-xs text-gray-700 text-center truncate w-full px-1">
                                     {file.name}
                                   </span>
+                                  {response?.events?.length ? (
+                                    <span className="text-[10px] font-semibold text-blue-700">
+                                      Event {eventId ? (response.events.findIndex(e => e.id === eventId) + 2) : 1}
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <button
                                   onClick={(e) => {
@@ -880,18 +901,30 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                       )}
 
                       {isEditMode && (
-                        <div className="mt-3">
-                          <label className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded cursor-pointer hover:bg-blue-100 transition-colors border border-blue-200">
-                            <ImageIcon className="w-4 h-4" />
-                            <span className="text-sm font-medium">Add Photos</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={(e) => e.target.files && handleAddPhotos(question.id, e.target.files)}
-                              className="hidden"
-                            />
-                          </label>
+                        // One Add Photos control per event; a question without
+                        // events keeps the single control (photos go to event 1).
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {[null, ...(response?.events ?? []).map(e => e.id)].map((eventId, eventIndex) => (
+                            <label
+                              key={eventId ?? 'event-1'}
+                              className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded cursor-pointer hover:bg-blue-100 transition-colors border border-blue-200"
+                            >
+                              <ImageIcon className="w-4 h-4" />
+                              <span className="text-sm font-medium">
+                                {response?.events?.length ? `Add Photos to Event ${eventIndex + 1}` : 'Add Photos'}
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                onChange={(e) => {
+                                  if (e.target.files) handleAddPhotos(question.id, e.target.files, eventId);
+                                  e.target.value = '';
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+                          ))}
                         </div>
                       )}
                     </div>

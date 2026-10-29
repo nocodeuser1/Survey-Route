@@ -17,6 +17,7 @@ import {
   NotificationPreferences,
 } from '../lib/supabase';
 import JSZip from 'jszip';
+import { remapResponsePhotoIds } from '../utils/restorePhotoIds';
 
 interface DataBackupProps {
   accountId: string;
@@ -295,6 +296,8 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
 
       const facilityIdMap = new Map<string, string>();
       const inspectionIdMap = new Map<string, string>();
+      // Restored photos get new ids; events reference photos by id.
+      const photoIdMap = new Map<string, string>();
 
       setRestoreProgress({ current: 0, total: backupData.facilities.length, stage: 'Restoring facilities...' });
       for (let i = 0; i < backupData.facilities.length; i++) {
@@ -393,24 +396,47 @@ export default function DataBackup({ accountId, facilities, onFacilitiesChange }
                 continue;
               }
 
-              const { error: insertError } = await supabase
+              const { data: newPhoto, error: insertError } = await supabase
                 .from('inspection_photos')
                 .insert({
                   inspection_id: newInspectionId,
                   question_id: photo.question_id,
                   photo_url: newStoragePath,
                   file_name: photo.file_name,
-                  file_size: photo.file_size
-                });
+                  file_size: photo.file_size,
+                  // Photos display newest-first, so keep the original timestamp.
+                  ...(photo.created_at ? { created_at: photo.created_at } : {}),
+                })
+                .select('id')
+                .single();
 
               if (insertError) {
                 console.error('Error inserting photo record:', insertError);
+              } else if (newPhoto?.id && photo.id) {
+                photoIdMap.set(photo.id, newPhoto.id);
               }
             } catch (photoErr) {
               console.error('Error processing photo:', photoErr);
             }
           }
           setRestoreProgress({ current: i + 1, total: backupData.inspectionPhotos.length, stage: 'Restoring photos...' });
+        }
+      }
+
+      // Point each restored inspection's events at the new photo ids.
+      if (backupData.inspections && backupData.inspections.length > 0) {
+        for (const inspection of backupData.inspections) {
+          const newInspectionId = inspectionIdMap.get(inspection.id);
+          if (!newInspectionId) continue;
+          const remapped = remapResponsePhotoIds(inspection.responses, photoIdMap);
+          if (!remapped) continue;
+          const { error } = await supabase
+            .from('inspections')
+            .update({ responses: remapped })
+            .eq('id', newInspectionId);
+          if (error) {
+            console.error('Error updating restored inspection events:', error);
+          }
         }
       }
 
