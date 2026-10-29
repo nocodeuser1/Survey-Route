@@ -1,5 +1,11 @@
 import { useState } from 'react';
 import { Navigation, MapPin, Globe, Copy, Check } from 'lucide-react';
+import {
+  appleMapsUrl,
+  googleEarthUrl,
+  googleMapsUrl,
+  launchExternalNavigation,
+} from '../utils/externalNavigation';
 
 interface NavigationPopupProps {
   latitude: number;
@@ -23,13 +29,11 @@ export default function NavigationPopup({
   const [showCopyPrompt, setShowCopyPrompt] = useState(false);
   const [copied, setCopied] = useState(false);
   const openGoogleMaps = () => {
-    window.open(`https://maps.google.com/?q=${latitude},${longitude}`, '_blank');
-    onClose();
+    launchExternalNavigation(googleMapsUrl(latitude, longitude), onClose);
   };
 
   const openAppleMaps = () => {
-    window.open(`http://maps.apple.com/?daddr=${latitude},${longitude}`, '_blank');
-    onClose();
+    launchExternalNavigation(appleMapsUrl(latitude, longitude), onClose);
   };
 
   const openGoogleEarth = () => {
@@ -51,9 +55,8 @@ export default function NavigationPopup({
   };
 
   const proceedToGoogleEarth = () => {
-    window.open(`https://earth.google.com/web/search/${latitude},${longitude}`, '_blank');
     setShowCopyPrompt(false);
-    onClose();
+    launchExternalNavigation(googleEarthUrl(latitude, longitude), onClose);
   };
 
   const preferredMapLabel = mapPreference === 'google' ? 'Google Maps' : 'Apple Maps';
