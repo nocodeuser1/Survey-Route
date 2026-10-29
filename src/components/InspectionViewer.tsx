@@ -1,5 +1,6 @@
 import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin } from 'lucide-react';
-import { Inspection, Facility, InspectionTemplate, InspectionPhoto, supabase } from '../lib/supabase';
+import { Inspection, Facility, InspectionTemplate, InspectionPhoto, InspectionResponse, supabase } from '../lib/supabase';
+import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -327,6 +328,16 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
     );
   };
 
+  const handleEventChange = (questionId: string, eventId: string, description: string) => {
+    setEditedResponses(prev =>
+      prev.map(r =>
+        r.question_id === questionId
+          ? { ...r, events: (r.events ?? []).map(e => e.id === eventId ? { ...e, description } : e) }
+          : r
+      )
+    );
+  };
+
   const handleAddPhotos = (questionId: string, files: FileList) => {
     const fileArray = Array.from(files);
     setNewPhotos(prev => ({
@@ -398,7 +409,8 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
               question_id: questionId,
               photo_url: fileName,
               file_name: file.name,
-              uploaded_by: userId
+              // file_size is NOT NULL; there is no uploaded_by column.
+              file_size: file.size,
             });
 
           if (dbError) throw dbError;
@@ -406,7 +418,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       }
 
       const flaggedCount = editedResponses.filter(r => r.answer === 'no').length;
-      const actionsCount = editedResponses.filter(r => r.action_required).length;
+      const actionsCount = editedResponses.filter(r => r.answer === 'no' && r.action_required).length;
 
       const changes = {
         before: localInspection.responses,
@@ -667,11 +679,11 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-lg p-4 transition-colors">
               <p className="text-sm text-red-600 dark:text-red-400 font-medium mb-1">Flagged Items</p>
-              <p className="text-3xl font-bold text-red-700 dark:text-red-300">{inspection.flagged_items_count}</p>
+              <p className="text-3xl font-bold text-red-700 dark:text-red-300">{localInspection.flagged_items_count}</p>
             </div>
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/30 rounded-lg p-4 transition-colors">
               <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-1">Action Items</p>
-              <p className="text-3xl font-bold text-blue-700 dark:text-blue-300">{inspection.actions_count}</p>
+              <p className="text-3xl font-bold text-blue-700 dark:text-blue-300">{localInspection.actions_count}</p>
             </div>
           </div>
 
@@ -705,7 +717,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                     <div key={question.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 transition-colors">
                       <div className="flex items-start justify-between gap-4 mb-3">
                         <p className="text-gray-900 dark:text-white font-medium flex-1">{question.text}</p>
-                        {!isEditMode ? (
+                        {question.type === 'comment' ? null : !isEditMode ? (
                           getAnswerDisplay(response?.answer || null)
                         ) : (
                           <div className="flex gap-2">
@@ -728,30 +740,66 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                       </div>
 
                       {!isEditMode ? (
-                        response?.comments && (
-                          <div className="mt-3 bg-gray-50 rounded p-3">
-                            <p className="text-xs font-medium text-gray-600 mb-1">Comments:</p>
-                            <p className="text-sm text-gray-800">{response.comments}</p>
-                          </div>
-                        )
+                        // Each event: its description with its photos underneath.
+                        (() => {
+                          const groups = reportableEvents(groupResponseEvents(response, photos[question.id] || []));
+                          const numbered = groups.length > 1;
+                          return groups.map((group, eventIndex) => (
+                            (numbered || group.description || group.photos.length > 0) && (
+                              <div key={group.eventId ?? 'first'} className={numbered ? 'mt-3 border-l-2 border-blue-200 dark:border-blue-800 pl-3' : 'mt-3'}>
+                                {numbered && (
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-1">Event {eventIndex + 1}</p>
+                                )}
+                                {group.description && (
+                                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded p-3">
+                                    {!numbered && <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Comments:</p>}
+                                    <p className="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{group.description}</p>
+                                  </div>
+                                )}
+                                {group.photos.length > 0 && (
+                                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                    {group.photos.map(photo => (
+                                      <PhotoThumbnail key={photo.id} photo={photo} onClick={setSelectedPhoto} />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          ));
+                        })()
                       ) : (
-                        <div className="mt-3">
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Comments:</label>
-                          <textarea
-                            value={response?.comments || ''}
-                            onChange={(e) => handleResponseChange(question.id, 'comments', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
-                            rows={2}
-                          />
+                        <div className="mt-3 space-y-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              {response?.events?.length ? 'Event 1:' : 'Comments:'}
+                            </label>
+                            <textarea
+                              value={response?.comments || ''}
+                              onChange={(e) => handleResponseChange(question.id, 'comments', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
+                              rows={2}
+                            />
+                          </div>
+                          {response?.events?.map((event, eventIndex) => (
+                            <div key={event.id}>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Event {eventIndex + 2}:</label>
+                              <textarea
+                                value={event.description}
+                                onChange={(e) => handleEventChange(question.id, event.id, e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
+                                rows={2}
+                              />
+                            </div>
+                          ))}
                         </div>
                       )}
 
                       {!isEditMode ? (
-                        response?.action_required && (
+                        response?.answer === 'no' && response?.action_required && (
                           <div className="mt-3 bg-amber-50 border border-amber-200 rounded p-3">
                             <p className="text-xs font-medium text-amber-800 mb-1">Action Required</p>
                             {response.action_notes && (
-                              <p className="text-sm text-amber-900">{response.action_notes}</p>
+                              <p className="text-sm text-amber-900 whitespace-pre-wrap">{response.action_notes}</p>
                             )}
                           </div>
                         )
@@ -778,7 +826,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                         </div>
                       )}
 
-                      {(photos[question.id]?.length > 0 || (isEditMode && newPhotos[question.id]?.length > 0)) && (
+                      {isEditMode && (photos[question.id]?.length > 0 || newPhotos[question.id]?.length > 0) && (
                         <div className="mt-3">
                           <div className="flex items-center gap-2 mb-2">
                             <ImageIcon className="w-4 h-4 text-gray-600" />

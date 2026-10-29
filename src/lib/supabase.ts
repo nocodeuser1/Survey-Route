@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createRecoveryTracker, recoveryCallbackPath } from './passwordRecovery';
+import type { InspectionEvent } from '../utils/inspectionEvents';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -31,6 +32,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 supabase.auth.onAuthStateChange((event, session) => {
   passwordRecovery.handleAuthEvent(event, session);
 });
+
+export type { InspectionEvent };
 
 export interface RouteVisitEvent {
   id: string;
@@ -621,6 +624,8 @@ export interface InspectionResponse {
   action_required: boolean;
   action_notes: string;
   photos?: InspectionPhoto[];
+  /** Events after the first; the first event is `comments` (see utils/inspectionEvents). */
+  events?: InspectionEvent[];
 }
 
 export interface Inspection {

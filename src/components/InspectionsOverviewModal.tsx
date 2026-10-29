@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, AlertTriangle, CheckCircle, Activity, Building2, ChevronLeft, ChevronRight, Loader } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, InspectionPhoto } from '../lib/supabase';
 import { formatInspectionTimestamp } from '../utils/inspectionTimestamp';
+import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
 import { useDarkMode } from '../contexts/DarkModeContext';
 
 interface InspectionsOverviewModalProps {
@@ -478,6 +479,27 @@ function InspectionReportContent({
     hideReportTimestamps: boolean;
 }) {
     const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
+    // photo_url is a path in the private bucket, so it needs a signed URL.
+    const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        let cancelled = false;
+        const paths = photos.map(photo => photo.photo_url.replace(/^.*\/inspection-photos\//, ''));
+        if (paths.length === 0) return;
+        supabase.storage.from('inspection-photos').createSignedUrls(paths, 3600).then(({ data, error }) => {
+            if (cancelled) return;
+            if (error) {
+                console.error('[InspectionsOverview] Could not sign photo URLs:', error);
+                return;
+            }
+            const urls: Record<string, string> = {};
+            data?.forEach((entry, index) => {
+                if (entry.signedUrl) urls[photos[index].id] = entry.signedUrl;
+            });
+            setSignedUrls(urls);
+        });
+        return () => { cancelled = true; };
+    }, [photos]);
 
     const photosByQuestion = useMemo(() => {
         const map = new Map<string, InspectionPhoto[]>();
@@ -567,40 +589,55 @@ function InspectionReportContent({
                                         <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                                             {question.text}
                                         </p>
-                                        {response.comments && (
-                                            <div className={`mt-2 p-3 rounded text-sm ${darkMode ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'
-                                                }`}>
-                                                {response.comments}
-                                            </div>
-                                        )}
-                                        {response.action_required && (
-                                            <div className={`mt-2 p-3 rounded text-sm ${darkMode ? 'bg-amber-900/50 text-amber-200' : 'bg-amber-100 text-amber-800'
+                                        {(() => {
+                                            const events = reportableEvents(groupResponseEvents(response, questionPhotos));
+                                            const numbered = events.length > 1;
+                                            return events.map((event, eventIndex) => (
+                                                (numbered || event.description || event.photos.length > 0) && (
+                                                    <div key={event.eventId ?? 'first'} className={numbered ? `mt-3 border-l-2 pl-3 ${darkMode ? 'border-blue-800' : 'border-blue-200'}` : ''}>
+                                                        {numbered && (
+                                                            <p className={`text-xs font-semibold uppercase tracking-wide ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>
+                                                                Event {eventIndex + 1}
+                                                            </p>
+                                                        )}
+                                                        {event.description && (
+                                                            <div className={`mt-2 p-3 rounded text-sm whitespace-pre-wrap ${darkMode ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'
+                                                                }`}>
+                                                                {event.description}
+                                                            </div>
+                                                        )}
+                                                        {event.photos.length > 0 && (
+                                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                                {event.photos.map((photo, idx) => signedUrls[photo.id] && (
+                                                                    <img
+                                                                        key={photo.id}
+                                                                        src={signedUrls[photo.id]}
+                                                                        alt={`Photo ${idx + 1}`}
+                                                                        className="w-24 h-24 object-cover rounded-lg cursor-pointer border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 transition-colors"
+                                                                        onClick={() => setPhotoModalUrl(signedUrls[photo.id])}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            ));
+                                        })()}
+                                        {response.answer === 'no' && response.action_required && (
+                                            <div className={`mt-2 p-3 rounded text-sm whitespace-pre-wrap ${darkMode ? 'bg-amber-900/50 text-amber-200' : 'bg-amber-100 text-amber-800'
                                                 }`}>
                                                 <strong>⚠ ACTION REQUIRED:</strong> {response.action_notes}
                                             </div>
                                         )}
-                                        {questionPhotos.length > 0 && (
-                                            <div className="mt-3 flex flex-wrap gap-2">
-                                                {questionPhotos.map((photo, idx) => (
-                                                    <img
-                                                        key={photo.id}
-                                                        src={photo.photo_url}
-                                                        alt={`Photo ${idx + 1}`}
-                                                        className="w-24 h-24 object-cover rounded-lg cursor-pointer border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 transition-colors"
-                                                        onClick={() => setPhotoModalUrl(photo.photo_url)}
-                                                    />
-                                                ))}
-                                            </div>
-                                        )}
                                     </div>
-                                    <span className={`px-3 py-1 rounded-lg text-sm font-bold ${response.answer === 'yes'
+                                    {question.type !== 'comment' && <span className={`px-3 py-1 rounded-lg text-sm font-bold ${response.answer === 'yes'
                                             ? 'bg-green-600 text-white'
                                             : response.answer === 'no'
                                                 ? 'bg-red-600 text-white'
                                                 : 'bg-gray-500 text-white'
                                         }`}>
                                         {response.answer?.toUpperCase() || 'N/A'}
-                                    </span>
+                                    </span>}
                                 </div>
                             </div>
                         );

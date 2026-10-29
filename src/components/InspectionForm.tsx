@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Image as ImageIcon } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Plus, Image as ImageIcon } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
 import { inspectionAuthorship, resolveInspectionIdentity } from '../utils/inspectionIdentity';
 import { alignResponses, draftStarterName, formatDraftTimestamp, isDeviceBackupNewer } from '../utils/inspectionDraft';
 import { fetchInspectionTemplate, readCachedInspectionTemplate } from '../utils/inspectionTemplateCache';
 import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
+import { claimPhotosForEvent, createInspectionEvent, groupResponseEvents, releasePhoto, stripPhotosForClone } from '../utils/inspectionEvents';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -109,7 +110,9 @@ function chooseOpening(
   draft: Inspection | null,
   backup: DeviceBackup | null,
 ): { responses: InspectionResponse[] | null; draft: Inspection | null; unsaved: boolean; shownAt: number; opened: OpenedDraft | null } {
-  if (clonedResponses) return { responses: clonedResponses, draft, unsaved: true, shownAt: Infinity, opened: null };
+  if (clonedResponses) {
+    return { responses: clonedResponses.map(stripPhotosForClone), draft, unsaved: true, shownAt: Infinity, opened: null };
+  }
   const opened = draft ? { startedBy: draftStarterName(draft), startedAt: draft.created_at, savedAt: draft.updated_at, deviceOnly: false } : null;
   if (backup && isDeviceBackupNewer(backup.timestamp, draft?.updated_at)) {
     return {
@@ -162,6 +165,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const autoSaveTimerRef = useRef<number | null>(null);
   const [uploadingPhotos, setUploadingPhotos] = useState<Record<string, boolean>>({});
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const responsesRef = useRef(responses);
+  responsesRef.current = responses;
 
   const saveToLocalStorage = useCallback(() => {
     try {
@@ -520,6 +525,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
           // Automatically set flagged based on answer
           if (updates.answer !== undefined) {
             updatedResponse.flagged = updates.answer === 'no';
+            // Action Required is only shown (and only means anything) for "No".
+            if (updates.answer !== 'no') updatedResponse.action_required = false;
           }
 
           return updatedResponse;
@@ -531,22 +538,48 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     setHasUnsavedChanges(true);
   };
 
-  const handlePhotoUpload = async (questionId: string, files: FileList) => {
+  const updateEvent = (questionId: string, eventId: string, description: string) => {
+    setResponses(prev => prev.map(r => r.question_id === questionId
+      ? { ...r, events: (r.events ?? []).map(e => e.id === eventId ? { ...e, description } : e) }
+      : r));
+    userEditedRef.current = true;
+    setHasUnsavedChanges(true);
+  };
+
+  const addEvent = (questionId: string) => {
+    setResponses(prev => prev.map(r => r.question_id === questionId
+      ? { ...r, events: [...(r.events ?? []), createInspectionEvent()] }
+      : r));
+    userEditedRef.current = true;
+    setHasUnsavedChanges(true);
+  };
+
+  const removeEvent = async (questionId: string, eventId: string, photos: InspectionPhoto[]) => {
+    const message = photos.length > 0
+      ? `Remove this event and its ${photos.length} photo${photos.length === 1 ? '' : 's'}?`
+      : 'Remove this event?';
+    if (!confirm(message)) return;
+    for (const photo of photos) {
+      if (!(await handlePhotoDelete(questionId, photo, { skipConfirm: true }))) return;
+    }
+    setResponses(prev => prev.map(r => r.question_id === questionId
+      ? { ...r, events: (r.events ?? []).filter(e => e.id !== eventId) }
+      : r));
+    userEditedRef.current = true;
+    setHasUnsavedChanges(true);
+  };
+
+  const photoKey = (questionId: string, eventId: string | null) => `${questionId}:${eventId ?? 'first'}`;
+
+  // No per-question cap: an event can hold as many photos as it needs.
+  const handlePhotoUpload = async (questionId: string, files: FileList, eventId: string | null = null) => {
     if (!existingInspection) {
       alert('Please save the inspection as a draft before adding photos.');
       return;
     }
 
-    const response = responses.find(r => r.question_id === questionId);
-    const currentPhotoCount = response?.photos?.length || 0;
-    const totalPhotos = currentPhotoCount + files.length;
-
-    if (totalPhotos > 10) {
-      alert(`You can only add up to 10 photos per question. You currently have ${currentPhotoCount} photo(s).`);
-      return;
-    }
-
-    setUploadingPhotos(prev => ({ ...prev, [questionId]: true }));
+    const uploadKey = photoKey(questionId, eventId);
+    setUploadingPhotos(prev => ({ ...prev, [uploadKey]: true }));
 
     try {
       const uploadedPhotos: InspectionPhoto[] = [];
@@ -662,15 +695,27 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       }
 
       if (uploadedPhotos.length > 0) {
-        setResponses(prev =>
-          prev.map(r =>
-            r.question_id === questionId
-              ? { ...r, photos: prependPhotoBatch(r.photos || [], uploadedPhotos) }
-              : r
-          )
+        const next = responsesRef.current.map(r =>
+          r.question_id === questionId
+            ? {
+                ...r,
+                photos: prependPhotoBatch(r.photos || [], uploadedPhotos),
+                ...(eventId ? { events: claimPhotosForEvent(r.events, eventId, uploadedPhotos.map(p => p.id)) } : {}),
+              }
+            : r
         );
+        setResponses(next);
         userEditedRef.current = true;
         setHasUnsavedChanges(true);
+        // Which event a photo belongs to lives in the responses JSON; save it
+        // now rather than at the next autosave so a closed form can't drop it.
+        if (eventId) {
+          const { error: linkError } = await supabase
+            .from('inspections')
+            .update({ responses: next, updated_at: new Date().toISOString() })
+            .eq('id', existingInspection.id);
+          if (linkError) console.error('[Photo Upload] Could not save event photos:', linkError);
+        }
       } else {
         console.error('No photos were uploaded successfully');
         alert('Failed to upload photos. Please check file format and try again.');
@@ -679,17 +724,20 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       console.error('Error uploading photo:', err);
       alert('Failed to upload photo: ' + (err.message || 'Unknown error'));
     } finally {
-      setUploadingPhotos(prev => ({ ...prev, [questionId]: false }));
+      setUploadingPhotos(prev => ({ ...prev, [uploadKey]: false }));
     }
   };
 
-  const handlePhotoDelete = async (questionId: string, photo: InspectionPhoto) => {
-    if (!confirm('Are you sure you want to delete this photo?')) {
-      return;
+  const handlePhotoDelete = async (questionId: string, photo: InspectionPhoto, { skipConfirm = false } = {}) => {
+    if (!skipConfirm && !confirm('Are you sure you want to delete this photo?')) {
+      return false;
     }
 
     try {
-      const fileName = photo.photo_url.split('/inspection-photos/')[1];
+      // photo_url is the storage path; older rows may hold a full public URL.
+      const fileName = photo.photo_url.includes('/inspection-photos/')
+        ? photo.photo_url.split('/inspection-photos/')[1]
+        : photo.photo_url;
 
       const { error: deleteError } = await supabase
         .from('inspection_photos')
@@ -705,15 +753,17 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       setResponses(prev =>
         prev.map(r =>
           r.question_id === questionId
-            ? { ...r, photos: (r.photos || []).filter(p => p.id !== photo.id) }
+            ? { ...r, photos: (r.photos || []).filter(p => p.id !== photo.id), events: releasePhoto(r.events, photo.id) }
             : r
         )
       );
       userEditedRef.current = true;
       setHasUnsavedChanges(true);
+      return true;
     } catch (err: any) {
       console.error('Error deleting photo:', err);
       alert('Failed to delete photo: ' + (err.message || 'Unknown error'));
+      return false;
     }
   };
 
@@ -734,7 +784,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
   const calculateCounts = () => {
     const flaggedCount = responses.filter(r => r.answer === 'no').length;
-    const actionsCount = responses.filter(r => r.action_required).length;
+    const actionsCount = responses.filter(r => r.answer === 'no' && r.action_required).length;
     return { flaggedCount, actionsCount };
   };
 
@@ -745,7 +795,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     try {
       // Recalculate counts with the responses being saved
       const flaggedCount = responsesToSave.filter(r => r.answer === 'no').length;
-      const actionsCount = responsesToSave.filter(r => r.action_required).length;
+      const actionsCount = responsesToSave.filter(r => r.answer === 'no' && r.action_required).length;
 
       const effectiveAccountId = accountId || userId;
       // Whoever submits signs it and is the inspector of record.
@@ -1112,62 +1162,98 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                     </div>
                   )}
 
-                  <textarea
-                    value={response.comments}
-                    onChange={(e) => updateResponse(question.id, { comments: e.target.value })}
-                    placeholder="Add comments..."
-                    className="form-textarea mb-2 w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 dark:text-white rounded-md focus:border-blue-500 focus:ring-blue-500"
-                    rows={2}
-                  />
-
-                  <div className="mt-2">
-                    <input
-                      ref={el => fileInputRefs.current[question.id] = el}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => {
-                        const files = e.target.files;
-                        if (files && files.length > 0) {
-                          handlePhotoUpload(question.id, files);
-                        }
-                        e.target.value = '';
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRefs.current[question.id]?.click()}
-                      disabled={uploadingPhotos[question.id] || !existingInspection || (response.photos && response.photos.length >= 10)}
-                      className="flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                    >
-                      <Camera className="w-4 h-4" />
-                      {uploadingPhotos[question.id] ? 'Uploading...' : 'Add Photo'}
-                      {response.photos && response.photos.length > 0 && (
-                        <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white rounded-full text-xs whitespace-nowrap">
-                          {response.photos.length}/10
-                        </span>
-                      )}
-                    </button>
-                    {!existingInspection && (
-                      <p className="text-xs text-gray-500 mt-1">Save as draft to add photos</p>
-                    )}
-                    {existingInspection && response.photos && response.photos.length >= 10 && (
-                      <p className="text-xs text-gray-500 mt-1">Maximum 10 photos reached</p>
-                    )}
-                  </div>
-
-                  {response.photos && response.photos.length > 0 && (
-                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {response.photos.map((photo) => (
-                        <PhotoPreview
-                          key={photo.id}
-                          photo={photo}
-                          onDelete={() => handlePhotoDelete(question.id, photo)}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const groups = groupResponseEvents(response, response.photos || []);
+                    const numbered = groups.length > 1;
+                    return (
+                      <div className="space-y-2">
+                        {groups.map((group, eventIndex) => {
+                          const key = photoKey(question.id, group.eventId);
+                          return (
+                            <div
+                              key={group.eventId ?? 'first'}
+                              className={numbered ? 'rounded-md border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 p-2' : ''}
+                            >
+                              {numbered && (
+                                <div className="mb-1 flex items-center justify-between">
+                                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Event {eventIndex + 1}</span>
+                                  {group.eventId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeEvent(question.id, group.eventId!, group.photos)}
+                                      className="p-1 text-gray-400 hover:text-red-600 rounded"
+                                      aria-label={`Remove event ${eventIndex + 1}`}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              <textarea
+                                value={group.description}
+                                onChange={(e) => group.eventId
+                                  ? updateEvent(question.id, group.eventId, e.target.value)
+                                  : updateResponse(question.id, { comments: e.target.value })}
+                                placeholder={numbered ? 'Describe what is happening in these photos...' : 'Add comments...'}
+                                className="form-textarea mb-2 w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 dark:text-white rounded-md focus:border-blue-500 focus:ring-blue-500"
+                                rows={2}
+                              />
+                              <input
+                                ref={el => fileInputRefs.current[key] = el}
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                  const files = e.target.files;
+                                  if (files && files.length > 0) {
+                                    handlePhotoUpload(question.id, files, group.eventId);
+                                  }
+                                  e.target.value = '';
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => fileInputRefs.current[key]?.click()}
+                                disabled={uploadingPhotos[key] || !existingInspection}
+                                className="flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                              >
+                                <Camera className="w-4 h-4" />
+                                {uploadingPhotos[key] ? 'Uploading...' : 'Add Photo'}
+                                {group.photos.length > 0 && (
+                                  <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white rounded-full text-xs whitespace-nowrap">
+                                    {group.photos.length}
+                                  </span>
+                                )}
+                              </button>
+                              {group.photos.length > 0 && (
+                                <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                  {group.photos.map((photo) => (
+                                    <PhotoPreview
+                                      key={photo.id}
+                                      photo={photo}
+                                      onDelete={() => handlePhotoDelete(question.id, photo)}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {!existingInspection && (
+                          <p className="text-xs text-gray-500">Save as draft to add photos</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => addEvent(question.id)}
+                          className="flex items-center gap-1.5 text-sm font-medium text-blue-700 dark:text-blue-300 hover:underline"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add event
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {response.answer === 'no' && (
                     <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-md">

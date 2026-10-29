@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Download, FileText, Loader, Search, ArrowUpDown } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, UserSettings, InspectionPhoto } from '../lib/supabase';
+import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
+import { escapeHtml } from '../utils/escapeHtml';
 import { formatInspectionTimestamp } from '../utils/inspectionTimestamp';
 import { buildInspectionFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import JSZip from 'jszip';
@@ -35,7 +37,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       const facilityIds = facilities.map(f => f.id);
       console.log('[InspectionReportExport] Loading inspections for facilities:', facilityIds.length);
 
-      const [inspectionsResult, templateResult, brandingResult, settingsResult, photosResult] = await Promise.all([
+      const [inspectionsResult, templateResult, brandingResult, settingsResult] = await Promise.all([
         supabase
           .from('inspections')
           .select('*')
@@ -56,11 +58,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
           .from('user_settings')
           .select('hide_report_timestamps')
           .eq('account_id', accountId)
-          .maybeSingle(),
-        supabase
-          .from('inspection_photos')
-          .select('*')
-          .in('inspection_id', facilityIds.length > 0 ? ['temp'] : [])
+          .maybeSingle()
       ]);
 
       if (inspectionsResult.error) throw inspectionsResult.error;
@@ -111,6 +109,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
                     });
                   } else {
                     console.warn('[InspectionReportExport] Failed to load photo:', storagePath, error);
+                    imageDataUrl = '';
                   }
                 }
               }
@@ -122,7 +121,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
               console.error('[InspectionReportExport] Error processing photo:', err);
               completedCount++;
               setLoadingProgress(prev => ({ ...prev, current: completedCount }));
-              return { ...photo, photo_url: photo.photo_url };
+              return { ...photo, photo_url: '' };
             }
           });
 
@@ -131,6 +130,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
 
           // Build the photo map
           for (const photoWithUrl of loadedPhotos) {
+            if (!photoWithUrl.photo_url) continue;
             const existing = photoMap.get(photoWithUrl.inspection_id) || [];
             photoMap.set(photoWithUrl.inspection_id, [...existing, photoWithUrl]);
           }
@@ -173,7 +173,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
     console.log('[InspectionReportExport] Generating report with hideReportTimestamps:', hideReportTimestamps);
 
     const flaggedResponses = inspection.responses.filter(r => r.answer === 'no');
-    const actionResponses = inspection.responses.filter(r => r.action_required);
+    const actionResponses = inspection.responses.filter(r => r.answer === 'no' && r.action_required);
     const inspectionTitle = 'SPCC Inspection';
     const photos = inspectionPhotos.get(inspection.id) || [];
     const photosByQuestion = new Map<string, InspectionPhoto[]>();
@@ -190,7 +190,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
           <div class="report-meta">
             <div class="meta-row">
               <span class="label">Location Inspected:</span>
-              <span class="value">${facility.name}</span>
+              <span class="value">${escapeHtml(facility.name)}</span>
             </div>
             <div class="meta-row">
               <span class="label">Conducted on:</span>
@@ -202,7 +202,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             </div>
             <div class="meta-row">
               <span class="label">Prepared by:</span>
-              <span class="value">${inspection.inspector_name}${inspection.inspector_email ? `<br><small>${inspection.inspector_email}</small>` : ''}</span>
+              <span class="value">${escapeHtml(inspection.inspector_name)}${inspection.inspector_email ? `<br><small>${escapeHtml(inspection.inspector_email)}</small>` : ''}</span>
             </div>
           </div>
         </div>
@@ -236,20 +236,25 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             const response = inspection.responses.find(r => r.question_id === question.id);
             if (!response) return '';
 
-            const hasExtras = response.comments || response.action_required;
             const questionPhotos = photosByQuestion.get(question.id) || [];
-            return `
-              <div class="question-row ${response.answer === 'no' ? 'flagged' : ''} ${hasExtras ? 'has-extras' : ''}">
-                <div class="question-content">
-                  <div class="question-text">${question.text}</div>
-                  ${response.comments ? `<div class="row-comments">${response.comments}</div>` : ''}
-                  ${response.action_required ? `<div class="row-action"><strong>⚠ ACTION REQUIRED:</strong> ${response.action_notes}</div>` : ''}
-                  ${questionPhotos.length > 0 ? `
+            // Each event prints as its description with its photos beneath;
+            // a question with one event looks exactly like it used to.
+            const events = reportableEvents(groupResponseEvents(response, questionPhotos));
+            const numbered = events.length > 1;
+            const showAction = response.answer === 'no' && response.action_required;
+            const isCommentOnly = question.type === 'comment';
+            const eventsHtml = events.map((event, eventIndex) => {
+              if (!numbered && !event.description && event.photos.length === 0) return '';
+              return `
+                <div class="event${numbered ? ' event-numbered' : ''}">
+                  ${numbered ? `<div class="event-label">Event ${eventIndex + 1}</div>` : ''}
+                  ${event.description ? `<div class="row-comments">${escapeHtml(event.description)}</div>` : ''}
+                  ${event.photos.length > 0 ? `
                     <div class="photo-grid">
-                      ${questionPhotos.map((photo, idx) => `
+                      ${event.photos.map((photo, idx) => `
                         <img
                           src="${photo.photo_url}"
-                          alt="Inspection photo ${idx + 1}"
+                          alt="${numbered ? `Event ${eventIndex + 1} photo` : 'Inspection photo'} ${idx + 1}"
                           class="photo-thumbnail"
                           onclick="openPhotoModal(this.src)"
                         />
@@ -257,9 +262,21 @@ export default function InspectionReportExport({ facilities, userId, accountId }
                     </div>
                   ` : ''}
                 </div>
-                <div class="answer ${response.answer === 'yes' ? 'answer-yes' : response.answer === 'no' ? 'answer-no' : 'answer-na'}">
-                  ${response.answer?.toUpperCase() || 'N/A'}
+              `;
+            }).join('');
+            const hasExtras = eventsHtml.trim() !== '' || showAction;
+            return `
+              <div class="question-row ${response.answer === 'no' ? 'flagged' : ''} ${hasExtras ? 'has-extras' : ''} ${questionPhotos.length > 0 ? 'has-photos' : ''}">
+                <div class="question-content">
+                  <div class="question-text">${escapeHtml(question.text)}</div>
+                  ${eventsHtml}
+                  ${showAction ? `<div class="row-action"><strong>⚠ ACTION REQUIRED:</strong> ${escapeHtml(response.action_notes)}</div>` : ''}
                 </div>
+                ${isCommentOnly ? '' : `
+                  <div class="answer ${response.answer === 'yes' ? 'answer-yes' : response.answer === 'no' ? 'answer-no' : 'answer-na'}">
+                    ${response.answer?.toUpperCase() || 'N/A'}
+                  </div>
+                `}
               </div>
             `;
           }).join('')}
@@ -270,8 +287,8 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             <h3>Inspector Signature</h3>
             <img src="${inspection.signature_data}" alt="Signature" class="signature-image" />
             <div class="signature-info">
-              <div>${inspection.inspector_name}</div>
-              ${inspection.inspector_email ? `<div>${inspection.inspector_email}</div>` : ''}
+              <div>${escapeHtml(inspection.inspector_name)}</div>
+              ${inspection.inspector_email ? `<div>${escapeHtml(inspection.inspector_email)}</div>` : ''}
               <div>${formatInspectionTimestamp(inspection, hideReportTimestamps)}</div>
             </div>
           </div>
@@ -344,13 +361,13 @@ export default function InspectionReportExport({ facilities, userId, accountId }
                 <tr class="facility-row"
                     onclick="openReportModal(${index})"
                     data-index="${index}"
-                    data-facility-name="${(item.facility?.name || 'Unknown Facility').toLowerCase()}"
+                    data-facility-name="${escapeHtml((item.facility?.name || 'Unknown Facility').toLowerCase())}"
                     data-has-findings="${item.hasFlagged}"
                     data-flagged-count="${item.inspection.flagged_items_count}"
                     data-actions-count="${item.hasActions ? item.inspection.actions_count : 0}">
-                  <td class="facility-name">${item.facility?.name || 'Unknown Facility'}</td>
+                  <td class="facility-name">${escapeHtml(item.facility?.name || 'Unknown Facility')}</td>
                   <td class="inspection-date">${formatInspectionTimestamp(item.inspection, hideReportTimestamps)}</td>
-                  <td class="inspector-name">${item.inspection.inspector_name}</td>
+                  <td class="inspector-name">${escapeHtml(item.inspection.inspector_name)}</td>
                   <td class="status-cell">
                     <span class="status-badge ${item.hasFlagged ? 'badge-warning' : 'badge-success'}">
                       ${item.hasFlagged ? '⚠ Findings' : '✓ Pass'}
@@ -459,12 +476,30 @@ export default function InspectionReportExport({ facilities, userId, accountId }
           page-break-after: always;
         }
 
-        .photo-grid {
-          page-break-inside: avoid;
-        }
-
+        /* Keep an event's description and photos together; a question with
+           several photo events may span pages instead of leaving a gap. */
         .question-row {
           page-break-inside: avoid;
+          break-inside: avoid;
+        }
+
+        .question-row.has-photos {
+          page-break-inside: auto;
+          break-inside: auto;
+        }
+
+        .event,
+        .photo-thumbnail {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+
+        .photo-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .photo-thumbnail {
+          height: 180px;
         }
 
         .signature-section {
@@ -636,6 +671,25 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         color: #475569;
         margin-top: 8px;
         border-left: 3px solid #3b82f6;
+        white-space: pre-wrap;
+      }
+
+      .event + .event {
+        margin-top: 14px;
+      }
+
+      .event-numbered {
+        border-left: 3px solid #bfdbfe;
+        padding-left: 12px;
+      }
+
+      .event-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: #1d4ed8;
+        margin-top: 10px;
       }
 
       .row-action {
@@ -939,7 +993,6 @@ export default function InspectionReportExport({ facilities, userId, accountId }
 
           .report-section {
             margin: 25px 0 45px 0;
-            page-break-inside: avoid;
           }
 
           .report-section h2 {
@@ -1003,6 +1056,25 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             color: #475569;
             font-style: italic;
             line-height: 1.6;
+            white-space: pre-wrap;
+          }
+
+          .event + .event {
+            margin-top: 14px;
+          }
+
+          .event-numbered {
+            border-left: 3px solid #bfdbfe;
+            padding-left: 12px;
+          }
+
+          .event-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: #1d4ed8;
+            margin-top: 10px;
           }
 
           .row-action {
@@ -1679,12 +1751,28 @@ export default function InspectionReportExport({ facilities, userId, accountId }
               max-width: 100%;
             }
 
-            .report-section {
-              page-break-inside: avoid;
-            }
-
             .question-row {
               page-break-inside: avoid;
+              break-inside: avoid;
+            }
+
+            .question-row.has-photos {
+              page-break-inside: auto;
+              break-inside: auto;
+            }
+
+            .event,
+            .photo-thumbnail {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+
+            .photo-grid {
+              grid-template-columns: repeat(3, 1fr);
+            }
+
+            .photo-thumbnail {
+              height: 180px;
             }
 
             .signature-section {
