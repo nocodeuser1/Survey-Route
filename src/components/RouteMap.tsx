@@ -18,6 +18,7 @@ import SearchInput from './SearchInput';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
+import InspectionForm from './InspectionForm';
 import SpeedDisplay from './SpeedDisplay';
 import { getCoords } from '../utils/coordinates';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -245,6 +246,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
   const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
+  const [inspectionFormState, setInspectionFormState] = useState<{
+    facility: Facility;
+    initialDraft?: Inspection | null;
+    clonedResponses?: Inspection['responses'];
+  } | null>(null);
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
   const [addFacilityCoords, setAddFacilityCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [newFacilityName, setNewFacilityName] = useState('');
@@ -389,6 +395,23 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   useEffect(() => {
     surveyTypeKindRef.current = effectiveKind;
   }, [effectiveKind]);
+
+  useEffect(() => {
+    onInspectionFormActiveChange?.(Boolean(inspectionFormState));
+  }, [inspectionFormState, onInspectionFormActiveChange]);
+
+  const openInspectionForm = useCallback((
+    facility: Facility,
+    options?: { initialDraft?: Inspection | null; clonedResponses?: Inspection['responses'] },
+  ) => {
+    // One top-level form owns the screen. Closing every underlying facility
+    // overlay first prevents the mobile form from being trapped behind the
+    // history/details sheet or returning to a stale modal after Save.
+    setInspectionsListFacility(null);
+    setSurveyFacility(null);
+    setForcedTab(null);
+    setInspectionFormState({ facility, ...options });
+  }, []);
 
   // Route facility click based on current surveyType
   const openFacilityModal = (facility: Facility) => {
@@ -1269,6 +1292,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             let statusBadgeHtml = '';
             let surveyBtnLabel = facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey';
             let surveyBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
+            let inspectionHistoryButtonHtml = '';
 
             if (effectiveKind === 'spcc_plan') {
               // SPCC Plans mode - show plan status badge
@@ -1319,6 +1343,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               surveyBtnLabel = 'Plan Details';
               surveyBtnTitle = 'View SPCC plan details';
             } else if (effectiveKind === 'spcc_inspection') {
+              const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
+              surveyBtnLabel = currentDraft ? 'Continue Inspection' : 'Add Inspection';
+              surveyBtnTitle = currentDraft ? 'Continue the saved inspection draft' : 'Start a new SPCC inspection';
+              if (facilityInspections.length > 0) {
+                inspectionHistoryButtonHtml = `
+                  <button
+                    id="inspection-history-btn-${facility.index}"
+                    style="width: 100%; margin-top: 6px; padding: 7px 8px; background-color: #F3F4F6; color: #1F2937; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;"
+                  >
+                    View Inspection History (${facilityInspections.length})
+                  </button>
+                `;
+              }
               // SPCC Inspections mode - show inspection completion badge
               const spccCompletedDate = fullFacility?.spcc_inspection_date;
               if (spccCompletedDate) {
@@ -1562,6 +1599,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     </button>
                   </div>
                 </div>
+                ${inspectionHistoryButtonHtml}
                 <div style="font-size: 11px; color: #6b7280;">Visit: ${facility.visitDuration} mins</div>
                 ${planInfoHtml}
                 ${recertificationHtml}
@@ -1718,6 +1756,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     // In SPCC plan mode, always open the plan modal
                     if (surveyTypeKindRef.current === 'spcc_plan') {
                       openFacilityModal(facilityForThisMarker);
+                    } else if (surveyTypeKindRef.current === 'spcc_inspection') {
+                      const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
+                      openInspectionForm(facilityForThisMarker, { initialDraft: currentDraft || null });
                     } else if (facilityInspections.length > 0) {
                       // If facility has existing inspections, show the inspections list modal
                       setInspectionsListFacility(facilityForThisMarker);
@@ -1728,6 +1769,14 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   } else {
                     alert('Could not find facility data. Please refresh the page.');
                   }
+                  marker.closePopup();
+                });
+              }
+
+              const inspectionHistoryBtn = document.getElementById(`inspection-history-btn-${facility.index}`);
+              if (inspectionHistoryBtn) {
+                inspectionHistoryBtn.addEventListener('click', () => {
+                  if (facilityForThisMarker) setInspectionsListFacility(facilityForThisMarker);
                   marker.closePopup();
                 });
               }
@@ -2060,6 +2109,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           let nonRouteStatusHtml = '';
           let nonRouteBtnLabel = facilityInspections.length > 0 ? `Surveys (${facilityInspections.length})` : 'Survey';
           let nonRouteBtnTitle = facilityInspections.length > 0 ? 'View surveys' : 'Fill Survey';
+          let nonRouteInspectionHistoryButtonHtml = '';
           let nonRoutePlanInfoHtml = '';
 
           if (effectiveKind === 'spcc_plan') {
@@ -2136,6 +2186,19 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               </div>
             `;
           } else if (effectiveKind === 'spcc_inspection') {
+            const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
+            nonRouteBtnLabel = currentDraft ? 'Continue Inspection' : 'Add Inspection';
+            nonRouteBtnTitle = currentDraft ? 'Continue the saved inspection draft' : 'Start a new SPCC inspection';
+            if (facilityInspections.length > 0) {
+              nonRouteInspectionHistoryButtonHtml = `
+                <button
+                  id="inspection-history-btn-${facilityIndex}"
+                  style="width: 100%; margin-top: 6px; padding: 7px 8px; background-color: #F3F4F6; color: #1F2937; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;"
+                >
+                  View Inspection History (${facilityInspections.length})
+                </button>
+              `;
+            }
             if (hasAnyValidCompletion) {
               nonRouteStatusHtml = `<span style="display: inline-block; padding: 2px 8px; background-color: #D1FAE5; color: #065F46; border-radius: 9999px; font-size: 11px; font-weight: 600;">Completed</span>`;
             } else {
@@ -2220,6 +2283,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     Navigate
                   </button>
                 </div>
+                ${nonRouteInspectionHistoryButtonHtml}
               ` : ''}
               ${isManuallyRemoved ? `
                 <button
@@ -2237,6 +2301,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           // Add event listeners after popup opens
           marker.on('popupopen', () => {
             const surveyBtn = document.getElementById(`survey-btn-${facilityIndex}`);
+            const inspectionHistoryBtn = document.getElementById(`inspection-history-btn-${facilityIndex}`);
             const navigateBtn = document.getElementById(`navigate-btn-${facilityIndex}`);
             const restoreBtn = document.getElementById(`restore-btn-${facilityIndex}`);
             // Day-assignment buttons are handled by a global delegated
@@ -2251,6 +2316,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
                 if (surveyTypeKindRef.current === 'spcc_plan') {
                   openFacilityModal(facility);
+                } else if (surveyTypeKindRef.current === 'spcc_inspection') {
+                  const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
+                  openInspectionForm(facility, { initialDraft: currentDraft || null });
                 } else if (facilityInspections.length > 0) {
                   // If facility has existing inspections, show the inspections list modal
                   setInspectionsListFacility(facility);
@@ -2258,6 +2326,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   // No existing inspections, open the survey form directly
                   setSurveyFacility(facility);
                 }
+                marker.closePopup();
+              });
+            }
+
+            if (inspectionHistoryBtn) {
+              inspectionHistoryBtn.addEventListener('click', () => {
+                setInspectionsListFacility(facility);
                 marker.closePopup();
               });
             }
@@ -2545,7 +2620,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       // than centering home base before the user asks for it.
       lastFitBoundsTriggerRef.current = triggerFitBounds;
     }
-  }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, locationTracking, navigationMode, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId]);
+  }, [result, homeBase, nextRouteDayNumber, selectedDay, onReassignFacility, selectedFacilities, selectionMode, showRoadRoutes, completedVisibility, inspections, settings, facilities, searchQuery, recentlyAssignedIds, triggerFitBounds, surveyType, showOnlyRouteFacilities, isFullScreen, locationTracking, navigationMode, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId, openInspectionForm]);
 
   // Copy coordinates to clipboard
   const handleCopyCoordinates = (latitude: number, longitude: number) => {
@@ -4667,6 +4742,27 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         />
       )}
 
+      {inspectionFormState && userId && (
+        <ModalPortal>
+          <InspectionForm
+            facility={inspectionFormState.facility}
+            userId={userId}
+            teamNumber={teamNumber}
+            accountId={accountId}
+            initialDraft={inspectionFormState.initialDraft || null}
+            clonedResponses={inspectionFormState.clonedResponses}
+            onClose={() => setInspectionFormState(null)}
+            onSaved={() => {
+              setInspectionFormState(null);
+              onFacilitiesChange?.();
+            }}
+            onInspectionCompletedWithFacility={async (facility, inspectionId) => {
+              await onInspectionRouteStopCompleted?.(facility.id, 'inspection', inspectionId);
+            }}
+          />
+        </ModalPortal>
+      )}
+
       {spccPlanDetailFacility && (
         <SPCCPlanDetailModal
           facility={spccPlanDetailFacility}
@@ -4698,19 +4794,15 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             }
           }}
           onCloneInspection={(inspection) => {
-            // Clone = open survey form with pre-filled data
-            setInspectionsListFacility(null);
-            setSurveyFacility(inspectionsListFacility);
+            openInspectionForm(inspectionsListFacility, {
+              clonedResponses: inspection.responses,
+            });
           }}
           onEditDraft={(inspection) => {
-            // Edit draft = open survey form with draft
-            setInspectionsListFacility(null);
-            setSurveyFacility(inspectionsListFacility);
+            openInspectionForm(inspectionsListFacility, { initialDraft: inspection });
           }}
           onAddNewInspection={() => {
-            // Close inspection list and open survey form
-            setInspectionsListFacility(null);
-            setSurveyFacility(inspectionsListFacility);
+            openInspectionForm(inspectionsListFacility);
           }}
         />
       )}

@@ -2944,7 +2944,7 @@ export default function FacilityDetailModal({
   }
 
   if (showInspectionForm) {
-    return (
+    return createPortal(
       <InspectionForm
         facility={facility}
         userId={userId}
@@ -2958,7 +2958,8 @@ export default function FacilityDetailModal({
           setSelectedInspection(null);
         }}
         onInspectionCompletedWithFacility={handleInspectionCompletedWithFacility}
-      />
+      />,
+      document.body,
     );
   }
 
