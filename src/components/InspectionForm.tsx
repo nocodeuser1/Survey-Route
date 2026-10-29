@@ -284,18 +284,33 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, accountId]);
 
+  // A signature is personal: use the one saved for this workspace, or else the
+  // newest one saved in any other workspace (copied here so Settings in this
+  // workspace shows it too). Reads a list so duplicate rows can't break it.
   const loadSignature = async (profileId: string) => {
     try {
       const effectiveAccountId = accountId || userId;
       const { data, error } = await supabase
         .from('user_signatures')
         .select('*')
-        .eq('account_id', effectiveAccountId)
         .eq('user_id', profileId)
-        .maybeSingle();
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setSignature(data);
+      const rows = (data || []) as UserSignature[];
+      const here = rows.find(row => row.account_id === effectiveAccountId);
+      const chosen = here ?? rows[0] ?? null;
+      setSignature(chosen);
+
+      if (chosen && !here && effectiveAccountId) {
+        const { error: copyError } = await supabase.from('user_signatures').insert({
+          user_id: profileId,
+          account_id: effectiveAccountId,
+          signature_name: chosen.signature_name,
+          signature_data: chosen.signature_data,
+        });
+        if (copyError) console.warn('[InspectionForm] Could not copy signature into this workspace:', copyError);
+      }
     } catch (err) {
       console.error('Error loading signature:', err);
     } finally {

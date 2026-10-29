@@ -33,14 +33,17 @@ createRoot(document.getElementById('root')).render(window.qa.view === 'form'
     ? <InspectionReportExport facilities={[facility]} userId="u1" accountId="acct" />
     : <InspectionViewer inspection={window.qa.completed} facility={facility} onClose={() => {}} onClone={() => {}} userId="u1" accountId="acct" />);`;
 const mockClient = `
-const rows = (table) => window.qa.rows[table];
+const raw = (table) => window.qa.rows[table];
 export const supabase = {
- from(table) { const chain = {
-   select() { return this }, eq() { return this }, in() { return this }, order() { return this }, limit() { return this },
+ from(table) { const filters = [];
+   // Array fixtures honor .eq() so lookups by the wrong id find nothing.
+   const rows = () => { const r = raw(table); return Array.isArray(r) ? r.filter(row => filters.every(([k, v]) => !(k in row) || row[k] === v)) : r; };
+   const chain = {
+   select() { return this }, eq(k, v) { filters.push([k, v]); return this }, in() { return this }, order() { return this }, limit() { return this },
    update() { return this }, insert() { return this },
-   async single() { return { data: Array.isArray(rows(table)) ? rows(table)[0] : rows(table) ?? null, error: null } },
+   async single() { const r = rows(); return { data: Array.isArray(r) ? r[0] ?? null : r ?? null, error: null } },
    async maybeSingle() { return this.single() },
-   then(resolve, reject) { const r = rows(table); return Promise.resolve({ data: Array.isArray(r) ? r : r ? [r] : [], error: null }).then(resolve, reject) },
+   then(resolve, reject) { const r = rows(); return Promise.resolve({ data: Array.isArray(r) ? r : r ? [r] : [], error: null }).then(resolve, reject) },
  }; return chain; },
  storage: { from() { return {
    async createSignedUrl(path) { return { data: { signedUrl: 'https://signed.test/' + path }, error: null } },
@@ -75,7 +78,13 @@ const type = async (el, value) => {
 const results = [];
 try {
   const draft = { id: 'i1', facility_id: 'f1', status: 'draft', inspector_name: 'Sam Lee', created_at: '2026-10-28T14:00:00Z', updated_at: '2026-10-29T09:30:00Z', responses };
-  await render({ view: 'form', draft, rows: { inspection_photos: photoRows, inspections: draft, inspection_templates: template } });
+  // Signature saved only in another workspace (e.g. during an invite).
+  const signatureElsewhere = { id: 's1', user_id: 'profile-1', account_id: 'other-workspace', signature_name: 'Jordan Ray', signature_data: 'data:image/png;base64,AA==', created_at: '2026-10-29T08:00:00Z' };
+  await render({ view: 'form', draft, rows: { inspection_photos: photoRows, inspections: draft, inspection_templates: template, user_signatures: [signatureElsewhere] } });
+  const complete = [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Complete');
+  assert.equal(complete.disabled, false);
+  assert.doesNotMatch(doc().body.textContent, /Signature Required/);
+  results.push('A signature saved in another workspace is used, so Complete is enabled');
   const labels = () => [...doc().querySelectorAll('span')].map(s => s.textContent).filter(t => /^Event \d$/.test(t));
   assert.deepEqual(labels(), ['Event 1', 'Event 2']);
   const areas = () => [...doc().querySelectorAll('textarea')];
