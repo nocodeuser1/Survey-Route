@@ -39,7 +39,7 @@ export const supabase = {
    // Array fixtures honor .eq() so lookups by the wrong id find nothing.
    const rows = () => { const r = raw(table); return Array.isArray(r) ? r.filter(row => filters.every(([k, v]) => !(k in row) || row[k] === v)) : r; };
    const chain = {
-   select() { return this }, eq(k, v) { filters.push([k, v]); return this }, in() { return this }, order() { return this }, limit() { return this },
+   select() { return this }, eq(k, v) { filters.push([k, v]); return this }, gte() { return this }, in() { return this }, order() { return this }, limit() { return this },
    update() { return this }, insert() { return this }, delete() { return this },
    async single() { const r = rows(); return { data: Array.isArray(r) ? r[0] ?? null : r ?? null, error: null } },
    async maybeSingle() { return this.single() },
@@ -90,11 +90,18 @@ try {
   assert.deepEqual(labels(), ['Event 1', 'Event 2']);
   const areas = () => [...doc().querySelectorAll('textarea')];
   assert.deepEqual(areas().map(a => a.value), ['Drip pan 1/3 full of rain water', 'Pan drained & <re>checked']);
+  const recent = doc().querySelector('[aria-label="Recent descriptions for question 1"]');
+  assert.ok(recent);
+  assert.deepEqual([...recent.options].slice(1).map(option => option.textContent), ['Drip pan 1/3 full of rain water', 'Pan drained & <re>checked']);
+  recent.value = 'Pan drained & <re>checked';
+  recent.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  await delay(30);
+  assert.equal(areas()[0].value, 'Pan drained & <re>checked');
   // Photos load async; event 2 owns p3, event 1 keeps the rest.
   const badges = () => [...doc().querySelectorAll('button')].filter(b => b.textContent.startsWith('Add Photo')).map(b => b.textContent.replace('Add Photo', ''));
   assert.deepEqual(badges(), ['2', '1']);
   assert.match(doc().body.textContent, /Started by Sam Lee/);
-  results.push('Form shows each event with its own description, photos, and Add Photo; banner names who started the draft');
+  results.push('Form shows each event with its own description and photos, and today history offers question-specific reusable descriptions');
 
   [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Add event').click();
   await delay(30);

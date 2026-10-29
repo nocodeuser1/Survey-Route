@@ -8,6 +8,13 @@ import { fetchInspectionTemplate, readCachedInspectionTemplate } from '../utils/
 import { useAuth } from '../contexts/AuthContext';
 import { photoCreatedAtForBatch, prependPhotoBatch } from '../utils/inspectionPhotoOrder';
 import { claimPhotosForEvent, createInspectionEvent, deleteInspectionEvent, groupResponseEvents, releasePhoto, stripPhotosForClone } from '../utils/inspectionEvents';
+import {
+  collectInspectionDescriptionHistory,
+  InspectionDescriptionHistory,
+  mergeInspectionDescriptionHistory,
+  parseInspectionDescriptionHistory,
+  rememberInspectionDescription,
+} from '../utils/inspectionDescriptionHistory';
 
 function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: () => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -96,6 +103,15 @@ function readDeviceBackup(key: string): DeviceBackup | null {
   }
 }
 
+function readDescriptionHistory(key: string): InspectionDescriptionHistory {
+  try {
+    return parseInspectionDescriptionHistory(localStorage.getItem(key));
+  } catch (error) {
+    console.error('[InspectionForm] Failed to read recent descriptions:', error);
+    return {};
+  }
+}
+
 /** Slender banner content: when the opened draft was started and last saved. */
 interface OpenedDraft {
   startedBy: string | null;
@@ -130,6 +146,7 @@ function chooseOpening(
 export default function InspectionForm({ facility, userId, teamNumber, onSaved, onClose, accountId, clonedResponses, initialDraft = null, onInspectionCompletedWithFacility }: InspectionFormProps) {
   const templateScope = accountId || userId;
   const localStorageKey = `inspection_draft_${facility.id}_${userId}`;
+  const descriptionHistoryKey = `survey-route:inspection-description-history:v1:${templateScope}`;
   // Everything needed to show the form is read synchronously from memory and
   // the device, so it opens immediately; the network only refreshes it.
   const [opening] = useState(() => chooseOpening(clonedResponses, initialDraft, readDeviceBackup(localStorageKey)));
@@ -164,6 +181,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const [loadError, setLoadError] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
   const [uploadingPhotos, setUploadingPhotos] = useState<Record<string, boolean>>({});
+  const [recentDescriptions, setRecentDescriptions] = useState<InspectionDescriptionHistory>(() => readDescriptionHistory(descriptionHistoryKey));
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const responsesRef = useRef(responses);
   responsesRef.current = responses;
@@ -222,6 +240,37 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       }
     };
   }, [facility.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadTodayDescriptions = async () => {
+      const local = readDescriptionHistory(descriptionHistoryKey);
+      setRecentDescriptions(local);
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      try {
+        const { data, error } = await supabase
+          .from('inspections')
+          .select('responses, updated_at')
+          .eq('account_id', templateScope)
+          .gte('updated_at', startOfToday.toISOString())
+          .order('updated_at', { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        if (cancelled) return;
+        const seeded = collectInspectionDescriptionHistory(data ?? []);
+        const merged = mergeInspectionDescriptionHistory(local, Object.entries(seeded).flatMap(([questionId, entries]) =>
+          entries.map(entry => ({ questionId, text: entry.text, usedAt: entry.usedAt })),
+        ));
+        setRecentDescriptions(merged);
+        localStorage.setItem(descriptionHistoryKey, JSON.stringify(merged));
+      } catch (error) {
+        console.warn('[InspectionForm] Could not load today\'s recent descriptions:', error);
+      }
+    };
+    loadTodayDescriptions();
+    return () => { cancelled = true; };
+  }, [descriptionHistoryKey, templateScope]);
 
   // Add beforeunload protection
   useEffect(() => {
@@ -559,6 +608,25 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       : r));
     userEditedRef.current = true;
     setHasUnsavedChanges(true);
+  };
+
+  const rememberDescription = (questionId: string, description: string) => {
+    if (!description.trim()) return;
+    setRecentDescriptions(current => {
+      const next = rememberInspectionDescription(current, questionId, description);
+      try {
+        localStorage.setItem(descriptionHistoryKey, JSON.stringify(next));
+      } catch (error) {
+        console.error('[InspectionForm] Failed to save recent description:', error);
+      }
+      return next;
+    });
+  };
+
+  const applyRecentDescription = (questionId: string, eventId: string | null, description: string) => {
+    if (eventId) updateEvent(questionId, eventId, description);
+    else updateResponse(questionId, { comments: description });
+    rememberDescription(questionId, description);
   };
 
   const addEvent = (questionId: string) => {
@@ -1214,11 +1282,30 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                                   </button>
                                 </div>
                               )}
+                              {response.answer === 'no' && (recentDescriptions[question.id]?.length ?? 0) > 0 && (
+                                <label className="mb-2 block">
+                                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                                    Recent descriptions for this question
+                                  </span>
+                                  <select
+                                    value=""
+                                    onChange={(event) => applyRecentDescription(question.id, group.eventId, event.target.value)}
+                                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                                    aria-label={`Recent descriptions for question ${index + 1}`}
+                                  >
+                                    <option value="" disabled>Choose a recent description...</option>
+                                    {recentDescriptions[question.id].map(entry => (
+                                      <option key={`${entry.usedAt}:${entry.text}`} value={entry.text}>{entry.text}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
                               <textarea
                                 value={group.description}
                                 onChange={(e) => group.eventId
                                   ? updateEvent(question.id, group.eventId, e.target.value)
                                   : updateResponse(question.id, { comments: e.target.value })}
+                                onBlur={() => rememberDescription(question.id, group.description)}
                                 placeholder={numbered ? 'Describe what is happening in these photos...' : 'Add comments...'}
                                 className="form-textarea mb-2 w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 dark:text-white rounded-md focus:border-blue-500 focus:ring-blue-500"
                                 rows={2}

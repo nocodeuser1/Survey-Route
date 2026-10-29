@@ -29,7 +29,7 @@ createRoot(document.getElementById('root')).render(
 // Every query hangs until the test releases it, like a stalled mobile request.
 const mockClient = `export const supabase = {
  from(table) { const chain = {
-   select() { return this }, eq() { return this }, in() { return this }, order() { return this }, limit() { return this },
+  select() { return this }, eq() { return this }, gte() { return this }, in() { return this }, order() { return this }, limit() { return this },
    update() { return this }, insert() { return this }, single() { return this.maybeSingle() },
    maybeSingle() { window.qa.queries.push(table); return new Promise(r => window.qa.release.push(() => r({ data: window.qa.rows[table] ?? null, error: null }))) },
    then(resolve, reject) { return new Promise(r => window.qa.release.push(() => r({ data: [], error: null }))).then(resolve, reject) },
