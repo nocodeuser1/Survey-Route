@@ -535,6 +535,35 @@ await test('No facilities or home base leaves framing controls safely disabled',
   assert.equal(h.button('Show home base').disabled,true);
 });
 
+await test('Fullscreen menu trigger closes on a second pointer tap without reopening', async h => {
+  const trigger = h.doc.querySelector('[aria-controls="fullscreen-navigation-panel"]');
+  trigger.click(); await h.flush();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  for (const label of ['Facilities', 'Route Planning', 'Survey Mode', 'Settings']) {
+    assert.ok(h.button(label).classList.contains('min-h-11'), label + ' has a 44px minimum tap target');
+  }
+  trigger.dispatchEvent(new h.window.Event('pointerdown', { bubbles: true }));
+  await h.flush();
+  trigger.click(); await h.flush();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(h.doc.getElementById('fullscreen-navigation-panel'), null);
+  assert.equal(h.qa.state.fullscreen, true, 'Dismissal must not exit the map');
+});
+
+await test('Fullscreen menu dismissal preserves map and Escape restores trigger focus', async h => {
+  const trigger = h.doc.querySelector('[aria-controls="fullscreen-navigation-panel"]');
+  trigger.click(); await h.flush();
+  h.doc.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await h.flush();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(h.doc.activeElement, trigger);
+  assert.equal(h.qa.state.fullscreen, true);
+  trigger.click(); await h.flush();
+  h.button('Close navigation menu').click(); await h.flush();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(h.qa.state.fullscreen, true);
+});
+
 await writeFile(join(output, 'results.json'), JSON.stringify(results, null, 2));
 console.log('\n' + (results.length - failures) + '/' + results.length + ' location integration cases passed. Report: ' + join(output, 'results.json'));
 if (failures) process.exitCode = 1;

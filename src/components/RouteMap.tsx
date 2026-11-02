@@ -425,7 +425,10 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   useEffect(() => {
     if (!showMenu) return;
     const handlePointerDown = (event: PointerEvent) => {
-      if (!fullscreenMenuRef.current?.contains(event.target as Node)) {
+      // The trigger owns its toggle. Closing on its pointerdown first would
+      // rerender before click, making the same tap immediately reopen the menu.
+      if (!fullscreenMenuRef.current?.contains(event.target as Node)
+        && !fullscreenMenuButtonRef.current?.contains(event.target as Node)) {
         setShowMenu(false);
       }
     };
@@ -4192,7 +4195,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         onNavigateToView('facilities');
                         setShowMenu(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                      className="min-h-11 w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                     >
                       <Building2 className="w-4 h-4 text-gray-600" />
                       <span className="text-gray-900 dark:text-white">Facilities</span>
@@ -4203,7 +4206,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         onNavigateToView('route-planning');
                         setShowMenu(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                      className="min-h-11 w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                     >
                       <MapPin className="w-4 h-4 text-gray-600" />
                       <span className="text-gray-900 dark:text-white">Route Planning</span>
@@ -4214,7 +4217,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         onNavigateToView('survey');
                         setShowMenu(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                      className="min-h-11 w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                     >
                       <Navigation2 className="w-4 h-4 text-gray-600" />
                       <span className="text-gray-900 dark:text-white">Survey Mode</span>
@@ -4225,7 +4228,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                         onNavigateToView('settings');
                         setShowMenu(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                      className="min-h-11 w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                     >
                       <UserCog className="w-4 h-4 text-gray-600" />
                       <span className="text-gray-900 dark:text-white">Settings</span>
