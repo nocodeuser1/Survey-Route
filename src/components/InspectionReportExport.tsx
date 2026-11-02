@@ -1,3 +1,4 @@
+import { renderFacilitySignageHtml, facilitySignageCss, reportPhotosWithLatestSignage } from '../utils/inspectionSignage';
 import { useState, useEffect } from 'react';
 import { Download, FileText, Loader, Search, ArrowUpDown } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, UserSettings, InspectionPhoto } from '../lib/supabase';
@@ -74,11 +75,13 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       setHideReportTimestamps(hideTimestamps);
 
       if (loadedInspections.length > 0) {
-        const { data: photos } = await supabase
+        const { data: photoRows } = await supabase
           .from('inspection_photos')
           .select('*')
           .in('inspection_id', loadedInspections.map(i => i.id))
           .order('created_at', { ascending: false });
+
+        const photos = reportPhotosWithLatestSignage((photoRows || []) as InspectionPhoto[]);
 
         console.log('[InspectionReportExport] Loaded photos:', photos?.length || 0);
 
@@ -281,6 +284,8 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             `;
           }).join('')}
         </div>
+
+        ${renderFacilitySignageHtml(photos)}
 
         ${inspection.signature_data ? `
           <div class="signature-section">
@@ -795,6 +800,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${facilityName} - SPCC Inspection Report</title>
         <style>
+          ${facilitySignageCss}
           ${getPrintOptimizedCSS()}
         </style>
       </head>
@@ -864,6 +870,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
         <meta charset="UTF-8">
         <title>SPCC Inspection Reports</title>
         <style>
+          ${facilitySignageCss}
           * { margin: 0; padding: 0; box-sizing: border-box; }
 
           body {

@@ -2,6 +2,7 @@
 // Pure so it can be tested without a browser: callers load the template,
 // the inspections and their photos (photo_url already a data/signed URL).
 
+import { renderFacilitySignageHtml, facilitySignageCss } from './inspectionSignage.ts';
 import { escapeHtml } from './escapeHtml.ts';
 import { groupResponseEvents, reportableEvents, type InspectionEvent } from './inspectionEvents.ts';
 
@@ -39,6 +40,7 @@ export interface ExportFacility {
 }
 
 export interface ExportPhoto {
+  created_at?: string;
   id: string;
   question_id: string;
   /** A data: or signed URL; photos that failed to load should be left out. */
@@ -117,6 +119,8 @@ export function renderInspectionSection(
         ${items || '<p>No responses recorded.</p>'}
       </div>
 
+      ${renderFacilitySignageHtml(photos)}
+
       ${inspection.signature_data ? `
         <div class="signature">
           <p><strong>Inspector Signature:</strong></p>
@@ -147,6 +151,7 @@ export function buildSurveysExportHtml(options: {
   <meta charset="UTF-8">
   <title>${escapeHtml(options.title)}</title>
   <style>
+    ${facilitySignageCss}
     body { font-family: Arial, sans-serif; margin: 20px; }
     .inspection-report { page-break-after: always; margin-bottom: 40px; border: 1px solid #ddd; padding: 20px; }
     .header { text-align: center; margin-bottom: 20px; }

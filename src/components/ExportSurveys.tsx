@@ -1,3 +1,4 @@
+import { reportPhotosWithLatestSignage } from '../utils/inspectionSignage';
 import { useState, useEffect } from 'react';
 import { Download, X, FileText } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionPhoto } from '../lib/supabase';
@@ -114,7 +115,7 @@ export default function ExportSurveys({
       if (photosResult.error) throw photosResult.error;
 
       const questions = (templateResult.data?.questions || []) as ExportQuestion[];
-      const loadedPhotos = await Promise.all(((photosResult.data || []) as InspectionPhoto[]).map(async (photo) => ({
+      const loadedPhotos = await Promise.all(reportPhotosWithLatestSignage((photosResult.data || []) as InspectionPhoto[]).map(async (photo) => ({
         ...photo,
         photo_url: await loadPhotoDataUrl(photo.photo_url),
       })));

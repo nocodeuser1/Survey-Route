@@ -1,3 +1,4 @@
+import InspectionSignage from './InspectionSignage';
 import { X, CheckCircle, XCircle, MinusCircle, FileText, Copy, Calendar, User, Image as ImageIcon, Edit3, Edit2, RotateCcw, Clock, Save, AlertTriangle as AlertTriangleIcon, ShieldCheck, MapPin, Trash2 } from 'lucide-react';
 import { Inspection, Facility, InspectionTemplate, InspectionPhoto, InspectionResponse, supabase } from '../lib/supabase';
 import { groupResponseEvents, reportableEvents, assignAddedPhotosToEvents, deleteInspectionEvent, releasePhoto } from '../utils/inspectionEvents';
@@ -736,6 +737,8 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
               </div>
             </div>
           )}
+
+          <InspectionSignage inspectionId={inspection.id} canEdit={canEditReport && !isEditMode} />
 
           <div className="space-y-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">Inspection Responses</h3>

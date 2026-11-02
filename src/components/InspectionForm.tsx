@@ -1,3 +1,4 @@
+import InspectionSignage from './InspectionSignage';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Plus, Image as ImageIcon } from 'lucide-react';
@@ -1187,6 +1188,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
       )}
 
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 max-w-full">
+        <InspectionSignage inspectionId={existingInspection?.id} canEdit />
         {template.questions.map((question: any, index: number) => {
           const response = responses.find(r => r.question_id === question.id);
           if (!response) return null;

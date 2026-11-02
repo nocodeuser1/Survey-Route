@@ -62,3 +62,17 @@ test('export of an inspection without signature or responses still renders', () 
   assert.match(out, /No responses recorded/);
   assert.doesNotMatch(out, /Inspector Signature/);
 });
+
+test('optional signage is compact, undated and separate from answers in HTML and print', () => {
+  const signage = { id: 's1', question_id: '__facility_signage__', photo_url: 'data:image/png;base64,SIGNAGE', created_at: '2026-11-02T12:34:56Z' };
+  const out = buildSurveysExportHtml({ title: 't', inspections: [inspection], facilities, questions, photosByInspection: new Map([['i1', [...photos, signage]]]) });
+  assert.equal((out.match(/<figure class="facility-signage">/g) || []).length, 1);
+  assert.match(out, /<figcaption>Facility signage<\/figcaption>/);
+  assert.match(out, /alt="Facility signage"/);
+  assert.doesNotMatch(out, /2026-11-02|12:34:56/);
+  assert.ok(out.indexOf('<figure class="facility-signage">') > out.indexOf('Site was quiet'));
+  assert.ok(out.indexOf('<figure class="facility-signage">') < out.indexOf('Inspector Signature:'));
+  assert.match(out, /max-height: 140px; object-fit: contain/);
+  assert.match(out, /\.facility-signage \{[^}]*break-inside: avoid/);
+  assert.doesNotMatch(html, /<figure class="facility-signage">|<figcaption>Facility signage/);
+});
