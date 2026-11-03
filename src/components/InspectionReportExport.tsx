@@ -1603,7 +1603,7 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             gap: 12px;
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            transition: all 0.3s;
+            transition: opacity 180ms ease, transform 180ms ease, box-shadow 180ms ease;
             z-index: 1000;
             text-decoration: none;
           }
@@ -1612,6 +1612,26 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
             border-color: #2563eb;
+          }
+
+          .surveyroute-branding.badge-hidden:not(:focus-within) {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(8px);
+          }
+
+          .surveyroute-branding:focus-visible {
+            outline: 3px solid #2563eb;
+            outline-offset: 3px;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .surveyroute-branding {
+              transition: none;
+            }
+            .surveyroute-branding.badge-hidden:not(:focus-within) {
+              transform: none;
+            }
           }
 
           .surveyroute-logo {
@@ -2037,6 +2057,47 @@ export default function InspectionReportExport({ facilities, userId, accountId }
               }
             }
           });
+
+          // The offline dashboard badge yields to reading, but stays reachable
+          // by keyboard. Accumulate direction changes to ignore tiny scroll jitter.
+          (function setupReportBadgeScroll() {
+            const badge = document.querySelector('.surveyroute-branding');
+            if (!badge) return;
+            function scrollPosition() {
+              const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+              return Math.min(max, Math.max(0, window.pageYOffset));
+            }
+            let previousY = scrollPosition();
+            let direction = 0;
+            let distance = 0;
+            function setHidden(hidden) {
+              badge.classList.toggle('badge-hidden', hidden && !badge.contains(document.activeElement));
+            }
+            setHidden(previousY > 120);
+            badge.addEventListener('focusin', function() {
+              setHidden(false);
+              distance = 0;
+              previousY = scrollPosition();
+            });
+            window.addEventListener('scroll', function() {
+              const y = scrollPosition();
+              const delta = y - previousY;
+              previousY = y;
+              if (y <= 24) {
+                setHidden(false);
+                distance = 0;
+                direction = 0;
+                return;
+              }
+              if (delta === 0) return;
+              const nextDirection = delta > 0 ? 1 : -1;
+              distance = nextDirection === direction ? distance + Math.abs(delta) : Math.abs(delta);
+              direction = nextDirection;
+              if (distance < 12) return;
+              if (direction < 0) setHidden(false);
+              else if (y > 120) setHidden(true);
+            }, { passive: true });
+          })();
 
           // Initialize default sort (by name) on page load
           document.addEventListener('DOMContentLoaded', function() {

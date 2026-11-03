@@ -201,6 +201,46 @@ try {
   assert.match(badge.textContent, /Survey-Route[\s\S]*by BEAR DATA/);
   assert.match(combinedHtml, /\.surveyroute-logo\s*\{\s*flex-shrink: 0;\s*width: 40px;\s*height: 40px;/);
   assert.match(combinedHtml, /@media print[\s\S]*\.surveyroute-branding\s*\{\s*display: none !important;/);
+  // Execute the actual offline export script, with synthetic scroll geometry.
+  // JSDOM checks behavior/CSS contracts, not pixel rendering or PDF output.
+  const scrollDoc = new JSDOM(combinedHtml, { url: 'file:///synthetic-report.html', runScripts: 'outside-only', pretendToBeVisual: true });
+  const win = scrollDoc.window;
+  Object.defineProperty(win.document.documentElement, 'scrollHeight', { value: 3000 });
+  Object.defineProperty(win, 'innerHeight', { value: 800 });
+  Object.defineProperty(win, 'pageYOffset', { value: 0, writable: true });
+  [...win.document.scripts].forEach(script => win.eval(script.textContent));
+  const scrollBadge = win.document.querySelector('.surveyroute-branding');
+  const hidden = () => scrollBadge.classList.contains('badge-hidden');
+  const scroll = y => { win.pageYOffset = y; win.dispatchEvent(new win.Event('scroll')); };
+  assert.equal(hidden(), false);
+  scroll(60); assert.equal(hidden(), false);
+  scroll(121); assert.equal(hidden(), true);
+  scroll(120); assert.equal(hidden(), true);
+  scroll(121); assert.equal(hidden(), true);
+  scroll(109); assert.equal(hidden(), false);
+  scroll(117); assert.equal(hidden(), false);
+  scroll(125); assert.equal(hidden(), true);
+  scrollBadge.focus(); assert.equal(hidden(), false);
+  scroll(300); assert.equal(hidden(), false); // Never hide a focused link.
+  scrollBadge.blur(); scroll(330); assert.equal(hidden(), true);
+  scroll(20); assert.equal(hidden(), false);
+  scroll(-20); assert.equal(hidden(), false); // Mobile overscroll is clamped.
+  scroll(2200); assert.equal(hidden(), true);
+  scroll(2300); scroll(2220); assert.equal(hidden(), true); // Bottom bounce is not an upward gesture.
+  scroll(2180); assert.equal(hidden(), false);
+  assert.match(combinedHtml, /\.surveyroute-branding\.badge-hidden:not\(:focus-within\)\s*\{[^}]*opacity: 0;[^}]*pointer-events: none;/);
+  assert.match(combinedHtml, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.surveyroute-branding\s*\{\s*transition: none;/);
+  assert.match(combinedHtml, /passive: true/);
+  const restored = new JSDOM(combinedHtml, { url: 'file:///synthetic-restored.html', runScripts: 'outside-only' });
+  Object.defineProperty(restored.window.document.documentElement, 'scrollHeight', { value: 3000 });
+  Object.defineProperty(restored.window, 'pageYOffset', { value: 500 });
+  [...restored.window.document.scripts].forEach(script => restored.window.eval(script.textContent));
+  assert.equal(restored.window.document.querySelector('.surveyroute-branding').classList.contains('badge-hidden'), true);
+  const single = new JSDOM(html, { url: 'file:///synthetic-single.html', runScripts: 'outside-only' });
+  [...single.window.document.scripts].forEach(script => single.window.eval(script.textContent));
+  assert.equal(single.window.document.querySelector('.surveyroute-branding'), null);
+  scrollDoc.window.close(); restored.window.close(); single.window.close();
+  results.push('Offline badge hides on downward scrolling, reveals upward/top/keyboard focus, ignores jitter and overscroll, supports restored scroll/reduced motion, and safely skips unbranded reports');
   exported.window.close(); favicon.window.close();
   results.push('Combined offline HTML embeds the actual route logo, retains fixed icon dimensions and accessible brand text, and excludes the floating badge from printed PDF');
   console.log(results.map(r => `✓ ${r}`).join('\n'));
