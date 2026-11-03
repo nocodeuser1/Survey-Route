@@ -155,7 +155,7 @@ try {
   dom.window.URL.createObjectURL = blob => { dom.window.qa.blob = blob; return 'blob:qa'; };
   dom.window.URL.revokeObjectURL = () => {};
   dom.window.HTMLAnchorElement.prototype.click = function () {};
-  [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Select All').click();
+  { const all = [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Select All'); if (all.getAttribute('aria-pressed') !== 'true') all.click(); }
   await delay(30);
   [...doc().querySelectorAll('button')].find(b => /^Export 1 Report \(HTML\)$/.test(b.textContent.trim())).click();
   await delay(100);
@@ -179,7 +179,7 @@ try {
   dom.window.URL.createObjectURL = blob => { dom.window.qa.blob = blob; return 'blob:qa'; };
   dom.window.URL.revokeObjectURL = () => {};
   dom.window.HTMLAnchorElement.prototype.click = function () {};
-  [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Select All').click();
+  { const all = [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Select All'); if (all.getAttribute('aria-pressed') !== 'true') all.click(); }
   await delay(30);
   const combinedToggle = [...doc().querySelectorAll('label')].find(el => el.textContent.includes('Create Combined Report')).querySelector('input');
   if (!combinedToggle.checked) combinedToggle.click();

@@ -1,6 +1,6 @@
 import { renderFacilitySignageHtml, facilitySignageCss, reportPhotosWithLatestSignage } from '../utils/inspectionSignage';
 import { useState, useEffect } from 'react';
-import { Download, FileText, Loader, Search, ArrowUpDown } from 'lucide-react';
+import { Download, FileText, Loader, Search, ArrowUpDown, Check, Minus } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, UserSettings, InspectionPhoto } from '../lib/supabase';
 import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
 import { escapeHtml } from '../utils/escapeHtml';
@@ -166,12 +166,26 @@ export default function InspectionReportExport({ facilities, userId, accountId }
 
   const latestInspectionIds = latestInspectionIdsPerFacility(inspections);
 
+  // Derive indicators from the actual selection, never the last button clicked.
+  const latestOnlySelected = latestInspectionIds.size > 0
+    && selectedInspections.size === latestInspectionIds.size
+    && [...latestInspectionIds].every(id => selectedInspections.has(id));
+  const allSelected = inspections.length > 0
+    && selectedInspections.size === inspections.length
+    && inspections.every(inspection => selectedInspections.has(inspection.id));
+  const partiallySelected = selectedInspections.size > 0 && !allSelected;
+  const selectionButtonClass = (active: boolean) => `inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800 ${
+    active
+      ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-600'
+      : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400 hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+  }`;
+
   const selectLatest = () => {
-    setSelectedInspections(new Set(latestInspectionIds));
+    setSelectedInspections(latestOnlySelected ? new Set() : new Set(latestInspectionIds));
   };
 
   const selectAll = () => {
-    setSelectedInspections(new Set(inspections.map(i => i.id)));
+    setSelectedInspections(allSelected ? new Set() : new Set(inspections.map(i => i.id)));
   };
 
   const clearAll = () => {
@@ -2183,28 +2197,45 @@ export default function InspectionReportExport({ facilities, userId, accountId }
             Flagged
             {sortBy === 'flagged' && <ArrowUpDown className="w-3 h-3" />}
           </button>
-          <div className="flex-1" />
-          <button
-            onClick={selectLatest}
-            className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-            title="Select only the most recent inspection for each facility"
-          >
-            Latest Only
-          </button>
-          <button
-            onClick={selectAll}
-            className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-          >
-            Select All
-          </button>
-          <button
-            onClick={clearAll}
-            className="px-2 py-0.5 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-          >
-            Clear All
-          </button>
+          <div role="group" aria-label="Inspection selection" className="flex w-full flex-wrap items-center gap-2 pt-1 sm:ml-auto sm:w-auto sm:pt-0">
+            <button
+              type="button"
+              onClick={selectLatest}
+              aria-pressed={latestOnlySelected}
+              className={selectionButtonClass(latestOnlySelected)}
+              title={latestOnlySelected ? 'Clear selection of latest inspections' : 'Select only the most recent inspection for each facility, including results hidden by search'}
+            >
+              <Check aria-hidden="true" className={`h-3.5 w-3.5 ${latestOnlySelected ? '' : 'invisible'}`} />
+              Latest Only
+            </button>
+            <button
+              type="button"
+              onClick={selectAll}
+              aria-pressed={allSelected ? true : partiallySelected ? 'mixed' : false}
+              className={selectionButtonClass(allSelected)}
+              title={allSelected ? 'Clear all selected inspections' : 'Select all inspections, including results hidden by search'}
+            >
+              {partiallySelected
+                ? <Minus aria-hidden="true" className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                : <Check aria-hidden="true" className={`h-3.5 w-3.5 ${allSelected ? '' : 'invisible'}`} />}
+              Select All
+            </button>
+            <button
+              type="button"
+              onClick={clearAll}
+              disabled={selectedInspections.size === 0}
+              className="min-h-[44px] rounded-lg px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              Clear All
+            </button>
+          </div>
         </div>
       </div>
+
+      <p role="status" className="px-4 pt-2 text-xs text-gray-600 dark:text-gray-400">
+        {selectedInspections.size} of {inspections.length} inspections selected
+        {searchQuery && ' (including inspections hidden by search)'}
+      </p>
 
       {/* Scrollable list — the ONLY scrolling area; header above and footer below stay put */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-1.5">
