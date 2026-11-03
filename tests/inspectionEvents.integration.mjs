@@ -30,7 +30,7 @@ const facility = { id: 'f1', name: 'Ash 1WH' };
 createRoot(document.getElementById('root')).render(window.qa.view === 'form'
   ? <InspectionForm facility={facility} userId="auth-1" accountId="acct" teamNumber={1} initialDraft={window.qa.draft} onClose={() => {}} />
   : window.qa.view === 'export'
-    ? <InspectionReportExport facilities={[facility]} userId="u1" accountId="acct" />
+    ? <InspectionReportExport facilities={window.qa.facilities || [facility]} userId="u1" accountId="acct" />
     : <InspectionViewer inspection={window.qa.completed} facility={facility} onClose={() => {}} onClone={() => {}} userId="u1" accountId="acct" />);`;
 const mockClient = `
 const raw = (table) => window.qa.rows[table];
@@ -169,6 +169,40 @@ try {
   assert.match(html, /\.event,\s*\.photo-thumbnail \{\s*page-break-inside: avoid/);
   assert.match(html, /Prepared by:[\s\S]*Jordan Ray/);
   results.push('Exported HTML/PDF groups photos by event, escapes text, skips failed photos, keeps events together when printed, and names the submitter');
+  // The combined dashboard must embed the real route mark, with no asset request
+  // needed when a downloaded report is opened offline from file://.
+  await render({ view: 'export', facilities: [{ id: 'f1', name: 'Synthetic North' }, { id: 'f2', name: 'Synthetic South' }], rows: {
+    inspections: [completed, { ...completed, id: 'i2', facility_id: 'f2' }],
+    inspection_photos: [], inspection_templates: template, user_settings: null, accounts: {},
+  } });
+  await delay(200);
+  dom.window.URL.createObjectURL = blob => { dom.window.qa.blob = blob; return 'blob:qa'; };
+  dom.window.URL.revokeObjectURL = () => {};
+  dom.window.HTMLAnchorElement.prototype.click = function () {};
+  [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Select All').click();
+  await delay(30);
+  const combinedToggle = [...doc().querySelectorAll('label')].find(el => el.textContent.includes('Create Combined Report')).querySelector('input');
+  if (!combinedToggle.checked) combinedToggle.click();
+  await delay(30);
+  [...doc().querySelectorAll('button')].find(b => b.textContent.trim() === 'Export Combined Report (2 Facilities) (HTML)').click();
+  await delay(100);
+  const combinedHtml = await new Promise((resolve, reject) => { const r = new dom.window.FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsText(dom.window.qa.blob); });
+  const exported = new JSDOM(combinedHtml, { url: 'file:///synthetic-report.html' });
+  const badge = exported.window.document.querySelector('.surveyroute-branding');
+  assert.ok(badge);
+  const logo = badge.querySelector('svg');
+  assert.equal(logo.getAttribute('viewBox'), '0 0 40 40');
+  assert.equal(logo.getAttribute('aria-hidden'), 'true');
+  assert.equal(logo.getAttribute('focusable'), 'false');
+  const favicon = new JSDOM(await readFile(join(root, 'public/favicon.svg'), 'utf8'), { contentType: 'image/svg+xml' });
+  assert.equal(logo.querySelector('path').getAttribute('d'), favicon.window.document.querySelector('path').getAttribute('d'));
+  assert.deepEqual([...logo.querySelectorAll('circle')].map(el => ['cx', 'cy', 'r'].map(a => el.getAttribute(a))), [['6', '19', '3'], ['18', '5', '3']]);
+  assert.equal(badge.querySelectorAll('img, image, use, script').length, 0);
+  assert.match(badge.textContent, /Survey-Route[\s\S]*by BEAR DATA/);
+  assert.match(combinedHtml, /\.surveyroute-logo\s*\{\s*flex-shrink: 0;\s*width: 40px;\s*height: 40px;/);
+  assert.match(combinedHtml, /@media print[\s\S]*\.surveyroute-branding\s*\{\s*display: none !important;/);
+  exported.window.close(); favicon.window.close();
+  results.push('Combined offline HTML embeds the actual route logo, retains fixed icon dimensions and accessible brand text, and excludes the floating badge from printed PDF');
   console.log(results.map(r => `✓ ${r}`).join('\n'));
 } finally {
   dom?.window.close();
