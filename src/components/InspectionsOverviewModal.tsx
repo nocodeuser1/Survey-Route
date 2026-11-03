@@ -1,3 +1,4 @@
+import ModalPortal from './ModalPortal';
 import { useState, useEffect, useMemo } from 'react';
 import { X, AlertTriangle, CheckCircle, Activity, Building2, ChevronLeft, ChevronRight, Loader } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, InspectionPhoto } from '../lib/supabase';
@@ -173,7 +174,8 @@ export default function InspectionsOverviewModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <ModalPortal>
+    <div role="dialog" aria-modal="true" aria-label="Inspection overview" className="fixed inset-0 z-[10000] flex items-center justify-center">
             {/* Overlay */}
             <div
                 className="absolute inset-0 bg-black/70"
@@ -401,6 +403,7 @@ export default function InspectionsOverviewModal({
                 </div>
             </div>
         </div>
+    </ModalPortal>
     );
 }
 

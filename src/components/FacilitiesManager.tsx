@@ -1,3 +1,4 @@
+import ModalPortal from './ModalPortal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
@@ -446,23 +447,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
   }, [facilities]);
 
-  // Esc clears the row selection. Skipped when the user is typing in an
-  // input/textarea/contenteditable (so search-bar Esc behavior isn't
-  // hijacked) and when the Complete modal is open (so Esc closes the
-  // modal first without dropping the underlying selection on the way out).
-  useEffect(() => {
-    if (selectedFacilityIds.size === 0) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
-      if (showCompletionModal) return;
-      setSelectedFacilityIds(new Set());
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedFacilityIds.size, showCompletionModal]);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('all');
@@ -1267,6 +1251,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [showPlansOverview, setShowPlansOverview] = useState(false);
   const [showOverviewTypePicker, setShowOverviewTypePicker] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
+  const isReportWorkflowOpen = showExportPopup || showReportTypePicker || showOverviewTypePicker
+    || showInspectionOverview || showPlansOverview || showMobileTools;
+
+  // Esc clears the row selection. Skipped when the user is typing in an
+  // input/textarea/contenteditable (so search-bar Esc behavior isn't
+  // hijacked) and while a completion/report/overview modal is open, so
+  // a key intended for that overlay cannot drop the underlying selection.
+  useEffect(() => {
+    if (selectedFacilityIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+      if (showCompletionModal || isReportWorkflowOpen) return;
+      setSelectedFacilityIds(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedFacilityIds.size, showCompletionModal, isReportWorkflowOpen]);
+
 
   useEffect(() => {
     if (!showMobileTools) return;
@@ -5861,14 +5866,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           )}
 
           {/* Floating Selection Actions Bar — fixed to bottom on mobile, sticky on desktop.
-              Hidden while a report/overview modal is open: those modals sit at a
-              lower z-index than this z-[9999] bar, so the bar would float on top of
-              and overlap them. The selection itself is preserved (the export reads
+              Hidden throughout report/overview workflows, including picker-to-dialog
+              transitions. The selection itself is preserved (the export reads
               selectedFacilityIds directly), so the bar simply reappears on close. */}
           {selectedFacilityIds.size > 0 &&
-            !showExportPopup &&
-            !showReportTypePicker &&
-            !showOverviewTypePicker && (
+            !isReportWorkflowOpen && (
             <div
               className="fixed bottom-0 left-0 right-0 z-[9999] animate-[slideUp_0.25s_ease-out]"
               style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
@@ -6878,8 +6880,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         const scopedLdarPlanCount = scopedFacilities.filter((f) => f.ldar_site_plan_url).length;
 
         return (
+        <ModalPortal>
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+          role="dialog" aria-modal="true" aria-label="Export reports"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] p-4"
           onClick={() => setShowReportTypePicker(false)}
         >
           <div
@@ -7070,6 +7074,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           </div>
         </div>
+        </ModalPortal>
         );
       })()}
 
@@ -7272,8 +7277,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
       {/* Overview Type Picker (All mode) */}
       {showOverviewTypePicker && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+          role="dialog" aria-modal="true" aria-label="Choose overview"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] p-4"
           onClick={() => setShowOverviewTypePicker(false)}
         >
           <div
@@ -7326,6 +7333,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* SPCC Plan Manager Modal */}

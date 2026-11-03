@@ -1,3 +1,4 @@
+import ModalPortal from './ModalPortal';
 import { useState, useMemo } from 'react';
 import { X, FileText, AlertTriangle, CheckCircle, Clock, Building2, ChevronLeft, ChevronRight, ExternalLink, Calendar, Shield, ShieldAlert } from 'lucide-react';
 import { Facility } from '../lib/supabase';
@@ -210,7 +211,8 @@ export default function SPCCPlansOverviewModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <ModalPortal>
+    <div role="dialog" aria-modal="true" aria-label="SPCC plans overview" className="fixed inset-0 z-[10000] flex items-center justify-center">
       {/* Overlay */}
       <div className="absolute inset-0 bg-black/70" onClick={handleClose} />
 
@@ -466,6 +468,7 @@ export default function SPCCPlansOverviewModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
