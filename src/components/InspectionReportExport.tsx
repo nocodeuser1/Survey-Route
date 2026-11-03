@@ -68,6 +68,9 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       console.log('[InspectionReportExport] Loaded inspections:', inspectionsResult.data?.length || 0);
       const loadedInspections = inspectionsResult.data || [];
       setInspections(loadedInspections);
+      // Default to the current inspection per facility — older years stay in
+      // the list but unchecked, so a route export doesn't drag in last year.
+      setSelectedInspections(latestInspectionIdsPerFacility(loadedInspections));
       setTemplate(templateResult.data);
       setAccountBranding(brandingResult.data || {});
       const hideTimestamps = settingsResult.data?.hide_report_timestamps || false;
@@ -159,6 +162,12 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       }
       return newSet;
     });
+  };
+
+  const latestInspectionIds = latestInspectionIdsPerFacility(inspections);
+
+  const selectLatest = () => {
+    setSelectedInspections(new Set(latestInspectionIds));
   };
 
   const selectAll = () => {
@@ -2179,6 +2188,13 @@ export default function InspectionReportExport({ facilities, userId, accountId }
           </button>
           <div className="flex-1" />
           <button
+            onClick={selectLatest}
+            className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+            title="Select only the most recent inspection for each facility"
+          >
+            Latest Only
+          </button>
+          <button
             onClick={selectAll}
             className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
           >
@@ -2219,6 +2235,11 @@ export default function InspectionReportExport({ facilities, userId, accountId }
                   {new Date(inspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })} - {inspection.inspector_name}
                 </p>
               </div>
+              {!latestInspectionIds.has(inspection.id) && (
+                <span className="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded flex-shrink-0">
+                  Older
+                </span>
+              )}
               {inspection.flagged_items_count > 0 && (
                 <span className="text-[11px] bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200 px-2 py-0.5 rounded flex-shrink-0">
                   {inspection.flagged_items_count} flagged
@@ -2284,4 +2305,16 @@ export default function InspectionReportExport({ facilities, userId, accountId }
       </div>
     </div>
   );
+}
+
+/** Newest completed inspection id for each facility. */
+function latestInspectionIdsPerFacility(inspections: Inspection[]): Set<string> {
+  const newestByFacility = new Map<string, Inspection>();
+  for (const inspection of inspections) {
+    const current = newestByFacility.get(inspection.facility_id);
+    if (!current || new Date(inspection.conducted_at) > new Date(current.conducted_at)) {
+      newestByFacility.set(inspection.facility_id, inspection);
+    }
+  }
+  return new Set(Array.from(newestByFacility.values(), inspection => inspection.id));
 }

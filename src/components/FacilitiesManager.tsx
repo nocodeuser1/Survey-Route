@@ -37,7 +37,7 @@ import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
 import { hapticTick } from '../utils/haptics';
-import { isInspectionValid, getFacilityInspectionExpiry, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
+import { isInspectionValid, getFacilityInspectionExpiry, isExternalCompletionCurrent, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
 import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
@@ -1759,7 +1759,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       // INSPECTION_COUNTDOWN_DAYS — far-out counts are noise. External-
       // completion subtype keeps its dedicated badge regardless.
       const showCountdown = expiry.daysUntilExpiry <= INSPECTION_COUNTDOWN_DAYS;
-      if (facility.spcc_completion_type === 'external') {
+      if (isExternalCompletionCurrent(facility, inspection)) {
         return (
           <span className="inline-flex items-center gap-1.5">
             <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />
@@ -1875,18 +1875,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
 
     if (selectedReportType === 'spcc_inspection') {
-      const inspection = inspections.get(facility.id);
-      const hasValidInspection = isInspectionValid(inspection);
-      const hasCompletionType = facility.spcc_completion_type && facility.spcc_inspection_date;
-
-      if (hasCompletionType) {
-        const completedDate = parseLocalDate(facility.spcc_inspection_date!);
-        const oneYearFromCompletion = new Date(completedDate);
-        oneYearFromCompletion.setFullYear(oneYearFromCompletion.getFullYear() + 1);
-        return new Date() <= oneYearFromCompletion;
-      }
-
-      return hasValidInspection;
+      const status = getInspectionStatus(facility);
+      return status === 'inspected' || status === 'expiring';
     }
 
     if (selectedReportType === 'spcc_inspection_internal') {
@@ -1895,7 +1885,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       // source the badge + sort use, so the filter agrees with what's on screen.
       return (
         getInspectionStatus(facility) === 'inspected' &&
-        facility.spcc_completion_type !== 'external'
+        !isExternalCompletionCurrent(facility, inspections.get(facility.id))
       );
     }
 
@@ -1906,7 +1896,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       // so the old "type is set" check wrongly let internals through here).
       return (
         getInspectionStatus(facility) === 'inspected' &&
-        facility.spcc_completion_type === 'external'
+        isExternalCompletionCurrent(facility, inspections.get(facility.id))
       );
     }
 
@@ -2142,7 +2132,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             // without this split the external rows interleave with internal
             // "Inspected" rows and the column looks ungrouped — which is the
             // bug. Give external its own adjacent slot so the badges cluster.
-            if (status === 'inspected' && facility.spcc_completion_type === 'external') {
+            if (status === 'inspected' && isExternalCompletionCurrent(facility, inspections.get(facility.id))) {
               return 6;
             }
             const order: Record<InspectionFilterValue, number> = {

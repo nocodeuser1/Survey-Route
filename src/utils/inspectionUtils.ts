@@ -62,8 +62,8 @@ export const INSPECTION_COUNTDOWN_DAYS = 90;
 /**
  * Comprehensive inspection expiry check for a facility.
  * Considers (in order):
- *   1. Completion-type date (internal/external) → annual cycle from there.
- *   2. Latest inspection record → annual cycle from conducted_at.
+ *   1/2. The newer of the completion-type date (internal/external) and the
+ *      latest inspection record → annual cycle from that date.
  *   3. First production date with no inspection yet → "initial inspection"
  *      lifecycle (upcoming/due/overdue) using the same 1-year clock.
  *   4. Nothing → no_ip_date.
@@ -89,22 +89,16 @@ export function getFacilityInspectionExpiry(
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  // Check completion type date first (internal/external)
-  if (facility.spcc_completion_type && facility.spcc_inspection_date) {
-    const completedDate = parseLocalDate(facility.spcc_inspection_date);
-    const expiryDate = new Date(completedDate);
-    expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  // Whichever evidence is newest wins: a fresh signed inspection supersedes
+  // an older internal/external manual completion, and vice versa.
+  const evidenceDate = getCurrentCompletionSource(facility, latestInspection) === 'inspection'
+    ? new Date(latestInspection!.conducted_at)
+    : facility.spcc_completion_type && facility.spcc_inspection_date
+      ? parseLocalDate(facility.spcc_inspection_date)
+      : null;
 
-    if (daysUntilExpiry <= 0) return { status: 'expired', daysUntilExpiry, expiryDate };
-    if (daysUntilExpiry <= INSPECTION_EXPIRING_DAYS) return { status: 'expiring', daysUntilExpiry, expiryDate };
-    return { status: 'valid', daysUntilExpiry, expiryDate };
-  }
-
-  // Fall back to inspection record
-  if (latestInspection && latestInspection.status === 'completed') {
-    const inspectionDate = new Date(latestInspection.conducted_at);
-    const expiryDate = new Date(inspectionDate);
+  if (evidenceDate) {
+    const expiryDate = new Date(evidenceDate);
     expiryDate.setFullYear(expiryDate.getFullYear() + 1);
     const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -128,6 +122,40 @@ export function getFacilityInspectionExpiry(
   }
 
   return { status: 'no_ip_date', daysUntilExpiry: null, expiryDate: null };
+}
+
+/**
+ * Which evidence currently governs the facility's SPCC inspection status:
+ * the manual completion mark (spcc_completion_type + spcc_inspection_date) or
+ * the newest completed inspection record. The newer date wins; ties go to the
+ * inspection record since it carries the actual report.
+ */
+export function getCurrentCompletionSource(
+  facility: {
+    spcc_completion_type?: string | null;
+    spcc_inspection_date?: string | null;
+  },
+  latestInspection?: Inspection
+): 'manual' | 'inspection' | null {
+  const hasInspection = latestInspection?.status === 'completed';
+  const hasManual = Boolean(facility.spcc_completion_type && facility.spcc_inspection_date);
+  if (!hasInspection) return hasManual ? 'manual' : null;
+  if (!hasManual) return 'inspection';
+  const manualTime = parseLocalDate(facility.spcc_inspection_date!).getTime();
+  const inspectionTime = parseLocalDate(latestInspection!.conducted_at).getTime();
+  return manualTime > inspectionTime ? 'manual' : 'inspection';
+}
+
+/** True when the external completion mark is the facility's current evidence. */
+export function isExternalCompletionCurrent(
+  facility: {
+    spcc_completion_type?: string | null;
+    spcc_inspection_date?: string | null;
+  },
+  latestInspection?: Inspection
+): boolean {
+  return facility.spcc_completion_type === 'external' &&
+    getCurrentCompletionSource(facility, latestInspection) === 'manual';
 }
 
 /** Canonical compliance predicate used by visibility and route-display fallback. */

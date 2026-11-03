@@ -50,7 +50,7 @@ import { nowInAccountTimeZone, zonedPartsToInstant } from '../utils/dateUtils';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import NearbyFacilityAlert from './NearbyFacilityAlert';
 import { findNearbyFacilities, NearbyFacilityWithDistance } from '../utils/distanceCalculator';
-import { getFacilityInspectionExpiry } from '../utils/inspectionUtils';
+import { getCurrentCompletionSource, getFacilityInspectionExpiry, getNewestCompletedInspection, isExternalCompletionCurrent } from '../utils/inspectionUtils';
 import { formatDayCount, getAutoWorkflowStatus, getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, isRecertificationActive, type SPCCWorkflowStatus } from '../utils/spccStatus';
 import RecertificationStatusField from './RecertificationStatusField';
 import { US_STATES } from '../utils/usStates';
@@ -1316,7 +1316,37 @@ export default function FacilityDetailModal({
     { id: 'documents', label: 'Documents', icon: Files },
   ];
 
+  // A manual internal/external mark only drives the top card while it's the
+  // newest evidence. Once a newer signed inspection exists it drops to a
+  // muted history row under the inspection list.
+  const manualCompletionIsCurrent =
+    getCurrentCompletionSource(facility, getNewestCompletedInspection(inspections)) === 'manual';
+
+  const renderSupersededCompletionRow = () => {
+    if (manualCompletionIsCurrent || !facility.spcc_completion_type || !facility.spcc_inspection_date) return null;
+    const isExternal = facility.spcc_completion_type === 'external';
+    return (
+      <div className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+            {isExternal ? 'External Completion' : 'Internal Completion'}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">Superseded by newer inspection</span>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          <Clock className="w-4 h-4 inline mr-1" />
+          Completed on {formatDate(facility.spcc_inspection_date)}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          {isExternal ? 'Marked as completed by an external company.' : 'Marked as completed internally.'}
+        </p>
+      </div>
+    );
+  };
+
   const renderCompletionCard = () => {
+    if (!manualCompletionIsCurrent) return null;
+
     if (facility.spcc_completion_type === 'internal' && facility.spcc_inspection_date && inspections.length === 0) {
       const completedDate = parseLocalDate(facility.spcc_inspection_date);
       const expirationDate = new Date(completedDate);
@@ -1588,6 +1618,7 @@ export default function FacilityDetailModal({
               </div>
             </div>
           ))}
+          {renderSupersededCompletionRow()}
         </div>
       )}
     </div>
@@ -2964,11 +2995,11 @@ export default function FacilityDetailModal({
   }
 
   const renderInspectionBadge = () => {
-    const inspection = inspections[0];
+    const inspection = getNewestCompletedInspection(inspections);
     const expiry = getFacilityInspectionExpiry(facility, inspection);
 
     if (expiry.status === 'valid') {
-      if (facility.spcc_completion_type === 'external') {
+      if (isExternalCompletionCurrent(facility, inspection)) {
         return <SPCCExternalCompletionBadge completedDate={facility.spcc_inspection_date!} />;
       }
       return <SPCCInspectionBadge />;
