@@ -161,6 +161,15 @@ export default function FacilityDetailModal({
   // "Validus Facility ID" / generic "Facility ID"). See hook src.
   const facilityIdLabel = useFacilityIdLabel();
   const [inspections, setInspections] = useState<Inspection[]>([]);
+  // Which facility the `inspections` list belongs to. Until it matches the
+  // open facility, we don't know whether a newer inspection supersedes an old
+  // internal/external mark — so the tab and header badge must not guess.
+  // Guessing flashed last year's "External Completion" card and an
+  // "Inspection Expiring" badge until the fetch landed (long on cell data).
+  const [inspectionsFacilityId, setInspectionsFacilityId] = useState<string | null>(null);
+  const currentFacilityIdRef = useRef(facility.id);
+  currentFacilityIdRef.current = facility.id;
+  const inspectionsLoaded = inspectionsFacilityId === facility.id;
   const [facilityComments, setFacilityComments] = useState<FacilityComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
@@ -355,18 +364,24 @@ export default function FacilityDetailModal({
   };
 
   const loadInspections = async () => {
+    const facilityId = facility.id;
     try {
       const { data, error } = await supabase
         .from('inspections')
         .select('*')
-        .eq('facility_id', facility.id)
+        .eq('facility_id', facilityId)
         .order('conducted_at', { ascending: false });
 
       if (error) throw error;
+      // Ignore a slow response for a facility the user already moved off of.
+      if (currentFacilityIdRef.current !== facilityId) return;
       setInspections(data || []);
     } catch (err) {
       console.error('Error loading inspections:', err);
+      if (currentFacilityIdRef.current !== facilityId) return;
+      setInspections([]);
     }
+    setInspectionsFacilityId(facilityId);
   };
 
   const loadComments = async () => {
@@ -531,6 +546,9 @@ export default function FacilityDetailModal({
   };
 
   const handleNewInspection = () => {
+    // Before the list loads we can't see an existing draft, and starting a
+    // fresh one here would fork the team's shared draft.
+    if (!inspectionsLoaded) return;
     const existingDraft = inspections.find((inspection) => inspection.status === 'draft');
     if (existingDraft) {
       setSelectedInspection(existingDraft);
@@ -1345,7 +1363,7 @@ export default function FacilityDetailModal({
   };
 
   const renderCompletionCard = () => {
-    if (!manualCompletionIsCurrent) return null;
+    if (!inspectionsLoaded || !manualCompletionIsCurrent) return null;
 
     if (facility.spcc_completion_type === 'internal' && facility.spcc_inspection_date && inspections.length === 0) {
       const completedDate = parseLocalDate(facility.spcc_inspection_date);
@@ -1454,7 +1472,8 @@ export default function FacilityDetailModal({
         <div className="flex flex-col items-stretch gap-2 lg:min-w-[240px]">
           <button
             onClick={handleNewInspection}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium min-h-[44px] w-full"
+            disabled={!inspectionsLoaded}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium min-h-[44px] w-full disabled:opacity-60 disabled:cursor-wait"
           >
             <Plus className="w-5 h-5" />
             <span>{inspections.some((inspection) => inspection.status === 'draft') ? 'Continue Draft' : 'New Inspection'}</span>
@@ -1535,7 +1554,12 @@ export default function FacilityDetailModal({
 
       {renderCompletionCard()}
 
-      {inspections.length === 0 && !facility.spcc_completion_type ? (
+      {!inspectionsLoaded ? (
+        <div className="flex items-center justify-center gap-3 py-12 text-sm text-gray-500 dark:text-gray-400">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+          <span>Loading inspections…</span>
+        </div>
+      ) : inspections.length === 0 && !facility.spcc_completion_type ? (
         <div className="text-center py-12 bg-gray-50 dark:bg-gray-700 rounded-lg transition-colors">
           <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
           <p className="text-gray-600 dark:text-gray-300 mb-4">No inspections yet</p>
@@ -2995,6 +3019,14 @@ export default function FacilityDetailModal({
   }
 
   const renderInspectionBadge = () => {
+    if (!inspectionsLoaded) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-white/20 text-white/80 rounded-full text-xs font-medium whitespace-nowrap animate-pulse">
+          <Clock className="w-3.5 h-3.5" />
+          <span>Checking inspections…</span>
+        </span>
+      );
+    }
     const inspection = getNewestCompletedInspection(inspections);
     const expiry = getFacilityInspectionExpiry(facility, inspection);
 
