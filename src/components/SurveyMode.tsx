@@ -14,7 +14,7 @@ import LDARLeakModal from './LDARLeakModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { getFacilityInspectionExpiry, getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
-import { getFacilityLdarCompliance, canUserAccessLdarMode, facilityNeedsLdarAttention } from '../utils/ldar';
+import { getFacilityLdarCompliance, canUserAccessLdarMode, facilityNeedsLdarAttention, LDAR_FREQUENCY_LABELS } from '../utils/ldar';
 import { useAuth } from '../contexts/AuthContext';
 import { getRouteStatusRenderModel, resolveInspectionDisplayStatus, type InspectionDisplayStatus } from '../utils/routeStatus';
 import { APP_TIME_ZONE, parseLocalDate } from '../utils/dateUtils';
@@ -128,6 +128,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const [managingInspectionsFacility, setManagingInspectionsFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
+  const [ldarDetailTab, setLdarDetailTab] = useState<'schedule' | 'surveys' | 'leaks' | 'site_plan' | 'inventory'>('schedule');
   const [ldarSurveyFacility, setLdarSurveyFacility] = useState<Facility | null>(null);
   const [ldarLeakFacility, setLdarLeakFacility] = useState<Facility | null>(null);
   const watchIdRef = useRef<number | null>(null);
@@ -1420,6 +1421,79 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                             <SPCCStatusBadge facility={facility} className="text-[10px]" />
                           )}
 
+                          {canAccessLdarMode && viewMode === 'ldar' && (() => {
+                            const ldarComp = getFacilityLdarCompliance(facility);
+                            const tone =
+                              ldarComp.status === 'overdue'
+                                ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200'
+                                : ldarComp.status === 'due_soon_30' || ldarComp.status === 'pending_initial'
+                                  ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
+                                  : ldarComp.status === 'due_60'
+                                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200'
+                                    : 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200';
+                            const walkingPathUrl =
+                              facility.ldar_observation_path_data?.annotated_pdf_url ||
+                              facility.ldar_site_plan_url ||
+                              null;
+                            return (
+                              <>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${tone}`}>
+                                  <Wind className="w-2.5 h-2.5" />
+                                  {ldarComp.label}
+                                </span>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                                  {ldarComp.method} · {LDAR_FREQUENCY_LABELS[ldarComp.frequency]}
+                                </span>
+                                {ldarComp.openLeaksCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setLdarDetailTab('leaks');
+                                      setLdarDetailFacility(facility);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white hover:bg-red-700"
+                                  >
+                                    <Flame className="w-2.5 h-2.5" />
+                                    {ldarComp.openLeaksCount} Open Leak{ldarComp.openLeaksCount === 1 ? '' : 's'}
+                                  </button>
+                                )}
+                                {walkingPathUrl && (
+                                  <a
+                                    href={walkingPathUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:underline"
+                                  >
+                                    <Navigation className="w-2.5 h-2.5" />
+                                    Walking Path
+                                  </a>
+                                )}
+                                {ldarComp.lastSurveyDate && (
+                                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    LDAR: {parseLocalDate(ldarComp.lastSurveyDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
+
+                          {canAccessLdarMode && viewMode === 'all' && (facility.ldar_open_leaks_count ?? 0) > 0 && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setLdarDetailTab('leaks');
+                                setLdarDetailFacility(facility);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200"
+                            >
+                              <Flame className="w-2.5 h-2.5" />
+                              {facility.ldar_open_leaks_count} LDAR Leak{(facility.ldar_open_leaks_count ?? 0) === 1 ? '' : 's'}
+                            </button>
+                          )}
+
                           {viewMode === 'plans' && !isOffRoute && onPlanRouteStopChange && (
                             <button
                               type="button"
@@ -1592,6 +1666,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    setLdarDetailTab('schedule');
                                     setLdarDetailFacility(facility);
                                   }}
                                   className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 rounded-lg border border-teal-200 dark:border-teal-800 text-xs font-semibold"
@@ -1941,6 +2016,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           facility={facilities.find(f => f.id === ldarDetailFacility.id) || ldarDetailFacility}
           accountId={accountId}
           userId={userId}
+          initialTab={ldarDetailTab}
           onClose={() => setLdarDetailFacility(null)}
           onFacilityUpdated={() => onFacilitiesChange?.()}
           onLdarSurveyCompleted={(facId, survId) => {

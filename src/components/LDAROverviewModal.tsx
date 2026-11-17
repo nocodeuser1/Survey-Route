@@ -14,6 +14,7 @@ import {
   Loader2,
   Trash2,
   Activity,
+  Route,
 } from 'lucide-react';
 import ModalPortal from './ModalPortal';
 import LDARLeakModal from './LDARLeakModal';
@@ -50,6 +51,7 @@ interface LDAROverviewModalProps {
   defaultInspectorName?: string;
   initialTab?: 'insights' | 'leaks' | 'dor' | 'calendar' | 'certifications';
   onOpenFacilityLdar?: (facility: Facility) => void;
+  onCreateLdarRoute?: (facilityIds: string[]) => void;
   onFacilitiesChanged?: () => void;
 }
 
@@ -62,6 +64,7 @@ export default function LDAROverviewModal({
   defaultInspectorName = '',
   initialTab = 'insights',
   onOpenFacilityLdar,
+  onCreateLdarRoute,
   onFacilitiesChanged,
 }: LDAROverviewModalProps) {
   const { darkMode } = useDarkMode();
@@ -354,11 +357,25 @@ export default function LDAROverviewModal({
   const calendarEventsByIso = useMemo(() => {
     const map = new Map<
       string,
-      Array<{ kind: 'survey_due' | 'survey_done' | 'leak_due'; title: string; subtitle: string; tone: string }>
+      Array<{
+        kind: 'survey_due' | 'survey_done' | 'leak_due';
+        title: string;
+        subtitle: string;
+        tone: string;
+        facilityId?: string;
+        leak?: LDARLeak;
+      }>
     >();
     const push = (
       iso: string | null | undefined,
-      ev: { kind: 'survey_due' | 'survey_done' | 'leak_due'; title: string; subtitle: string; tone: string },
+      ev: {
+        kind: 'survey_due' | 'survey_done' | 'leak_due';
+        title: string;
+        subtitle: string;
+        tone: string;
+        facilityId?: string;
+        leak?: LDARLeak;
+      },
     ) => {
       if (!iso) return;
       const key = iso.slice(0, 10);
@@ -372,6 +389,7 @@ export default function LDAROverviewModal({
           title: `${facility.name}`,
           subtitle: `${compliance.method} Survey Hard Due`,
           tone: compliance.status === 'overdue' ? 'bg-red-500' : 'bg-teal-600',
+          facilityId: facility.id,
         });
       }
     });
@@ -383,6 +401,7 @@ export default function LDAROverviewModal({
         title: fac?.name || 'Facility',
         subtitle: `${surv.survey_method} Survey Completed (${surv.leaks_found_count} leaks)`,
         tone: 'bg-emerald-600',
+        facilityId: surv.facility_id,
       });
     });
 
@@ -397,6 +416,8 @@ export default function LDAROverviewModal({
             title: `${leak.leak_tag_id} · ${fac?.name || ''}`,
             subtitle: `${dl.label} (${leak.component_type})`,
             tone: 'bg-amber-500',
+            facilityId: leak.facility_id,
+            leak,
           });
         }
       });
@@ -917,13 +938,30 @@ export default function LDAROverviewModal({
                           Click any site to open LDAR schedule, surveys & leaks
                         </span>
                       </div>
-                      <input
-                        type="text"
-                        value={facilityDrillSearch}
-                        onChange={e => setFacilityDrillSearch(e.target.value)}
-                        placeholder="Search facility, county, or ID..."
-                        className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs sm:w-64"
-                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {onCreateLdarRoute && drilledFacilities.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ids = drilledFacilities.map(d => d.facility.id);
+                              onClose();
+                              onCreateLdarRoute(ids);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold"
+                            title="Generate an optimized LDAR route from the currently filtered facilities"
+                          >
+                            <Route className="w-3.5 h-3.5" />
+                            Build Route ({drilledFacilities.length})
+                          </button>
+                        )}
+                        <input
+                          type="text"
+                          value={facilityDrillSearch}
+                          onChange={e => setFacilityDrillSearch(e.target.value)}
+                          placeholder="Search facility, county, or ID..."
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-xs sm:w-64"
+                        />
+                      </div>
                     </div>
                     <div className="max-h-80 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
                       {(showAllDrilledFacilities ? drilledFacilities : drilledFacilities.slice(0, 60)).map(({ facility, compliance }) => (
@@ -1043,9 +1081,22 @@ export default function LDAROverviewModal({
                             <div className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-bold">{leak.leak_tag_id}</span>
-                                <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                                  {fac?.name || 'Facility'}
-                                </span>
+                                {fac && onOpenFacilityLdar ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onClose();
+                                      onOpenFacilityLdar(fac);
+                                    }}
+                                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                                  >
+                                    {fac.name}
+                                  </button>
+                                ) : (
+                                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                    {fac?.name || 'Facility'}
+                                  </span>
+                                )}
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${meta.badgeClass}`}>
                                   {meta.label}
                                 </span>
@@ -1067,11 +1118,26 @@ export default function LDAROverviewModal({
                               </p>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
+                              {leak.status === 'pending_confirmation' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingLeak(leak);
+                                    setLeakInitialSection('confirm');
+                                    setShowLeakModal(true);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
+                                >
+                                  Verify Closed
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
                                   setEditingLeak(leak);
-                                  setLeakInitialSection('repair');
+                                  setLeakInitialSection(
+                                    leak.status === 'pending_confirmation' ? 'confirm' : 'repair',
+                                  );
                                   setShowLeakModal(true);
                                 }}
                                 className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
@@ -1307,10 +1373,31 @@ export default function LDAROverviewModal({
                         <p className="text-xs text-gray-500">No scheduled deadlines or completed surveys on this date.</p>
                       ) : (
                         (calendarEventsByIso.get(selectedCalendarIso) || []).map((ev, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs py-1">
-                            <span className="font-semibold">{ev.title}</span>
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => {
+                              if (ev.leak) {
+                                setEditingLeak(ev.leak);
+                                setLeakInitialSection(
+                                  ev.leak.status === 'pending_confirmation' ? 'confirm' : 'repair',
+                                );
+                                setShowLeakModal(true);
+                              } else if (ev.facilityId && onOpenFacilityLdar) {
+                                const targetFac = facilityMap.get(ev.facilityId);
+                                if (targetFac) {
+                                  onClose();
+                                  onOpenFacilityLdar(targetFac);
+                                }
+                              }
+                            }}
+                            className="w-full flex items-center justify-between text-xs py-1.5 px-2 rounded-lg hover:bg-gray-200/70 dark:hover:bg-gray-700/60 text-left transition-colors"
+                          >
+                            <span className="font-semibold text-teal-700 dark:text-teal-300 hover:underline">
+                              {ev.title}
+                            </span>
                             <span className="text-gray-500 dark:text-gray-300">{ev.subtitle}</span>
-                          </div>
+                          </button>
                         ))
                       )}
                     </div>

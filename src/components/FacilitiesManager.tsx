@@ -39,6 +39,8 @@ import LDARFacilityDetailModal from './LDARFacilityDetailModal';
 import LDAROverviewModal from './LDAROverviewModal';
 import LDARReportsModal from './LDARReportsModal';
 import LDARSurveyModal from './LDARSurveyModal';
+import LDARLeakModal from './LDARLeakModal';
+import LDARBulkActionsModal from './LDARBulkActionsModal';
 import { hapticTick } from '../utils/haptics';
 import { isInspectionValid, getFacilityInspectionExpiry, isExternalCompletionCurrent, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
@@ -519,6 +521,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [spccMode]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
+  const [ldarDetailInitialTab, setLdarDetailInitialTab] = useState<'schedule' | 'surveys' | 'leaks' | 'site_plan' | 'inventory'>('schedule');
+  const [quickSurveyFacility, setQuickSurveyFacility] = useState<Facility | null>(null);
+  const [quickLeakFacility, setQuickLeakFacility] = useState<Facility | null>(null);
+  const [showLdarBulkModal, setShowLdarBulkModal] = useState(false);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | 'ldar' | 'spcc' | null>(null);
   const [openToComments, setOpenToComments] = useState(false);
   const [invoiceView, setInvoiceView] = useState(false);
@@ -1286,7 +1292,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const isReportWorkflowOpen = showExportPopup || showReportTypePicker || showOverviewTypePicker
     || showInspectionOverview || showPlansOverview || showLdarOverview || showLdarReportsModal
-    || showLdarSurveyModal || Boolean(ldarDetailFacility) || showMobileTools;
+    || showLdarSurveyModal || showLdarBulkModal || Boolean(quickSurveyFacility)
+    || Boolean(quickLeakFacility) || Boolean(ldarDetailFacility) || showMobileTools;
 
   // Esc clears the row selection. Skipped when the user is typing in an
   // input/textarea/contenteditable (so search-bar Esc behavior isn't
@@ -6050,6 +6057,33 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               <ClipboardList className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                               Overview
                             </button>
+                            {spccMode === 'ldar' && canAccessLdarMode && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowMobileTools(false);
+                                    setShowLdarSurveyModal(true);
+                                  }}
+                                  className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-teal-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                                >
+                                  <Wind className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                                  Log Survey
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowMobileTools(false);
+                                    setLdarOverviewTab('leaks');
+                                    setShowLdarOverview(true);
+                                  }}
+                                  className="flex min-h-12 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-left text-sm font-medium text-gray-700 hover:border-red-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                                >
+                                  <Flame className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                  Open Leaks
+                                </button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
@@ -6251,18 +6285,41 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
                   {/* Action buttons */}
                   <div className="flex items-center gap-1.5 md:gap-2">
-                    {/* Mark Complete */}
-                    <button
-                      onClick={() => {
-                        setBulkCompletionError(null);
-                        setShowCompletionModal(true);
-                      }}
-                      className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all text-xs font-medium"
-                      title="Mark as SPCC completed"
-                    >
-                      <CheckCircle className="w-4 h-4 md:w-3.5 md:h-3.5" />
-                      <span className="hidden lg:inline">Complete</span>
-                    </button>
+                    {/* Mode-aware primary bulk action: in LDAR mode open Bulk LDAR Surveys/Schedules; otherwise SPCC Complete */}
+                    {spccMode === 'ldar' && canAccessLdarMode ? (
+                      <button
+                        onClick={() => setShowLdarBulkModal(true)}
+                        className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-teal-600 text-white hover:bg-teal-700 active:scale-95 transition-all text-xs font-medium"
+                        title="Bulk log clean LDAR surveys or configure LDAR schedules"
+                      >
+                        <Wind className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                        <span className="hidden lg:inline">LDAR Actions</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            setBulkCompletionError(null);
+                            setShowCompletionModal(true);
+                          }}
+                          className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all text-xs font-medium"
+                          title="Mark as SPCC completed"
+                        >
+                          <CheckCircle className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                          <span className="hidden lg:inline">Complete</span>
+                        </button>
+                        {spccMode === 'all' && canAccessLdarMode && (
+                          <button
+                            onClick={() => setShowLdarBulkModal(true)}
+                            className="flex items-center justify-center gap-1.5 w-9 h-9 md:w-auto md:h-auto md:px-3.5 md:py-2 rounded-xl md:rounded-lg bg-teal-500/10 dark:bg-teal-400/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 dark:hover:bg-teal-400/20 active:scale-95 transition-all text-xs font-medium"
+                            title="Bulk LDAR surveys or schedule setup"
+                          >
+                            <Wind className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                            <span className="hidden lg:inline">LDAR</span>
+                          </button>
+                        )}
+                      </>
+                    )}
 
                     {/* Mark Sold */}
                     {!showSoldFacilities && (
@@ -6777,6 +6834,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               if (
                                 columnId === 'plan_invoice_status' ||
                                 columnId === 'inspection_invoice_status' ||
+                                columnId === 'ldar_invoice_status' ||
                                 columnId === 'invoiced_date'
                               ) {
                                 return;
@@ -6794,8 +6852,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               }
                               if (columnId === 'ldar_site_plan_status') {
                                 e.stopPropagation();
-                                setForcedTab('ldar');
-                                setSelectedFacility(facility);
+                                if (spccMode === 'ldar' && canAccessLdarMode) {
+                                  setLdarDetailInitialTab('site_plan');
+                                  setLdarDetailFacility(facility);
+                                } else {
+                                  setForcedTab('ldar');
+                                  setSelectedFacility(facility);
+                                }
+                                return;
+                              }
+                              if (canAccessLdarMode && columnId === 'ldar_open_leaks') {
+                                e.stopPropagation();
+                                setLdarDetailInitialTab('leaks');
+                                setLdarDetailFacility(facility);
+                                return;
+                              }
+                              if (canAccessLdarMode && columnId === 'ldar_last_survey_date') {
+                                e.stopPropagation();
+                                setLdarDetailInitialTab('surveys');
+                                setLdarDetailFacility(facility);
                                 return;
                               }
                               // Facility name column always opens the full
@@ -6805,9 +6880,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                               // plan mode).
                               if (columnId === 'name') {
                                 e.stopPropagation();
+                                if (spccMode === 'ldar' && canAccessLdarMode) {
+                                  setForcedTab('ldar');
+                                }
                                 setSelectedFacility(facility);
                                 return;
                               }
+                              setLdarDetailInitialTab('schedule');
                               handleFacilityRowClick(facility);
                             }}
                           >
@@ -6816,6 +6895,30 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                         ))}
                         <td className={`px-1 py-1 whitespace-nowrap text-xs sticky right-0 ${invoiceBg ? invoiceBg.sticky : stripeStickyBg} hidden md:table-cell shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] transition-colors duration-200`}>
                           <div className="flex gap-1 items-center justify-center">
+                            {spccMode === 'ldar' && canAccessLdarMode && (
+                              <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setQuickSurveyFacility(facility);
+                                  }}
+                                  className="p-1 flex items-center justify-center rounded-md text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-all duration-200 hover:scale-110"
+                                  title="Log LDAR Survey"
+                                >
+                                  <Wind className="w-3 h-3 shrink-0" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setQuickLeakFacility(facility);
+                                  }}
+                                  className="p-1 flex items-center justify-center rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200 hover:scale-110"
+                                  title="Tag Fugitive Leak"
+                                >
+                                  <Flame className="w-3 h-3 shrink-0" />
+                                </button>
+                              </>
+                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -6826,17 +6929,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             >
                               <Edit2 className="w-3 h-3 shrink-0" />
                             </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setManagingFacility(facility);
-                                setShowSPCCPlanManager(true);
-                              }}
-                              className="p-1 flex items-center justify-center rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
-                              title="Manage SPCC Plan"
-                            >
-                              <ShieldCheck className="w-3 h-3 shrink-0" />
-                            </button>
+                            {spccMode !== 'ldar' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setManagingFacility(facility);
+                                  setShowSPCCPlanManager(true);
+                                }}
+                                className="p-1 flex items-center justify-center rounded-md text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 transition-all duration-200 hover:scale-110"
+                                title="Manage SPCC Plan"
+                              >
+                                <ShieldCheck className="w-3 h-3 shrink-0" />
+                              </button>
+                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -7662,8 +7767,20 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         facilities={facilities}
         accountId={accountId}
         userId={userId}
+        defaultInspectorName={currentAuthorName}
         initialTab={ldarOverviewTab}
-        onOpenFacilityLdar={(fac) => setLdarDetailFacility(fac)}
+        onOpenFacilityLdar={(fac) => {
+          setLdarDetailInitialTab('schedule');
+          setLdarDetailFacility(fac);
+        }}
+        onCreateLdarRoute={
+          onCreateRoute
+            ? (facilityIds) => {
+                const match = surveyTypes.find(t => t.system_kind === 'ldar');
+                onCreateRoute(facilityIds, match?.id ?? 'ldar');
+              }
+            : undefined
+        }
         onFacilitiesChanged={() => void onFacilitiesChange()}
       />
 
@@ -7683,18 +7800,51 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         onBulkDownloadPlans={() => handleBulkLdarDownload('plan')}
       />
 
-      {/* Quick Log LDAR Survey Modal */}
-      {canAccessLdarMode && showLdarSurveyModal && (
+      {/* Quick Log LDAR Survey Modal (Toolbar or Row Action) */}
+      {canAccessLdarMode && (showLdarSurveyModal || quickSurveyFacility) && (
         <LDARSurveyModal
-          isOpen={showLdarSurveyModal}
-          onClose={() => setShowLdarSurveyModal(false)}
+          isOpen={true}
+          onClose={() => {
+            setShowLdarSurveyModal(false);
+            setQuickSurveyFacility(null);
+          }}
           accountId={accountId}
           userId={userId}
+          defaultInspectorName={currentAuthorName}
+          facility={quickSurveyFacility}
           facilities={facilities}
           onSaved={(savedSurvey) => {
             if (savedSurvey?.status === 'completed' && savedSurvey?.id && savedSurvey?.facility_id) {
               void onLdarRouteStopCompleted?.(savedSurvey.facility_id, savedSurvey.id);
             }
+            void onFacilitiesChange();
+          }}
+        />
+      )}
+
+      {/* Quick Row Tag Leak Modal */}
+      {canAccessLdarMode && quickLeakFacility && (
+        <LDARLeakModal
+          isOpen={true}
+          onClose={() => setQuickLeakFacility(null)}
+          accountId={accountId}
+          userId={userId}
+          defaultInspectorName={currentAuthorName}
+          facility={quickLeakFacility}
+          onSaved={() => void onFacilitiesChange()}
+        />
+      )}
+
+      {/* Bulk LDAR Surveys & Schedule Modal */}
+      {canAccessLdarMode && showLdarBulkModal && (
+        <LDARBulkActionsModal
+          isOpen={showLdarBulkModal}
+          onClose={() => setShowLdarBulkModal(false)}
+          selectedFacilities={facilities.filter(f => selectedFacilityIds.has(f.id))}
+          accountId={accountId}
+          onLdarRouteStopCompleted={onLdarRouteStopCompleted}
+          onCompleted={() => {
+            setSelectedFacilityIds(new Set());
             void onFacilitiesChange();
           }}
         />
@@ -7706,6 +7856,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           facility={facilities.find(f => f.id === ldarDetailFacility.id) || ldarDetailFacility}
           accountId={accountId}
           userId={userId}
+          defaultInspectorName={currentAuthorName}
+          initialTab={ldarDetailInitialTab}
           onClose={() => setLdarDetailFacility(null)}
           onFacilityUpdated={() => void onFacilitiesChange()}
           onLdarSurveyCompleted={(facId, survId) => {

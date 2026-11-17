@@ -13,6 +13,7 @@ import {
   Loader2,
   Trash2,
   Search,
+  ArrowRight,
 } from 'lucide-react';
 import ModalPortal from './ModalPortal';
 import {
@@ -186,6 +187,7 @@ export default function LDARLeakModal({
   const [newAttemptAction, setNewAttemptAction] = useState(LDAR_REPAIR_METHODS[0]);
   const [newAttemptSucceeded, setNewAttemptSucceeded] = useState(true);
   const [newAttemptNotes, setNewAttemptNotes] = useState('');
+  const [repairFormTouched, setRepairFormTouched] = useState(false);
 
   // Stage 3 -> Stage 4 Confirmation (Re-Monitoring)
   const [confirmedDate, setConfirmedDate] = useState(existingLeak?.confirmed_date || todayIso);
