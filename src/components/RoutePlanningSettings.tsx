@@ -128,38 +128,51 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
   };
 
   const saveSettingsToDb = async () => {
-    const { error } = await supabase
+    const payloadWithLdar = {
+      user_id: authUserId,
+      account_id: accountId,
+      max_facilities_per_day: settings.max_facilities_per_day,
+      max_hours_per_day: settings.max_hours_per_day,
+      default_visit_duration_minutes: settings.default_visit_duration_minutes,
+      use_facilities_constraint: settings.use_facilities_constraint,
+      use_hours_constraint: settings.use_hours_constraint,
+      clustering_tightness: settings.clustering_tightness,
+      cluster_balance_weight: settings.cluster_balance_weight,
+      start_time: settings.start_time,
+      sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
+      auto_refresh_route: settings.auto_refresh_route ?? false,
+      exclude_completed_facilities: settings.exclude_completed_facilities ?? false,
+      exclude_externally_completed: settings.exclude_externally_completed ?? false,
+      team_count: settings.team_count,
+      inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
+      plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
+      ldar_visit_duration_minutes: settings.ldar_visit_duration_minutes ?? 45,
+      // Time-budget fields — parity with the Update Route Settings modal so
+      // editing in either surface persists to the same row and both UIs
+      // reflect the same value on next mount.
+      lunch_break_minutes: settings.lunch_break_minutes ?? 0,
+      max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
+      return_by_time: settings.return_by_time || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    let { error } = await supabase
       .from('user_settings')
-      .upsert({
-        user_id: authUserId,
-        account_id: accountId,
-        max_facilities_per_day: settings.max_facilities_per_day,
-        max_hours_per_day: settings.max_hours_per_day,
-        default_visit_duration_minutes: settings.default_visit_duration_minutes,
-        use_facilities_constraint: settings.use_facilities_constraint,
-        use_hours_constraint: settings.use_hours_constraint,
-        clustering_tightness: settings.clustering_tightness,
-        cluster_balance_weight: settings.cluster_balance_weight,
-        start_time: settings.start_time,
-        sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
-        auto_refresh_route: settings.auto_refresh_route ?? false,
-        exclude_completed_facilities: settings.exclude_completed_facilities ?? false,
-        exclude_externally_completed: settings.exclude_externally_completed ?? false,
-        team_count: settings.team_count,
-        inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
-        plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
-        ldar_visit_duration_minutes: settings.ldar_visit_duration_minutes ?? 45,
-        // Time-budget fields — parity with the Update Route Settings modal so
-        // editing in either surface persists to the same row and both UIs
-        // reflect the same value on next mount.
-        lunch_break_minutes: settings.lunch_break_minutes ?? 0,
-        max_drive_time_minutes: settings.max_drive_time_minutes ?? 0,
-        return_by_time: settings.return_by_time || null,
-        updated_at: new Date().toISOString(),
-      }, {
+      .upsert(payloadWithLdar, {
         onConflict: 'account_id',
         ignoreDuplicates: false,
       });
+
+    if (error && /ldar_visit_duration_minutes|PGRST204/i.test(error.message)) {
+      const { ldar_visit_duration_minutes: _omit, ...legacyPayload } = payloadWithLdar;
+      void _omit;
+      ({ error } = await supabase
+        .from('user_settings')
+        .upsert(legacyPayload, {
+          onConflict: 'account_id',
+          ignoreDuplicates: false,
+        }));
+    }
 
     if (error) throw error;
   };
@@ -177,6 +190,7 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
       const errorMsg = err.message || JSON.stringify(err);
       console.error('Error saving settings:', err);
       setSaveMessage(`Failed to save settings: ${errorMsg}`);
+    } finally {
       setIsSaving(false);
     }
   };
@@ -194,6 +208,7 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
       const errorMsg = err.message || JSON.stringify(err);
       console.error('Error saving settings:', err);
       setSaveMessage(`Failed to save settings: ${errorMsg}`);
+    } finally {
       setIsSaving(false);
     }
   };

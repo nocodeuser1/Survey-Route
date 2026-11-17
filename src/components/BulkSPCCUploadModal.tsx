@@ -240,7 +240,6 @@ export default function BulkSPCCUploadModal({
   const [rejectedFiles, setRejectedFiles] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [extractionConfig, setExtractionConfig] = useState<ExtractionConfig | null>(null);
-  const [configLoaded, setConfigLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load extraction config for this account
@@ -250,12 +249,11 @@ export default function BulkSPCCUploadModal({
         .from('user_settings')
         .select('spcc_extraction_config')
         .eq('account_id', accountId)
-        .single();
+        .maybeSingle();
 
       if (data?.spcc_extraction_config) {
         setExtractionConfig(data.spcc_extraction_config as ExtractionConfig);
       }
-      setConfigLoaded(true);
     };
     if (isOpen) loadConfig();
   }, [accountId, isOpen]);

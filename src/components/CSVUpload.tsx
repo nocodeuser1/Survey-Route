@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Upload, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { parseCSV, parseExcelFile, ParseResult } from '../utils/csvParser';
 
 interface CSVUploadProps {

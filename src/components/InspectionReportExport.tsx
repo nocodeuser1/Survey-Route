@@ -1,7 +1,7 @@
 import { renderFacilitySignageHtml, facilitySignageCss, reportPhotosWithLatestSignage } from '../utils/inspectionSignage';
 import { useState, useEffect } from 'react';
 import { Download, FileText, Loader, Search, ArrowUpDown, Check, Minus } from 'lucide-react';
-import { supabase, Facility, Inspection, InspectionTemplate, UserSettings, InspectionPhoto } from '../lib/supabase';
+import { supabase, Facility, Inspection, InspectionTemplate, InspectionPhoto } from '../lib/supabase';
 import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';
 import { escapeHtml } from '../utils/escapeHtml';
 import { formatInspectionTimestamp } from '../utils/inspectionTimestamp';
@@ -14,7 +14,7 @@ interface InspectionReportExportProps {
   accountId: string;
 }
 
-export default function InspectionReportExport({ facilities, userId, accountId }: InspectionReportExportProps) {
+export default function InspectionReportExport({ facilities, userId: _userId, accountId }: InspectionReportExportProps) {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [template, setTemplate] = useState<InspectionTemplate | null>(null);
   const [inspectionPhotos, setInspectionPhotos] = useState<Map<string, InspectionPhoto[]>>(new Map());
@@ -198,8 +198,6 @@ export default function InspectionReportExport({ facilities, userId, accountId }
 
     console.log('[InspectionReportExport] Generating report with hideReportTimestamps:', hideReportTimestamps);
 
-    const flaggedResponses = inspection.responses.filter(r => r.answer === 'no');
-    const actionResponses = inspection.responses.filter(r => r.answer === 'no' && r.action_required);
     const inspectionTitle = 'SPCC Inspection';
     const photos = inspectionPhotos.get(inspection.id) || [];
     const photosByQuestion = new Map<string, InspectionPhoto[]>();

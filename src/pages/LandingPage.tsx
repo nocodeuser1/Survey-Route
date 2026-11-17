@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState, useRef } from 'react';
-import { Route, Star, CheckCircle, ArrowRight, Shield, BarChart3, Globe, X, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint, Clock, Calendar, Smartphone, Handshake, Users, Sparkles } from 'lucide-react';
+import { Route, Star, CheckCircle, ArrowRight, Shield, BarChart3, Globe, X, Camera, FileText, Navigation, Upload, MapPin, TrendingUp, Monitor, ChevronUp, ChevronDown, Mic, WifiOff, ClipboardList, Settings, Layers, Headphones, Fingerprint, Clock, Calendar, Smartphone, Handshake, Sparkles } from 'lucide-react';
 
 // ─── useScrollAnimation ───────────────────────────────────────────────
 function useScrollAnimation(threshold = 0.15) {
@@ -426,7 +426,7 @@ export default function LandingPage() {
     setOpenFaq(openFaq === index ? null : index);
   };
 
-  const sectionClass = (visible: boolean, delay = 0) =>
+  const sectionClass = (visible: boolean, _delay = 0) =>
     `transition-opacity duration-700 ${visible ? 'animate-fade-in-up' : 'opacity-0'}`;
 
   return (

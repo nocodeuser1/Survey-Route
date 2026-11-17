@@ -171,7 +171,7 @@ export default function RecertificationPagePickerModal({
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const task = page.render({ canvasContext: ctx, viewport });
+        const task = page.render({ canvas, canvasContext: ctx, viewport });
         renderTaskRef.current = task;
         await task.promise;
         if (cancelled) return;
@@ -255,7 +255,7 @@ export default function RecertificationPagePickerModal({
       const storagePath = plan.plan_url.replace(/^.*\/spcc-plans\//, '');
       const { error: uploadErr } = await supabase.storage
         .from('spcc-plans')
-        .upload(storagePath, new Blob([merged], { type: 'application/pdf' }), {
+        .upload(storagePath, new Blob([merged as BlobPart], { type: 'application/pdf' }), {
           contentType: 'application/pdf',
           upsert: true,
           // Short cache TTL so phones drop the stale file quickly.
@@ -468,7 +468,7 @@ export default function RecertificationPagePickerModal({
                   className="relative inline-block border border-gray-200 dark:border-gray-700 bg-white"
                   style={{ minHeight: 200 }}
                 >
-                  <canvas ref={canvasRef} />
+                  <canvas ref={canvasRef} className="block max-w-full h-auto" />
                   {renderingPage && (
                     <div className="absolute inset-0 flex items-center justify-center bg-white/60 dark:bg-gray-900/60">
                       <Loader2 className="w-5 h-5 animate-spin text-gray-500" />

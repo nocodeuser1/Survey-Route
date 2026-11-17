@@ -5,10 +5,10 @@ import { parseLocalDate } from '../utils/dateUtils';
 
 interface FacilityComplianceTimelineProps {
   facility: Facility;
-  accountId: string;
+  accountId?: string;
 }
 
-export default function FacilityComplianceTimeline({ facility, accountId }: FacilityComplianceTimelineProps) {
+export default function FacilityComplianceTimeline({ facility }: FacilityComplianceTimelineProps) {
   const [compliance, setCompliance] = useState<SPCCComplianceTracking | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +70,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
         return <FileText className="w-5 h-5 text-gray-400" />;
       case 'initial_due':
       case 'renewal_due':
+      case 'expiring':
         return <Clock className="w-5 h-5 text-yellow-500" />;
       case 'initial_complete':
       case 'renewal_complete':
@@ -87,6 +88,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
         return 'text-gray-600 dark:text-gray-400';
       case 'initial_due':
       case 'renewal_due':
+      case 'expiring':
         return 'text-yellow-600 dark:text-yellow-400';
       case 'initial_complete':
       case 'renewal_complete':
@@ -108,6 +110,8 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
         return 'Initial Plan Complete';
       case 'renewal_due':
         return 'Recertification Due';
+      case 'expiring':
+        return 'Expiring Soon';
       case 'renewal_complete':
         return 'Recertification Complete';
       case 'overdue':
@@ -169,7 +173,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
     });
   }
 
-  timelineEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  timelineEvents.sort((a, b) => parseLocalDate(a.date).getTime() - parseLocalDate(b.date).getTime());
 
   return (
     <div className="space-y-4">
@@ -186,7 +190,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
           </div>
         </div>
 
-        {compliance.days_until_due !== null && (
+        {compliance.days_until_due != null && (
           <div className="ml-auto text-right">
             <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
               {compliance.days_until_due < 0 ? Math.abs(compliance.days_until_due) : compliance.days_until_due}
@@ -202,7 +206,7 @@ export default function FacilityComplianceTimeline({ facility, accountId }: Faci
         <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Timeline</h4>
         <div className="space-y-3">
           {timelineEvents.map((event, index) => {
-            const eventDate = new Date(event.date);
+            const eventDate = parseLocalDate(event.date);
             const isPast = eventDate < new Date();
 
             return (

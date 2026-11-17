@@ -1,6 +1,6 @@
 import { CheckCircle, Clock, AlertTriangle, FileText } from 'lucide-react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { getSPCCPlanStatus, getSPCCWorkflowBadgeConfig, getStatusBadgeConfig, formatDayCount, shouldShowSPCCWorkflowStatus, type SPCCStatusFacility } from '../utils/spccStatus';
+import { getSPCCPlanStatus, getStatusBadgeConfig, formatDayCount, type SPCCStatusFacility } from '../utils/spccStatus';
 
 interface SPCCStatusBadgeProps {
   facility: SPCCStatusFacility;
@@ -25,15 +25,6 @@ export default function SPCCStatusBadge({ facility, showMessage = false, classNa
   const config = getStatusBadgeConfig(result.status);
   const Icon = iconMap[config.icon];
   const colors = darkMode ? config.darkColorClass : config.colorClass;
-  const workflowVisible = shouldShowSPCCWorkflowStatus(facility);
-  const workflowConfig = facility.spcc_workflow_status
-    ? getSPCCWorkflowBadgeConfig(facility.spcc_workflow_status)
-    : null;
-  const workflowColors = workflowConfig
-    ? darkMode
-      ? workflowConfig.darkColorClass
-      : workflowConfig.colorClass
-    : '';
 
   return (
     <div className={`inline-flex flex-col items-start gap-1 ${className}`}>

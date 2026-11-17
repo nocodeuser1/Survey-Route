@@ -14,10 +14,10 @@ import LDARLeakModal from './LDARLeakModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { getFacilityInspectionExpiry, getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
-import { getFacilityLdarCompliance, canUserAccessLdarMode } from '../utils/ldar';
+import { getFacilityLdarCompliance, canUserAccessLdarMode, facilityNeedsLdarAttention } from '../utils/ldar';
 import { useAuth } from '../contexts/AuthContext';
 import { getRouteStatusRenderModel, resolveInspectionDisplayStatus, type InspectionDisplayStatus } from '../utils/routeStatus';
-import { parseLocalDate } from '../utils/dateUtils';
+import { APP_TIME_ZONE, parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
 import { getBermDisplayLabel } from '../utils/spccPlans';
 import { getCoords } from '../utils/coordinates';
@@ -89,7 +89,7 @@ type ViewModeType = 'all' | 'inspections' | 'plans' | 'ldar';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
 export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId, onInspectionRouteStopCompleted, onLdarRouteStopCompleted, routeStatusStopsByScope, routeStatusRunInitialized }: SurveyModeProps) {
-  const { user: authUser, supabaseUser } = useAuth();
+  const { user: authUser, supabaseUser, loading: authLoading } = useAuth();
   const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
 
   const mapSurveyTypeToViewMode = (st: string | undefined): ViewModeType | null => {
@@ -114,6 +114,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [facilitiesWithDistance, setFacilitiesWithDistance] = useState<FacilityWithDistance[]>([]);
   const [inspectingFacility, setInspectingFacility] = useState<Facility | null>(null);
+  const [clonedResponses, setClonedResponses] = useState<Inspection['responses'] | undefined>(undefined);
   const [viewingInspection, setViewingInspection] = useState<Inspection | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Inspection[]>([]);
@@ -155,15 +156,15 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     const fromProp = mapSurveyTypeToViewMode(externalSurveyType);
     if (fromProp) return fromProp;
     const saved = statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
-    if (saved === 'ldar' && !canAccessLdarMode) return 'inspections';
+    if (saved === 'ldar' && !authLoading && !canAccessLdarMode) return 'inspections';
     return saved;
   });
 
   useEffect(() => {
-    if (!canAccessLdarMode && viewMode === 'ldar') {
+    if (!authLoading && !canAccessLdarMode && viewMode === 'ldar') {
       setViewModeInternal('all');
     }
-  }, [canAccessLdarMode, viewMode]);
+  }, [authLoading, canAccessLdarMode, viewMode]);
 
   // "Show off-route facilities" toggle. Only meaningful when a custom route
   // is active (routeFacilityIds non-null). When ON, the list expands to every
@@ -191,9 +192,10 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   // Sync from external surveyType. Handles both the legacy SPCC enum strings
   // and post-migration UUIDs (via system_kind lookup in mapSurveyTypeToViewMode).
   useEffect(() => {
+    if (authLoading && externalSurveyType === 'ldar') return;
     const mapped = mapSurveyTypeToViewMode(externalSurveyType);
     if (mapped && mapped !== viewMode) setViewModeInternal(mapped);
-  }, [externalSurveyType, dbSurveyTypes]);
+  }, [externalSurveyType, dbSurveyTypes, canAccessLdarMode, authLoading]);
 
   // Wrapper to sync outward — emits the system_kind row's UUID if known,
   // falling back to legacy enum strings so App.tsx can self-heal via migration.
@@ -442,7 +444,6 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       const { data, error } = await supabase
         .from('user_settings')
         .select('*')
-        .eq('user_id', userId)
         .eq('account_id', accountId)
         .maybeSingle();
 
@@ -592,12 +593,10 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           )
         : 0;
 
-      const teamRoute = result.routes[teamNumber - 1];
-      let day: number | undefined;
-      if (teamRoute && teamRoute.facilities) {
-        const routeItem = teamRoute.facilities.find((f: any) => f.id === facility.id) as any;
-        day = routeItem?.day;
-      }
+      const matchingDayRoute = result?.routes?.find(r =>
+        r.facilities?.some((rf: any) => (rf.id ? rf.id === facility.id : rf.name === facility.name))
+      );
+      const day = matchingDayRoute?.day;
 
       return {
         ...facility,
@@ -754,16 +753,14 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   function getFacilityRouteRenderModel(facility: Facility) {
     const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
     const planStatus = getSPCCPlanStatus(facility);
-    const ldarComp = getFacilityLdarCompliance(facility);
-    const ldarCurrent =
-      (ldarComp.status === 'current' || ldarComp.status === 'due_60' || ldarComp.status === 'exempt') &&
-      ldarComp.openLeaksCount === 0;
+    const includeLdar = viewMode === 'ldar' || canAccessLdarMode;
+    const ldarCurrent = includeLdar && !facilityNeedsLdarAttention(facility);
     const kind =
       viewMode === 'inspections'
         ? 'spcc_inspection'
         : viewMode === 'plans'
           ? 'spcc_plan'
-          : viewMode === 'ldar'
+          : viewMode === 'ldar' && canAccessLdarMode
             ? 'ldar'
             : 'all';
     return getRouteStatusRenderModel({
@@ -771,10 +768,10 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       isCurrentRouteStop: !routeFacilityIds || routeFacilityIds.includes(facility.id),
       inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
       planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? false,
-      ldarRunInitialized: routeStatusRunInitialized?.ldar ?? false,
+      ldarRunInitialized: includeLdar ? (routeStatusRunInitialized?.ldar ?? false) : false,
       inspectionStop: routeStatusStopsByScope?.spcc_inspection.get(facility.id),
       planStop: routeStatusStopsByScope?.spcc_plan.get(facility.id) ?? planRouteStopsByFacilityId?.get(facility.id),
-      ldarStop: routeStatusStopsByScope?.ldar?.get(facility.id),
+      ldarStop: includeLdar ? routeStatusStopsByScope?.ldar?.get(facility.id) : undefined,
       inspectionComplianceCurrent: isFacilityInspectionCurrent(facility, facilityInspections),
       planComplianceCurrent: planStatus === 'valid' || planStatus === 'recertified',
       ldarComplianceCurrent: ldarCurrent,
@@ -905,6 +902,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   async function handleInspectionComplete() {
     await loadInspections();
     setInspectingFacility(null);
+    setClonedResponses(undefined);
     if (onFacilitiesChange) {
       onFacilitiesChange();
     }
@@ -936,12 +934,16 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         userId={userId}
         teamNumber={teamNumber}
         accountId={accountId}
-        initialDraft={pickLatestDraft(inspections, inspectingFacility.id)}
+        initialDraft={clonedResponses ? null : pickLatestDraft(inspections, inspectingFacility.id)}
+        clonedResponses={clonedResponses}
         onSaved={handleInspectionComplete}
         onInspectionCompletedWithFacility={async (facility, inspectionId) => {
           await onInspectionRouteStopCompleted?.(facility.id, 'inspection', inspectionId);
         }}
-        onClose={() => setInspectingFacility(null)}
+        onClose={() => {
+          setInspectingFacility(null);
+          setClonedResponses(undefined);
+        }}
       />
     );
   }
@@ -954,13 +956,17 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
     }
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
         <InspectionViewer
           inspection={viewingInspection}
           facility={viewingFacility}
           onClose={() => setViewingInspection(null)}
-          onClone={() => { }}
-          canClone={false}
+          onClone={() => {
+            setClonedResponses(viewingInspection.responses);
+            setViewingInspection(null);
+            setInspectingFacility(viewingFacility);
+          }}
+          canClone={true}
           userId={userId}
           accountId={accountId}
         />
@@ -1019,9 +1025,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           )}
 
           {locationError && (
-            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-              <p className="text-xs text-red-800">{locationError}</p>
+            <div className="mb-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+              <p className="text-xs text-red-800 dark:text-red-300">{locationError}</p>
             </div>
           )}
 
@@ -1450,8 +1456,8 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                               date; in 'all' mode whichever is more recent
                               is shown alongside its label. */}
                           {(viewMode === 'inspections' || viewMode === 'all') && latestInspection && (
-                            <span className="text-[10px] text-gray-500">
-                              Insp: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' })}
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                              Insp: {new Date(latestInspection.conducted_at).toLocaleDateString('en-US', { timeZone: APP_TIME_ZONE, month: 'short', day: 'numeric' })}
                             </span>
                           )}
                           {(viewMode === 'plans' || viewMode === 'all') && (() => {
@@ -1902,34 +1908,37 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
             }
           }}
           onCloneInspection={(inspection) => {
-            console.log('[SurveyMode] Cloning inspection', inspection.id);
+            const targetFac = managingInspectionsFacility;
             setManagingInspectionsFacility(null);
+            setClonedResponses(inspection.responses);
+            setInspectingFacility(targetFac);
           }}
-          onEditDraft={(inspection) => {
-            console.log('[SurveyMode] Editing draft inspection', inspection.id);
+          onEditDraft={() => {
+            const targetFac = managingInspectionsFacility;
+            setClonedResponses(undefined);
             setManagingInspectionsFacility(null);
-            setInspectingFacility(managingInspectionsFacility);
+            setInspectingFacility(targetFac);
           }}
         />
       )}
 
       {spccPlanDetailFacility && (
         <SPCCPlanDetailModal
-          facility={spccPlanDetailFacility}
+          facility={facilities.find(f => f.id === spccPlanDetailFacility.id) || spccPlanDetailFacility}
           onClose={() => setSpccPlanDetailFacility(null)}
           onFacilitiesChange={() => {
             loadInspections();
             if (onFacilitiesChange) onFacilitiesChange();
           }}
           onViewInspectionDetails={() => {
-            setInspectingFacility(spccPlanDetailFacility);
+            setInspectingFacility(facilities.find(f => f.id === spccPlanDetailFacility.id) || spccPlanDetailFacility);
           }}
         />
       )}
 
-      {ldarDetailFacility && (
+      {canAccessLdarMode && ldarDetailFacility && (
         <LDARFacilityDetailModal
-          facility={ldarDetailFacility}
+          facility={facilities.find(f => f.id === ldarDetailFacility.id) || ldarDetailFacility}
           accountId={accountId}
           userId={userId}
           onClose={() => setLdarDetailFacility(null)}
@@ -1940,13 +1949,13 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         />
       )}
 
-      {ldarSurveyFacility && (
+      {canAccessLdarMode && ldarSurveyFacility && (
         <LDARSurveyModal
           isOpen={true}
           onClose={() => setLdarSurveyFacility(null)}
           accountId={accountId}
           userId={userId}
-          facility={ldarSurveyFacility}
+          facility={facilities.find(f => f.id === ldarSurveyFacility.id) || ldarSurveyFacility}
           onSaved={async (savedSurvey) => {
             if (savedSurvey.status === 'completed') {
               await onLdarRouteStopCompleted?.(ldarSurveyFacility.id, savedSurvey.id);
@@ -1956,27 +1965,27 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
         />
       )}
 
-      {ldarLeakFacility && (
+      {canAccessLdarMode && ldarLeakFacility && (
         <LDARLeakModal
           isOpen={true}
           onClose={() => setLdarLeakFacility(null)}
           accountId={accountId}
           userId={userId}
-          facility={ldarLeakFacility}
+          facility={facilities.find(f => f.id === ldarLeakFacility.id) || ldarLeakFacility}
           onSaved={() => onFacilitiesChange?.()}
         />
       )}
 
       <button
         onClick={() => setShowSearch(!showSearch)}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center justify-center z-40"
+        className="fixed bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))] right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center justify-center z-40"
         title="Quick Actions"
       >
         {showSearch ? <X className="w-6 h-6" /> : <Search className="w-6 h-6" />}
       </button>
 
       {showSearch && (
-        <div className="fixed bottom-24 right-6 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-4 w-80 z-40">
+        <div className="fixed bottom-[calc(max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))+4.5rem)] right-4 sm:right-6 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-4 w-[calc(100vw-2rem)] max-w-xs z-40">
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200 mb-1 block">Search</label>

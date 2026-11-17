@@ -4,9 +4,10 @@ import { Inspection, Facility, InspectionTemplate, InspectionPhoto, InspectionRe
 import { groupResponseEvents, reportableEvents, assignAddedPhotosToEvents, deleteInspectionEvent, releasePhoto } from '../utils/inspectionEvents';
 import { useState, useEffect } from 'react';
 import { isInspectionValid } from '../utils/inspectionUtils';
-import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { getDisplayTimestamp, hasManualTimestamp, validateTimestamp } from '../utils/inspectionTimestamp';
 import { formatInspectionTimestamp } from '../utils/timestampFormatter';
+import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 
 function PhotoThumbnail({ photo, onClick }: { photo: InspectionPhoto; onClick: (url: string) => void }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -43,7 +44,7 @@ function PhotoThumbnail({ photo, onClick }: { photo: InspectionPhoto; onClick: (
 
   if (loading) {
     return (
-      <div className="w-full h-24 bg-gray-100 rounded-md border border-gray-300 flex items-center justify-center">
+      <div className="w-full h-24 bg-gray-100 dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 flex items-center justify-center">
         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
       </div>
     );
@@ -51,7 +52,7 @@ function PhotoThumbnail({ photo, onClick }: { photo: InspectionPhoto; onClick: (
 
   if (error || !photoUrl) {
     return (
-      <div className="w-full h-24 bg-gray-100 rounded-md border border-gray-300 flex items-center justify-center">
+      <div className="w-full h-24 bg-gray-100 dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 flex items-center justify-center">
         <div className="text-gray-400 text-xs">Failed to load</div>
       </div>
     );
@@ -62,7 +63,7 @@ function PhotoThumbnail({ photo, onClick }: { photo: InspectionPhoto; onClick: (
       <img
         src={photoUrl}
         alt={photo.file_name}
-        className="w-full h-24 object-cover rounded-md border border-gray-300 hover:border-blue-500 transition-colors"
+        className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600 hover:border-blue-500 transition-colors"
         onClick={() => onClick(photoUrl)}
       />
       <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 rounded-b-md truncate">
@@ -85,6 +86,8 @@ interface InspectionViewerProps {
 }
 
 export default function InspectionViewer({ inspection, facility, onClose, onClone, canClone = true, userId, accountId, onViewSPCCPlan, onViewFacilityDetails }: InspectionViewerProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const { accountRole, isAgencyAdmin } = useAccount();
   const [template, setTemplate] = useState<InspectionTemplate | null>(null);
   const [accountBranding, setAccountBranding] = useState<{ company_name?: string; logo_url?: string }>({});
   const [hideReportTimestamps, setHideReportTimestamps] = useState(false);
@@ -116,41 +119,43 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
     loadReportSettings();
   }, []);
 
+  useEffect(() => {
+    checkEditPermissions();
+  }, [userId, authUser?.id, supabaseUser?.id, accountRole, isAgencyAdmin, inspection.account_id, inspection.user_id]);
+
   const checkEditPermissions = async () => {
-    if (!userId) {
-      console.log('[InspectionViewer] No userId provided');
+    const contextAdmin = Boolean(isAgencyAdmin || authUser?.isAgencyOwner || accountRole === 'account_admin');
+    const candidateUserIds = Array.from(new Set([userId, authUser?.id, supabaseUser?.id].filter(Boolean))) as string[];
+
+    if (candidateUserIds.length === 0 && !contextAdmin) {
       setCanEditTimestamp(false);
       setCanEditReport(false);
       return;
     }
 
     try {
-      console.log('[InspectionViewer] Checking permissions for userId:', userId, 'accountId:', inspection.account_id);
+      let dbAdmin = false;
+      if (!contextAdmin && candidateUserIds.length > 0 && inspection.account_id) {
+        const { data, error } = await supabase
+          .from('account_users')
+          .select('role')
+          .in('user_id', candidateUserIds)
+          .eq('account_id', inspection.account_id);
 
-      const { data, error } = await supabase
-        .from('account_users')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('account_id', inspection.account_id)
-        .maybeSingle();
+        if (!error && data) {
+          dbAdmin = data.some(r => r.role === 'account_admin');
+        }
+      }
 
-      if (error) throw error;
-
-      console.log('[InspectionViewer] Account user data:', data);
-
-      const isAdmin = data?.role === 'account_admin';
-      const isOwner = userId === inspection.user_id;
-
-      console.log('[InspectionViewer] Permissions - isAdmin:', isAdmin, 'isOwner:', isOwner);
-      console.log('[InspectionViewer] Inspection status:', inspection.status);
-      console.log('[InspectionViewer] Setting canEditReport to:', isAdmin);
+      const isAdmin = contextAdmin || dbAdmin;
+      const isOwner = Boolean(inspection.user_id && candidateUserIds.includes(inspection.user_id));
 
       setCanEditTimestamp(isAdmin || isOwner);
       setCanEditReport(isAdmin);
     } catch (err) {
       console.error('[InspectionViewer] Error checking permissions:', err);
-      setCanEditTimestamp(false);
-      setCanEditReport(false);
+      setCanEditTimestamp(contextAdmin);
+      setCanEditReport(contextAdmin);
     }
   };
 
@@ -329,9 +334,14 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
   const handleResponseChange = (questionId: string, field: keyof InspectionResponse, value: any) => {
     setEditedResponses(prev =>
-      prev.map(r =>
-        r.question_id === questionId ? { ...r, [field]: value } : r
-      )
+      prev.map(r => {
+        if (r.question_id !== questionId) return r;
+        const updated = { ...r, [field]: value };
+        if (field === 'answer' && value !== 'no') {
+          updated.action_required = false;
+        }
+        return updated;
+      })
     );
   };
 
@@ -556,13 +566,13 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-800 md:rounded-lg shadow-xl max-w-4xl w-full h-full md:h-[90vh] flex flex-col overflow-hidden transition-colors duration-200"
+        className="relative bg-white dark:bg-gray-800 md:rounded-lg shadow-xl max-w-4xl w-full h-full md:h-[90vh] flex flex-col overflow-hidden transition-colors duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 transition-colors duration-200">
+        <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 pr-14 transition-colors duration-200">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors z-10"
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors z-10"
           >
             <X className="w-6 h-6" />
           </button>
@@ -594,7 +604,6 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                   <span className="sm:hidden">Overview</span>
                 </button>
               )}
-              {canEditReport && !isEditMode && inspection.status === 'completed' && console.log('[InspectionViewer] Showing Edit Report button')}
               {canEditReport && !isEditMode && inspection.status === 'completed' && (
                 <button
                   onClick={handleEnterEditMode}
@@ -769,7 +778,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                                     ? val === 'yes' ? 'bg-green-600 text-white'
                                       : val === 'no' ? 'bg-red-600 text-white'
                                         : 'bg-gray-600 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                                   }`}
                               >
                                 {val.toUpperCase()}
@@ -811,7 +820,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                         <div className="mt-3 space-y-2">
                           <div>
                             <div className="mb-1 flex items-center justify-between">
-                              <label className="block text-xs font-medium text-gray-600">
+                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                                 {response?.events?.length ? 'Event 1:' : 'Comments:'}
                               </label>
                               {response?.events?.length ? (
@@ -829,14 +838,14 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                             <textarea
                               value={response?.comments || ''}
                               onChange={(e) => handleResponseChange(question.id, 'comments', e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded text-sm focus:ring-2 focus:ring-blue-500"
                               rows={2}
                             />
                           </div>
                           {response?.events?.map((event, eventIndex) => (
                             <div key={event.id}>
                               <div className="mb-1 flex items-center justify-between">
-                                <label className="block text-xs font-medium text-gray-600">Event {eventIndex + 2}:</label>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">Event {eventIndex + 2}:</label>
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteEvent(question.id, event.id, eventIndex + 2)}
@@ -850,7 +859,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
                               <textarea
                                 value={event.description}
                                 onChange={(e) => handleEventChange(question.id, event.id, e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded text-sm focus:ring-2 focus:ring-blue-500"
                                 rows={2}
                               />
                             </div>
@@ -860,35 +869,35 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
 
                       {!isEditMode ? (
                         response?.answer === 'no' && response?.action_required && (
-                          <div className="mt-3 bg-amber-50 border border-amber-200 rounded p-3">
-                            <p className="text-xs font-medium text-amber-800 mb-1">Action Required</p>
+                          <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded p-3">
+                            <p className="text-xs font-medium text-amber-800 dark:text-amber-300 mb-1">Action Required</p>
                             {response.action_notes && (
-                              <p className="text-sm text-amber-900 whitespace-pre-wrap">{response.action_notes}</p>
+                              <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{response.action_notes}</p>
                             )}
                           </div>
                         )
-                      ) : (
+                      ) : response?.answer === 'no' ? (
                         <div className="mt-3 space-y-2">
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
                               checked={response?.action_required || false}
                               onChange={(e) => handleResponseChange(question.id, 'action_required', e.target.checked)}
-                              className="rounded border-gray-300"
+                              className="rounded border-gray-300 dark:border-gray-600"
                             />
-                            <span className="text-sm font-medium text-gray-700">Action Required</span>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Action Required</span>
                           </label>
                           {response?.action_required && (
                             <textarea
                               value={response?.action_notes || ''}
                               onChange={(e) => handleResponseChange(question.id, 'action_notes', e.target.value)}
                               placeholder="Action notes..."
-                              className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500"
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded text-sm focus:ring-2 focus:ring-blue-500"
                               rows={2}
                             />
                           )}
                         </div>
-                      )}
+                      ) : null}
 
                       {isEditMode && (photos[question.id]?.length > 0 || newPhotos[question.id]?.length > 0) && (
                         <div className="mt-3">
@@ -1020,7 +1029,7 @@ export default function InspectionViewer({ inspection, facility, onClose, onClon
         >
           <button
             onClick={() => setSelectedPhoto(null)}
-            className="absolute top-4 right-4 p-2 bg-white rounded-full text-gray-800 dark:text-white dark:text-white hover:bg-gray-100"
+            className="absolute top-4 right-4 p-2 bg-white dark:bg-gray-800 rounded-full text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             <X className="w-6 h-6" />
           </button>

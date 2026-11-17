@@ -12,6 +12,9 @@ import {
   ShieldCheck,
   Navigation,
   Sparkles,
+  Zap,
+  SlidersHorizontal,
+  Search,
 } from 'lucide-react';
 import ModalPortal from './ModalPortal';
 import LDARLeakModal from './LDARLeakModal';
@@ -25,12 +28,15 @@ import {
   type LDAREquipmentCertification,
 } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   LDAR_SURVEY_METHODS,
   LDAR_FREQUENCY_DAYS,
   addDaysToIso,
   getLeakStatusMeta,
   getTodayInAccountTimeZone,
+  loadLdarShiftPrefs,
+  saveLdarShiftPrefs,
   normalizeLdarInventory,
 } from '../utils/ldar';
 import { formatDate, instantToZonedParts } from '../utils/dateUtils';
@@ -74,9 +80,33 @@ export default function LDARSurveyModal({
   onSaved,
 }: LDARSurveyModalProps) {
   const { darkMode } = useDarkMode();
+  const { user: authUser, supabaseUser } = useAuth();
+  const shiftPrefs = useMemo(() => loadLdarShiftPrefs(accountId), [accountId]);
+  const resolvedDefaultInspector =
+    defaultInspectorName.trim() ||
+    shiftPrefs.inspectorName ||
+    authUser?.fullName?.trim() ||
+    authUser?.email?.split('@')[0] ||
+    supabaseUser?.email?.split('@')[0] ||
+    'Field Inspector';
+
+  const [facilityQuery, setFacilityQuery] = useState('');
+  const filteredPickerFacilities = useMemo(() => {
+    const active = facilities
+      .filter(f => f.status !== 'sold')
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const q = facilityQuery.trim().toLowerCase();
+    if (!q) return active;
+    return active.filter(f =>
+      `${f.name} ${f.county || ''} ${f.camino_facility_id || ''}`.toLowerCase().includes(q),
+    );
+  }, [facilities, facilityQuery]);
 
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>(
     existingSurvey?.facility_id || initialFacility?.id || facilities[0]?.id || '',
+  );
+  const [entryMode, setEntryMode] = useState<'quick' | 'full'>(
+    existingSurvey ? 'full' : 'quick',
   );
 
   const activeFacility = useMemo(() => {
@@ -98,10 +128,12 @@ export default function LDARSurveyModal({
     existingSurvey?.sub_facility_name || '',
   );
   const [inspectorName, setInspectorName] = useState(
-    existingSurvey?.inspector_name || defaultInspectorName || 'Field Inspector',
+    existingSurvey?.inspector_name || resolvedDefaultInspector,
   );
   const [additionalInspectorsText, setAdditionalInspectorsText] = useState(
-    (existingSurvey?.additional_inspectors || []).join(', '),
+    existingSurvey
+      ? (existingSurvey.additional_inspectors || []).join(', ')
+      : shiftPrefs.additionalInspectorsText || '',
   );
   const [surveyDate, setSurveyDate] = useState(existingSurvey?.survey_date || todayIso);
   const [startTime, setStartTime] = useState(() => {
@@ -121,30 +153,36 @@ export default function LDARSurveyModal({
 
   // Equipment & Appendix K Daily QA
   const [equipmentCatalog, setEquipmentCatalog] = useState<LDAREquipmentCertification[]>([]);
-  const [equipmentId, setEquipmentId] = useState(existingSurvey?.equipment_id || '');
-  const [cameraModel, setCameraModel] = useState(existingSurvey?.camera_model || 'FLIR GF320');
-  const [cameraSerial, setCameraSerial] = useState(existingSurvey?.camera_serial || '');
+  const [equipmentId, setEquipmentId] = useState(
+    existingSurvey?.equipment_id || shiftPrefs.equipmentId || '',
+  );
+  const [cameraModel, setCameraModel] = useState(
+    existingSurvey?.camera_model || shiftPrefs.cameraModel || 'FLIR GF320',
+  );
+  const [cameraSerial, setCameraSerial] = useState(
+    existingSurvey?.camera_serial || shiftPrefs.cameraSerial || '',
+  );
   const [dailyQaCompleted, setDailyQaCompleted] = useState(
     existingSurvey?.daily_qa_completed ?? true,
   );
   const [dailyQaMode, setDailyQaMode] = useState<'operating_envelope' | 'field_check'>(
-    existingSurvey?.daily_qa_mode || 'operating_envelope',
+    existingSurvey?.daily_qa_mode || shiftPrefs.dailyQaMode || 'operating_envelope',
   );
   const [deltaTF, setDeltaTF] = useState<string>(
-    existingSurvey?.delta_t_f != null ? String(existingSurvey.delta_t_f) : '5.0',
+    existingSurvey?.delta_t_f != null ? String(existingSurvey.delta_t_f) : shiftPrefs.deltaTF || '5.0',
   );
   const [maxViewingDistanceFt, setMaxViewingDistanceFt] = useState<string>(
     existingSurvey?.max_viewing_distance_ft != null
       ? String(existingSurvey.max_viewing_distance_ft)
-      : '25',
+      : shiftPrefs.maxViewingDistanceFt || '25',
   );
   const [qaGasFlowGhr, setQaGasFlowGhr] = useState<string>(
     existingSurvey?.qa_gas_flow_rate_ghr != null
       ? String(existingSurvey.qa_gas_flow_rate_ghr)
-      : '60',
+      : shiftPrefs.qaGasFlowGhr || '60',
   );
   const [qaVideoReference, setQaVideoReference] = useState(
-    existingSurvey?.qa_video_reference || '',
+    existingSurvey?.qa_video_reference || shiftPrefs.qaVideoReference || '',
   );
 
   // Weather Observations
@@ -231,9 +269,17 @@ export default function LDARSurveyModal({
       .in('item_category', ['ogi_camera', 'method21_analyzer'])
       .order('name')
       .then(({ data }) => {
-        if (data) setEquipmentCatalog(data as LDAREquipmentCertification[]);
+        if (data) {
+          const items = data as LDAREquipmentCertification[];
+          setEquipmentCatalog(items);
+          if (!existingSurvey && !equipmentId && items.length > 0) {
+            setEquipmentId(items[0].id);
+            setCameraModel(items[0].model || items[0].name);
+            setCameraSerial(items[0].serial_number || '');
+          }
+        }
       });
-  }, [isOpen, accountId]);
+  }, [isOpen, accountId, existingSurvey, equipmentId]);
 
   useEffect(() => {
     if (!isOpen || !selectedFacilityId) return;
@@ -243,9 +289,46 @@ export default function LDARSurveyModal({
       .eq('facility_id', selectedFacilityId)
       .order('detected_at', { ascending: false })
       .then(({ data }) => {
-        if (data) setFacilityLeaks(data as LDARLeak[]);
+        if (data) {
+          const loaded = data as LDARLeak[];
+          setFacilityLeaks(loaded);
+          // Surface open leaks automatically so the tech doesn't miss re-monitoring
+          if (!existingSurvey && loaded.some(l => l.status !== 'repaired')) {
+            setEntryMode('full');
+          }
+        }
       });
-  }, [isOpen, selectedFacilityId]);
+  }, [isOpen, selectedFacilityId, existingSurvey]);
+
+  // Auto-fetch live site weather from GPS when opening a new survey
+  useEffect(() => {
+    if (!isOpen || existingSurvey) return;
+    if (!activeFacility?.latitude || !activeFacility?.longitude) return;
+    let cancelled = false;
+    setFetchingWeather(true);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${activeFacility.latitude}&longitude=${activeFacility.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    fetch(url)
+      .then(r => (r.ok ? r.json() : null))
+      .then(json => {
+        if (cancelled || !json?.current) return;
+        const cur = json.current;
+        const t = Math.round(cur.temperature_2m);
+        setTempStartF(String(t));
+        setTempEndF(String(t));
+        setHumidityPct(String(Math.round(cur.relative_humidity_2m)));
+        setWindAvgMph(String(Number(cur.wind_speed_10m).toFixed(1)));
+        setWindMaxMph(String(Number(cur.wind_gusts_10m ?? cur.wind_speed_10m).toFixed(1)));
+        setWindDirection(degreesToCompass(cur.wind_direction_10m ?? 180));
+        setSkyConditions(wmoCodeToSky(cur.weather_code ?? 0));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setFetchingWeather(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, existingSurvey, activeFacility?.id, activeFacility?.latitude, activeFacility?.longitude]);
 
   if (!isOpen) return null;
 
@@ -436,6 +519,20 @@ export default function LDARSurveyModal({
         }
       }
 
+      // Save technician & instrument preferences for subsequent sites today
+      saveLdarShiftPrefs(accountId, {
+        inspectorName: inspectorName.trim(),
+        additionalInspectorsText: additionalInspectorsText.trim(),
+        equipmentId,
+        cameraModel: cameraModel.trim(),
+        cameraSerial: cameraSerial.trim(),
+        dailyQaMode,
+        deltaTF,
+        maxViewingDistanceFt,
+        qaGasFlowGhr,
+        qaVideoReference: qaVideoReference.trim(),
+      });
+
       onSaved(savedSurvey, facilityPatch);
       onClose();
     } catch (err) {
@@ -525,28 +622,106 @@ export default function LDARSurveyModal({
                 </div>
               )}
 
+              {/* Quick Clean vs Full Details Mode Toggle */}
+              {!existingSurvey && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-900/15">
+                  <div className="inline-flex rounded-lg bg-white dark:bg-gray-800 p-0.5 border border-gray-200 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => setEntryMode('quick')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        entryMode === 'quick'
+                          ? 'bg-teal-600 text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      Quick Clean Survey (0 Leaks)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEntryMode('full')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        entryMode === 'full'
+                          ? 'bg-teal-600 text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      Full Survey & Leak Tagging
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-teal-800 dark:text-teal-300">
+                    {fetchingWeather ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Fetching pad weather...
+                      </span>
+                    ) : tempStartF ? (
+                      <span>
+                        Auto-Weather: <strong>{tempStartF}°F</strong> ·{' '}
+                        <strong>{windAvgMph || '0'} mph {windDirection}</strong> · {skyConditions}
+                      </span>
+                    ) : (
+                      <span>Inspector &amp; camera remembered across stops</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 1. Survey Header & Method */}
               <div className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-teal-700 dark:text-teal-400">
                   1. Survey Classification & Schedule
                 </h3>
                 {!initialFacility && facilities.length > 0 && (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
-                      Facility *
-                    </label>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">
+                        Facility * ({filteredPickerFacilities.length})
+                      </label>
+                      {facilities.length > 8 && (
+                        <div className="relative w-56">
+                          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2" />
+                          <input
+                            type="text"
+                            value={facilityQuery}
+                            onChange={e => {
+                              const nextQ = e.target.value;
+                              setFacilityQuery(nextQ);
+                              const q = nextQ.trim().toLowerCase();
+                              if (q) {
+                                const firstMatch = facilities.find(
+                                  f =>
+                                    f.status !== 'sold' &&
+                                    `${f.name} ${f.county || ''} ${f.camino_facility_id || ''}`
+                                      .toLowerCase()
+                                      .includes(q),
+                                );
+                                if (firstMatch && firstMatch.id !== selectedFacilityId) {
+                                  handleSelectFacility(firstMatch.id);
+                                }
+                              }
+                            }}
+                            placeholder="Filter site or county..."
+                            className="w-full pl-8 pr-2.5 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs"
+                          />
+                        </div>
+                      )}
+                    </div>
                     <select
                       value={selectedFacilityId}
                       onChange={e => handleSelectFacility(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
                     >
-                      {facilities
-                        .filter(f => f.status !== 'sold')
-                        .map(f => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
+                      {filteredPickerFacilities.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                          {f.county ? ` (${f.county})` : ''}
+                          {(f.ldar_open_leaks_count ?? 0) > 0
+                            ? ` — ${f.ldar_open_leaks_count} open leak(s)`
+                            : ''}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -655,20 +830,85 @@ export default function LDARSurveyModal({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
-                    Additional Inspectors (Comma-separated, Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={additionalInspectorsText}
-                    onChange={e => setAdditionalInspectorsText(e.target.value)}
-                    placeholder="e.g. J. Miller, R. Davis"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
-                  />
-                </div>
+                {entryMode === 'full' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                      Additional Inspectors (Comma-separated, Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={additionalInspectorsText}
+                      onChange={e => setAdditionalInspectorsText(e.target.value)}
+                      placeholder="e.g. J. Miller, R. Davis"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                    />
+                  </div>
+                )}
               </div>
 
+              {entryMode === 'quick' ? (
+                <div className="space-y-4">
+                  {highWindWarning && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      Max wind speed ({windMaxMph} mph) exceeds 15 mph — verify OGI camera operating envelope distance reduction per Appendix K.
+                    </div>
+                  )}
+
+                  <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="space-y-1">
+                      <div className="font-semibold text-gray-800 dark:text-gray-100">
+                        Instrument &amp; Weather Snapshot
+                      </div>
+                      <div className="text-gray-600 dark:text-gray-300">
+                        {surveyMethod === 'AVO'
+                          ? 'AVO Walk-Through (No thermal camera required)'
+                          : `${cameraModel || 'FLIR GF320'}${cameraSerial ? ` (SN: ${cameraSerial})` : ''} · Daily QA Passed`}
+                        {' · '}
+                        {tempStartF
+                          ? `${tempStartF}°F, Wind ${windAvgMph || '0'} mph ${windDirection} (${skyConditions})`
+                          : 'Weather optional'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingLeak(null);
+                          setLeakModalInitialTab('details');
+                          setEntryMode('full');
+                          setShowLeakModal(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold"
+                      >
+                        <Flame className="w-3.5 h-3.5" />
+                        Found a Leak? Tag It
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEntryMode('full')}
+                        className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 font-semibold hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        Edit Weather / QA
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                      Field Notes (Optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                      placeholder="Zero plumes observed; wells flowing normally..."
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <>
               {/* 2. Field Weather & Environmental Observations */}
               <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1110,6 +1350,8 @@ export default function LDARSurveyModal({
                   />
                 </div>
               </div>
+                </>
+              )}
             </div>
 
             {/* Footer */}

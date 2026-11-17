@@ -55,7 +55,6 @@ import {
   saveHomeBases as cacheOfflineHomeBases,
   saveAccountSnapshot,
   getAccountSnapshot,
-  deleteAccountSnapshot,
   type OfflineAccountSnapshot,
 } from './lib/offlineDb';
 

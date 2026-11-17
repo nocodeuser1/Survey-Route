@@ -145,7 +145,7 @@ export default function ManagementSignaturePagePickerModal({
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const task = page.render({ canvasContext: ctx, viewport });
+        const task = page.render({ canvas, canvasContext: ctx, viewport });
         renderTaskRef.current = task;
         await task.promise;
       } catch (err: any) {

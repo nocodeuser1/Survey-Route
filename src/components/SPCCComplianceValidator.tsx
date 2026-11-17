@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, CheckCircle, Clock, FileWarning, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Clock, FileWarning } from 'lucide-react';
 import { ParsedFacility } from '../utils/csvParser';
 
 interface SPCCComplianceValidatorProps {

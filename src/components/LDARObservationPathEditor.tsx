@@ -2592,7 +2592,7 @@ function Legend({
               pointerEvents={isEditMode ? 'auto' : 'none'}
             >
               <div
-                xmlns="http://www.w3.org/1999/xhtml"
+                {...({ xmlns: 'http://www.w3.org/1999/xhtml' } as Record<string, string>)}
                 style={{
                   width: '100%',
                   height: '100%',

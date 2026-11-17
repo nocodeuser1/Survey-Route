@@ -271,7 +271,7 @@ export default function VisitActionsPopover({
       // the summary's ordering follows the corrected time.
       await saveFieldVisitTime(
         facility.id,
-        parsed ? parseDateInput(dateInput) || facility.field_visit_date : null,
+        parsed ? parseDateInput(dateInput) || facility.field_visit_date || null : null,
         parsed
       );
       facility.field_visit_time = parsed;

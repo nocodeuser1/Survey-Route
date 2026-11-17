@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigation, MapPin, Globe, Copy, Check } from 'lucide-react';
+import { MapPin, Globe, Copy, Check } from 'lucide-react';
 import {
   appleMapsUrl,
   googleEarthUrl,

@@ -303,7 +303,7 @@ export default function BermPlanCard({
       const storagePath = plan.plan_url.replace(/^.*\/spcc-plans\//, '');
       const { error: uploadErr } = await supabase.storage
         .from('spcc-plans')
-        .upload(storagePath, new Blob([merged], { type: 'application/pdf' }), {
+        .upload(storagePath, new Blob([merged as BlobPart], { type: 'application/pdf' }), {
           contentType: 'application/pdf',
           upsert: true,
           cacheControl: '60',

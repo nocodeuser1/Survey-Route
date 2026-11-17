@@ -38,8 +38,8 @@ interface ExportSurveysProps {
 export default function ExportSurveys({
   facilityIds,
   facilities,
-  userId,
-  accountId,
+  userId: _userId,
+  accountId: _accountId,
   onClose,
 }: ExportSurveysProps) {
   const [inspections, setInspections] = useState<Inspection[]>([]);

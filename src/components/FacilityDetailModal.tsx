@@ -177,7 +177,6 @@ export default function FacilityDetailModal({
   const inspectionsLoaded = inspectionsFacilityId === facility.id;
   const [facilityComments, setFacilityComments] = useState<FacilityComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -305,7 +304,6 @@ export default function FacilityDetailModal({
     loadInspections();
     loadSettings();
     loadComments();
-    setCommentsExpanded(false);
     setNewComment('');
     setEditingCommentId(null);
     setEditingCommentBody('');
@@ -416,7 +414,6 @@ export default function FacilityDetailModal({
   // is somehow absent. Without this, isOwner was always false (no edit button)
   // and edit/delete matched zero rows.
   const myUserId = user?.id ?? userId;
-  const latestComment = facilityComments[0] || null;
   const commentCount = facilityComments.length;
 
   const formatCommentTimestamp = (value: string) => {
@@ -457,7 +454,6 @@ export default function FacilityDetailModal({
 
       setFacilityComments((prev) => (data ? [data, ...prev] : prev));
       setNewComment('');
-      setCommentsExpanded(true);
     } catch (err: any) {
       console.error('Error adding facility comment:', err);
       // Surface the actual Postgres / RLS error inline rather than a generic
@@ -2545,7 +2541,7 @@ export default function FacilityDetailModal({
                   </button>
                   <button
                     onClick={() => { setEditingIpDate(false); setIpDateValue(facility.first_prod_date ? formatDate(facility.first_prod_date) : ''); }}
-                    className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                    className="px-2 py-1 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-gray-200"
                   >
                     Cancel
                   </button>
@@ -2590,7 +2586,7 @@ export default function FacilityDetailModal({
                   </button>
                   <button
                     onClick={() => { setEditingPeDate(false); setPeDateValue(facility.spcc_pe_stamp_date ? formatDate(facility.spcc_pe_stamp_date) : ''); }}
-                    className="px-2 py-1 text-xs rounded dark:bg-gray-600 dark:text-gray-200"
+                    className="px-2 py-1 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-gray-200"
                   >
                     Cancel
                   </button>
@@ -2640,8 +2636,8 @@ export default function FacilityDetailModal({
                     className="text-sm px-2 py-1 rounded border w-20 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
                     autoFocus
                   />
-                  <button onClick={handleSaveOil} className="px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button>
-                  <button onClick={() => { setEditingOil(false); setOilValue(facility.estimated_oil_per_day?.toString() || ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                  <button onClick={handleSaveOil} className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded">Save</button>
+                  <button onClick={() => { setEditingOil(false); setOilValue(facility.estimated_oil_per_day?.toString() || ''); }} className="px-2 py-1 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-gray-200">Cancel</button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -2673,8 +2669,8 @@ export default function FacilityDetailModal({
                     className="text-sm px-2 py-1 rounded border w-28 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
                     autoFocus
                   />
-                  <button onClick={handleSaveVisitDate} className="px-2 py-1 text-xs bg-blue-600 text-white rounded">Save</button>
-                  <button onClick={() => { setEditingVisitDate(false); setVisitDateValue(facility.field_visit_date ? formatDate(facility.field_visit_date) : ''); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                  <button onClick={handleSaveVisitDate} className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded">Save</button>
+                  <button onClick={() => { setEditingVisitDate(false); setVisitDateValue(facility.field_visit_date ? formatDate(facility.field_visit_date) : ''); }} className="px-2 py-1 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-gray-200">Cancel</button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -2754,8 +2750,8 @@ export default function FacilityDetailModal({
                       }`}
                       autoFocus
                     />
-                    <button onClick={handleSaveVisitTime} disabled={savingDate || !parseVisitTimeInput(visitTimeValue)} className="px-2 py-1 text-xs bg-blue-600 text-white rounded disabled:opacity-50">Save</button>
-                    <button onClick={() => { setEditingVisitTime(false); setVisitTimeValue(formatVisitTimeDisplay(facility.field_visit_time)); }} className="px-2 py-1 text-xs rounded dark:bg-gray-600">Cancel</button>
+                    <button onClick={handleSaveVisitTime} disabled={savingDate || !parseVisitTimeInput(visitTimeValue)} className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50">Save</button>
+                    <button onClick={() => { setEditingVisitTime(false); setVisitTimeValue(formatVisitTimeDisplay(facility.field_visit_time)); }} className="px-2 py-1 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-gray-200">Cancel</button>
                   </div>
                 )}
               </div>
@@ -3093,7 +3089,7 @@ export default function FacilityDetailModal({
 
     if (expiry.status === 'initial_overdue' && expiry.daysUntilExpiry !== null) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection overdue — never inspected since first production">
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection overdue — never inspected since first production">
           <AlertTriangle className="w-3 h-3" />
           <span>Initial Inspection Overdue ({formatDayCount(Math.abs(expiry.daysUntilExpiry))})</span>
         </span>
@@ -3102,7 +3098,7 @@ export default function FacilityDetailModal({
 
     if (expiry.status === 'initial_due' && expiry.daysUntilExpiry !== null) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection due soon — first inspection coming up">
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection due soon — first inspection coming up">
           <Clock className="w-3.5 h-3.5" />
           <span>Initial Inspection Due ({formatDayCount(expiry.daysUntilExpiry)})</span>
         </span>
@@ -3111,7 +3107,7 @@ export default function FacilityDetailModal({
 
     if (expiry.status === 'initial_upcoming' && expiry.daysUntilExpiry !== null) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection comes due 1 year after first production">
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium whitespace-nowrap" title="Initial inspection comes due 1 year after first production">
           <Clock className="w-3.5 h-3.5" />
           <span>Inspection Upcoming ({formatDayCount(expiry.daysUntilExpiry)})</span>
         </span>
@@ -3120,7 +3116,7 @@ export default function FacilityDetailModal({
 
     // no_ip_date — no inspection AND no first-production date on file
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-full text-xs font-medium whitespace-nowrap" title="No first production date on file — can't compute inspection deadline">
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-white/90 text-gray-700 rounded-full text-xs font-medium whitespace-nowrap" title="No first production date on file — can't compute inspection deadline">
         <Clock className="w-3 h-3" />
         <span>No IP Date</span>
       </span>
@@ -3365,7 +3361,7 @@ export default function FacilityDetailModal({
           }}
         />
       )}
-      {showFullLdarCommand && accountId && (
+      {canAccessLdarMode && showFullLdarCommand && accountId && (
         <LDARFacilityDetailModal
           facility={facility}
           accountId={accountId}

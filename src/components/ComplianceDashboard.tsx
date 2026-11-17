@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, AlertTriangle, Clock, TrendingUp, FileText, Calendar, Filter, Search, ExternalLink } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Clock, FileText, Search, ExternalLink } from 'lucide-react';
 import { supabase, Facility, SPCCComplianceTracking } from '../lib/supabase';
 import { formatDate, parseLocalDate } from '../utils/dateUtils';
 import { formatDayCount } from '../utils/spccStatus';
 
 interface ComplianceDashboardProps {
   accountId: string;
-  userId: string;
+  userId?: string;
   onViewFacility?: (facilityId: string) => void;
 }
 
@@ -27,7 +27,7 @@ interface FacilityCompliance {
   daysUntilDue?: number;
 }
 
-export default function ComplianceDashboard({ accountId, userId, onViewFacility }: ComplianceDashboardProps) {
+export default function ComplianceDashboard({ accountId, onViewFacility }: ComplianceDashboardProps) {
   const [stats, setStats] = useState<ComplianceStats>({
     totalFacilities: 0,
     compliantFacilities: 0,
@@ -101,18 +101,19 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
       setFacilitiesCompliance(facilitiesWithCompliance);
 
       const totalFacilities = facilities?.length || 0;
+      const isUpcoming = (fc: FacilityCompliance) =>
+        (fc.spccCompliance?.days_until_due != null && fc.spccCompliance.days_until_due >= 0 && fc.spccCompliance.days_until_due <= 30) ||
+        fc.inspectionStatus === 'due_soon';
+      const isOverdue = (fc: FacilityCompliance) =>
+        fc.spccCompliance?.compliance_status === 'overdue' || fc.inspectionStatus === 'overdue';
+
       const compliantFacilities = facilitiesWithCompliance.filter(fc =>
-        (fc.spccCompliance?.is_compliant ?? true) && fc.inspectionStatus !== 'overdue'
+        (fc.spccCompliance?.is_compliant ?? true) && !isOverdue(fc) && !isUpcoming(fc)
       ).length;
 
-      const upcomingDue = facilitiesWithCompliance.filter(fc =>
-        (fc.spccCompliance?.days_until_due !== null && fc.spccCompliance?.days_until_due! >= 0 && fc.spccCompliance?.days_until_due! <= 30) ||
-        fc.inspectionStatus === 'due_soon'
-      ).length;
+      const upcomingDue = facilitiesWithCompliance.filter(isUpcoming).length;
 
-      const overdue = facilitiesWithCompliance.filter(fc =>
-        fc.spccCompliance?.compliance_status === 'overdue' || fc.inspectionStatus === 'overdue'
-      ).length;
+      const overdue = facilitiesWithCompliance.filter(isOverdue).length;
 
       const spccInitialPending = spccData?.filter(s => s.compliance_status === 'initial_due').length || 0;
       const spccRecertificationsDue = spccData?.filter(s => s.compliance_status === 'renewal_due' || s.compliance_status === 'expiring').length || 0;
@@ -142,13 +143,18 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
       }
     }
 
+    const isUpcoming =
+      (fc.spccCompliance?.days_until_due != null && fc.spccCompliance.days_until_due >= 0 && fc.spccCompliance.days_until_due <= 30) ||
+      fc.inspectionStatus === 'due_soon';
+    const isOverdue =
+      fc.spccCompliance?.compliance_status === 'overdue' || fc.inspectionStatus === 'overdue';
+
     if (filter === 'compliant') {
-      return (fc.spccCompliance?.is_compliant ?? true) && fc.inspectionStatus !== 'overdue';
+      return (fc.spccCompliance?.is_compliant ?? true) && !isOverdue && !isUpcoming;
     } else if (filter === 'upcoming') {
-      return (fc.spccCompliance?.days_until_due !== null && fc.spccCompliance?.days_until_due! >= 0 && fc.spccCompliance?.days_until_due! <= 30) ||
-        fc.inspectionStatus === 'due_soon';
+      return isUpcoming && !isOverdue;
     } else if (filter === 'overdue') {
-      return fc.spccCompliance?.compliance_status === 'overdue' || fc.inspectionStatus === 'overdue';
+      return isOverdue;
     }
 
     return true;
@@ -163,7 +169,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
         </span>
       );
     } else if (
-      (fc.spccCompliance?.days_until_due !== null && fc.spccCompliance?.days_until_due! >= 0 && fc.spccCompliance?.days_until_due! <= 30) ||
+      (fc.spccCompliance?.days_until_due != null && fc.spccCompliance.days_until_due >= 0 && fc.spccCompliance.days_until_due <= 30) ||
       fc.inspectionStatus === 'due_soon'
     ) {
       return (
@@ -172,7 +178,7 @@ export default function ComplianceDashboard({ accountId, userId, onViewFacility 
           Due Soon
         </span>
       );
-    } else if ((fc.spccCompliance?.is_compliant ?? true) && fc.inspectionStatus !== 'overdue') {
+    } else if (fc.spccCompliance?.is_compliant ?? true) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium rounded">
           <CheckCircle className="w-3 h-3" />

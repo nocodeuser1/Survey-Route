@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bell, Save, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface CompanyNotificationSettingsProps {

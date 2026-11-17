@@ -1,7 +1,7 @@
 import InspectionSignage from './InspectionSignage';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Plus, Image as ImageIcon } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Save, FileText, X, ArrowLeft, Clock, Camera, Trash2, Plus } from 'lucide-react';
 import { supabase, Facility, InspectionTemplate, InspectionResponse, Inspection, UserSignature, InspectionPhoto } from '../lib/supabase';
 import { inspectionAuthorship, resolveInspectionIdentity } from '../utils/inspectionIdentity';
 import { alignResponses, draftStarterName, formatDraftTimestamp, isDeviceBackupNewer } from '../utils/inspectionDraft';
@@ -38,10 +38,10 @@ function PhotoPreview({ photo, onDelete }: { photo: InspectionPhoto; onDelete: (
         <img
           src={photoUrl}
           alt={photo.file_name}
-          className="w-full h-24 object-cover rounded-md border border-gray-300"
+          className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600"
         />
       ) : (
-        <div className="w-full h-24 bg-gray-100 rounded-md border border-gray-300 flex items-center justify-center">
+        <div className="w-full h-24 bg-gray-100 dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 flex items-center justify-center">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
         </div>
       )}
@@ -162,7 +162,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   const userEditedRef = useRef(false);
   const shownAtRef = useRef(opening.shownAt);
   const [openedDraft, setOpenedDraft] = useState<OpenedDraft | null>(opening.opened);
-  const [generalComments, setGeneralComments] = useState('');
+  const [generalComments] = useState('');
   const [signature, setSignature] = useState<UserSignature | null>(null);
   const [signatureChecked, setSignatureChecked] = useState(false);
   // user_signatures.user_id and the identity row are keyed by the profile id
@@ -587,11 +587,9 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
         if (r.question_id === questionId) {
           const updatedResponse = { ...r, ...updates };
 
-          // Automatically set flagged based on answer
-          if (updates.answer !== undefined) {
-            updatedResponse.flagged = updates.answer === 'no';
-            // Action Required is only shown (and only means anything) for "No".
-            if (updates.answer !== 'no') updatedResponse.action_required = false;
+          // Action Required is only shown (and only means anything) for "No".
+          if (updates.answer !== undefined && updates.answer !== 'no') {
+            updatedResponse.action_required = false;
           }
 
           return updatedResponse;
@@ -969,6 +967,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
   };
 
   const handleSave = async (status: 'draft' | 'completed') => {
+    if (!template) return;
     if (status === 'completed') {
       if (!signature) {
         alert('Please set up your signature in Settings > Team Management before completing inspections. Your signature will be automatically applied to all inspections you complete.');
@@ -977,18 +976,18 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
       // Only check required questions (not optional/comment-only questions)
       const unanswered = responses.filter(r => {
-        const question = template.questions.find((q: any) => q.id === r.question_id);
+        const question = template.questions.find((q) => q.id === r.question_id);
         const isOptional = question?.type === 'comment' || question?.optional;
-        return !isOptional && (r.answer === null || r.answer === undefined || r.answer === '');
+        return !isOptional && !r.answer;
       });
 
       if (unanswered.length > 0) {
         // Check if ALL questions are unanswered (empty survey)
         const allUnanswered = responses.every(r => {
-          const question = template.questions.find((q: any) => q.id === r.question_id);
+          const question = template.questions.find((q) => q.id === r.question_id);
           const isOptional = question?.type === 'comment' || question?.optional;
           if (isOptional) return true; // Skip optional questions
-          return r.answer === null || r.answer === undefined || r.answer === '';
+          return !r.answer;
         });
 
         if (allUnanswered) {
@@ -999,8 +998,8 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
 
           if (confirmed) {
             // Auto-fill all required questions with 'yes'
-            const updatedResponses = responses.map(r => {
-              const question = template.questions.find((q: any) => q.id === r.question_id);
+            const updatedResponses: InspectionResponse[] = responses.map(r => {
+              const question = template.questions.find((q) => q.id === r.question_id);
               const isOptional = question?.type === 'comment' || question?.optional;
 
               if (isOptional) {
@@ -1010,10 +1009,9 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
               // Fill with 'yes' for all required questions
               return {
                 ...r,
-                answer: 'yes',
-                flagged: false,
+                answer: 'yes' as const,
                 action_required: false,
-                comment: r.comment || ''
+                comments: r.comments || ''
               };
             });
 
@@ -1219,7 +1217,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                         onClick={() => updateResponse(question.id, { answer: 'yes' })}
                         className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'yes'
                           ? 'bg-green-600 text-white'
-                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                       >
                         <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mx-auto" />
@@ -1229,7 +1227,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                         onClick={() => updateResponse(question.id, { answer: 'no' })}
                         className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'no'
                           ? 'bg-red-600 text-white'
-                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                       >
                         <XCircle className="w-4 h-4 sm:w-5 sm:h-5 mx-auto" />
@@ -1239,7 +1237,7 @@ export default function InspectionForm({ facility, userId, teamNumber, onSaved, 
                         onClick={() => updateResponse(question.id, { answer: 'na' })}
                         className={`flex-1 py-2 px-2 sm:px-4 rounded-md font-medium transition-colors ${response.answer === 'na'
                           ? 'bg-gray-600 text-white'
-                          : 'bg-gray-100 text-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                       >
                         <span className="text-sm">N/A</span>

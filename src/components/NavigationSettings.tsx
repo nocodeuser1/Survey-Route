@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase, UserSettings } from '../lib/supabase';
+import { useDarkMode } from '../contexts/DarkModeContext';
 
 interface NavigationSettingsProps {
   accountId: string;
@@ -7,15 +8,23 @@ interface NavigationSettingsProps {
 }
 
 export default function NavigationSettings({ accountId, authUserId }: NavigationSettingsProps) {
+  const { darkMode, toggleDarkMode } = useDarkMode();
   const [settings, setSettings] = useState<UserSettings>({
     id: '',
     user_id: accountId,
-    map_preference: 'google_maps',
+    account_id: accountId,
+    max_facilities_per_day: 8,
+    max_hours_per_day: 8,
+    default_visit_duration_minutes: 30,
+    use_facilities_constraint: false,
+    use_hours_constraint: true,
+    map_preference: 'google',
     include_google_earth: false,
+    location_permission_granted: false,
     speed_unit: 'mph',
     map_rotation_sensitivity: 0.7,
     show_road_routes: false,
-    dark_mode: false,
+    dark_mode: darkMode,
     updated_at: '',
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -36,12 +45,17 @@ export default function NavigationSettings({ accountId, authUserId }: Navigation
       if (error) throw error;
 
       if (data) {
+        const normalizedMapPref: 'google' | 'apple' =
+          data.map_preference === 'apple' || (data.map_preference as string) === 'apple_maps'
+            ? 'apple'
+            : 'google';
         setSettings({
           ...data,
+          map_preference: normalizedMapPref,
           speed_unit: data.speed_unit ?? 'mph',
           map_rotation_sensitivity: data.map_rotation_sensitivity ?? 0.7,
           show_road_routes: data.show_road_routes ?? false,
-          dark_mode: data.dark_mode ?? false,
+          dark_mode: data.dark_mode ?? darkMode,
         });
       }
     } catch (err) {
@@ -73,6 +87,10 @@ export default function NavigationSettings({ accountId, authUserId }: Navigation
 
       if (error) throw error;
 
+      if (Boolean(settings.dark_mode) !== darkMode) {
+        toggleDarkMode();
+      }
+
       setSaveMessage('Settings saved successfully!');
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (err: any) {
@@ -93,33 +111,33 @@ export default function NavigationSettings({ accountId, authUserId }: Navigation
             <input
               type="radio"
               name="map-preference"
-              value="google_maps"
-              checked={settings.map_preference === 'google_maps' || settings.map_preference === 'google'}
-              onChange={(e) =>
+              value="google"
+              checked={settings.map_preference === 'google'}
+              onChange={() =>
                 setSettings({
                   ...settings,
-                  map_preference: 'google_maps' as any,
+                  map_preference: 'google',
                 })
               }
               className="w-4 h-4 text-blue-600"
             />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200">Google Maps</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Google Maps</span>
           </label>
           <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-800 transition-colors duration-200">
             <input
               type="radio"
               name="map-preference"
-              value="apple_maps"
-              checked={settings.map_preference === 'apple_maps' || settings.map_preference === 'apple'}
-              onChange={(e) =>
+              value="apple"
+              checked={settings.map_preference === 'apple'}
+              onChange={() =>
                 setSettings({
                   ...settings,
-                  map_preference: 'apple_maps' as any,
+                  map_preference: 'apple',
                 })
               }
               className="w-4 h-4 text-blue-600"
             />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200">Apple Maps</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Apple Maps</span>
           </label>
         </div>
 

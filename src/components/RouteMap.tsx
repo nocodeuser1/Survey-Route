@@ -23,7 +23,8 @@ import FacilityInspectionsManager from './FacilityInspectionsManager';
 import InspectionForm from './InspectionForm';
 import SpeedDisplay from './SpeedDisplay';
 import { getCoords } from '../utils/coordinates';
-import { getFacilityLdarCompliance, LDAR_FREQUENCY_LABELS } from '../utils/ldar';
+import { canUserAccessLdarMode, facilityNeedsLdarAttention, getFacilityLdarCompliance, LDAR_FREQUENCY_LABELS } from '../utils/ldar';
+import { useAuth } from '../contexts/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { requestMapLocation } from '../utils/mapLocation';
 
@@ -143,8 +144,10 @@ const FOLLOW_START_ZOOM = 16;
 const FOLLOW_PAUSE_MS = 20_000;
 
 export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false, hideCurrentLdar: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, onInspectionRouteStopCompleted, onLdarRouteStopCompleted, onManualInspectionCompletion, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+  const { user } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(user?.email);
   const { isOnline } = useOnlineStatus();
-  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
+  const rawEffectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
     surveyTypeKind ??
     (surveyType === 'spcc_plan'
       ? 'spcc_plan'
@@ -153,6 +156,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         : surveyType === 'ldar'
           ? 'ldar'
           : 'all');
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
+    rawEffectiveKind === 'ldar' && !canAccessLdarMode ? 'all' : rawEffectiveKind;
   const mapRef = useRef<L.Map | null>(null);
   const homeBaseRef = useRef(homeBase);
   homeBaseRef.current = homeBase;
@@ -202,17 +207,16 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     }
 
     // LDAR-based hiding
-    if (completedVisibility.hideCurrentLdar) {
+    if (canAccessLdarMode && completedVisibility.hideCurrentLdar) {
       facilities.forEach(f => {
-        const ldarComp = getFacilityLdarCompliance(f);
-        if ((ldarComp.status === 'current' || ldarComp.status === 'exempt') && ldarComp.openLeaksCount === 0) {
+        if (!facilityNeedsLdarAttention(f)) {
           completed.add(f.id);
         }
       });
     }
 
     return completed;
-  }, [facilities, inspections, completedVisibility]);
+  }, [facilities, inspections, completedVisibility, canAccessLdarMode]);
 
   // Stable lookup for current facility coordinates and status. Route rows with
   // ids never fall back to names, which prevents duplicate-name collisions.
@@ -225,7 +229,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   }, [facilities]);
 
   // Helper to check if any completed facilities are hidden
-  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans || Boolean(completedVisibility.hideCurrentLdar);
+  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans || Boolean(canAccessLdarMode && completedVisibility.hideCurrentLdar);
   const markersRef = useRef<Map<string, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
   const polylinesRef = useRef<Map<number, L.Polyline>>(new Map());
   const frameFacilityPointsRef = useRef<L.LatLng[]>([]);
@@ -252,7 +256,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
   const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
   const [ldarSurveyFacility, setLdarSurveyFacility] = useState<Facility | null>(null);
-  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | 'spcc' | 'ldar' | null>(null);
   const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
   const [inspectionFormState, setInspectionFormState] = useState<{
     facility: Facility;
@@ -260,7 +264,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
     clonedResponses?: Inspection['responses'];
   } | null>(null);
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
-  const [addFacilityCoords, setAddFacilityCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [newFacilityName, setNewFacilityName] = useState('');
   const [newFacilityLat, setNewFacilityLat] = useState('');
   const [newFacilityLng, setNewFacilityLng] = useState('');
@@ -286,7 +289,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [gpsSpeed, setGpsSpeed] = useState<number | null>(null);
   const [estimatedSpeedLimit] = useState<number | null>(null);
   const previousPositionRef = useRef<GeolocationPosition | null>(null);
-  const geoWatchIdRef = useRef<number | null>(null);
   const [autoCentering, setAutoCentering] = useState(true);
   const autoCenteringRef = useRef(true);
   const [isLocating, setIsLocating] = useState(false);
@@ -425,7 +427,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const openFacilityModal = (facility: Facility) => {
     if (surveyTypeKindRef.current === 'spcc_plan') {
       setSpccPlanDetailFacility(facility);
-    } else if (surveyTypeKindRef.current === 'ldar') {
+    } else if (surveyTypeKindRef.current === 'ldar' && canAccessLdarMode) {
       setLdarDetailFacility(facility);
     } else {
       setSurveyFacility(facility);
@@ -678,7 +680,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       });
 
       // Add double-tap-hold-drag zoom for mobile
-      let doubleTapTimeout: NodeJS.Timeout | null = null;
       let lastTapTime = 0;
       let isDraggingZoom = false;
       let dragStartY = 0;
@@ -1095,11 +1096,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             }
           }
 
-          const ldarCompliance = latestFacilityData ? getFacilityLdarCompliance(latestFacilityData) : null;
+          const includeLdarInRouteStatus = effectiveKind === 'ldar' || canAccessLdarMode;
           const hasCurrentLdarCompliance = Boolean(
-            ldarCompliance &&
-            (ldarCompliance.status === 'current' || ldarCompliance.status === 'due_60' || ldarCompliance.status === 'exempt') &&
-            ldarCompliance.openLeaksCount === 0,
+            includeLdarInRouteStatus &&
+            latestFacilityData &&
+            !facilityNeedsLdarAttention(latestFacilityData),
           );
 
           // Use appropriate completion status based on surveyType
@@ -1108,12 +1109,12 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             isCurrentRouteStop: true,
             inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
             planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? Boolean(planRouteStopsByFacilityId),
-            ldarRunInitialized: routeStatusRunInitialized?.ldar ?? false,
+            ldarRunInitialized: includeLdarInRouteStatus ? (routeStatusRunInitialized?.ldar ?? false) : false,
             inspectionStop: facilityDatabaseId ? routeStatusStopsByScope?.spcc_inspection.get(facilityDatabaseId) : undefined,
             planStop: facilityDatabaseId
               ? routeStatusStopsByScope?.spcc_plan.get(facilityDatabaseId) ?? planRouteStopsByFacilityId?.get(facilityDatabaseId)
               : undefined,
-            ldarStop: facilityDatabaseId ? routeStatusStopsByScope?.ldar?.get(facilityDatabaseId) : undefined,
+            ldarStop: includeLdarInRouteStatus && facilityDatabaseId ? routeStatusStopsByScope?.ldar?.get(facilityDatabaseId) : undefined,
             inspectionComplianceCurrent: hasAnyValidInspectionCompletion,
             planComplianceCurrent: hasValidSPCCPlan,
             ldarComplianceCurrent: hasCurrentLdarCompliance,
@@ -1817,7 +1818,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     // In SPCC plan mode, always open the plan modal
                     if (surveyTypeKindRef.current === 'spcc_plan') {
                       openFacilityModal(facilityForThisMarker);
-                    } else if (surveyTypeKindRef.current === 'ldar') {
+                    } else if (surveyTypeKindRef.current === 'ldar' && canAccessLdarMode) {
                       setLdarSurveyFacility(facilityForThisMarker);
                     } else if (surveyTypeKindRef.current === 'spcc_inspection') {
                       const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
@@ -2267,6 +2268,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             } else {
               nonRouteStatusHtml = `<span style="font-size: 12px; color: #6b7280;">${isManuallyRemoved ? 'Manually Removed' : 'Not in Current Route'}</span>`;
             }
+          } else if (effectiveKind === 'ldar' && canAccessLdarMode) {
+            const ldarInfo = getFacilityLdarCompliance(facility);
+            const badgeBg = ldarInfo.status === 'overdue' || ldarInfo.openLeaksCount > 0 ? '#FEE2E2' : ldarInfo.isUrgent ? '#FEF3C7' : '#CCFBF1';
+            const badgeFg = ldarInfo.status === 'overdue' || ldarInfo.openLeaksCount > 0 ? '#991B1B' : ldarInfo.isUrgent ? '#92400E' : '#115E59';
+            nonRouteStatusHtml = `<span style="display: inline-block; padding: 2px 8px; background-color: ${badgeBg}; color: ${badgeFg}; border-radius: 9999px; font-size: 11px; font-weight: 600;">${ldarInfo.label}${ldarInfo.openLeaksCount > 0 ? ` (${ldarInfo.openLeaksCount} leak${ldarInfo.openLeaksCount === 1 ? '' : 's'})` : ''}</span>`;
+            nonRouteBtnLabel = 'Log LDAR Survey';
+            nonRouteBtnTitle = 'Start OGI / AVO LDAR survey';
           } else {
             // All mode
             nonRouteStatusHtml = `<span style="font-size: 12px; color: #6b7280;">${isManuallyRemoved ? 'Manually Removed' : hasAnyValidCompletion ? 'Completed' : 'Not in Current Route'}</span>`;
@@ -2379,6 +2387,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
                 if (surveyTypeKindRef.current === 'spcc_plan') {
                   openFacilityModal(facility);
+                } else if (surveyTypeKindRef.current === 'ldar' && canAccessLdarMode) {
+                  setLdarSurveyFacility(facility);
                 } else if (surveyTypeKindRef.current === 'spcc_inspection') {
                   const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
                   openInspectionForm(facility, { initialDraft: currentDraft || null });
@@ -2698,7 +2708,6 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
   // Open add facility modal
   const handleOpenAddFacility = (latitude: number, longitude: number) => {
-    setAddFacilityCoords({ latitude, longitude });
     setNewFacilityLat(latitude.toFixed(6));
     setNewFacilityLng(longitude.toFixed(6));
     setNewFacilityName('');
@@ -3849,14 +3858,14 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         setRecentlyAssignedIds(new Set());
         return;
       }
-      if (navigationTarget || surveyFacility || spccPlanDetailFacility) return;
+      if (navigationTarget || surveyFacility || spccPlanDetailFacility || ldarDetailFacility || ldarSurveyFacility || inspectionFormState || inspectionsListFacility || showAddFacilityModal) return;
 
       exitFullscreenMap();
     };
 
     window.addEventListener('keydown', handleFullscreenEscape);
     return () => window.removeEventListener('keydown', handleFullscreenEscape);
-  }, [isFullScreen, locationTracking, navigationMode, navigationTarget, onExitFullscreen, showMenu, showSearch, spccPlanDetailFacility, surveyFacility]);
+  }, [isFullScreen, locationTracking, navigationMode, navigationTarget, onExitFullscreen, showMenu, showSearch, spccPlanDetailFacility, surveyFacility, ldarDetailFacility, ldarSurveyFacility, inspectionFormState, inspectionsListFacility, showAddFacilityModal]);
 
   // Helper function to find overlapping markers using pixel distance
   const findOverlappingMarkers = (clickedIndex: string): string[] => {
@@ -4789,6 +4798,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             }
           }}
           onInspectionRouteStopCompleted={onInspectionRouteStopCompleted}
+          onLdarRouteStopCompleted={onLdarRouteStopCompleted}
           onManualInspectionCompletion={onManualInspectionCompletion}
           onShowOnMap={onShowOnMap ? (latitude, longitude) => {
             setSurveyFacility(null);
@@ -4844,9 +4854,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         />
       )}
 
-      {ldarDetailFacility && accountId && userId && (
+      {canAccessLdarMode && ldarDetailFacility && accountId && userId && (
         <LDARFacilityDetailModal
-          facility={ldarDetailFacility}
+          facility={facilitiesById.get(ldarDetailFacility.id) || ldarDetailFacility}
           accountId={accountId}
           userId={userId}
           onClose={() => setLdarDetailFacility(null)}
@@ -4864,13 +4874,13 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
         />
       )}
 
-      {ldarSurveyFacility && accountId && userId && (
+      {canAccessLdarMode && ldarSurveyFacility && accountId && userId && (
         <LDARSurveyModal
           isOpen={true}
           onClose={() => setLdarSurveyFacility(null)}
           accountId={accountId}
           userId={userId}
-          facility={ldarSurveyFacility}
+          facility={facilitiesById.get(ldarSurveyFacility.id) || ldarSurveyFacility}
           onSaved={async (savedSurvey, patch) => {
             if (patch) onFacilityPatch?.(ldarSurveyFacility.id, patch);
             if (savedSurvey.status === 'completed') {
@@ -4909,12 +4919,12 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
 
       {showAddFacilityModal && (
         <ModalPortal>
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Add Facility at Current Location</h3>
 
             {addFacilityError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-red-700 dark:text-red-300 text-sm">
                 {addFacilityError}
               </div>
             )}
@@ -4929,7 +4939,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   value={newFacilityName}
                   onChange={(e) => setNewFacilityName(e.target.value)}
                   placeholder="Enter facility name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   autoFocus
                 />
               </div>
@@ -4943,7 +4953,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   value={newFacilityLat}
                   onChange={(e) => setNewFacilityLat(e.target.value)}
                   placeholder="Enter latitude"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
@@ -4956,11 +4966,11 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   value={newFacilityLng}
                   onChange={(e) => setNewFacilityLng(e.target.value)}
                   placeholder="Enter longitude"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
-              <div className="text-sm text-gray-500">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
                 Default visit duration: 30 minutes
               </div>
             </div>
@@ -4971,7 +4981,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   setShowAddFacilityModal(false);
                   setAddFacilityError(null);
                 }}
-                className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 transition-colors font-medium"
+                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
               >
                 Cancel
               </button>
@@ -5008,7 +5018,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           >
             {/* Arrow pointing down */}
             <div
-              className="absolute left-1/2 -translate-x-1/2 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[10px] border-t-white"
+              className="absolute left-1/2 -translate-x-1/2 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[10px] border-t-white dark:border-t-gray-800"
               style={{
                 bottom: '-10px',
                 filter: 'drop-shadow(0 2px 1px rgba(0,0,0,0.1))'
@@ -5016,9 +5026,9 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             />
 
             {/* Header */}
-            <div className="px-4 py-3 bg-gradient-to-br from-gray-50 to-gray-100 border-b border-gray-200">
+            <div className="px-4 py-3 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-b border-gray-200 dark:border-gray-700">
               <p className="font-semibold text-gray-900 dark:text-white text-base leading-tight">{contextMenu.facility.name}</p>
-              <p className="text-xs text-gray-600 mt-1.5 font-mono">
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5 font-mono">
                 {(() => {
                   const c = getCoords(contextMenu.facility);
                   return c ? `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}` : 'No Coordinates';
@@ -5031,30 +5041,30 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
               {contextMenu.facility.day_assignment === -2 ? (
                 <button
                   onClick={() => handleRestoreFacility(contextMenu.facility)}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 active:bg-blue-100 transition-colors text-left touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 active:bg-blue-100 transition-colors text-left touch-manipulation"
                 >
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100">
-                    <CheckCircle className="w-5 h-5 text-blue-600" />
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50">
+                    <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                   </div>
                   <span className="text-gray-900 dark:text-white font-medium">Restore to Route</span>
                 </button>
               ) : (
                 <button
                   onClick={() => handleRemoveFacility(contextMenu.facility)}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 active:bg-red-100 transition-colors text-left touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 dark:hover:bg-red-900/30 active:bg-red-100 transition-colors text-left touch-manipulation"
                 >
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100">
-                    <X className="w-5 h-5 text-red-600" />
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/50">
+                    <X className="w-5 h-5 text-red-600 dark:text-red-400" />
                   </div>
                   <span className="text-gray-900 dark:text-white font-medium">Remove from Route</span>
                 </button>
               )}
               <button
                 onClick={() => setContextMenu(null)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 active:bg-gray-200 transition-colors text-left border-t border-gray-200 touch-manipulation"
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 transition-colors text-left border-t border-gray-200 dark:border-gray-700 touch-manipulation"
               >
                 <div className="w-8 h-8 flex items-center justify-center">
-                  <X className="w-4 h-4 text-gray-500" />
+                  <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                 </div>
                 <span className="text-gray-700 dark:text-gray-200 font-medium">Cancel</span>
               </button>
@@ -5168,16 +5178,16 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                 }
               }
             }}
-            className="w-full p-3 text-left hover:bg-blue-50 transition-colors"
+            className="w-full p-3 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
-              <Navigation className="w-5 h-5 text-blue-600 flex-shrink-0" />
-              <span className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Next Stop</span>
+              <Navigation className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+              <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Next Stop</span>
             </div>
             <div className="font-semibold text-gray-900 dark:text-white text-sm mb-1 line-clamp-2">
               {nextFacility.facility.name}
             </div>
-            <div className="flex items-center gap-2 text-xs text-gray-600">
+            <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
               <MapPin className="w-3 h-3" />
               <span>{nextFacility.distance.toFixed(1)} mi away</span>
             </div>

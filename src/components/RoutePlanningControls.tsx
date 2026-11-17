@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Settings, Clock, MapPin } from 'lucide-react';
+import { Settings, MapPin } from 'lucide-react';
 import { supabase, UserSettings } from '../lib/supabase';
 
 interface RoutePlanningControlsProps {
   userId: string;
   onGenerate: (settings: UserSettings) => void;
-  onVisitDurationChange: (duration: number) => void;
+  onVisitDurationChange?: (duration: number) => void;
   isGenerating: boolean;
   disabled?: boolean;
   lastUsedSettings?: UserSettings | null;
@@ -14,7 +14,6 @@ interface RoutePlanningControlsProps {
 export default function RoutePlanningControls({
   userId,
   onGenerate,
-  onVisitDurationChange,
   isGenerating,
   disabled = false,
   lastUsedSettings,
@@ -27,6 +26,9 @@ export default function RoutePlanningControls({
     default_visit_duration_minutes: 30,
     use_facilities_constraint: false,
     use_hours_constraint: true,
+    map_preference: 'google',
+    include_google_earth: false,
+    location_permission_granted: false,
     updated_at: '',
   });
 
@@ -63,6 +65,9 @@ export default function RoutePlanningControls({
           default_visit_duration_minutes: 30,
           use_facilities_constraint: false,
           use_hours_constraint: true,
+          map_preference: 'google' as const,
+          include_google_earth: false,
+          location_permission_granted: false,
         };
 
         const { data: newSettings, error: insertError } = await supabase

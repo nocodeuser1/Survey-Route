@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Home, Search, MapPin, Save, Plus, Trash2 } from 'lucide-react';
+import { Home, Search, Save } from 'lucide-react';
 import { geocodeAddress } from '../services/osrm';
 import { supabase, HomeBase } from '../lib/supabase';
 

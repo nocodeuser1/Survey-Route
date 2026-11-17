@@ -84,7 +84,7 @@ export default function SPCCExtractionSettings({ accountId, authUserId }: SPCCEx
         .from('user_settings')
         .select('spcc_extraction_config')
         .eq('account_id', accountId)
-        .single();
+        .maybeSingle();
 
       if (data?.spcc_extraction_config) {
         const config = data.spcc_extraction_config as ExtractionConfig;
@@ -148,7 +148,7 @@ export default function SPCCExtractionSettings({ accountId, authUserId }: SPCCEx
     canvas.height = scaledViewport.height;
     setCanvasSize({ width: scaledViewport.width, height: scaledViewport.height });
 
-    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
 
     if (overlayRef.current) {
       overlayRef.current.width = scaledViewport.width;
@@ -355,8 +355,15 @@ export default function SPCCExtractionSettings({ accountId, authUserId }: SPCCEx
     try {
       const { error } = await supabase
         .from('user_settings')
-        .update({ spcc_extraction_config: config })
-        .eq('account_id', accountId);
+        .upsert(
+          {
+            account_id: accountId,
+            user_id: authUserId || accountId,
+            spcc_extraction_config: config,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'account_id', ignoreDuplicates: false },
+        );
 
       if (error) throw error;
       setSavedConfig(config);

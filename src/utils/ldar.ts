@@ -885,3 +885,52 @@ export function getNextActionDeadlineForLeak(leak: LDARLeak): {
   const d = diffDaysFromToday(due);
   return { label: 'Final Repair Due', dueDate: due, daysLeft: d, isOverdue: d !== null && d < 0 };
 }
+
+export interface LDARShiftPrefs {
+  inspectorName?: string;
+  additionalInspectorsText?: string;
+  equipmentId?: string;
+  cameraModel?: string;
+  cameraSerial?: string;
+  qaDate?: string;
+  dailyQaMode?: 'operating_envelope' | 'field_check';
+  deltaTF?: string;
+  maxViewingDistanceFt?: string;
+  qaGasFlowGhr?: string;
+  qaVideoReference?: string;
+}
+
+export function loadLdarShiftPrefs(accountId: string): LDARShiftPrefs {
+  try {
+    const raw = localStorage.getItem(`sr_ldar_shift_prefs_${accountId}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as LDARShiftPrefs;
+    const today = getTodayInAccountTimeZone();
+    if (parsed.qaDate !== today) {
+      return {
+        inspectorName: parsed.inspectorName,
+        additionalInspectorsText: parsed.additionalInspectorsText,
+        equipmentId: parsed.equipmentId,
+        cameraModel: parsed.cameraModel,
+        cameraSerial: parsed.cameraSerial,
+      };
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+export function saveLdarShiftPrefs(accountId: string, prefs: LDARShiftPrefs): void {
+  try {
+    localStorage.setItem(
+      `sr_ldar_shift_prefs_${accountId}`,
+      JSON.stringify({
+        ...prefs,
+        qaDate: getTodayInAccountTimeZone(),
+      }),
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}

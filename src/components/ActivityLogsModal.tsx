@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { X, Filter, Download, ChevronDown, ChevronUp, User, Activity, Calendar, Info, CheckCircle, Upload, Route as RouteIcon, Settings, Users, Eye, AlertCircle } from 'lucide-react';
+import { X, Filter, Download, ChevronDown, ChevronUp, User, Activity, Calendar, CheckCircle, Upload, Route as RouteIcon, Settings, Users, Eye, AlertCircle } from 'lucide-react';
 
 interface ActivityLog {
   id: string;

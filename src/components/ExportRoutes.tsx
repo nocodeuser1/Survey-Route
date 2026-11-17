@@ -17,12 +17,11 @@ interface TeamMember {
   direction: TeamDirection;
 }
 
-export default function ExportRoutes({ result, facilities, homeBase }: ExportRoutesProps) {
+export default function ExportRoutes({ result, facilities }: ExportRoutesProps) {
   const [teamSize, setTeamSize] = useState(1);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([
     { id: 1, direction: 'north' },
   ]);
-  const [showTeamConfig, setShowTeamConfig] = useState(false);
 
   const updateTeamSize = (size: number) => {
     setTeamSize(size);
@@ -34,12 +33,6 @@ export default function ExportRoutes({ result, facilities, homeBase }: ExportRou
       });
     }
     setTeamMembers(newMembers);
-  };
-
-  const updateTeamDirection = (memberId: number, direction: TeamDirection) => {
-    setTeamMembers(
-      teamMembers.map((m) => (m.id === memberId ? { ...m, direction } : m))
-    );
   };
 
   const calculateCentroid = (facilities: Facility[]) => {

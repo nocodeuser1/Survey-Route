@@ -62,7 +62,7 @@ export interface CompressOptions {
 const DEFAULT_MAX_INPUT_BYTES = 30 * 1024 * 1024; // 30 MB
 
 function toBlob(file: File | Blob, bytes: Uint8Array | null): Blob {
-  if (bytes) return new Blob([bytes], { type: 'application/pdf' });
+  if (bytes) return new Blob([bytes as BlobPart], { type: 'application/pdf' });
   return file instanceof Blob ? file : new Blob([file]);
 }
 
@@ -176,7 +176,7 @@ export async function compressPDF(
     }
 
     return {
-      blob: new Blob([compressedU8], { type: 'application/pdf' }),
+      blob: new Blob([compressedU8 as BlobPart], { type: 'application/pdf' }),
       originalBytes,
       compressedBytes,
       usedCompressed: true,

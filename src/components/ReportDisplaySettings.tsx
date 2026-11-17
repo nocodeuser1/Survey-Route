@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Clock, CheckCircle, AlertTriangle } from 'lucide-react';
-import { supabase, UserSettings } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 interface ReportDisplaySettingsProps {
   userId: string;

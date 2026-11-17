@@ -12,6 +12,7 @@ import {
   Camera,
   Loader2,
   Trash2,
+  Search,
 } from 'lucide-react';
 import ModalPortal from './ModalPortal';
 import {
@@ -23,6 +24,7 @@ import {
 } from '../lib/supabase';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useAccount } from '../contexts/AccountContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   LDAR_COMPONENT_TYPES,
   LDAR_COMPONENT_SIZES,
@@ -34,6 +36,7 @@ import {
   estimateLeakEmissions,
   getLeakStatusMeta,
   getTodayInAccountTimeZone,
+  loadLdarShiftPrefs,
   normalizeLdarInventory,
 } from '../utils/ldar';
 import { formatDate } from '../utils/dateUtils';
@@ -57,7 +60,7 @@ export default function LDARLeakModal({
   isOpen,
   onClose,
   accountId,
-  userId,
+  userId: _userId,
   defaultInspectorName = '',
   facility: initialFacility,
   facilities = [],
@@ -69,7 +72,32 @@ export default function LDARLeakModal({
 }: LDARLeakModalProps) {
   const { darkMode } = useDarkMode();
   const { isAgencyAdmin, accountRole } = useAccount();
+  const { user: authUser, supabaseUser } = useAuth();
   const canApproveDor = isAgencyAdmin || accountRole === 'account_admin';
+
+  const resolvedDefaultInspector = useMemo(() => {
+    if (defaultInspectorName.trim()) return defaultInspectorName.trim();
+    const prefs = loadLdarShiftPrefs(accountId);
+    return (
+      prefs.inspectorName ||
+      authUser?.fullName?.trim() ||
+      authUser?.email?.split('@')[0] ||
+      supabaseUser?.email?.split('@')[0] ||
+      'Field Tech'
+    );
+  }, [accountId, authUser?.email, authUser?.fullName, defaultInspectorName, supabaseUser?.email]);
+
+  const [facilityQuery, setFacilityQuery] = useState('');
+  const filteredPickerFacilities = useMemo(() => {
+    const active = facilities
+      .filter(f => f.status !== 'sold')
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const q = facilityQuery.trim().toLowerCase();
+    if (!q) return active;
+    return active.filter(f =>
+      `${f.name} ${f.county || ''} ${f.camino_facility_id || ''}`.toLowerCase().includes(q),
+    );
+  }, [facilities, facilityQuery]);
 
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>(
     existingLeak?.facility_id || initialFacility?.id || facilities[0]?.id || '',
@@ -101,7 +129,7 @@ export default function LDARLeakModal({
   const [gasStreamType, setGasStreamType] = useState(existingLeak?.gas_stream_type || 'Sales Gas');
   const [detectionMethod, setDetectionMethod] = useState(existingLeak?.detection_method || 'OGI');
   const [detectedAt, setDetectedAt] = useState(existingLeak?.detected_at || todayIso);
-  const [detectedBy, setDetectedBy] = useState(existingLeak?.detected_by || defaultInspectorName);
+  const [detectedBy, setDetectedBy] = useState(existingLeak?.detected_by || resolvedDefaultInspector);
   const [flowRateValue, setFlowRateValue] = useState<string>(
     existingLeak?.flow_rate_value != null ? String(existingLeak.flow_rate_value) : '',
   );
@@ -154,14 +182,14 @@ export default function LDARLeakModal({
 
   // New Repair Attempt Draft
   const [newAttemptDate, setNewAttemptDate] = useState(todayIso);
-  const [newAttemptTech, setNewAttemptTech] = useState(defaultInspectorName);
+  const [newAttemptTech, setNewAttemptTech] = useState(resolvedDefaultInspector);
   const [newAttemptAction, setNewAttemptAction] = useState(LDAR_REPAIR_METHODS[0]);
   const [newAttemptSucceeded, setNewAttemptSucceeded] = useState(true);
   const [newAttemptNotes, setNewAttemptNotes] = useState('');
 
   // Stage 3 -> Stage 4 Confirmation (Re-Monitoring)
   const [confirmedDate, setConfirmedDate] = useState(existingLeak?.confirmed_date || todayIso);
-  const [confirmedBy, setConfirmedBy] = useState(existingLeak?.confirmed_by || defaultInspectorName);
+  const [confirmedBy, setConfirmedBy] = useState(existingLeak?.confirmed_by || resolvedDefaultInspector);
   const [confirmationMethod, setConfirmationMethod] = useState(
     existingLeak?.confirmation_method || 'OGI',
   );
@@ -326,7 +354,7 @@ export default function LDARLeakModal({
     const entry: LDARRepairAttempt = {
       id: crypto.randomUUID(),
       attempt_date: newAttemptDate,
-      technician_name: newAttemptTech || defaultInspectorName || 'Field Tech',
+      technician_name: newAttemptTech || resolvedDefaultInspector,
       repair_action: newAttemptAction,
       repair_succeeded: newAttemptSucceeded,
       notes: newAttemptNotes.trim() || undefined,
@@ -346,32 +374,7 @@ export default function LDARLeakModal({
       setStatus('repair_attempted');
     }
     setNewAttemptNotes('');
-  };
-
-  const handleApplyConfirmation = (passed: boolean) => {
-    setConfirmationPassed(passed);
-    setHasRecordedConfirmation(true);
-    setIsDirty(true);
-    if (passed) {
-      setStatus('repaired');
-    } else {
-      // Failed re-monitoring sends leak back to Stage 2 rework (LTP rule)
-      setStatus('repair_attempted');
-    }
-  };
-
-  const handleRequestDor = () => {
-    setDorStatus('pending');
-    setStatus('dor_pending');
-  };
-
-  const handleReviewDor = (decision: 'approved' | 'denied') => {
-    setDorStatus(decision);
-    if (decision === 'approved') {
-      setStatus('dor_approved');
-    } else {
-      setStatus(firstAttemptDate ? 'repair_attempted' : 'detected');
-    }
+    setRepairFormTouched(false);
   };
 
   const toggleRegulation = (code: string) => {
@@ -380,7 +383,12 @@ export default function LDARLeakModal({
     );
   };
 
-  const handleSave = async () => {
+  const handleSave = async (overrides?: {
+    statusOverride?: LDARLeakStatus;
+    dorStatusOverride?: 'none' | 'pending' | 'approved' | 'denied';
+    confirmationPassedOverride?: boolean;
+    appendCurrentRepairForm?: boolean;
+  }) => {
     if (!selectedFacilityId) {
       setError('Please select a facility for this leak.');
       return;
@@ -399,17 +407,22 @@ export default function LDARLeakModal({
       let finalRepairedDate = repairedDate;
       let finalRepairedBy = repairedBy;
       let finalRepairMethod = repairMethod;
-      let finalStatus: LDARLeakStatus = status;
+      let finalStatus: LDARLeakStatus = overrides?.statusOverride ?? status;
 
-      // Auto-capture a typed repair attempt note if the user clicked Save directly
-      if (newAttemptNotes.trim() !== '') {
+      const shouldAutoAppendAttempt =
+        overrides?.appendCurrentRepairForm ||
+        newAttemptNotes.trim() !== '' ||
+        repairFormTouched ||
+        (activeTab === 'repair' && existingLeak != null && repairAttempts.length === 0);
+
+      if (shouldAutoAppendAttempt) {
         const autoEntry: LDARRepairAttempt = {
           id: crypto.randomUUID(),
           attempt_date: newAttemptDate,
-          technician_name: newAttemptTech || defaultInspectorName || 'Field Tech',
+          technician_name: newAttemptTech || resolvedDefaultInspector,
           repair_action: newAttemptAction,
           repair_succeeded: newAttemptSucceeded,
-          notes: newAttemptNotes.trim(),
+          notes: newAttemptNotes.trim() || undefined,
         };
         finalAttempts = [...repairAttempts, autoEntry];
         if (!finalFirstAttemptDate) {
@@ -420,21 +433,35 @@ export default function LDARLeakModal({
           finalRepairedDate = newAttemptDate;
           finalRepairedBy = autoEntry.technician_name;
           finalRepairMethod = newAttemptAction;
-          if (finalStatus !== 'repaired') finalStatus = 'pending_confirmation';
-        } else if (finalStatus === 'detected') {
+          if (!overrides?.statusOverride && finalStatus !== 'repaired') {
+            finalStatus = 'pending_confirmation';
+          }
+        } else if (!overrides?.statusOverride && finalStatus === 'detected') {
           finalStatus = 'repair_attempted';
         }
       }
 
       // Preserve typed DOR inputs as pending if user didn't click "Submit DOR Request" first
       const hasDorDraft = Boolean(dorJustification.trim() || dorPartsOrderNumber.trim());
+      const baseDorStatus = overrides?.dorStatusOverride ?? dorStatus;
       const effectiveDorStatus =
-        dorStatus === 'none' && hasDorDraft ? 'pending' : dorStatus;
-      if (dorStatus === 'none' && hasDorDraft && finalStatus !== 'repaired') {
+        baseDorStatus === 'none' && hasDorDraft ? 'pending' : baseDorStatus;
+      if (effectiveDorStatus === 'approved') {
+        finalStatus = 'dor_approved';
+      } else if (effectiveDorStatus === 'denied' && !overrides?.statusOverride) {
+        finalStatus = finalFirstAttemptDate ? 'repair_attempted' : 'detected';
+      } else if (baseDorStatus === 'none' && hasDorDraft && finalStatus !== 'repaired') {
         finalStatus = 'dor_pending';
       }
 
-      const saveConfirmation = finalStatus === 'repaired' || hasRecordedConfirmation;
+      const effectiveConfirmationPassed =
+        overrides?.confirmationPassedOverride !== undefined
+          ? overrides.confirmationPassedOverride
+          : confirmationPassed;
+      const saveConfirmation =
+        finalStatus === 'repaired' ||
+        overrides?.confirmationPassedOverride !== undefined ||
+        hasRecordedConfirmation;
 
       const payload = {
         account_id: accountId,
@@ -481,7 +508,7 @@ export default function LDARLeakModal({
           finalStatus === 'repaired'
             ? true
             : saveConfirmation
-              ? confirmationPassed
+              ? effectiveConfirmationPassed
               : existingLeak?.confirmation_passed ?? null,
         dor_status: effectiveDorStatus,
         dor_requested_at:
@@ -691,6 +718,56 @@ export default function LDARLeakModal({
               </div>
             </div>
 
+            {/* Contextual Next-Step Quick Action Bar for Open Leaks */}
+            {existingLeak && status !== 'repaired' && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 rounded-xl border border-teal-200 dark:border-teal-800 bg-white/90 dark:bg-gray-800/90 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-gray-700 dark:text-gray-200">
+                  <ArrowRight className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                  {status === 'pending_confirmation' ? (
+                    <span>
+                      <strong>Next Step:</strong> Verify leak-free with OGI / Soap Bubble to close tag
+                    </span>
+                  ) : status === 'dor_pending' ? (
+                    <span>
+                      <strong>Next Step:</strong> Awaiting administrator DOR review (or log repair)
+                    </span>
+                  ) : (
+                    <span>
+                      <strong>Next Step:</strong> Log repair attempt or mark repaired today
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {status !== 'pending_confirmation' && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => setActiveTab('repair')}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                    >
+                      Go to Repair
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setConfirmationPassed(true);
+                      setHasRecordedConfirmation(true);
+                      setStatus('repaired');
+                      void handleSave({
+                        statusOverride: 'repaired',
+                        confirmationPassedOverride: true,
+                      });
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                  >
+                    Confirm Leak-Free Today &amp; Close
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Section Tabs */}
             <div className="flex gap-1 overflow-x-auto pt-0.5">
               {(
@@ -735,22 +812,48 @@ export default function LDARLeakModal({
             {activeTab === 'details' && (
               <div className="space-y-4">
                 {!initialFacility && facilities.length > 0 && (
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Facility *
                     </label>
+                    {facilities.length > 8 && (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={facilityQuery}
+                          onChange={e => {
+                            const nextQ = e.target.value;
+                            setFacilityQuery(nextQ);
+                            const q = nextQ.trim().toLowerCase();
+                            if (q) {
+                              const firstMatch = facilities
+                                .filter(f => f.status !== 'sold')
+                                .find(f =>
+                                  `${f.name} ${f.county || ''} ${f.camino_facility_id || ''}`
+                                    .toLowerCase()
+                                    .includes(q),
+                                );
+                              if (firstMatch && firstMatch.id !== selectedFacilityId) {
+                                handleSelectFacility(firstMatch.id);
+                              }
+                            }
+                          }}
+                          placeholder="Filter facilities by name, county, or ID..."
+                          className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs"
+                        />
+                      </div>
+                    )}
                     <select
                       value={selectedFacilityId}
                       onChange={e => handleSelectFacility(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
                     >
-                      {facilities
-                        .filter(f => f.status !== 'sold')
-                        .map(f => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
+                      {filteredPickerFacilities.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -1159,7 +1262,10 @@ export default function LDARLeakModal({
                       <input
                         type="date"
                         value={newAttemptDate}
-                        onChange={e => setNewAttemptDate(e.target.value)}
+                        onChange={e => {
+                          setNewAttemptDate(e.target.value);
+                          setRepairFormTouched(true);
+                        }}
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
                       />
                     </div>
@@ -1170,7 +1276,10 @@ export default function LDARLeakModal({
                       <input
                         type="text"
                         value={newAttemptTech}
-                        onChange={e => setNewAttemptTech(e.target.value)}
+                        onChange={e => {
+                          setNewAttemptTech(e.target.value);
+                          setRepairFormTouched(true);
+                        }}
                         placeholder="Maintenance / LDAR tech"
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
                       />
@@ -1181,7 +1290,10 @@ export default function LDARLeakModal({
                       </label>
                       <select
                         value={newAttemptAction}
-                        onChange={e => setNewAttemptAction(e.target.value)}
+                        onChange={e => {
+                          setNewAttemptAction(e.target.value);
+                          setRepairFormTouched(true);
+                        }}
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
                       >
                         {LDAR_REPAIR_METHODS.map(m => (
@@ -1197,21 +1309,35 @@ export default function LDARLeakModal({
                       <input
                         type="checkbox"
                         checked={newAttemptSucceeded}
-                        onChange={e => setNewAttemptSucceeded(e.target.checked)}
+                        onChange={e => {
+                          setNewAttemptSucceeded(e.target.checked);
+                          setRepairFormTouched(true);
+                        }}
                         className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                       />
                       <span>
                         Repair Succeeded — Advance to <strong>Pending Confirmation (Stage 3)</strong>
                       </span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleAddRepairAttempt}
-                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add Repair Attempt
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAddRepairAttempt}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs font-semibold"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add to List
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void handleSave({ appendCurrentRepairForm: true })}
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Log Repair &amp; Save
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -1345,25 +1471,35 @@ export default function LDARLeakModal({
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => handleApplyConfirmation(true)}
-                        className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border transition-colors ${
-                          status === 'repaired' && confirmationPassed
-                            ? 'bg-emerald-600 text-white border-emerald-600'
-                            : 'bg-white dark:bg-gray-800 text-emerald-700 dark:text-emerald-300 border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                        }`}
+                        disabled={saving}
+                        onClick={() => {
+                          setConfirmationPassed(true);
+                          setHasRecordedConfirmation(true);
+                          setStatus('repaired');
+                          void handleSave({
+                            statusOverride: 'repaired',
+                            confirmationPassedOverride: true,
+                          });
+                        }}
+                        className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
                       >
-                        Confirmed Leak-Free
+                        Confirm Leak-Free &amp; Close Leak
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleApplyConfirmation(false)}
-                        className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-colors ${
-                          hasRecordedConfirmation && !confirmationPassed && status !== 'repaired'
-                            ? 'bg-red-600 text-white border-red-600'
-                            : 'border-red-300 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20'
-                        }`}
+                        disabled={saving}
+                        onClick={() => {
+                          setConfirmationPassed(false);
+                          setHasRecordedConfirmation(true);
+                          setStatus('repair_attempted');
+                          void handleSave({
+                            statusOverride: 'repair_attempted',
+                            confirmationPassedOverride: false,
+                          });
+                        }}
+                        className="py-2 px-3 rounded-lg text-xs font-semibold border border-red-300 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
                       >
-                        Not Confirmed (Rework)
+                        Failed — Send to Rework
                       </button>
                     </div>
                   </div>
@@ -1460,27 +1596,49 @@ export default function LDARLeakModal({
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={handleRequestDor}
-                      className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold"
+                      disabled={saving}
+                      onClick={() => {
+                        setDorStatus('pending');
+                        setStatus('dor_pending');
+                        void handleSave({
+                          statusOverride: 'dor_pending',
+                          dorStatusOverride: 'pending',
+                        });
+                      }}
+                      className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold disabled:opacity-50"
                     >
-                      Submit DOR Request (Pending Review)
+                      Submit DOR Request &amp; Save
                     </button>
 
                     {canApproveDor && (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleReviewDor('approved')}
-                          className="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold"
+                          disabled={saving}
+                          onClick={() => {
+                            setDorStatus('approved');
+                            setStatus('dor_approved');
+                            void handleSave({
+                              statusOverride: 'dor_approved',
+                              dorStatusOverride: 'approved',
+                            });
+                          }}
+                          className="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold disabled:opacity-50"
                         >
-                          Admin Approve DOR
+                          Approve DOR &amp; Save
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleReviewDor('denied')}
-                          className="px-3.5 py-2 rounded-lg border border-red-300 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs font-semibold"
+                          disabled={saving}
+                          onClick={() => {
+                            setDorStatus('denied');
+                            void handleSave({
+                              dorStatusOverride: 'denied',
+                            });
+                          }}
+                          className="px-3.5 py-2 rounded-lg border border-red-300 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs font-semibold disabled:opacity-50"
                         >
-                          Deny DOR
+                          Deny DOR &amp; Save
                         </button>
                       </div>
                     )}
@@ -1535,7 +1693,7 @@ export default function LDARLeakModal({
               <button
                 type="button"
                 disabled={saving}
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
               >
                 {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

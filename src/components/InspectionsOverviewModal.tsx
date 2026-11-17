@@ -1,6 +1,6 @@
 import ModalPortal from './ModalPortal';
 import { useState, useEffect, useMemo } from 'react';
-import { X, AlertTriangle, CheckCircle, Activity, Building2, ChevronLeft, ChevronRight, Loader } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Building2, ChevronLeft, ChevronRight, Loader } from 'lucide-react';
 import { supabase, Facility, Inspection, InspectionTemplate, InspectionPhoto } from '../lib/supabase';
 import { formatInspectionTimestamp } from '../utils/inspectionTimestamp';
 import { groupResponseEvents, reportableEvents } from '../utils/inspectionEvents';

@@ -494,21 +494,27 @@ function redistributePoints(
     const currentCluster = clusters[i];
     const nextCluster = clusters[i + 1];
 
-    // Calculate max radius for next cluster to maintain geographic cohesion
-    const maxNextRadius = calculateMaxClusterRadius(nextCluster) * 1.5; // Allow 50% expansion
-
     // If current cluster is much larger than next, move some points
     while (
       currentCluster.points.length > avgSize &&
       nextCluster.points.length < maxPointsPerCluster &&
       currentCluster.points.length > nextCluster.points.length + 1
     ) {
+      // Calculate max radius for next cluster to maintain geographic cohesion.
+      // When nextCluster has <= 1 point, its own radius is 0, so fall back to
+      // currentCluster's radius (with a 10-mile floor) so singletons can still balance.
+      const maxNextRadius =
+        nextCluster.points.length > 1
+          ? calculateMaxClusterRadius(nextCluster) * 1.5
+          : Math.max(calculateMaxClusterRadius(currentCluster) * 1.5, 10);
+
       // Find the point in current cluster closest to next cluster
       let closestPoint: GeoPoint | null = null;
       let minDist = Infinity;
       let closestIdx = -1;
 
-      currentCluster.points.forEach((point, idx) => {
+      for (let idx = 0; idx < currentCluster.points.length; idx++) {
+        const point = currentCluster.points[idx];
         const dist = haversineDistance(
           point.latitude,
           point.longitude,
@@ -520,7 +526,7 @@ function redistributePoints(
           closestPoint = point;
           closestIdx = idx;
         }
-      });
+      }
 
       if (closestPoint && closestIdx >= 0) {
         // Check if moving this point would break geographic cohesion
