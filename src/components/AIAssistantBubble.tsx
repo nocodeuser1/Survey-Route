@@ -1,9 +1,15 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2, History } from 'lucide-react';
+import { MessageSquare, X, Send, Loader2, Sparkles, Zap, Brain, Edit2, History, CheckCircle2, AlertCircle, BookOpen, ArrowUpRight } from 'lucide-react';
 import { useAccount } from '../contexts/AccountContext';
 import { supabase, Facility } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  type AIUIAction,
+  type AIToolExecutionBadge,
+  SURVEY_ROUTE_AI_SKILLS,
+  DELIBERATE_AI_BOUNDARIES,
+} from '../utils/aiTeammateSkills';
 
 /**
  * Model picker — must match the server-side ALLOWED_MODELS allowlist in
@@ -51,6 +57,8 @@ function loadModel(): ModelId {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  toolBadges?: AIToolExecutionBadge[];
+  uiActions?: AIUIAction[];
 }
 
 /**
@@ -115,10 +123,10 @@ function formatRelativeTime(ts: number): string {
 }
 
 const SUGGESTED_PROMPTS = [
-  'How many SPCC plans are due this year?',
-  'Which facilities are overdue for an annual inspection?',
-  'What facilities have no PE stamp date yet?',
-  'Show me facilities due for 5-year recertification in the next 90 days.',
+  'Which facilities are overdue or due within 30 days for an LDAR survey?',
+  'Build an LDAR route for all facilities that are overdue or have open leaks.',
+  'How many SPCC plans and annual inspections are due or overdue right now?',
+  'Open the LDAR Insights & Compliance Hub.',
 ];
 
 interface AIAssistantBubbleProps {
@@ -126,6 +134,11 @@ interface AIAssistantBubbleProps {
   facilities?: Facility[];
   /** Called when the user clicks a linkified facility mention. */
   onOpenFacility?: (facility: Facility) => void;
+  /** Called when the AI Teammate emits an executable UI or refresh command. */
+  onExecuteUIAction?: (action: AIUIAction) => void;
+  /** Current active view & mode so the AI Teammate knows what screen the user is on. */
+  currentView?: string;
+  currentMode?: string;
   /** When true, the bubble's window-level Escape handler no-ops. The parent
    *  uses this when a top-level modal owned by the AI flow (e.g. the
    *  facility-detail modal opened by clicking a linkified mention) is
@@ -156,10 +169,14 @@ function loadPanelWidth(): number {
 export default function AIAssistantBubble({
   facilities = [],
   onOpenFacility,
+  onExecuteUIAction,
+  currentView,
+  currentMode,
   escapeDisabled = false,
   hidden = false,
 }: AIAssistantBubbleProps = {}) {
   const { currentAccount } = useAccount();
+  const [showSkillsDrawer, setShowSkillsDrawer] = useState(false);
 
   // Lower-cased name → facility lookup for fast linkification of bold mentions
   // in assistant messages. Covers facility.name plus matched_facility_name
@@ -309,6 +326,8 @@ export default function AIAssistantBubble({
           accountId: currentAccount.id,
           messages: nextMessages,
           model,
+          currentView,
+          currentMode,
         }),
         signal: controller.signal,
       });
@@ -347,18 +366,58 @@ export default function AIAssistantBubble({
           for (const event of events) {
             const line = event.split('\n').find((l) => l.startsWith('data: '));
             if (!line) continue;
-            let payload: { type?: string; text?: string; error?: string };
+            let payload: {
+              type?: string;
+              text?: string;
+              error?: string;
+              badge?: AIToolExecutionBadge;
+              action?: AIUIAction;
+            };
             try {
               payload = JSON.parse(line.slice(6));
             } catch (parseErr) {
               console.error('[AIAssistant] Failed to parse SSE chunk:', line, parseErr);
               continue;
             }
-            if (payload.type === 'text' && payload.text) {
+            if (payload.type === 'tool' && payload.badge) {
+              const badge = payload.badge;
+              setMessages((prev) => {
+                const copy = [...prev];
+                const last = copy[copy.length - 1];
+                if (last && last.role === 'assistant') {
+                  copy[copy.length - 1] = {
+                    ...last,
+                    toolBadges: [...(last.toolBadges ?? []), badge],
+                  };
+                }
+                return copy;
+              });
+            } else if (payload.type === 'ui_action' && payload.action) {
+              const action = payload.action;
+              onExecuteUIAction?.(action);
+              if (action.kind !== 'refresh_data') {
+                setMessages((prev) => {
+                  const copy = [...prev];
+                  const last = copy[copy.length - 1];
+                  if (last && last.role === 'assistant') {
+                    copy[copy.length - 1] = {
+                      ...last,
+                      uiActions: [...(last.uiActions ?? []), action],
+                    };
+                  }
+                  return copy;
+                });
+              }
+            } else if (payload.type === 'text' && payload.text) {
               assistantText += payload.text;
               setMessages((prev) => {
                 const copy = [...prev];
-                copy[copy.length - 1] = { role: 'assistant', content: assistantText };
+                const last = copy[copy.length - 1];
+                copy[copy.length - 1] = {
+                  ...last,
+                  role: 'assistant',
+                  content: assistantText,
+                };
                 return copy;
               });
             } else if (payload.type === 'error') {
@@ -536,11 +595,22 @@ export default function AIAssistantBubble({
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm leading-tight">Survey-Route Assistant</p>
-                  <p className="text-[11px] text-blue-100 leading-tight truncate">Ask about your facilities, dates, and statuses</p>
+                  <p className="font-semibold text-sm leading-tight">Survey-Route AI Teammate</p>
+                  <p className="text-[11px] text-blue-100 leading-tight truncate">Full action parity: SPCC, LDAR, Routes, Invoicing & UI</p>
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowSkillsDrawer((v) => !v)}
+                  title="View AI Teammate skills & capabilities"
+                  className={`text-xs px-2 py-1 rounded transition-colors inline-flex items-center gap-1 ${
+                    showSkillsDrawer ? 'bg-white text-blue-700 font-semibold' : 'hover:bg-white/15'
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Skills</span>
+                </button>
                 {history.length > 0 && (
                   <div className="relative" ref={historyMenuRef}>
                     <button
@@ -634,16 +704,75 @@ export default function AIAssistantBubble({
             </div>
           </div>
 
-          {/* Messages */}
+          {/* Messages or Skills Drawer */}
+          {showSkillsDrawer ? (
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 text-xs">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                    AI Teammate Skills &amp; Action Parity
+                  </h4>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Click any example prompt below to run it immediately.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSkillsDrawer(false)}
+                  className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                >
+                  Back to Chat
+                </button>
+              </div>
+
+              {SURVEY_ROUTE_AI_SKILLS.map((cat) => (
+                <div
+                  key={cat.id}
+                  className="p-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 space-y-2"
+                >
+                  <div className="font-bold text-gray-900 dark:text-white">{cat.title}</div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                    {cat.description}
+                  </p>
+                  <div className="space-y-1 pt-1">
+                    {cat.examples.map((ex) => (
+                      <button
+                        key={ex}
+                        type="button"
+                        onClick={() => {
+                          setShowSkillsDrawer(false);
+                          void sendMessage(ex);
+                        }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg bg-blue-50/70 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium transition-colors"
+                      >
+                        “{ex}”
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/60 space-y-1.5">
+                <div className="font-bold text-amber-900 dark:text-amber-200">
+                  Deliberate Browser &amp; Safety Boundaries
+                </div>
+                {DELIBERATE_AI_BOUNDARIES.map((b) => (
+                  <div key={b.area} className="text-[11px] text-amber-800 dark:text-amber-300">
+                    <strong>{b.area}:</strong> {b.reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-gray-50 dark:bg-gray-900/50">
             {messages.length === 0 ? (
               <div className="text-center py-8">
                 <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/30 mb-3">
                   <MessageSquare className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                 </div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">How can I help?</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 max-w-[280px] mx-auto">
-                  Ask about SPCC due dates, recertifications, inspections, or any account-wide rollup.
+                <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">Your AI Teammate is Ready</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 max-w-[290px] mx-auto">
+                  Ask questions OR tell me to log LDAR surveys, tag/close leaks, build routes, update schedules, or mark invoices.
                 </p>
                 <div className="space-y-1.5">
                   {SUGGESTED_PROMPTS.map((p) => (
@@ -663,13 +792,6 @@ export default function AIAssistantBubble({
                   key={i}
                   className={`group flex items-center gap-1.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  {/* Edit-and-fork affordance for past user prompts.
-                      Sits left of the bubble (since user messages are
-                      right-aligned), hidden until row-hover so it
-                      doesn't crowd the conversation. Clicking pops
-                      the prompt back into the composer and truncates
-                      the conversation at that point — see
-                      editAndForkFrom. */}
                   {msg.role === 'user' && msg.content && (
                     <button
                       type="button"
@@ -686,9 +808,30 @@ export default function AIAssistantBubble({
                     className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words ${
                       msg.role === 'user'
                         ? 'bg-blue-600 text-white rounded-br-md whitespace-pre-wrap'
-                        : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-md'
+                        : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-md space-y-2'
                     }`}
                   >
+                    {msg.role === 'assistant' && msg.toolBadges && msg.toolBadges.length > 0 && (
+                      <div className="space-y-1">
+                        {msg.toolBadges.map((b, bi) => (
+                          <div
+                            key={bi}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                              b.status === 'ok'
+                                ? 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                : 'bg-red-50 dark:bg-red-900/25 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+                            }`}
+                          >
+                            {b.status === 'ok' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            )}
+                            <span>{b.summary}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {msg.content ? (
                       msg.role === 'assistant' ? (
                         <AIMarkdown
@@ -705,6 +848,21 @@ export default function AIAssistantBubble({
                         Thinking…
                       </span>
                     )}
+                    {msg.role === 'assistant' && msg.uiActions && msg.uiActions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {msg.uiActions.map((act, ai) => (
+                          <button
+                            key={ai}
+                            type="button"
+                            onClick={() => onExecuteUIAction?.(act)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-semibold border border-blue-200 dark:border-blue-800 transition-colors"
+                          >
+                            <span>{'label' in act ? act.label : 'Open'}</span>
+                            <ArrowUpRight className="w-3 h-3" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -715,6 +873,7 @@ export default function AIAssistantBubble({
               </div>
             )}
           </div>
+          )}
 
           {/* Composer */}
           <form onSubmit={handleSubmit} className="px-3 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex-shrink-0">

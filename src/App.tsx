@@ -25,6 +25,13 @@ import SiteVisitChecklistSettings from './components/SiteVisitChecklistSettings'
 import AccountSwitcher from './components/AccountSwitcher';
 import ManagementSignatureSettings from './components/ManagementSignatureSettings';
 import FacilityDetailModal from './components/FacilityDetailModal';
+import SPCCPlanDetailModal from './components/SPCCPlanDetailModal';
+import LDARFacilityDetailModal from './components/LDARFacilityDetailModal';
+import LDAROverviewModal from './components/LDAROverviewModal';
+import LDARReportsModal from './components/LDARReportsModal';
+import SPCCPlansOverviewModal from './components/SPCCPlansOverviewModal';
+import InspectionsOverviewModal from './components/InspectionsOverviewModal';
+import { type AIUIAction } from './utils/aiTeammateSkills';
 import ReportDisplaySettings from './components/ReportDisplaySettings';
 import SPCCExtractionSettings from './components/SPCCExtractionSettings';
 import SurveyTypesSettings from './components/SurveyTypesSettings';
@@ -513,10 +520,17 @@ function App() {
   const { currentAccount, accounts, accountRole, loading: accountLoading, selectAccount } = useAccount();
   const { isOnline } = useOnlineStatus();
 
-  // Facility opened from the AI assistant bubble's linkified bold mentions.
-  // Rendered as a top-level FacilityDetailModal so it works regardless of
-  // which view the user is on when they click the AI's facility link.
+  // Facility & Hub modals opened from the AI Teammate bubble.
   const [aiOpenedFacility, setAiOpenedFacility] = useState<Facility | null>(null);
+  const [aiOpenedSpccPlanFacility, setAiOpenedSpccPlanFacility] = useState<Facility | null>(null);
+  const [aiOpenedLdarFacility, setAiOpenedLdarFacility] = useState<{
+    facility: Facility;
+    tab?: 'schedule' | 'surveys' | 'leaks' | 'site_plan' | 'inventory';
+  } | null>(null);
+  const [aiOpenedHub, setAiOpenedHub] = useState<{
+    hub: 'ldar_overview' | 'ldar_reports' | 'spcc_overview' | 'inspections_overview';
+    tab?: 'insights' | 'leaks' | 'dor' | 'calendar' | 'certifications';
+  } | null>(null);
   const { darkMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const { logTabView, logActivity } = useActivityLogger();
@@ -5763,26 +5777,161 @@ function App() {
         <AIAssistantBubble
           hidden={isFullScreenMap || (currentView === 'route-planning' && isMobileViewport)}
           facilities={facilities}
+          currentView={currentView}
+          currentMode={surveyTypeKind}
           onOpenFacility={setAiOpenedFacility}
-          // When the AI-opened facility modal is in front, Esc should close
+          onExecuteUIAction={(action: AIUIAction) => {
+            if (action.kind === 'refresh_data') {
+              void loadData();
+              return;
+            }
+            if (action.kind === 'navigate_view') {
+              if (action.mode) {
+                if (action.mode === 'all') {
+                  setSurveyType('all');
+                } else {
+                  const row = dbSurveyTypes.find(t => t.system_kind === action.mode);
+                  setSurveyType(row?.id ?? action.mode);
+                }
+              }
+              localStorage.setItem('currentView', action.view);
+              setCurrentView(action.view);
+              return;
+            }
+            if (action.kind === 'open_hub') {
+              setAiOpenedHub({ hub: action.hub, tab: action.tab });
+              return;
+            }
+            if (action.kind === 'open_facility') {
+              const fac =
+                facilities.find(f => f.id === action.facilityId) ||
+                facilities.find(f => f.name.toLowerCase() === action.facilityName.toLowerCase());
+              if (!fac) return;
+              if (action.modal === 'ldar' && canAccessLdarMode) {
+                setAiOpenedLdarFacility({
+                  facility: fac,
+                  tab: (action.tab as any) || 'schedule',
+                });
+              } else if (action.modal === 'spcc_plan') {
+                setAiOpenedSpccPlanFacility(fac);
+              } else {
+                setAiOpenedFacility(fac);
+              }
+              return;
+            }
+            if (action.kind === 'build_route') {
+              let targetType = 'all';
+              if (action.mode !== 'all') {
+                const row = dbSurveyTypes.find(t => t.system_kind === action.mode);
+                targetType = row?.id ?? action.mode;
+              }
+              void handleCreateRouteFromSelection(action.facilityIds, targetType);
+              return;
+            }
+            if (action.kind === 'show_on_map') {
+              localStorage.setItem('currentView', 'route-planning');
+              setCurrentView('route-planning');
+              setMapTargetCoords({ latitude: action.latitude, longitude: action.longitude });
+            }
+          }}
+          // When any AI-opened modal is in front, Esc should close
           // the modal (which has its own handler), not the bubble behind it.
-          escapeDisabled={!!aiOpenedFacility}
+          escapeDisabled={
+            !!aiOpenedFacility ||
+            !!aiOpenedSpccPlanFacility ||
+            !!aiOpenedLdarFacility ||
+            !!aiOpenedHub
+          }
         />
       )}
 
       {/* Top-level FacilityDetailModal triggered by the AI bubble's linkified
-          facility mentions. Lives at App level so the modal works from any
-          view (route planning, survey mode, settings, etc.) without each
-          view needing its own click handler. */}
+          facility mentions or open_facility command. */}
       {aiOpenedFacility && currentAccount && user && (
         <FacilityDetailModal
-          facility={aiOpenedFacility}
+          facility={facilities.find(f => f.id === aiOpenedFacility.id) || aiOpenedFacility}
           userId={user.id}
           teamNumber={effectiveUserTeam ?? 1}
           accountId={currentAccount.id}
           facilities={facilities}
           allInspections={inspections}
+          onInspectionCompleted={() => void loadData()}
+          onLdarRouteStopCompleted={routeStatusRuns.completeLdarStop}
+          onManualInspectionCompletion={routeStatusRuns.recordManualInspectionCompletion}
           onClose={() => setAiOpenedFacility(null)}
+        />
+      )}
+
+      {aiOpenedSpccPlanFacility && (
+        <SPCCPlanDetailModal
+          facility={facilities.find(f => f.id === aiOpenedSpccPlanFacility.id) || aiOpenedSpccPlanFacility}
+          onClose={() => setAiOpenedSpccPlanFacility(null)}
+          onFacilitiesChange={() => void loadData()}
+        />
+      )}
+
+      {canAccessLdarMode && aiOpenedLdarFacility && currentAccount && user && (
+        <LDARFacilityDetailModal
+          facility={facilities.find(f => f.id === aiOpenedLdarFacility.facility.id) || aiOpenedLdarFacility.facility}
+          accountId={currentAccount.id}
+          userId={user.id}
+          defaultInspectorName={user.fullName || user.email}
+          initialTab={aiOpenedLdarFacility.tab || 'schedule'}
+          onClose={() => setAiOpenedLdarFacility(null)}
+          onFacilityUpdated={() => void loadData()}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void routeStatusRuns.completeLdarStop(facId, survId);
+          }}
+        />
+      )}
+
+      {canAccessLdarMode && aiOpenedHub?.hub === 'ldar_overview' && currentAccount && user && (
+        <LDAROverviewModal
+          isOpen={true}
+          onClose={() => setAiOpenedHub(null)}
+          facilities={facilities}
+          accountId={currentAccount.id}
+          userId={user.id}
+          defaultInspectorName={user.fullName || user.email}
+          initialTab={aiOpenedHub.tab || 'insights'}
+          onOpenFacilityLdar={(fac) => {
+            setAiOpenedHub(null);
+            setAiOpenedLdarFacility({ facility: fac, tab: 'schedule' });
+          }}
+          onCreateLdarRoute={(ids) => {
+            setAiOpenedHub(null);
+            const row = dbSurveyTypes.find(t => t.system_kind === 'ldar');
+            void handleCreateRouteFromSelection(ids, row?.id ?? 'ldar');
+          }}
+          onFacilitiesChanged={() => void loadData()}
+        />
+      )}
+
+      {canAccessLdarMode && aiOpenedHub?.hub === 'ldar_reports' && currentAccount && (
+        <LDARReportsModal
+          isOpen={true}
+          onClose={() => setAiOpenedHub(null)}
+          scopedFacilities={facilities.filter(f => f.status !== 'sold')}
+          usingSelection={false}
+          accountId={currentAccount.id}
+        />
+      )}
+
+      {aiOpenedHub?.hub === 'spcc_overview' && currentAccount && (
+        <SPCCPlansOverviewModal
+          isOpen={true}
+          onClose={() => setAiOpenedHub(null)}
+          facilities={facilities}
+          accountId={currentAccount.id}
+        />
+      )}
+
+      {aiOpenedHub?.hub === 'inspections_overview' && currentAccount && (
+        <InspectionsOverviewModal
+          isOpen={true}
+          onClose={() => setAiOpenedHub(null)}
+          facilities={facilities}
+          accountId={currentAccount.id}
         />
       )}
     </div>
