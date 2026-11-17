@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import ModalPortal from './ModalPortal';
-import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Pencil, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock } from 'lucide-react';
+import { Clock, TrendingUp, MapPin, Navigation, RefreshCw, CheckCircle, FileText, AlertCircle, ChevronDown, ChevronUp, Undo2, Route, Info, Home, Pencil, Download, Save, FolderOpen, Plus, X as XIcon, CheckSquare, Square, ClipboardList, FileCheck, Settings, Camera, Trash2, CalendarClock, Wind, Flame } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { OptimizationResult, FacilityWithIndex, calculateDayRoute, rebuildDayRoute, endsAfterDeadline, lastDepartureMinutes, deadlineMinutes } from '../services/routeOptimizer';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -8,6 +8,7 @@ import { getSunTimes, getDefaultReturnByTime, minutesTo12Hour, getSeasonLabel } 
 import { UserSettings, Facility, Inspection, RoutePlan, RouteVisitEvent, PlanRouteRunStop, ResetRouteStatusScope, supabase } from '../lib/supabase';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
+import LDARFacilityDetailModal from './LDARFacilityDetailModal';
 import { isFacilityInspectionCurrent, isInspectionValid, getFacilityInspectionExpiry } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, facilityNeedsSPCCPlan } from '../utils/spccStatus';
 import PhotosTakenStatusBadge from './PhotosTakenStatusBadge';
@@ -20,11 +21,8 @@ import { calculateDistanceMatrix } from '../services/osrm';
 import { getCoords } from '../utils/coordinates';
 import ResetRouteStatusModal from './ResetRouteStatusModal';
 import { getRouteStatusRenderModel } from '../utils/routeStatus';
-
-// Helper function to check if a facility is active (not excluded or removed)
-const isActiveFacility = (facility: Facility): boolean => {
-  return facility.day_assignment !== -1 && facility.day_assignment !== -2;
-};
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode, facilityNeedsLdarAttention, getFacilityLdarCompliance } from '../utils/ldar';
 
 interface RouteResultsProps {
   result: OptimizationResult;
@@ -70,6 +68,7 @@ interface RouteResultsProps {
     hideExternallyCompleted: boolean;
     hideValidPlans: boolean;
     hideExpiringPlans: boolean;
+    hideCurrentLdar?: boolean;
   };
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onApplyWithTimeRefresh?: () => Promise<void>;
@@ -84,7 +83,7 @@ interface RouteResultsProps {
    * match. Falls back to enum-string equality when omitted, for backward
    * compat with callers that haven't been updated.
    */
-  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom';
   planRouteProgress?: {
     runId: string | null;
     stopsByFacilityId: Map<string, PlanRouteRunStop>;
@@ -99,13 +98,16 @@ interface RouteResultsProps {
     resetting?: boolean;
     resetRouteStatus?: (scope: ResetRouteStatusScope, requestId: string) => Promise<unknown>;
     inspectionStopsByFacilityId?: Map<string, PlanRouteRunStop>;
+    ldarStopsByFacilityId?: Map<string, PlanRouteRunStop>;
     inspectionRunInitialized?: boolean;
     planRunInitialized?: boolean;
+    ldarRunInitialized?: boolean;
     completeInspectionStop?: (
       facilityId: string,
       source: 'inspection' | 'manual_internal' | 'manual_external',
       sourceRecordId: string,
     ) => Promise<boolean>;
+    completeLdarStop?: (facilityId: string, surveyId: string) => Promise<boolean>;
     recordManualInspectionCompletion?: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   };
 }
@@ -115,11 +117,14 @@ interface RouteResultsProps {
 type SurveyType = string;
 
 export default function RouteResults({ result, settings, facilities, userId, teamNumber, onRefresh, accountId, onFacilitiesUpdated, isRefreshing, showOnlySettings = false, showOnlyRouteList = false, homeBase, onSaveCurrentRoute, onLoadRoute, currentRouteId, onRouteRenamed, currentRouteName, nextRouteDayNumber, routeStopCount, routeScopeIsSubset = false, onUseAllEligible, onRegenerateAllEligible, onConfigureHomeBase, showRefreshOptions: externalShowRefreshOptions, onShowRefreshOptions, onUpdateResult, onPersistRouteResult, onMoveFacility, onMoveFacilities, onAddFacilitiesToRoute, completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideExternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false }, onShowOnMap, onApplyWithTimeRefresh, surveyType: externalSurveyType, onSurveyTypeChange, surveyTypeKind: externalSurveyTypeKind, planRouteProgress }: RouteResultsProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
   const [routeVisitEvents, setRouteVisitEvents] = useState<RouteVisitEvent[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
-  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
+  const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
+  const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | 'ldar' | 'spcc' | null>(null);
   const [internalShowRefreshOptions, setInternalShowRefreshOptions] = useState(false);
   const [internalSurveyType, setInternalSurveyType] = useState<SurveyType>('all');
   const surveyType = externalSurveyType !== undefined ? externalSurveyType : internalSurveyType;
@@ -133,13 +138,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   // See the surveyTypeKind prop docs above. Prefer the parent-supplied kind
   // (it knows about UUIDs via the dbSurveyTypes lookup); otherwise fall back
   // to the legacy enum-string check.
-  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
     externalSurveyTypeKind ??
     (surveyType === 'spcc_plan'
       ? 'spcc_plan'
       : surveyType === 'spcc_inspection'
         ? 'spcc_inspection'
-        : 'all');
+        : surveyType === 'ldar'
+          ? 'ldar'
+          : 'all');
   const nextAvailableRouteDay = nextRouteDayNumber
     ?? Math.max(0, ...result.routes.map(route => route.day)) + 1;
   const persistEditedResult = async (newResult: OptimizationResult): Promise<boolean> => {
@@ -914,34 +921,42 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         });
 
 
-        // Save the updated settings FIRST (keeping visit duration, start time, and sunset offset from current settings)
-        const { error } = await supabase
+        const payloadWithLdar = {
+          user_id: settings?.user_id || supabaseUser?.id || accountId,
+          account_id: accountId,
+          max_facilities_per_day: tempSettings.max_facilities_per_day,
+          max_hours_per_day: tempSettings.max_hours_per_day,
+          default_visit_duration_minutes: settings?.default_visit_duration_minutes || 30,
+          use_facilities_constraint: tempSettings.use_facilities_constraint,
+          use_hours_constraint: tempSettings.use_hours_constraint,
+          clustering_tightness: tempSettings.clustering_tightness,
+          cluster_balance_weight: tempSettings.cluster_balance_weight,
+          start_time: tempSettings.start_time || '08:00',
+          sunset_offset_minutes: settings?.sunset_offset_minutes ?? 0,
+          map_preference: tempSettings.map_preference || 'google',
+          include_google_earth: tempSettings.include_google_earth || false,
+          location_permission_granted: tempSettings.location_permission_granted || false,
+          lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
+          max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
+          return_by_time: tempSettings.return_by_time || null,
+          inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
+          plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
+          ldar_visit_duration_minutes: tempSettings.ldar_visit_duration_minutes ?? 45,
+          updated_at: new Date().toISOString(),
+        };
+        let { error } = await supabase
           .from('user_settings')
-          .upsert({
-            user_id: accountId,
-            account_id: accountId,
-            max_facilities_per_day: tempSettings.max_facilities_per_day,
-            max_hours_per_day: tempSettings.max_hours_per_day,
-            default_visit_duration_minutes: settings?.default_visit_duration_minutes || 30,
-            use_facilities_constraint: tempSettings.use_facilities_constraint,
-            use_hours_constraint: tempSettings.use_hours_constraint,
-            clustering_tightness: tempSettings.clustering_tightness,
-            cluster_balance_weight: tempSettings.cluster_balance_weight,
-            start_time: tempSettings.start_time || '08:00',
-            sunset_offset_minutes: settings?.sunset_offset_minutes ?? 0,
-            map_preference: tempSettings.map_preference || 'google',
-            include_google_earth: tempSettings.include_google_earth || false,
-            location_permission_granted: tempSettings.location_permission_granted || false,
-            lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
-            max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
-            return_by_time: tempSettings.return_by_time || null,
-            inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
-            plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
-            updated_at: new Date().toISOString(),
-          }, {
+          .upsert(payloadWithLdar, {
             onConflict: 'account_id',
             ignoreDuplicates: false,
           });
+        if (error && /ldar_visit_duration_minutes|PGRST204/i.test(error.message)) {
+          const { ldar_visit_duration_minutes: _omit, ...legacyPayload } = payloadWithLdar;
+          void _omit;
+          ({ error } = await supabase
+            .from('user_settings')
+            .upsert(legacyPayload, { onConflict: 'account_id', ignoreDuplicates: false }));
+        }
 
         if (error) {
           console.error('Error saving settings:', error);
@@ -992,36 +1007,42 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       try {
         console.log('Saving settings and refreshing times only...');
 
-        // Save every editable timing value. Previously this path discarded
-        // edited SPCC durations, so the button claimed to refresh times while
-        // quietly recalculating with the old visit lengths.
-        const { error } = await supabase
+        const timePayloadWithLdar = {
+          user_id: settings.user_id || supabaseUser?.id || accountId,
+          account_id: accountId,
+          max_facilities_per_day: tempSettings.max_facilities_per_day,
+          max_hours_per_day: tempSettings.max_hours_per_day,
+          default_visit_duration_minutes: settings.default_visit_duration_minutes,
+          use_facilities_constraint: tempSettings.use_facilities_constraint,
+          use_hours_constraint: tempSettings.use_hours_constraint,
+          clustering_tightness: tempSettings.clustering_tightness,
+          cluster_balance_weight: tempSettings.cluster_balance_weight,
+          start_time: tempSettings.start_time || '08:00',
+          sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
+          map_preference: tempSettings.map_preference || 'google',
+          include_google_earth: tempSettings.include_google_earth || false,
+          location_permission_granted: tempSettings.location_permission_granted || false,
+          lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
+          max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
+          return_by_time: tempSettings.return_by_time || null,
+          inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
+          plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
+          ldar_visit_duration_minutes: tempSettings.ldar_visit_duration_minutes ?? 45,
+          updated_at: new Date().toISOString(),
+        };
+        let { error } = await supabase
           .from('user_settings')
-          .upsert({
-            user_id: accountId,
-            account_id: accountId,
-            max_facilities_per_day: tempSettings.max_facilities_per_day,
-            max_hours_per_day: tempSettings.max_hours_per_day,
-            default_visit_duration_minutes: settings.default_visit_duration_minutes,
-            use_facilities_constraint: tempSettings.use_facilities_constraint,
-            use_hours_constraint: tempSettings.use_hours_constraint,
-            clustering_tightness: tempSettings.clustering_tightness,
-            cluster_balance_weight: tempSettings.cluster_balance_weight,
-            start_time: tempSettings.start_time || '08:00',
-            sunset_offset_minutes: settings.sunset_offset_minutes ?? 0,
-            map_preference: tempSettings.map_preference || 'google',
-            include_google_earth: tempSettings.include_google_earth || false,
-            location_permission_granted: tempSettings.location_permission_granted || false,
-            lunch_break_minutes: tempSettings.lunch_break_minutes ?? 0,
-            max_drive_time_minutes: tempSettings.max_drive_time_minutes ?? 0,
-            return_by_time: tempSettings.return_by_time || null,
-            inspection_visit_duration_minutes: tempSettings.inspection_visit_duration_minutes ?? 30,
-            plan_visit_duration_minutes: tempSettings.plan_visit_duration_minutes ?? 60,
-            updated_at: new Date().toISOString(),
-          }, {
+          .upsert(timePayloadWithLdar, {
             onConflict: 'account_id',
             ignoreDuplicates: false,
           });
+        if (error && /ldar_visit_duration_minutes|PGRST204/i.test(error.message)) {
+          const { ldar_visit_duration_minutes: _omit, ...legacyTimePayload } = timePayloadWithLdar;
+          void _omit;
+          ({ error } = await supabase
+            .from('user_settings')
+            .upsert(legacyTimePayload, { onConflict: 'account_id', ignoreDuplicates: false }));
+        }
 
         if (error) {
           console.error('Error saving settings:', error);
@@ -1150,15 +1171,20 @@ export default function RouteResults({ result, settings, facilities, userId, tea
   const getFacilityRouteRenderModel = (facility: Facility) => {
     const inspection = inspections.get(facility.id);
     const planStatus = getSPCCPlanStatus(facility).status;
+    const includeLdar = effectiveKind === 'ldar' || canAccessLdarMode;
+    const ldarCurrent = includeLdar && !facilityNeedsLdarAttention(facility);
     return getRouteStatusRenderModel({
       surveyTypeKind: effectiveKind,
       isCurrentRouteStop: routeContainsFacility(facility, getRouteFacilityIdentity()),
       inspectionRunInitialized: Boolean(planRouteProgress?.inspectionRunInitialized),
       planRunInitialized: Boolean(planRouteProgress?.planRunInitialized),
+      ldarRunInitialized: includeLdar ? Boolean(planRouteProgress?.ldarRunInitialized) : false,
       inspectionStop: planRouteProgress?.inspectionStopsByFacilityId?.get(facility.id),
       planStop: planRouteProgress?.stopsByFacilityId.get(facility.id),
+      ldarStop: includeLdar ? planRouteProgress?.ldarStopsByFacilityId?.get(facility.id) : undefined,
       inspectionComplianceCurrent: isFacilityInspectionCurrent(facility, inspection ? [inspection] : []),
       planComplianceCurrent: planStatus === 'valid' || planStatus === 'recertified',
+      ldarComplianceCurrent: ldarCurrent,
     });
   };
 
@@ -1270,11 +1296,15 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     const facility = getFacilityForStop(facilityName, facilityId);
     if (!facility) return false;
 
-    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans } = completedVisibility;
+    const { hideAllCompleted, hideInternallyCompleted, hideExternallyCompleted, hideValidPlans, hideExpiringPlans, hideCurrentLdar } = completedVisibility;
 
     // If nothing is hidden, show all
-    if (!hideAllCompleted && !hideInternallyCompleted && !hideExternallyCompleted && !hideValidPlans && !hideExpiringPlans) {
+    if (!hideAllCompleted && !hideInternallyCompleted && !hideExternallyCompleted && !hideValidPlans && !hideExpiringPlans && !hideCurrentLdar) {
       return false;
+    }
+
+    if (hideCurrentLdar && canAccessLdarMode && !facilityNeedsLdarAttention(facility)) {
+      return true;
     }
 
     // Inspection-based hiding (applies in All and Inspections modes)
@@ -1405,6 +1435,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     if (facility) {
       if (effectiveKind === 'spcc_plan') {
         setSpccPlanDetailFacility(facility);
+      } else if (effectiveKind === 'ldar' && canAccessLdarMode) {
+        setLdarDetailFacility(facility);
       } else {
         setSelectedFacility(facility);
       }
@@ -1435,6 +1467,10 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       return facilityNeedsSPCCInspection(facility);
     }
 
+    if (effectiveKind === 'ldar') {
+      return facilityNeedsLdarAttention(facility);
+    }
+
     return true;
   };
 
@@ -1461,11 +1497,25 @@ export default function RouteResults({ result, settings, facilities, userId, tea
     let inspectionInRouteCount = 0;
     let planPastDueInRouteCount = 0;
     let inspectionPastDueInRouteCount = 0;
+    let ldarCount = 0;
+    let ldarInRouteCount = 0;
+    let ldarPastDueCount = 0;
+    let ldarPastDueInRouteCount = 0;
 
     const facilitiesInRoute = getRouteFacilityIdentity();
 
     facilities.forEach(f => {
       const isInRoute = routeContainsFacility(f, facilitiesInRoute);
+
+      if (facilityNeedsLdarAttention(f)) {
+        ldarCount++;
+        if (isInRoute) ldarInRouteCount++;
+        const ldarComp = getFacilityLdarCompliance(f);
+        if (ldarComp.status === 'overdue' || ldarComp.openLeaksCount > 0) {
+          ldarPastDueCount++;
+          if (isInRoute) ldarPastDueInRouteCount++;
+        }
+      }
 
       if (facilityNeedsSPCCPlan(f)) {
         planCount++;
@@ -1517,7 +1567,11 @@ export default function RouteResults({ result, settings, facilities, userId, tea
       planInRouteCount,
       inspectionInRouteCount,
       planPastDueInRouteCount,
-      inspectionPastDueInRouteCount
+      inspectionPastDueInRouteCount,
+      ldarCount,
+      ldarInRouteCount,
+      ldarPastDueCount,
+      ldarPastDueInRouteCount,
     };
   };
 
@@ -2499,8 +2553,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
                 <div className="border-t pt-4 space-y-4">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Onsite Visit Duration</p>
-                  <div className={`grid grid-cols-1 gap-4 ${effectiveKind === 'all' || effectiveKind === 'custom' ? 'sm:grid-cols-2' : ''}`}>
-                    {effectiveKind !== 'spcc_plan' && (
+                  <div className={`grid grid-cols-1 gap-4 ${effectiveKind === 'all' || effectiveKind === 'custom' ? (canAccessLdarMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2') : ''}`}>
+                    {(effectiveKind === 'all' || effectiveKind === 'custom' || effectiveKind === 'spcc_inspection') && (
                     <div>
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         <Clock className="inline w-4 h-4 mr-1" />
@@ -2520,7 +2574,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Inspections mode</p>
                     </div>
                     )}
-                    {effectiveKind !== 'spcc_inspection' && (
+                    {(effectiveKind === 'all' || effectiveKind === 'custom' || effectiveKind === 'spcc_plan') && (
                     <div>
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         <Clock className="inline w-4 h-4 mr-1" />
@@ -2538,6 +2592,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                         className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in Plans mode</p>
+                    </div>
+                    )}
+                    {canAccessLdarMode && (effectiveKind === 'all' || effectiveKind === 'custom' || effectiveKind === 'ldar') && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                        <Clock className="inline w-4 h-4 mr-1" />
+                        LDAR Survey (min)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="480"
+                        value={tempSettings.ldar_visit_duration_minutes ?? 45}
+                        onChange={(e) => setTempSettings({
+                          ...tempSettings,
+                          ldar_visit_duration_minutes: parseInt(e.target.value) || 45,
+                        })}
+                        className="min-w-0 max-w-full w-full mt-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Time at each site in LDAR mode</p>
                     </div>
                     )}
                   </div>
@@ -2830,7 +2904,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           routeName={currentRouteName}
           teamNumber={teamNumber}
           stopCount={routeStopCount ?? result.totalFacilities}
-          defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' ? effectiveKind : 'all'}
+          defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' || effectiveKind === 'ldar' ? effectiveKind : 'all'}
           canReset={Boolean(currentRouteId && accountId && teamNumber)}
           offline={planRouteProgress?.isOnline === false}
           resetting={Boolean(planRouteProgress?.resetting)}
@@ -3212,7 +3286,9 @@ export default function RouteResults({ result, settings, facilities, userId, tea
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 {effectiveKind === 'spcc_inspection'
                   ? `Showing ${c.inspectionInRouteCount} of ${c.inspectionCount} facilities needing yearly SPCC inspection (${c.inspectionPastDueInRouteCount} overdue in route, ${c.inspectionPastDueCount} overdue total).`
-                  : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
+                  : effectiveKind === 'ldar'
+                    ? `Showing ${c.ldarInRouteCount} of ${c.ldarCount} facilities needing LDAR monitoring or leak repair (${c.ldarPastDueInRouteCount} urgent in route, ${c.ldarPastDueCount} urgent total).`
+                    : `Showing ${c.planInRouteCount} of ${c.planCount} facilities needing SPCC plan attention (${c.planPastDueInRouteCount} overdue in route, ${c.planPastDueCount} overdue total).`}
               </p>
             );
           })()}
@@ -3647,23 +3723,53 @@ export default function RouteResults({ result, settings, facilities, userId, tea
                                       );
                                     })()}
 
-                                    {/* Standard inspection icons - show when not filtering by spcc_plan */}
-                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && routeRenderModel?.showRouteCheck && (
+                                    {/* LDAR stop status badges */}
+                                    {effectiveKind === 'ldar' && segment.to !== 'Home Base' && facility && (() => {
+                                      const ldarComp = getFacilityLdarCompliance(facility);
+                                      const tone =
+                                        ldarComp.status === 'overdue'
+                                          ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                                          : ldarComp.status === 'due_soon_30' || ldarComp.status === 'pending_initial'
+                                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                            : 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300';
+                                      return (
+                                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                          {routeRenderModel?.showRouteCheck && (
+                                            <span title="Completed on the current LDAR route status">
+                                              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                            </span>
+                                          )}
+                                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>
+                                            <Wind className="w-3 h-3" />
+                                            {ldarComp.label}
+                                          </span>
+                                          {ldarComp.openLeaksCount > 0 && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                              <Flame className="w-3 h-3" />
+                                              {ldarComp.openLeaksCount} leak{ldarComp.openLeaksCount === 1 ? '' : 's'}
+                                            </span>
+                                          )}
+                                        </span>
+                                      );
+                                    })()}
+
+                                    {/* Standard inspection icons - show when not filtering by spcc_plan or ldar */}
+                                    {effectiveKind !== 'spcc_plan' && effectiveKind !== 'ldar' && segment.to !== 'Home Base' && routeRenderModel?.showRouteCheck && (
                                       <span title="Completed on the current route status">
                                         <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && inspectionComplianceCurrent && (
+                                    {effectiveKind !== 'spcc_plan' && effectiveKind !== 'ldar' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && inspectionComplianceCurrent && (
                                       <span title="Inspection is compliant; current route status is pending">
                                         <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && getInspection(segment.to, facility?.id) && (
+                                    {effectiveKind !== 'spcc_plan' && effectiveKind !== 'ldar' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && getInspection(segment.to, facility?.id) && (
                                       <span title="Inspection expired - Reinspection needed">
                                         <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
                                       </span>
                                     )}
-                                    {effectiveKind !== 'spcc_plan' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && !getInspection(segment.to, facility?.id) && (
+                                    {effectiveKind !== 'spcc_plan' && effectiveKind !== 'ldar' && segment.to !== 'Home Base' && !routeRenderModel?.showRouteCheck && !inspectionComplianceCurrent && !getInspection(segment.to, facility?.id) && (
                                       <span title="No inspection yet">
                                         <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
                                       </span>
@@ -3926,6 +4032,8 @@ export default function RouteResults({ result, settings, facilities, userId, tea
             setDayActionsPopover(null);
             if (effectiveKind === 'spcc_plan') {
               setSpccPlanDetailFacility(f);
+            } else if (effectiveKind === 'ldar' && canAccessLdarMode) {
+              setLdarDetailFacility(f);
             } else {
               setSelectedFacility(f);
             }
@@ -3950,9 +4058,29 @@ export default function RouteResults({ result, settings, facilities, userId, tea
           facilities={facilities}
           allInspections={Array.from(inspections.values())}
           onInspectionRouteStopCompleted={planRouteProgress?.completeInspectionStop}
+          onLdarRouteStopCompleted={planRouteProgress?.completeLdarStop}
           onManualInspectionCompletion={planRouteProgress?.recordManualInspectionCompletion}
           onViewNearbyFacility={(facility) => {
             setSelectedFacility(facility);
+          }}
+        />
+      )}
+
+      {ldarDetailFacility && accountId && (
+        <LDARFacilityDetailModal
+          facility={facilities.find(f => f.id === ldarDetailFacility.id) || ldarDetailFacility}
+          accountId={accountId}
+          userId={userId}
+          onClose={() => setLdarDetailFacility(null)}
+          onFacilityUpdated={() => {
+            if (onFacilitiesUpdated) onFacilitiesUpdated();
+          }}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void planRouteProgress?.completeLdarStop?.(facId, survId);
+          }}
+          onOpenGeneralFacilityModal={(fac) => {
+            setForcedTab('general');
+            setSelectedFacility(fac);
           }}
         />
       )}
@@ -4301,26 +4429,26 @@ export default function RouteResults({ result, settings, facilities, userId, tea
 
             </div>
 
-            <div className="p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex gap-3">
+            <div className="p-4 sm:p-6 border-t border-gray-200/60 dark:border-gray-700/60 flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3">
               <button
                 onClick={() => {
                   setShowRefreshOptions(false);
                   setShowAdvanced(false);
                 }}
-                className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 sm:border-transparent text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRefreshTimesOnly}
-                className="flex-1 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
+                className="flex-1 px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium text-sm sm:text-base shadow-[0_2px_8px_rgba(59,130,246,0.3)]"
                 title="Quickly update times without regenerating routes"
               >
                 Apply & Refresh Times
               </button>
               <button
                 onClick={handleRefreshWithSettings}
-                className="flex-1 px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium shadow-sm"
+                className="flex-1 px-4 sm:px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium text-sm sm:text-base shadow-sm"
                 title="Fully re-optimize routes with new constraints"
               >
                 Apply & Re-optimize
@@ -4337,7 +4465,7 @@ export default function RouteResults({ result, settings, facilities, userId, tea
         routeName={currentRouteName}
         teamNumber={teamNumber}
         stopCount={routeStopCount ?? result.totalFacilities}
-        defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' ? effectiveKind : 'all'}
+        defaultScope={effectiveKind === 'spcc_inspection' || effectiveKind === 'spcc_plan' || effectiveKind === 'ldar' ? effectiveKind : 'all'}
         canReset={Boolean(currentRouteId && accountId && teamNumber)}
         offline={planRouteProgress?.isOnline === false}
         resetting={Boolean(planRouteProgress?.resetting)}
@@ -4830,9 +4958,8 @@ function DayActionsPopover({ facility, x, y, routes, nextRouteDayNumber, onReass
               type="button"
               onClick={() => onReassign(newDayNumber)}
               title="Create a new day for this facility"
-              className="px-2 py-1.5 rounded-md text-xs font-semibold transition-transform hover:scale-105"
+              className="px-2 py-1.5 rounded-md text-xs font-semibold transition-transform hover:scale-105 bg-white dark:bg-gray-800"
               style={{
-                backgroundColor: 'white',
                 color,
                 border: `2px dashed ${color}`,
               }}

@@ -17,10 +17,13 @@ import NavigationPopup from './NavigationPopup';
 import SearchInput from './SearchInput';
 import FacilityDetailModal from './FacilityDetailModal';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
+import LDARFacilityDetailModal from './LDARFacilityDetailModal';
+import LDARSurveyModal from './LDARSurveyModal';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
 import InspectionForm from './InspectionForm';
 import SpeedDisplay from './SpeedDisplay';
 import { getCoords } from '../utils/coordinates';
+import { getFacilityLdarCompliance, LDAR_FREQUENCY_LABELS } from '../utils/ldar';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { requestMapLocation } from '../utils/mapLocation';
 
@@ -43,6 +46,7 @@ interface RouteMapProps {
     hideExternallyCompleted: boolean;
     hideValidPlans: boolean;
     hideExpiringPlans: boolean;
+    hideCurrentLdar?: boolean;
   };
   facilities?: Facility[];
   userId?: string;
@@ -66,6 +70,7 @@ interface RouteMapProps {
     source: 'inspection' | 'manual_internal' | 'manual_external',
     sourceRecordId: string,
   ) => Promise<boolean>;
+  onLdarRouteStopCompleted?: (facilityId: string, surveyId: string) => Promise<boolean>;
   onManualInspectionCompletion?: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   triggerFitBounds?: number;
   onEditFacility?: (facility: Facility) => void;
@@ -74,17 +79,9 @@ interface RouteMapProps {
   // Widened 2026-05-20: 'all' | 'spcc_inspection' | 'spcc_plan' | <UUID for custom>.
   surveyType?: string;
   /**
-   * Normalized survey-type discriminator added 2026-05-23. When supplied, all
-   * internal branching uses this instead of string-comparing surveyType to the
-   * legacy enum members — necessary because after the survey-types-as-route-
-   * modes refactor, surveyType is often a system row's UUID, not the literal
-   * 'spcc_plan' / 'spcc_inspection' string. Without this prop the SPCC Plan
-   * tab's UUID would fall through inspection-completion checks and incorrectly
-   * tag plan-mode facilities as "complete" based on their inspection history.
-   * Falls back to literal string equality when omitted, for callers that
-   * haven't been updated yet.
+   * Normalized survey-type discriminator added 2026-05-23.
    */
-  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom';
   showOnlyRouteFacilities?: boolean;
   planRouteStopsByFacilityId?: Map<string, PlanRouteRunStop>;
   routeStatusStopsByScope?: Record<RouteStatusScope, Map<string, PlanRouteRunStop>>;
@@ -145,18 +142,17 @@ function findCurrentFacilityForRouteStop(
 const FOLLOW_START_ZOOM = 16;
 const FOLLOW_PAUSE_MS = 20_000;
 
-export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, onInspectionRouteStopCompleted, onManualInspectionCompletion, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
+export default function RouteMap({ result, homeBase, nextRouteDayNumber, selectedDay = null, onReassignFacility, onBulkReassignFacilities, onRemoveFacilityFromRoute, isFullScreen = false, onUpdateRoute, accountId, settings, inspections = [], completedVisibility = { hideAllCompleted: false, hideInternallyCompleted: false, hideValidPlans: false, hideExpiringPlans: false, hideExternallyCompleted: false, hideCurrentLdar: false }, facilities = [], userId, teamNumber = 1, onFacilitiesChange, onFacilityPatch, onAddFacilityToRoute, onShowOnMap, targetCoords, onNavigateToView, onToggleHideCompleted, onToggleMarkerScope, onEnterFullscreen, onExitFullscreen, onClearTargetCoords, navigationMode: externalNavigationMode, onNavigationModeChange, onInspectionFormActiveChange, onInspectionRouteStopCompleted, onLdarRouteStopCompleted, onManualInspectionCompletion, triggerFitBounds, onEditFacility, locationTracking: externalLocationTracking, onLocationTrackingChange, surveyType = 'all', surveyTypeKind, showOnlyRouteFacilities = false, planRouteStopsByFacilityId, routeStatusStopsByScope, routeStatusRunInitialized, onPlanRouteStopChange, planRouteSavingFacilityId }: RouteMapProps) {
   const { isOnline } = useOnlineStatus();
-  // See the surveyTypeKind prop docs above. Derive an `effectiveKind` that
-  // prefers the prop when given (canonical post-refactor path) and falls back
-  // to the legacy enum-string equality check so older callers keep working.
-  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
     surveyTypeKind ??
     (surveyType === 'spcc_plan'
       ? 'spcc_plan'
       : surveyType === 'spcc_inspection'
         ? 'spcc_inspection'
-        : 'all');
+        : surveyType === 'ldar'
+          ? 'ldar'
+          : 'all');
   const mapRef = useRef<L.Map | null>(null);
   const homeBaseRef = useRef(homeBase);
   homeBaseRef.current = homeBase;
@@ -205,6 +201,16 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
       });
     }
 
+    // LDAR-based hiding
+    if (completedVisibility.hideCurrentLdar) {
+      facilities.forEach(f => {
+        const ldarComp = getFacilityLdarCompliance(f);
+        if ((ldarComp.status === 'current' || ldarComp.status === 'exempt') && ldarComp.openLeaksCount === 0) {
+          completed.add(f.id);
+        }
+      });
+    }
+
     return completed;
   }, [facilities, inspections, completedVisibility]);
 
@@ -219,7 +225,7 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   }, [facilities]);
 
   // Helper to check if any completed facilities are hidden
-  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans;
+  const hideCompletedFacilities = completedVisibility.hideAllCompleted || completedVisibility.hideInternallyCompleted || completedVisibility.hideExternallyCompleted || completedVisibility.hideValidPlans || completedVisibility.hideExpiringPlans || Boolean(completedVisibility.hideCurrentLdar);
   const markersRef = useRef<Map<string, { marker: L.Marker; day: number; wasSelectionMode: boolean; wasSelected: boolean }>>(new Map());
   const polylinesRef = useRef<Map<number, L.Polyline>>(new Map());
   const frameFacilityPointsRef = useRef<L.LatLng[]>([]);
@@ -244,6 +250,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const [navigationTarget, setNavigationTarget] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
   const [surveyFacility, setSurveyFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
+  const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
+  const [ldarSurveyFacility, setLdarSurveyFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | null>(null);
   const [inspectionsListFacility, setInspectionsListFacility] = useState<Facility | null>(null);
   const [inspectionFormState, setInspectionFormState] = useState<{
@@ -417,6 +425,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
   const openFacilityModal = (facility: Facility) => {
     if (surveyTypeKindRef.current === 'spcc_plan') {
       setSpccPlanDetailFacility(facility);
+    } else if (surveyTypeKindRef.current === 'ldar') {
+      setLdarDetailFacility(facility);
     } else {
       setSurveyFacility(facility);
     }
@@ -1085,18 +1095,28 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
             }
           }
 
+          const ldarCompliance = latestFacilityData ? getFacilityLdarCompliance(latestFacilityData) : null;
+          const hasCurrentLdarCompliance = Boolean(
+            ldarCompliance &&
+            (ldarCompliance.status === 'current' || ldarCompliance.status === 'due_60' || ldarCompliance.status === 'exempt') &&
+            ldarCompliance.openLeaksCount === 0,
+          );
+
           // Use appropriate completion status based on surveyType
           const routeStatusModel = getRouteStatusRenderModel({
             surveyTypeKind: effectiveKind,
             isCurrentRouteStop: true,
             inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
             planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? Boolean(planRouteStopsByFacilityId),
+            ldarRunInitialized: routeStatusRunInitialized?.ldar ?? false,
             inspectionStop: facilityDatabaseId ? routeStatusStopsByScope?.spcc_inspection.get(facilityDatabaseId) : undefined,
             planStop: facilityDatabaseId
               ? routeStatusStopsByScope?.spcc_plan.get(facilityDatabaseId) ?? planRouteStopsByFacilityId?.get(facilityDatabaseId)
               : undefined,
+            ldarStop: facilityDatabaseId ? routeStatusStopsByScope?.ldar?.get(facilityDatabaseId) : undefined,
             inspectionComplianceCurrent: hasAnyValidInspectionCompletion,
             planComplianceCurrent: hasValidSPCCPlan,
+            ldarComplianceCurrent: hasCurrentLdarCompliance,
           });
           const hasAnyValidCompletion = routeStatusModel.showRouteCheck;
 
@@ -1370,6 +1390,15 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                   SPCC Complete
                 </span>`;
               }
+            } else if (effectiveKind === 'ldar' && fullFacility) {
+              const ldarInfo = getFacilityLdarCompliance(fullFacility);
+              const badgeBg = ldarInfo.status === 'overdue' ? '#FEE2E2' : ldarInfo.isUrgent ? '#FEF3C7' : '#CCFBF1';
+              const badgeFg = ldarInfo.status === 'overdue' ? '#991B1B' : ldarInfo.isUrgent ? '#92400E' : '#115E59';
+              statusBadgeHtml = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background-color: ${badgeBg}; color: ${badgeFg}; border-radius: 9999px; font-size: 10px; font-weight: 600; margin-left: 6px;">
+                ${ldarInfo.label}
+              </span>`;
+              surveyBtnLabel = 'Log LDAR Survey';
+              surveyBtnTitle = 'Start OGI / AVO LDAR survey';
             }
             // All mode: no status badge shown
 
@@ -1414,6 +1443,35 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     ${fullFacility.spcc_plan_url ? `
                       <div style="margin-top: 2px;">
                         <a href="${fullFacility.spcc_plan_url}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline; font-size: 10px;">View Plan Document</a>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            } else if (effectiveKind === 'ldar' && fullFacility) {
+              const ldarInfo = getFacilityLdarCompliance(fullFacility);
+              const pathUrl = fullFacility.ldar_observation_path_data?.annotated_pdf_url || fullFacility.ldar_site_plan_url;
+              planInfoHtml = `
+                <div style="font-size: 11px; margin-top: 4px; padding: 6px; background: #F0FDFA; border-radius: 6px; border: 1px solid #99F6E4;">
+                  <div style="font-weight: 600; margin-bottom: 4px; color: #115E59;">LDAR Monitoring (${LDAR_FREQUENCY_LABELS[ldarInfo.frequency]})</div>
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">Method:</span>
+                      <span style="font-weight: 600; color: #1F2937;">${ldarInfo.method}</span>
+                    </div>
+                    ${ldarInfo.nextDueDate ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6B7280;">Next Due:</span>
+                        <span style="font-weight: 600;">${formatDate(ldarInfo.nextDueDate)}</span>
+                      </div>
+                    ` : ''}
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #6B7280;">Open Leaks:</span>
+                      <span style="font-weight: 700; color: ${ldarInfo.openLeaksCount > 0 ? '#DC2626' : '#059669'};">${ldarInfo.openLeaksCount}</span>
+                    </div>
+                    ${pathUrl ? `
+                      <div style="margin-top: 2px;">
+                        <a href="${pathUrl}" target="_blank" rel="noopener noreferrer" style="color: #7C3AED; text-decoration: underline; font-size: 10px; font-weight: 600;">Open Site Walking Path PDF</a>
                       </div>
                     ` : ''}
                   </div>
@@ -1759,6 +1817,8 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
                     // In SPCC plan mode, always open the plan modal
                     if (surveyTypeKindRef.current === 'spcc_plan') {
                       openFacilityModal(facilityForThisMarker);
+                    } else if (surveyTypeKindRef.current === 'ldar') {
+                      setLdarSurveyFacility(facilityForThisMarker);
                     } else if (surveyTypeKindRef.current === 'spcc_inspection') {
                       const currentDraft = facilityInspections.find(inspection => inspection.status === 'draft');
                       openInspectionForm(facilityForThisMarker, { initialDraft: currentDraft || null });
@@ -4780,6 +4840,43 @@ export default function RouteMap({ result, homeBase, nextRouteDayNumber, selecte
           onViewFacilityDetails={() => {
             setForcedTab('general');
             setSurveyFacility(spccPlanDetailFacility);
+          }}
+        />
+      )}
+
+      {ldarDetailFacility && accountId && userId && (
+        <LDARFacilityDetailModal
+          facility={ldarDetailFacility}
+          accountId={accountId}
+          userId={userId}
+          onClose={() => setLdarDetailFacility(null)}
+          onFacilityUpdated={(patch) => {
+            if (patch) onFacilityPatch?.(ldarDetailFacility.id, patch);
+            onFacilitiesChange?.();
+          }}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void onLdarRouteStopCompleted?.(facId, survId);
+          }}
+          onOpenGeneralFacilityModal={(fac) => {
+            setForcedTab('general');
+            setSurveyFacility(fac);
+          }}
+        />
+      )}
+
+      {ldarSurveyFacility && accountId && userId && (
+        <LDARSurveyModal
+          isOpen={true}
+          onClose={() => setLdarSurveyFacility(null)}
+          accountId={accountId}
+          userId={userId}
+          facility={ldarSurveyFacility}
+          onSaved={async (savedSurvey, patch) => {
+            if (patch) onFacilityPatch?.(ldarSurveyFacility.id, patch);
+            if (savedSurvey.status === 'completed') {
+              await onLdarRouteStopCompleted?.(ldarSurveyFacility.id, savedSurvey.id);
+            }
+            onFacilitiesChange?.();
           }}
         />
       )}

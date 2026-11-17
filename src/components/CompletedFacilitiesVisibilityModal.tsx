@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, ClipboardList, FileCheck, Eye } from 'lucide-react';
+import { X, ClipboardList, FileCheck, Eye, Wind } from 'lucide-react';
+import ModalPortal from './ModalPortal';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 
 export interface CompletedVisibility {
   // Inspection-related
@@ -9,6 +12,8 @@ export interface CompletedVisibility {
   // Plan-related
   hideValidPlans: boolean;
   hideExpiringPlans: boolean;
+  // LDAR-related
+  hideCurrentLdar?: boolean;
 }
 
 interface CompletedFacilitiesVisibilityModalProps {
@@ -21,7 +26,7 @@ interface CompletedFacilitiesVisibilityModalProps {
    * members — necessary because after the UUID-based refactor the literal
    * strings rarely match. Falls back to enum-string equality when omitted.
    */
-  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
+  surveyTypeKind?: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom';
   onClose: () => void;
   onApply: (visibility: CompletedVisibility) => void;
 }
@@ -33,15 +38,19 @@ export default function CompletedFacilitiesVisibilityModal({
   onClose,
   onApply,
 }: CompletedFacilitiesVisibilityModalProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
   // Prefer the parent-supplied kind (knows about UUIDs); fall back to the
   // legacy enum-string check for callers that haven't been updated.
-  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom' =
+  const effectiveKind: 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom' =
     surveyTypeKind ??
     (surveyType === 'spcc_plan'
       ? 'spcc_plan'
       : surveyType === 'spcc_inspection'
         ? 'spcc_inspection'
-        : 'all');
+        : surveyType === 'ldar'
+          ? 'ldar'
+          : 'all');
   const [localVisibility, setLocalVisibility] = useState(visibility);
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -126,6 +135,7 @@ export default function CompletedFacilitiesVisibilityModal({
       hideExternallyCompleted: false,
       hideValidPlans: false,
       hideExpiringPlans: false,
+      hideCurrentLdar: false,
     });
   };
 
@@ -135,30 +145,40 @@ export default function CompletedFacilitiesVisibilityModal({
     localVisibility.hideInternallyCompleted ||
     localVisibility.hideExternallyCompleted ||
     localVisibility.hideValidPlans ||
-    localVisibility.hideExpiringPlans;
+    localVisibility.hideExpiringPlans ||
+    Boolean(localVisibility.hideCurrentLdar);
 
   const title =
     effectiveKind === 'spcc_inspection'
       ? 'Inspection Visibility'
       : effectiveKind === 'spcc_plan'
         ? 'Plan Visibility'
-        : 'Map Visibility';
+        : effectiveKind === 'ldar'
+          ? 'LDAR Map Visibility'
+          : 'Map Visibility';
 
   const description =
     effectiveKind === 'spcc_inspection'
       ? 'Hide completed inspections from the map so you can focus on remaining work.'
       : effectiveKind === 'spcc_plan'
         ? 'Hide facilities with current SPCC plans from the map so you can focus on those needing attention.'
-        : 'Choose which completed facilities to hide from the map view.';
+        : effectiveKind === 'ldar'
+          ? 'Hide LDAR facilities whose schedule is current and leak-free so you can focus on active monitoring windows and open leaks.'
+          : 'Choose which completed facilities to hide from the map view.';
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-end justify-center bg-black bg-opacity-50 p-0 sm:items-center sm:p-4">
+    <ModalPortal>
+    <div
+      className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/50 backdrop-blur-[1px] p-0 sm:items-center sm:p-4"
+      onClick={onClose}
+    >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="map-visibility-title"
         tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
         className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-800 sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -342,9 +362,48 @@ export default function CompletedFacilitiesVisibilityModal({
               </label>
             </div>
           )}
+
+          {canAccessLdarMode && effectiveKind === 'all' && (
+            <div className="border-t border-gray-200 dark:border-gray-700" />
+          )}
+
+          {canAccessLdarMode && (effectiveKind === 'all' || effectiveKind === 'ldar') && (
+            <div>
+              {effectiveKind === 'all' && (
+                <div className="flex items-center gap-2 mb-2">
+                  <Wind className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                    LDAR Monitoring
+                  </p>
+                </div>
+              )}
+
+              <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={Boolean(localVisibility.hideCurrentLdar)}
+                  onChange={(e) =>
+                    setLocalVisibility({
+                      ...localVisibility,
+                      hideCurrentLdar: e.target.checked,
+                    })
+                  }
+                  className="mt-0.5 w-4 h-4 text-teal-600 rounded"
+                />
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    Hide Current & Leak-Free LDAR Sites
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Hides facilities with &gt; 60 days until next LDAR survey and zero open leaks
+                  </div>
+                </div>
+              </label>
+            </div>
+          )}
         </div>
 
-        <div className="shrink-0 border-t border-gray-200 p-4 dark:border-gray-700">
+        <div className="shrink-0 border-t border-gray-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4 dark:border-gray-700">
           <div className="flex gap-3">
             {hasAnyHidden && (
               <button
@@ -374,5 +433,6 @@ export default function CompletedFacilitiesVisibilityModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

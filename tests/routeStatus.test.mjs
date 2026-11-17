@@ -80,7 +80,38 @@ test('All Facilities is the union of committed domain stops', () => {
   assert.deepEqual(model.routeStatusByDomain, {
     spcc_inspection: 'pending',
     spcc_plan: 'completed',
+    ldar: 'legacy',
   });
+});
+
+test('LDAR route status tracks dedicated domain run and fallback compliance', () => {
+  const pendingRun = getRouteStatusRenderModel({
+    surveyTypeKind: 'ldar',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: false,
+    planRunInitialized: false,
+    ldarRunInitialized: true,
+    ldarStop: pending,
+    inspectionComplianceCurrent: true,
+    planComplianceCurrent: true,
+    ldarComplianceCurrent: true,
+  });
+  assert.equal(pendingRun.showRouteCheck, false);
+  assert.equal(pendingRun.routeStatusByDomain.ldar, 'pending');
+
+  const completedRun = getRouteStatusRenderModel({
+    surveyTypeKind: 'ldar',
+    isCurrentRouteStop: true,
+    inspectionRunInitialized: false,
+    planRunInitialized: false,
+    ldarRunInitialized: true,
+    ldarStop: completed,
+    inspectionComplianceCurrent: false,
+    planComplianceCurrent: false,
+    ldarComplianceCurrent: false,
+  });
+  assert.equal(completedRun.showRouteCheck, true);
+  assert.equal(completedRun.routeStatusByDomain.ldar, 'completed');
 });
 
 test('All ignores legacy completion from a domain without an active route cycle', () => {

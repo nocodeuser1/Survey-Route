@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, SurveyType, SurveyField, FacilitySurveyData } from '../lib/supabase';
 import { useOnlineStatus } from './useOnlineStatus';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 
 interface UseSurveyTypesResult {
   surveyTypes: SurveyType[];
@@ -17,7 +19,13 @@ interface UseSurveyTypesResult {
 
 export function useSurveyTypes(accountId: string): UseSurveyTypesResult {
   const { isOnline } = useOnlineStatus();
-  const [surveyTypes, setSurveyTypes] = useState<SurveyType[]>([]);
+  const { user, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(user?.email || supabaseUser?.email);
+  const [rawSurveyTypes, setSurveyTypes] = useState<SurveyType[]>([]);
+  const surveyTypes = useMemo(
+    () => rawSurveyTypes.filter(t => t.system_kind !== 'ldar' || canAccessLdarMode),
+    [rawSurveyTypes, canAccessLdarMode],
+  );
   const [allFields, setAllFields] = useState<Map<string, SurveyField[]>>(new Map());
   const [allSurveyData, setAllSurveyData] = useState<FacilitySurveyData[]>([]);
   const [loading, setLoading] = useState(true);

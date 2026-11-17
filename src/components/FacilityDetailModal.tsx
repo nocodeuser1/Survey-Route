@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useReducer, useCallback } from 'react';
 import ScrollableTabStrip from './ScrollableTabStrip';
+import LDARFacilityDetailModal from './LDARFacilityDetailModal';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
 import { createPortal } from 'react-dom';
 import {
@@ -59,6 +60,7 @@ import SPCCInspectionBadge from './SPCCInspectionBadge';
 import SPCCExternalCompletionBadge from './SPCCExternalCompletionBadge';
 import InlineEditField from './InlineEditField';
 import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 import SiteVisitChecklist from './SiteVisitChecklist';
 import { useAccount } from '../contexts/AccountContext';
 import { prefetchInspectionTemplate } from '../utils/inspectionTemplateCache';
@@ -77,6 +79,7 @@ interface FacilityDetailModalProps {
     source: 'inspection' | 'manual_internal' | 'manual_external',
     sourceRecordId: string,
   ) => Promise<boolean>;
+  onLdarRouteStopCompleted?: (facilityId: string, surveyId: string) => Promise<boolean>;
   onManualInspectionCompletion?: (
     facilityId: string,
     completionType: 'internal' | 'external',
@@ -145,6 +148,7 @@ export default function FacilityDetailModal({
   onShowOnMap,
   onInspectionCompleted,
   onInspectionRouteStopCompleted,
+  onLdarRouteStopCompleted,
   onManualInspectionCompletion,
   onInspectionFormActiveChange,
   onEdit,
@@ -155,7 +159,8 @@ export default function FacilityDetailModal({
   initialTab = 'general',
   scrollToComments = false,
 }: FacilityDetailModalProps) {
-  const { user } = useAuth();
+  const { user, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(user?.email || supabaseUser?.email);
   const { isAgencyAdmin } = useAccount();
   // Brand-aware facility-id label (e.g. "Camino Facility ID" /
   // "Validus Facility ID" / generic "Facility ID"). See hook src.
@@ -176,6 +181,7 @@ export default function FacilityDetailModal({
   const [newComment, setNewComment] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [showFullLdarCommand, setShowFullLdarCommand] = useState(false);
   // When the user clicks "+ Add Well", we reveal the next empty slot. After
   // they fill it (the slot now has data) the value is reset to null so the
   // slot once again has to be explicitly revealed via the button.
@@ -2888,23 +2894,52 @@ export default function FacilityDetailModal({
    */
   const renderLDARTab = () => (
     <div className="space-y-6">
-      <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
-            <Gauge className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-blue-900 dark:text-blue-100">
-              LDAR Site Plan
-            </h3>
-            <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-0.5">
-              Leak Detection And Repair tracking. Mark as completed when finished —
-              uploading the site plan PDF is optional. Status appears in the
-              Regulations panel on the General tab once completed.
-            </p>
+      {canAccessLdarMode ? (
+        <div className="rounded-xl border border-teal-200 bg-teal-50 dark:border-teal-800 dark:bg-teal-900/20 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-lg bg-teal-600 text-white flex items-center justify-center flex-shrink-0">
+                <Gauge className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-teal-900 dark:text-teal-100">
+                  LDAR Monitoring, Leaks & Site Plan
+                </h3>
+                <p className="text-xs text-teal-800/80 dark:text-teal-300/80 mt-0.5">
+                  Manage OGI / AVO survey schedules, 4-stage leak repair deadlines, Delay of Repair (DOR), and site walking paths.
+                </p>
+              </div>
+            </div>
+            {accountId && (
+              <button
+                type="button"
+                onClick={() => setShowFullLdarCommand(true)}
+                className="px-3.5 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shrink-0"
+              >
+                Open LDAR Surveys & Leaks
+              </button>
+            )}
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+              <Gauge className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-blue-900 dark:text-blue-100">
+                LDAR Site Plan
+              </h3>
+              <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+                Leak Detection And Repair tracking. Mark as completed when finished —
+                uploading the site plan PDF is optional. Status appears in the
+                Regulations panel on the General tab once completed.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Two-column layout on wide screens — the LDAR Site Plan and
           Observation Path sections sit side by side. When the user is
@@ -3327,6 +3362,21 @@ export default function FacilityDetailModal({
           onClose={() => {
             setShowNearbyAlert(false);
             setNearbyFacilitiesData([]);
+          }}
+        />
+      )}
+      {showFullLdarCommand && accountId && (
+        <LDARFacilityDetailModal
+          facility={facility}
+          accountId={accountId}
+          userId={userId}
+          onClose={() => setShowFullLdarCommand(false)}
+          onFacilityUpdated={() => {
+            bumpFacilityRender();
+            onInspectionCompleted?.();
+          }}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void onLdarRouteStopCompleted?.(facId, survId);
           }}
         />
       )}

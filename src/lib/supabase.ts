@@ -45,7 +45,7 @@ export interface RouteVisitEvent {
 
 export type PlanRouteRunStatus = 'active' | 'completed' | 'abandoned';
 export type PlanRouteStopStatus = 'pending' | 'completed' | 'removed' | 'skipped';
-export type RouteStatusScope = 'spcc_inspection' | 'spcc_plan';
+export type RouteStatusScope = 'spcc_inspection' | 'spcc_plan' | 'ldar';
 export type ResetRouteStatusScope = RouteStatusScope | 'all';
 
 export interface PlanRouteRun {
@@ -353,6 +353,23 @@ export interface Facility {
   inspection_invoiced_at?: string | null;
   inspection_paid?: boolean;
   inspection_paid_at?: string | null;
+  ldar_invoiced?: boolean;
+  ldar_invoiced_at?: string | null;
+  ldar_paid?: boolean;
+  ldar_paid_at?: string | null;
+  // LDAR scheduling, compliance & inventory fields
+  ldar_applicable_regulations?: string[] | null;
+  ldar_survey_frequency?: 'weekly' | 'monthly' | 'bi_monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'exempt' | null;
+  ldar_primary_method?: 'OGI' | 'Appendix K OGI' | 'AVO' | 'Method 21' | 'Acoustic' | 'Flyover' | null;
+  ldar_last_survey_date?: string | null;
+  ldar_next_survey_due?: string | null;
+  ldar_earliest_window_date?: string | null;
+  ldar_facility_type?: string | null;
+  ldar_region_basin?: string | null;
+  ldar_planned_shutdown_date?: string | null;
+  ldar_open_leaks_count?: number;
+  ldar_dor_leaks_count?: number;
+  ldar_equipment_inventory?: LDARFacilityInventory | null;
   // Detail fields
   /** AND-aggregate across berms: TRUE only when every berm has photos. */
   photos_taken?: boolean;
@@ -541,13 +558,14 @@ export interface UserSettings {
   clustering_tightness?: number;
   cluster_balance_weight?: number;
   show_road_routes?: boolean;
+  dark_mode?: boolean;
   start_time?: string;
   sunset_offset_minutes?: number;
   auto_refresh_route?: boolean;
   exclude_completed_facilities?: boolean;
   exclude_completed_type?: 'inspection' | 'plan' | 'both';
   exclude_externally_completed?: boolean;
-  selected_report_type?: 'none' | 'spcc_plan' | 'spcc_inspection';
+  selected_report_type?: 'none' | 'spcc_plan' | 'spcc_inspection' | 'ldar';
   navigation_mode_enabled?: boolean;
   speed_unit?: 'mph' | 'kmh';
   estimate_speed_limits?: boolean;
@@ -560,6 +578,7 @@ export interface UserSettings {
   return_by_time?: string;
   inspection_visit_duration_minutes?: number;
   plan_visit_duration_minutes?: number;
+  ldar_visit_duration_minutes?: number;
   spcc_extraction_config?: {
     facility_name: {
       page: number;
@@ -598,6 +617,8 @@ export interface InspectionQuestion {
   id: string;
   text: string;
   category: string;
+  type?: 'yes_no_na' | 'comment' | string;
+  optional?: boolean;
 }
 
 export interface InspectionTemplate {
@@ -799,7 +820,7 @@ export interface FacilityInspectionSchedule {
  * - 'spcc_plan'        → seeded SPCC Plan row; uses getSPCCPlanStatus filter
  * - 'spcc_inspection'  → seeded SPCC Inspection row; uses facilityNeedsInspection filter
  */
-export type SurveyTypeSystemKind = 'spcc_plan' | 'spcc_inspection' | null;
+export type SurveyTypeSystemKind = 'spcc_plan' | 'spcc_inspection' | 'ldar' | null;
 
 export interface SurveyType {
   id: string;
@@ -869,6 +890,215 @@ export interface SPCCComplianceTracking {
   plan_url?: string | null;
   notification_sent_at?: string | null;
   notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================================
+// LDAR Mode Interfaces (LeakTracker Pro Parity)
+// ============================================================================
+
+export type LDARSurveyFrequency =
+  | 'weekly'
+  | 'monthly'
+  | 'bi_monthly'
+  | 'quarterly'
+  | 'semi_annual'
+  | 'annual'
+  | 'exempt';
+
+export type LDARSurveyMethod =
+  | 'OGI'
+  | 'Appendix K OGI'
+  | 'AVO'
+  | 'Method 21'
+  | 'Acoustic'
+  | 'Flyover';
+
+export type LDARSurveyReason = 'Routine' | 'Re-Survey' | 'Non-Routine' | 'Initial';
+
+export type LDARLeakStatus =
+  | 'detected'
+  | 'repair_attempted'
+  | 'pending_confirmation'
+  | 'repaired'
+  | 'dor_pending'
+  | 'dor_approved';
+
+export interface LDARSubFacility {
+  id: string;
+  name: string;
+  frequency: LDARSurveyFrequency;
+  method: LDARSurveyMethod;
+  notes?: string;
+}
+
+export interface LDAREquipmentUnit {
+  id: string;
+  unit_tag: string;
+  equipment_type: string;
+  serial_number?: string;
+  install_date?: string;
+  operating_status: 'active' | 'standby' | 'out_of_service';
+  sub_facility_name?: string;
+}
+
+export interface LDARComponentCounts {
+  valves: number;
+  connectors: number;
+  flanges: number;
+  thief_hatches: number;
+  prvs: number;
+  pneumatics: number;
+  pumps_compressors: number;
+  open_ended_lines: number;
+}
+
+export interface LDARFacilityInventory {
+  sub_facilities?: LDARSubFacility[];
+  equipment_units?: LDAREquipmentUnit[];
+  component_counts?: LDARComponentCounts;
+}
+
+export interface LDARWeatherObservation {
+  timestamp: string;
+  label: 'Start' | 'Mid' | 'End';
+  temp_f: number | null;
+  humidity_pct: number | null;
+  wind_avg_mph: number | null;
+  wind_max_mph: number | null;
+  wind_direction: string;
+  sky_conditions: string;
+}
+
+export interface LDARSurvey {
+  id: string;
+  account_id: string;
+  facility_id: string;
+  sub_facility_name?: string | null;
+  survey_method: LDARSurveyMethod;
+  survey_reason: LDARSurveyReason;
+  status: 'draft' | 'completed';
+  inspector_name: string;
+  additional_inspectors?: string[] | null;
+  survey_date: string;
+  started_at: string;
+  ended_at?: string | null;
+  equipment_id?: string | null;
+  camera_model?: string | null;
+  camera_serial?: string | null;
+  daily_qa_completed: boolean;
+  daily_qa_mode?: 'operating_envelope' | 'field_check' | null;
+  delta_t_f?: number | null;
+  max_viewing_distance_ft?: number | null;
+  qa_gas_flow_rate_ghr?: number | null;
+  qa_video_reference?: string | null;
+  temp_start_f?: number | null;
+  temp_end_f?: number | null;
+  humidity_pct?: number | null;
+  wind_speed_avg_mph?: number | null;
+  wind_speed_max_mph?: number | null;
+  wind_direction?: string | null;
+  sky_conditions?: string | null;
+  deviated_from_plan: boolean;
+  deviation_justification?: string | null;
+  leaks_found_count: number;
+  leaks_repaired_during_survey: number;
+  site_photo_url?: string | null;
+  signature_data?: string | null;
+  notes?: string | null;
+  weather_log?: LDARWeatherObservation[] | null;
+  attachments?: Array<{ name: string; url: string; type: string }> | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LDARRepairAttempt {
+  id: string;
+  attempt_date: string;
+  technician_name: string;
+  repair_action: string;
+  repair_succeeded: boolean;
+  notes?: string;
+}
+
+export interface LDARLeak {
+  id: string;
+  account_id: string;
+  facility_id: string;
+  survey_id?: string | null;
+  leak_tag_id: string;
+  sub_facility_name?: string | null;
+  equipment_unit?: string | null;
+  component_type: string;
+  component_subtype?: string | null;
+  component_size?: string | null;
+  gas_stream_type?: string | null;
+  detection_method: string;
+  detected_at: string;
+  detected_by?: string | null;
+  flow_rate_value?: number | null;
+  flow_rate_unit?: 'scfh' | 'ppm' | 'g/hr' | 'scfm' | 'slpm' | null;
+  estimated_co2e_mt_yr?: number | null;
+  location_description?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  optical_photo_url?: string | null;
+  infrared_photo_url?: string | null;
+  infrared_video_url?: string | null;
+  status: LDARLeakStatus;
+  applicable_regulations?: string[] | null;
+  faar_due_date?: string | null;
+  final_repair_due_date?: string | null;
+  confirmation_due_date?: string | null;
+  first_attempt_date?: string | null;
+  first_attempt_by?: string | null;
+  first_attempt_notes?: string | null;
+  repaired_date?: string | null;
+  repaired_by?: string | null;
+  repair_method?: string | null;
+  repair_attempts?: LDARRepairAttempt[] | null;
+  confirmed_date?: string | null;
+  confirmed_by?: string | null;
+  confirmation_method?: string | null;
+  confirmation_reading?: number | null;
+  confirmation_unit?: string | null;
+  confirmation_passed?: boolean | null;
+  dor_requested_at?: string | null;
+  dor_requested_by?: string | null;
+  dor_status: 'none' | 'pending' | 'approved' | 'denied';
+  dor_reason_code?: string | null;
+  dor_justification?: string | null;
+  dor_parts_order_number?: string | null;
+  dor_parts_eta?: string | null;
+  dor_planned_shutdown_date?: string | null;
+  dor_extended_due_date?: string | null;
+  dor_reviewed_by?: string | null;
+  dor_reviewed_at?: string | null;
+  dor_review_notes?: string | null;
+  notes?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LDAREquipmentCertification {
+  id: string;
+  account_id: string;
+  item_category: 'ogi_camera' | 'method21_analyzer' | 'cal_gas' | 'inspector_cert';
+  name: string;
+  model?: string | null;
+  serial_number?: string | null;
+  assigned_to?: string | null;
+  certification_date?: string | null;
+  expiration_date?: string | null;
+  daily_qa_verified_date?: string | null;
+  daily_qa_notes?: string | null;
+  operating_envelope?: Record<string, unknown> | null;
+  status: 'active' | 'expiring' | 'expired' | 'maintenance';
+  notes?: string | null;
+  created_by?: string | null;
   created_at: string;
   updated_at: string;
 }

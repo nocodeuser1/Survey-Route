@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { SurveyType, SurveyField } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 
 interface SurveyTypeWithCount extends SurveyType {
   field_count?: number;
@@ -55,6 +57,8 @@ function getFieldTypeIcon(fieldType: string) {
 }
 
 export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
   const [surveyTypes, setSurveyTypes] = useState<SurveyTypeWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -132,7 +136,7 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
 
   useEffect(() => {
     loadSurveyTypes();
-  }, [accountId]);
+  }, [accountId, canAccessLdarMode]);
 
   const loadSurveyTypes = async () => {
     try {
@@ -146,8 +150,10 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
 
       if (typesError) throw typesError;
 
-      if (types && types.length > 0) {
-        const typeIds = types.map(t => t.id);
+      const visibleTypes = (types || []).filter(t => t.system_kind !== 'ldar' || canAccessLdarMode);
+
+      if (visibleTypes.length > 0) {
+        const typeIds = visibleTypes.map(t => t.id);
         const { data: fieldRows, error: fieldsError } = await supabase
           .from('survey_fields')
           .select('survey_type_id')
@@ -158,17 +164,17 @@ export default function SurveyTypesSettings({ accountId }: SurveyTypesSettingsPr
           fieldRows.forEach(f => {
             counts[f.survey_type_id] = (counts[f.survey_type_id] || 0) + 1;
           });
-          types.forEach(t => {
+          visibleTypes.forEach(t => {
             (t as SurveyTypeWithCount).field_count = counts[t.id] || 0;
           });
         }
       }
 
-      setSurveyTypes(types || []);
+      setSurveyTypes(visibleTypes);
 
       // If we're viewing a type's fields, refresh the selected type data
       if (selectedType) {
-        const updated = types?.find(t => t.id === selectedType.id);
+        const updated = visibleTypes.find(t => t.id === selectedType.id);
         if (updated) setSelectedType(updated as SurveyTypeWithCount);
       }
     } catch (err) {

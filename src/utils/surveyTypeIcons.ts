@@ -23,6 +23,7 @@ import {
   Eye,
   Search,
   AlertTriangle,
+  Wind,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -45,6 +46,7 @@ export const SURVEY_TYPE_ICON_MAP: Record<string, IconComponent> = {
   eye: Eye,
   search: Search,
   'alert-triangle': AlertTriangle,
+  wind: Wind,
 };
 
 export function resolveSurveyTypeIcon(iconName: string | null | undefined): IconComponent {

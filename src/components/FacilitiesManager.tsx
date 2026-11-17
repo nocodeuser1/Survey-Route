@@ -2,7 +2,7 @@ import ModalPortal from './ModalPortal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useFacilityIdLabel } from '../hooks/useFacilityIdLabel';
-import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal, MoreHorizontal, Tag as TagIcon } from 'lucide-react';
+import { MapPin, Trash2, FileText, CheckCircle, AlertCircle, Plus, Edit2, X, Upload, Save, Search, Filter, FileDown, Undo2, Columns, GripVertical, ChevronDown, ChevronUp, Database, DollarSign, ClipboardList, ShieldCheck, ArrowUp, ArrowDown, Loader2, Calendar, Eye, EyeOff, Clock, Route, Download, Link as LinkIcon, Copy, Check, MessageCircle, MoveHorizontal, MoreHorizontal, Tag as TagIcon, Wind, Flame } from 'lucide-react';
 import JSZip from 'jszip';
 import { Facility, FacilityComment, Inspection, SurveyType, SurveyField, FacilitySurveyData, type PhotoVisitEvent, type PhotoVisitEventRevision, supabase } from '../lib/supabase';
 // SurveyTypeSelector was removed from this view 2026-05-21 — its functionality
@@ -36,11 +36,15 @@ import SoldFacilitiesModal from './SoldFacilitiesModal';
 import LoadingSpinner from './LoadingSpinner';
 import InspectionsOverviewModal from './InspectionsOverviewModal';
 import SPCCPlansOverviewModal from './SPCCPlansOverviewModal';
+import LDARFacilityDetailModal from './LDARFacilityDetailModal';
+import LDAROverviewModal from './LDAROverviewModal';
+import LDARReportsModal from './LDARReportsModal';
+import LDARSurveyModal from './LDARSurveyModal';
 import { hapticTick } from '../utils/haptics';
 import { isInspectionValid, getFacilityInspectionExpiry, isExternalCompletionCurrent, INSPECTION_COUNTDOWN_DAYS } from '../utils/inspectionUtils';
 import { getSPCCPlanStatus, getSPCCPlanStatusText, formatDayCount, isRecertificationActive } from '../utils/spccStatus';
 import { buildPlanFilename, pickFacilityFilenameName } from '../utils/spccPlans';
-import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL } from '../utils/ldar';
+import { getLdarSitePlanState, isLdarSitePlanRequired, buildLdarSitePlanFilename, LDAR_PROXY_NOTE, LDAR_CUTOFF_LABEL, getFacilityLdarCompliance, LDAR_FREQUENCY_LABELS, canUserAccessLdarMode } from '../utils/ldar';
 import { formatDate, nowInAccountTimeZone, parseLocalDate } from '../utils/dateUtils';
 import { ParseResult, ParsedFacility } from '../utils/csvParser';
 import { getCoords } from '../utils/coordinates';
@@ -59,6 +63,7 @@ interface FacilitiesManagerProps {
   accountId: string;
   userId: string;
   onFacilitiesChange: () => void | Promise<void>;
+  onLdarRouteStopCompleted?: (facilityId: string, surveyId: string) => Promise<boolean>;
   onManualInspectionCompletion: (facilityId: string, completionType: 'internal' | 'external') => Promise<boolean>;
   onShowOnMap?: (latitude: number, longitude: number) => void;
   onCoordinatesUpdated?: (facilityId: string, latitude: number, longitude: number) => void;
@@ -133,7 +138,8 @@ type BaseColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_durat
   'matched_facility_name' | 'well_name_1' | 'well_name_2' | 'well_name_3' | 'well_name_4' | 'well_name_5' | 'well_name_6' | 'well_name_7' | 'well_name_8' | 'well_name_9' | 'well_name_10' |
   'well_api_1' | 'well_api_2' | 'well_api_3' | 'well_api_4' | 'well_api_5' | 'well_api_6' | 'well_api_7' | 'well_api_8' | 'well_api_9' | 'well_api_10' | 'api_numbers_combined' |
   'lat_well_sheet' | 'long_well_sheet' | 'ldar_site_plan_status' |
-  'plan_invoice_status' | 'inspection_invoice_status' | 'invoiced_date';
+  'ldar_schedule_status' | 'ldar_open_leaks' | 'ldar_frequency_method' | 'ldar_last_survey_date' | 'ldar_next_survey_due' | 'ldar_regulations' |
+  'plan_invoice_status' | 'inspection_invoice_status' | 'ldar_invoice_status' | 'invoiced_date';
 type ColumnId = BaseColumnId | ChecklistColumnId;
 
 // spcc_status sits immediately after name so the SPCC plan status is the
@@ -145,9 +151,10 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'spcc_status', 'latitude', 
 // mode-appropriate Status column, and the Invoice (date + action buttons)
 // column. This overrides the user's normal column layout while invoice view
 // is active and is intentionally NOT persisted/editable.
-const INVOICE_VIEW_COLUMNS: Record<'plan' | 'inspection', ColumnId[]> = {
+const INVOICE_VIEW_COLUMNS: Record<'plan' | 'inspection' | 'ldar', ColumnId[]> = {
   plan: ['name', 'spcc_status', 'plan_invoice_status', 'invoiced_date'],
   inspection: ['name', 'inspection_status', 'inspection_invoice_status', 'invoiced_date'],
+  ldar: ['name', 'ldar_schedule_status', 'ldar_invoice_status', 'invoiced_date'],
 };
 
 // Complete ordered list of all columns - this defines the display order
@@ -155,7 +162,8 @@ const BASE_COLUMNS_ORDER: BaseColumnId[] = [
   // spcc_status directly after name (see DEFAULT_VISIBLE_COLUMNS note) so a
   // freshly-toggled column re-inserts into an order that keeps SPCC status
   // pinned right beside the facility name.
-  'name', 'spcc_status', 'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group', 'tags',
+  'name', 'spcc_status', 'ldar_schedule_status', 'ldar_open_leaks', 'ldar_frequency_method', 'ldar_last_survey_date', 'ldar_next_survey_due', 'ldar_regulations',
+  'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group', 'tags',
   'status', 'day_assignment', 'team_assignment',
   'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
@@ -235,23 +243,28 @@ const COLUMN_LABELS: Record<BaseColumnId, string> = {
   lat_well_sheet: 'Lat (Sheet)',
   long_well_sheet: 'Long (Sheet)',
   ldar_site_plan_status: 'LDAR Site Plan',
-  // These only ever render inside the focused Invoice view (where the active
-  // tab already says Plans vs Inspections), so a short shared label reads
-  // best above the date/status + action buttons.
+  ldar_schedule_status: 'LDAR Schedule',
+  ldar_open_leaks: 'Open Leaks',
+  ldar_frequency_method: 'LDAR Method / Freq',
+  ldar_last_survey_date: 'Last LDAR Survey',
+  ldar_next_survey_due: 'Next LDAR Due',
+  ldar_regulations: 'LDAR Regulations',
   plan_invoice_status: 'Invoiced',
   inspection_invoice_status: 'Invoiced',
+  ldar_invoice_status: 'Invoiced',
   invoiced_date: 'Invoice Date',
   created_at: 'Date Added',
 };
 
-export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onManualInspectionCompletion, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
+export default function FacilitiesManager({ facilities, accountId, userId, onFacilitiesChange, onLdarRouteStopCompleted, onManualInspectionCompletion, onShowOnMap, onCoordinatesUpdated, initialFacilityToEdit, onFacilityEditHandled, isLoading = false, onCreateRoute, onAddToCurrentRoute, currentRouteFacilityIds, surveyTypes = [], activeSurveyTypeId = null, onSurveyTypeSelect, surveyTypesLoading = false, getFieldsForType, getSurveyData, getCompletionStatus, onSurveyDataSaved, globalSurveyType, onGlobalSurveyTypeChange }: FacilitiesManagerProps) {
   // Only the agency owner's tweaks propagate to the shared per-account row
   // (visible columns per mode, column widths, sort, saved filters). Other
   // users still get a responsive local-only UI for their session, but the
   // team-wide default they see on a fresh load is whatever the owner
   // curated. See the docstring on useFacilitiesPreferences for details.
   const { isAgencyAdmin } = useAccount();
-  const { user: authUser } = useAuth();
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
   // Stamped onto resolved_by_name when a comment is checked off from the
   // quick-peek popover — same expression the full editor uses, so the two
   // paths attribute completions identically.
@@ -295,8 +308,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     checklistTemplate.accountId === accountId ? checklistTemplate.items : [],
   ), [accountId, checklistTemplate]);
   const checklistColumnMap = useMemo(() => new Map(checklistColumns.map(column => [column.id, column])), [checklistColumns]);
+  const LDAR_MODE_ONLY_COLS = useMemo(
+    () =>
+      new Set<ColumnId>([
+        'ldar_schedule_status',
+        'ldar_open_leaks',
+        'ldar_frequency_method',
+        'ldar_last_survey_date',
+        'ldar_next_survey_due',
+        'ldar_regulations',
+        'ldar_invoice_status',
+      ]),
+    [],
+  );
   const allColumnsOrder = useMemo<ColumnId[]>(
-    () => [...BASE_COLUMNS_ORDER, ...checklistColumns.map(column => column.id)], [checklistColumns],
+    () =>
+      [...BASE_COLUMNS_ORDER, ...checklistColumns.map(column => column.id)].filter(
+        col => canAccessLdarMode || !LDAR_MODE_ONLY_COLS.has(col),
+      ),
+    [checklistColumns, canAccessLdarMode, LDAR_MODE_ONLY_COLS],
   );
   const availableColumnIds = useMemo(() => new Set<ColumnId>(allColumnsOrder), [allColumnsOrder]);
   const filterFields = useMemo(() => [...FILTER_FIELDS, ...buildChecklistFilterFields(checklistColumns)], [checklistColumns]);
@@ -449,71 +479,48 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external'>('all');
-  // Resolve the persisted global survey type into the local plan/inspection/
-  // all mode. globalSurveyType can be a legacy enum string ('spcc_plan' /
-  // 'spcc_inspection') OR — after the one-shot migration in App.tsx — the
-  // system survey-type's UUID. The old code only matched the legacy strings,
-  // so on refresh (where the stored value is now a UUID) the mode silently
-  // reset to 'all'. Map the UUID back via the surveyTypes list's system_kind.
+  const [selectedReportType, setSelectedReportType] = useState<'all' | 'spcc_plan' | 'spcc_inspection' | 'spcc_inspection_internal' | 'spcc_inspection_external' | 'ldar'>('all');
   const resolveSpccMode = (
     gst: string | undefined,
     types: SurveyType[],
-  ): 'all' | 'plan' | 'inspection' => {
+  ): 'all' | 'plan' | 'inspection' | 'ldar' => {
     if (gst === 'spcc_plan') return 'plan';
     if (gst === 'spcc_inspection') return 'inspection';
+    if (gst === 'ldar') return canAccessLdarMode ? 'ldar' : 'all';
     const t = types.find((st) => st.id === gst);
     if (t?.system_kind === 'spcc_plan') return 'plan';
     if (t?.system_kind === 'spcc_inspection') return 'inspection';
+    if (t?.system_kind === 'ldar') return canAccessLdarMode ? 'ldar' : 'all';
     return 'all';
   };
 
-  const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection'>(
+  const [spccMode, setSpccModeInternal] = useState<'all' | 'plan' | 'inspection' | 'ldar'>(
     () => resolveSpccMode(globalSurveyType, surveyTypes),
   );
 
-  // surveyTypes loads from the DB after mount, so the UUID→mode lookup above
-  // can miss on the very first render (empty list). Re-derive once the types
-  // arrive or the global type changes. Only writes the INTERNAL state (never
-  // calls onGlobalSurveyTypeChange) so it can't fight a user's manual tab
-  // click — after a click globalSurveyType already matches and this no-ops.
-  //
-  // A real change here means the mode was switched somewhere other than this
-  // toggle (Route Planning, Survey Mode). Drop the previous mode's filters the
-  // same way setSpccMode does; otherwise e.g. an Inspections status filter
-  // carries into Plans, where it matches nothing and empties the list.
   useEffect(() => {
     const resolved = resolveSpccMode(globalSurveyType, surveyTypes);
     if (resolved === spccMode) return;
     setSpccModeInternal(resolved);
-    setSelectedReportType(resolved === 'plan' ? 'spcc_plan' : resolved === 'inspection' ? 'spcc_inspection' : 'all');
+    setSelectedReportType(
+      resolved === 'plan' ? 'spcc_plan' : resolved === 'inspection' ? 'spcc_inspection' : resolved === 'ldar' ? 'ldar' : 'all',
+    );
     setStatusFilters([]);
     setSpccPlanFilter('all');
+    setLdarQuickFilter('all');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSurveyType, surveyTypes]);
 
-  // Any change to the mode drops the invoice sub-view + open dropdown. This
-  // catches mode changes that bypass setSpccMode (e.g. the global-survey-type
-  // sync above) so the focused invoice layout can't linger into a mode it
-  // doesn't belong to.
   useEffect(() => {
     setInvoiceView(false);
     setModeMenuOpen(null);
   }, [spccMode]);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
+  const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
   const [forcedTab, setForcedTab] = useState<'general' | 'inspections' | 'documents' | 'ldar' | 'spcc' | null>(null);
-  // When opening the facility modal from the row comment popover's "View
-  // comments" action, scroll straight to the Comments section on the General
-  // tab. Reset on modal close.
   const [openToComments, setOpenToComments] = useState(false);
-  // Invoice sub-view: a focused billing layout reachable by clicking the
-  // already-active Plans/Inspections tab and choosing "Invoice view" from
-  // the dropdown. Only meaningful in plan/inspection mode; reset whenever
-  // the mode changes. When on, the table shows just Name + Status + Invoice
-  // (with the per-row Invoice/Paid action buttons). `modeMenuOpen` tracks
-  // which tab's dropdown is currently open.
   const [invoiceView, setInvoiceView] = useState(false);
-  const [modeMenuOpen, setModeMenuOpen] = useState<'plan' | 'inspection' | null>(null);
+  const [modeMenuOpen, setModeMenuOpen] = useState<'plan' | 'inspection' | 'ldar' | null>(null);
 
   const isRestored = useRef(false);
 
@@ -620,38 +627,40 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // opening the SPCC plan detail modal on row click in plan mode — keeps
   // working from this single toggle. See the rationale in the header where
   // we render the toggle.
-  const setSpccMode = (mode: 'all' | 'plan' | 'inspection') => {
+  const setSpccMode = (mode: 'all' | 'plan' | 'inspection' | 'ldar') => {
     setSpccModeInternal(mode);
     userChangedMode.current = true;
-    // Plans is an urgency-first work queue. Always enter it sorted by the
-    // computed SPCC plan status (ascending = overdue first), matching the
-    // status column's severity order while still allowing a manual re-sort.
     if (mode === 'plan') {
       setSortColumn('spcc_status');
       setSortDirection('asc');
+    } else if (mode === 'ldar') {
+      setSortColumn('ldar_schedule_status');
+      setSortDirection('asc');
     }
-    // Leaving the current mode always drops the invoice sub-view + any open
-    // tab dropdown — invoice view is entered fresh per mode.
     setInvoiceView(false);
     setModeMenuOpen(null);
-    // Sync the report type filter to match the mode
-    const mapped = mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'all';
+    const mapped =
+      mode === 'plan'
+        ? 'spcc_plan'
+        : mode === 'inspection'
+          ? 'spcc_inspection'
+          : mode === 'ldar'
+            ? 'ldar'
+            : 'all';
     setSelectedReportType(mapped as any);
-    // Reset status filter when switching modes (different modes have different statuses)
     setStatusFilters([]);
     setSpccPlanFilter('all');
+    setLdarQuickFilter('all');
     if (onGlobalSurveyTypeChange) {
-      onGlobalSurveyTypeChange(mapped as 'all' | 'spcc_inspection' | 'spcc_plan');
+      if (mode === 'all') {
+        onGlobalSurveyTypeChange('all');
+      } else {
+        const systemKind =
+          mode === 'plan' ? 'spcc_plan' : mode === 'inspection' ? 'spcc_inspection' : 'ldar';
+        const match = surveyTypes.find(t => t.system_kind === systemKind);
+        onGlobalSurveyTypeChange(match?.id ?? systemKind);
+      }
     }
-    // Clear activeSurveyTypeId when switching to a built-in mode (All / Plans
-    // / Inspections). We deliberately do NOT route SPCC modes through the
-    // survey-types system here: doing so would trigger the per-facility
-    // "{completed}/{total}" completion badge next to every facility name —
-    // and Israel called out that those numbers should only appear when a
-    // custom type is selected (the original purpose of the badge). The SPCC
-    // modes get all the behavior they need from spccMode +
-    // onGlobalSurveyTypeChange above; setting activeSurveyTypeId would just
-    // duplicate that, plus introduce the unwanted badges.
     onSurveyTypeSelect?.(null);
   };
 
@@ -672,12 +681,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // Derived: which button is currently active. activeSurveyTypeId wins if set
   // and recognized (so external changes to it via App.tsx state are reflected
   // in the toggle); otherwise we fall back to spccMode.
-  const activeToggleKey: 'all' | 'plan' | 'inspection' | string = (() => {
+  const activeToggleKey: 'all' | 'plan' | 'inspection' | 'ldar' | string = (() => {
     if (activeSurveyTypeId) {
       const row = surveyTypes.find(t => t.id === activeSurveyTypeId);
       if (row && !row.is_system) return activeSurveyTypeId; // custom row UUID
       if (row?.system_kind === 'spcc_plan') return 'plan';
       if (row?.system_kind === 'spcc_inspection') return 'inspection';
+      if (row?.system_kind === 'ldar') return 'ldar';
     }
     return spccMode;
   })();
@@ -719,6 +729,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   }, [allColumnsOrder]);
 
   const getDefaultVisibleColumns = (mode: string): ColumnId[] => {
+    if (mode === 'ldar') {
+      return [
+        'name',
+        'ldar_schedule_status',
+        'ldar_open_leaks',
+        'ldar_frequency_method',
+        'ldar_last_survey_date',
+        'ldar_next_survey_due',
+        'ldar_site_plan_status',
+        'county',
+        'notes',
+      ];
+    }
     const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
     const inspectionColumns: ColumnId[] = ['inspection_status'];
     let cols = [...DEFAULT_VISIBLE_COLUMNS];
@@ -754,11 +777,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   // buttons can never appear outside invoice view (even if an older saved
   // layout still lists them).
   const effectiveVisibleColumns = useMemo<ColumnId[]>(() => {
-    if (invoiceView && (spccMode === 'plan' || spccMode === 'inspection')) {
+    if (invoiceView && (spccMode === 'plan' || spccMode === 'inspection' || spccMode === 'ldar')) {
       return INVOICE_VIEW_COLUMNS[spccMode];
     }
     return visibleColumns.filter(
-      c => availableColumnIds.has(c) && c !== 'plan_invoice_status' && c !== 'inspection_invoice_status',
+      c =>
+        availableColumnIds.has(c) &&
+        c !== 'plan_invoice_status' &&
+        c !== 'inspection_invoice_status' &&
+        c !== 'ldar_invoice_status',
     );
   }, [invoiceView, spccMode, visibleColumns, availableColumnIds]);
   // Per-column pixel widths from auto-fit-to-display + drag-resize +
@@ -1249,10 +1276,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
   const [showReportTypePicker, setShowReportTypePicker] = useState(false);
   const [showPlansOverview, setShowPlansOverview] = useState(false);
+  const [showLdarOverview, setShowLdarOverview] = useState(false);
+  const [ldarOverviewTab, setLdarOverviewTab] = useState<'insights' | 'leaks' | 'dor' | 'calendar' | 'certifications'>('insights');
+  const [showLdarReportsModal, setShowLdarReportsModal] = useState(false);
+  const [showLdarSurveyModal, setShowLdarSurveyModal] = useState(false);
   const [showOverviewTypePicker, setShowOverviewTypePicker] = useState(false);
   const [managingFacility, setManagingFacility] = useState<Facility | null>(null);
   const isReportWorkflowOpen = showExportPopup || showReportTypePicker || showOverviewTypePicker
-    || showInspectionOverview || showPlansOverview || showMobileTools;
+    || showInspectionOverview || showPlansOverview || showLdarOverview || showLdarReportsModal || showMobileTools;
 
   // Esc clears the row selection. Skipped when the user is typing in an
   // input/textarea/contenteditable (so search-bar Esc behavior isn't
@@ -1328,19 +1359,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [deletingFacilityIds, setDeletingFacilityIds] = useState<Set<string>>(new Set());
   const [spccPlanFilter, setSpccPlanFilter] = useState<'all' | 'overdue' | 'current'>('all');
+  const [ldarQuickFilter, setLdarQuickFilter] = useState<'all' | 'overdue' | 'due_soon' | 'leaks' | 'current'>('all');
   // LDAR Site Plan filter (in the Filters menu). Session-local, not persisted.
-  //  - 'all'      → no LDAR constraint
-  //  - 'required' → all Quad Ob sites (IP date after the cutoff), whether or
-  //                 not a plan is on file (current + still-needed)
-  //  - 'needed'   → Quad Ob sites with no plan on file yet
   const [ldarFilter, setLdarFilter] = useState<'all' | 'required' | 'needed'>('all');
-  // Per-mode invoice filter chip. 'all' = no filter, 'awaiting' = not-yet-
-  // invoiced, 'unpaid' = invoiced but not paid, 'paid' = fully collected.
-  // Independent state per mode so toggling in plan mode doesn't carry over
-  // when the user switches to inspection mode.
   type InvoiceFilter = 'all' | 'awaiting' | 'unpaid' | 'paid';
   const [planInvoiceFilter, setPlanInvoiceFilter] = useState<InvoiceFilter>('all');
   const [inspectionInvoiceFilter, setInspectionInvoiceFilter] = useState<InvoiceFilter>('all');
+  const [ldarInvoiceFilter, setLdarInvoiceFilter] = useState<InvoiceFilter>('all');
   // Custom rule-based filters from the Filters dropdown. Hydrated from
   // user preferences (JSON-serializable). See src/utils/customFilters.ts.
   const [customFilterRules, setCustomFilterRules] = useState<CustomRule[]>(
@@ -1865,9 +1890,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     // and so the list rendered as 0/30 with no visible filter chip to
     // disable. The Filters dropdown's Report Type select still works in
     // Plans/Inspections modes; in All mode it's not meaningful.
-    if (spccMode === 'all') return true;
+    if (spccMode === 'all' || spccMode === 'ldar') return true;
 
-    if (selectedReportType === 'all') return true;
+    if (selectedReportType === 'all' || selectedReportType === 'ldar') return true;
 
     if (selectedReportType === 'spcc_plan') {
       // In plan mode, show ALL facilities — the status badge shows their plan status
@@ -1914,9 +1939,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   const getInvoiceRowBg = (
     facility: Facility,
   ): { row: string; sticky: string } | null => {
-    if (!invoiceView || (spccMode !== 'plan' && spccMode !== 'inspection')) return null;
-    const paid = spccMode === 'plan' ? facility.plan_paid : facility.inspection_paid;
-    const invoiced = spccMode === 'plan' ? facility.plan_invoiced : facility.inspection_invoiced;
+    if (!invoiceView || (spccMode !== 'plan' && spccMode !== 'inspection' && spccMode !== 'ldar')) return null;
+    const paid =
+      spccMode === 'plan'
+        ? facility.plan_paid
+        : spccMode === 'inspection'
+          ? facility.inspection_paid
+          : facility.ldar_paid;
+    const invoiced =
+      spccMode === 'plan'
+        ? facility.plan_invoiced
+        : spccMode === 'inspection'
+          ? facility.inspection_invoiced
+          : facility.ldar_invoiced;
     if (paid) {
       return {
         row: 'bg-emerald-50/70 dark:bg-emerald-900/15 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/25',
@@ -2020,6 +2055,15 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (planStatus !== spccPlanFilter) return false;
       }
 
+      // LDAR inline quick stat filter chips
+      if (ldarQuickFilter !== 'all' && spccMode === 'ldar') {
+        const ldarComp = getFacilityLdarCompliance(facility);
+        if (ldarQuickFilter === 'overdue' && ldarComp.status !== 'overdue') return false;
+        if (ldarQuickFilter === 'due_soon' && ldarComp.status !== 'due_soon_30' && ldarComp.status !== 'pending_initial') return false;
+        if (ldarQuickFilter === 'leaks' && ldarComp.openLeaksCount === 0) return false;
+        if (ldarQuickFilter === 'current' && ldarComp.status !== 'current' && ldarComp.status !== 'due_60' && ldarComp.status !== 'exempt') return false;
+      }
+
       // LDAR Site Plan filter (Filters menu). 'required' = every Quad Ob
       // site (IP after the cutoff, done or not); 'needed' = Quad Ob sites
       // with no plan on file yet.
@@ -2046,6 +2090,13 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         if (inspectionInvoiceFilter === 'awaiting' && invoiced) return false;
         if (inspectionInvoiceFilter === 'unpaid' && (!invoiced || paid)) return false;
         if (inspectionInvoiceFilter === 'paid' && !paid) return false;
+      }
+      if (spccMode === 'ldar' && ldarInvoiceFilter !== 'all') {
+        const invoiced = !!facility.ldar_invoiced;
+        const paid = !!facility.ldar_paid;
+        if (ldarInvoiceFilter === 'awaiting' && invoiced) return false;
+        if (ldarInvoiceFilter === 'unpaid' && (!invoiced || paid)) return false;
+        if (ldarInvoiceFilter === 'paid' && !paid) return false;
       }
 
       // Custom rules (AND-combined). Empty list short-circuits inside the
@@ -2156,12 +2207,6 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             return 2; // no_changes
           }
           case 'ldar_site_plan_status': {
-            // Group by LDAR state so the badges cluster when sorted (this
-            // column is computed, not a raw field — without an explicit case
-            // it fell through to default '' and rows sorted by name instead).
-            // Severity-first on ascending, matching the other status columns:
-            // Needed (action required) → Uploaded → Completed → N/A (not
-            // required, sinks to the bottom).
             const order: Record<ReturnType<typeof getLdarSitePlanState>, number> = {
               needed: 0,
               uploaded: 1,
@@ -2169,6 +2214,27 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               not_required: 3,
             };
             return order[getLdarSitePlanState(facility)];
+          }
+          case 'ldar_schedule_status': {
+            const c = getFacilityLdarCompliance(facility);
+            const days = Math.max(-1e6, Math.min(1e6, c.daysUntilDue ?? 0));
+            return c.severityRank * 1e7 + days;
+          }
+          case 'ldar_open_leaks':
+            return -(facility.ldar_open_leaks_count ?? 0);
+          case 'ldar_frequency_method': {
+            const c = getFacilityLdarCompliance(facility);
+            return `${c.frequency}_${c.method}`;
+          }
+          case 'ldar_last_survey_date':
+            return facility.ldar_last_survey_date || '';
+          case 'ldar_next_survey_due': {
+            const c = getFacilityLdarCompliance(facility);
+            return c.nextDueDate || '9999-12-31';
+          }
+          case 'ldar_regulations': {
+            const c = getFacilityLdarCompliance(facility);
+            return c.applicableRegulations.join(', ');
           }
           case 'spcc_plan_uploaded':
             // Asc → "Not uploaded" first, then "Uploaded"; flip via header click.
@@ -3784,6 +3850,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     }
     if (spccMode === 'plan') {
       setSpccPlanDetailFacility(facility);
+    } else if (spccMode === 'ldar') {
+      setLdarDetailFacility(facility);
     } else {
       setSelectedFacility(facility);
     }
@@ -4118,6 +4186,75 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           </span>
         );
       }
+      case 'ldar_schedule_status': {
+        const comp = getFacilityLdarCompliance(facility);
+        const cls =
+          comp.status === 'overdue'
+            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+            : comp.status === 'due_soon_30' || comp.status === 'pending_initial'
+              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+              : comp.status === 'due_60'
+                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                : comp.status === 'exempt'
+                  ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}
+            title={comp.detail}
+          >
+            <Wind className="w-3 h-3" />
+            {comp.label}
+          </span>
+        );
+      }
+      case 'ldar_open_leaks': {
+        const openCount = facility.ldar_open_leaks_count ?? 0;
+        const dorCount = facility.ldar_dor_leaks_count ?? 0;
+        if (openCount === 0) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
+              0 leaks
+            </span>
+          );
+        }
+        return (
+          <div className="inline-flex items-center gap-1 whitespace-nowrap">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+              <Flame className="w-3 h-3" />
+              {openCount} open
+            </span>
+            {dorCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                {dorCount} DOR
+              </span>
+            )}
+          </div>
+        );
+      }
+      case 'ldar_frequency_method': {
+        const comp = getFacilityLdarCompliance(facility);
+        return (
+          <span className="text-xs font-medium whitespace-nowrap">
+            {LDAR_FREQUENCY_LABELS[comp.frequency]} · <span className="text-teal-600 dark:text-teal-400">{comp.method}</span>
+          </span>
+        );
+      }
+      case 'ldar_last_survey_date':
+        return facility.ldar_last_survey_date ? formatDate(facility.ldar_last_survey_date) : '-';
+      case 'ldar_next_survey_due': {
+        const comp = getFacilityLdarCompliance(facility);
+        return comp.nextDueDate ? formatDate(comp.nextDueDate) : '-';
+      }
+      case 'ldar_regulations': {
+        const comp = getFacilityLdarCompliance(facility);
+        if (comp.applicableRegulations.length === 0) return '-';
+        return (
+          <span className="text-xs truncate block max-w-[200px]" title={comp.applicableRegulations.join(', ')}>
+            {comp.applicableRegulations.join(', ')}
+          </span>
+        );
+      }
       case 'plan_invoice_status':
         return (
           <InvoiceStatusCell
@@ -4134,19 +4271,41 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
             onChange={onFacilitiesChange}
           />
         );
+      case 'ldar_invoice_status':
+        return (
+          <InvoiceStatusCell
+            facility={facility}
+            kind="ldar"
+            onChange={onFacilitiesChange}
+          />
+        );
       case 'invoiced_date': {
-        // The status + date tag in its own column (right after the action
-        // buttons). Mode-aware: reads the plan or inspection fields. Paid →
-        // green, invoiced → amber, not-yet-invoiced → a muted dash.
-        const isPlan = spccMode !== 'inspection';
-        const paid = isPlan ? facility.plan_paid : facility.inspection_paid;
-        const invoiced = isPlan ? facility.plan_invoiced : facility.inspection_invoiced;
+        const paid =
+          spccMode === 'plan'
+            ? facility.plan_paid
+            : spccMode === 'inspection'
+              ? facility.inspection_paid
+              : facility.ldar_paid;
+        const invoiced =
+          spccMode === 'plan'
+            ? facility.plan_invoiced
+            : spccMode === 'inspection'
+              ? facility.inspection_invoiced
+              : facility.ldar_invoiced;
         if (!paid && !invoiced) {
           return <span className="text-gray-300 dark:text-gray-600">—</span>;
         }
         const at = paid
-          ? (isPlan ? facility.plan_paid_at : facility.inspection_paid_at)
-          : (isPlan ? facility.plan_invoiced_at : facility.inspection_invoiced_at);
+          ? (spccMode === 'plan'
+              ? facility.plan_paid_at
+              : spccMode === 'inspection'
+                ? facility.inspection_paid_at
+                : facility.ldar_paid_at)
+          : (spccMode === 'plan'
+              ? facility.plan_invoiced_at
+              : spccMode === 'inspection'
+                ? facility.inspection_invoiced_at
+                : facility.ldar_invoiced_at);
         const m = at ? String(at).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
         const dateStr = m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : '';
         const cls = paid
@@ -5199,6 +5358,101 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   </div>
                 );
               })()}
+              {/* Inline LDAR Schedule & Leak stat chips */}
+              {spccMode === 'ldar' && !invoiceView && !isLoading && (() => {
+                let overdueCount = 0;
+                let dueSoonCount = 0;
+                let leaksSitesCount = 0;
+                let currentCount = 0;
+                facilities.filter(f => f.status !== 'sold').forEach(f => {
+                  const comp = getFacilityLdarCompliance(f);
+                  if (comp.status === 'overdue') overdueCount++;
+                  else if (comp.status === 'due_soon_30' || comp.status === 'pending_initial') dueSoonCount++;
+                  else currentCount++;
+                  if (comp.openLeaksCount > 0) leaksSitesCount++;
+                });
+                return (
+                  <div className="hidden sm:flex items-center gap-1.5 ml-1">
+                    <button
+                      onClick={() => setLdarQuickFilter(ldarQuickFilter === 'overdue' ? 'all' : 'overdue')}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${
+                        ldarQuickFilter === 'overdue'
+                          ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-2 ring-red-400'
+                          : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:ring-1 hover:ring-red-300'
+                      }`}
+                    >
+                      {overdueCount} overdue
+                      {ldarQuickFilter === 'overdue' && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                    <button
+                      onClick={() => setLdarQuickFilter(ldarQuickFilter === 'due_soon' ? 'all' : 'due_soon')}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${
+                        ldarQuickFilter === 'due_soon'
+                          ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 ring-2 ring-amber-400'
+                          : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:ring-1 hover:ring-amber-300'
+                      }`}
+                    >
+                      {dueSoonCount} due / initial
+                      {ldarQuickFilter === 'due_soon' && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                    <button
+                      onClick={() => setLdarQuickFilter(ldarQuickFilter === 'leaks' ? 'all' : 'leaks')}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${
+                        ldarQuickFilter === 'leaks'
+                          ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 ring-2 ring-rose-400'
+                          : 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 hover:ring-1 hover:ring-rose-300'
+                      }`}
+                    >
+                      {leaksSitesCount} w/ leaks
+                      {ldarQuickFilter === 'leaks' && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                    <button
+                      onClick={() => setLdarQuickFilter(ldarQuickFilter === 'current' ? 'all' : 'current')}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full cursor-pointer transition-all whitespace-nowrap ${
+                        ldarQuickFilter === 'current'
+                          ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 ring-2 ring-teal-400'
+                          : 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 hover:ring-1 hover:ring-teal-300'
+                      }`}
+                    >
+                      {currentCount} current
+                      {ldarQuickFilter === 'current' && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Invoice chips — LDAR invoice view */}
+              {spccMode === 'ldar' && invoiceView && !isLoading && (() => {
+                let awaiting = 0;
+                let unpaid = 0;
+                let paid = 0;
+                facilities.filter(f => f.status !== 'sold').forEach(f => {
+                  if (f.ldar_paid) paid++;
+                  else if (f.ldar_invoiced) unpaid++;
+                  else awaiting++;
+                });
+                return (
+                  <div className="hidden sm:flex items-center gap-1.5 ml-1">
+                    <InvoiceChip
+                      label={`${awaiting} awaiting invoice`}
+                      tone="amber"
+                      active={ldarInvoiceFilter === 'awaiting'}
+                      onClick={() => setLdarInvoiceFilter(ldarInvoiceFilter === 'awaiting' ? 'all' : 'awaiting')}
+                    />
+                    <InvoiceChip
+                      label={`${unpaid} awaiting payment`}
+                      tone="blue"
+                      active={ldarInvoiceFilter === 'unpaid'}
+                      onClick={() => setLdarInvoiceFilter(ldarInvoiceFilter === 'unpaid' ? 'all' : 'unpaid')}
+                    />
+                    <InvoiceChip
+                      label={`${paid} paid`}
+                      tone="green"
+                      active={ldarInvoiceFilter === 'paid'}
+                      onClick={() => setLdarInvoiceFilter(ldarInvoiceFilter === 'paid' ? 'all' : 'paid')}
+                    />
+                  </div>
+                );
+              })()}
             </div>
             {/* Survey-type toggle. This is the single source of truth for
                 "what mode is the Facilities tab in" — it sets local spccMode
@@ -5243,6 +5497,19 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                 onPickStandard={() => { setInvoiceView(false); setModeMenuOpen(null); }}
                 onPickInvoice={() => { setInvoiceView(true); setModeMenuOpen(null); }}
               />
+              {canAccessLdarMode && (
+                <ModeTab
+                  label="LDAR"
+                  active={activeToggleKey === 'ldar'}
+                  invoiceView={invoiceView}
+                  menuOpen={modeMenuOpen === 'ldar'}
+                  onActivate={() => { setSpccMode('ldar'); setSpccPlanFilter('all'); }}
+                  onToggleMenu={() => setModeMenuOpen(modeMenuOpen === 'ldar' ? null : 'ldar')}
+                  onCloseMenu={() => setModeMenuOpen(null)}
+                  onPickStandard={() => { setInvoiceView(false); setModeMenuOpen(null); }}
+                  onPickInvoice={() => { setInvoiceView(true); setModeMenuOpen(null); }}
+                />
+              )}
               {/* Custom (non-system) survey types render in the same pill so
                   they don't reintroduce the two-control problem. Only rendered
                   if any exist — keeps the compact 3-button look when no custom
@@ -5794,11 +6061,10 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                       }
                       onClick={() => {
                         if (isBulkDownloading) return;
-                        // Plans mode used to download directly; now opens the
-                        // picker so the user can choose between zip download
-                        // and share-links spreadsheet.
                         if (spccMode === 'inspection') {
                           setShowExportPopup(true);
+                        } else if (spccMode === 'ldar') {
+                          setShowLdarReportsModal(true);
                         } else {
                           setShowReportTypePicker(true);
                         }
@@ -5814,18 +6080,42 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           ? 'Zipping...'
                           : spccMode === 'plan'
                             ? (() => {
-                                // Match the tooltip's scoping rule: if rows are
-                                // selected, count plans on JUST those rows;
-                                // otherwise count plans across the filtered list.
                                 const scope = selectedFacilityIds.size > 0
                                   ? filteredFacilities.filter((f) => selectedFacilityIds.has(f.id))
                                   : filteredFacilities;
                                 return `Plans (${scope.filter((f) => f.spcc_plan_url).length})`;
                               })()
-                            : 'Reports'
+                            : spccMode === 'ldar'
+                              ? 'LDAR Reports'
+                              : 'Reports'
                         }
                       </span>
                     </TouchTooltipButton>
+                    {spccMode === 'ldar' && (
+                      <>
+                        <TouchTooltipButton
+                          id="tb-ldar-leaks"
+                          tooltip="Open Fugitive Leaks & Repair Queue"
+                          onClick={() => {
+                            setLdarOverviewTab('leaks');
+                            setShowLdarOverview(true);
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                          <Flame className="w-3.5 h-3.5" />
+                          <span className="hidden md:inline">Leaks</span>
+                        </TouchTooltipButton>
+                        <TouchTooltipButton
+                          id="tb-ldar-log-survey"
+                          tooltip="Log New LDAR Survey (OGI / AVO)"
+                          onClick={() => setShowLdarSurveyModal(true)}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
+                        >
+                          <Wind className="w-3.5 h-3.5" />
+                          <span className="hidden md:inline">Log Survey</span>
+                        </TouchTooltipButton>
+                      </>
+                    )}
                     <TouchTooltipButton
                       id="tb-overview"
                       tooltip={
@@ -5833,13 +6123,18 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                           ? 'SPCC Plans Overview'
                           : spccMode === 'inspection'
                             ? 'Inspections Overview'
-                            : 'Overview'
+                            : spccMode === 'ldar'
+                              ? 'LDAR Insights & Compliance Hub'
+                              : 'Overview'
                       }
                       onClick={() => {
                         if (spccMode === 'plan') {
                           setShowPlansOverview(true);
                         } else if (spccMode === 'inspection') {
                           setShowInspectionOverview(true);
+                        } else if (spccMode === 'ldar') {
+                          setLdarOverviewTab('insights');
+                          setShowLdarOverview(true);
                         } else {
                           setShowOverviewTypePicker(true);
                         }
@@ -5917,8 +6212,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                     {onCreateRoute && (
                       <button
                         onClick={() => {
-                          const mappedSurveyType: 'all' | 'spcc_inspection' | 'spcc_plan' =
-                            spccMode === 'plan' ? 'spcc_plan' : spccMode === 'inspection' ? 'spcc_inspection' : 'all';
+                          let mappedSurveyType = 'all';
+                          if (spccMode !== 'all') {
+                            const targetKind = spccMode === 'plan' ? 'spcc_plan' : spccMode === 'inspection' ? 'spcc_inspection' : 'ldar';
+                            const match = surveyTypes.find(t => t.system_kind === targetKind);
+                            mappedSurveyType = match?.id ?? targetKind;
+                          }
                           onCreateRoute(Array.from(selectedFacilityIds), mappedSurveyType);
                           setSelectedFacilityIds(new Set());
                         }}
@@ -6979,6 +7278,25 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1">
                     LDAR
                   </p>
+                  {canAccessLdarMode && (
+                    <button
+                      onClick={() => {
+                        setShowReportTypePicker(false);
+                        setShowLdarReportsModal(true);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-teal-50 dark:hover:bg-teal-900/20 hover:border-teal-300 dark:hover:border-teal-600 transition-colors text-left"
+                    >
+                      <div className="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
+                        <Wind className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">LDAR Regulatory & Operational Reports</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          EPA OOOOa / OOOOb CEDRI workbooks, Leak Master, DOR Log & Survey Summary
+                        </p>
+                      </div>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setShowReportTypePicker(false);
@@ -7265,6 +7583,69 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         accountId={accountId}
       />
 
+      {/* LDAR Insights & Operations Hub Modal */}
+      <LDAROverviewModal
+        isOpen={showLdarOverview}
+        onClose={() => setShowLdarOverview(false)}
+        facilities={facilities}
+        accountId={accountId}
+        userId={userId}
+        initialTab={ldarOverviewTab}
+        onOpenFacilityLdar={(fac) => setLdarDetailFacility(fac)}
+        onFacilitiesChanged={() => void onFacilitiesChange()}
+      />
+
+      {/* LDAR Regulatory & Operational Reports Modal */}
+      <LDARReportsModal
+        isOpen={showLdarReportsModal}
+        onClose={() => setShowLdarReportsModal(false)}
+        scopedFacilities={
+          selectedFacilityIds.size > 0
+            ? filteredFacilities.filter(f => selectedFacilityIds.has(f.id))
+            : filteredFacilities
+        }
+        usingSelection={selectedFacilityIds.size > 0}
+        accountId={accountId}
+        isBulkDownloading={isBulkDownloading}
+        onBulkDownloadPaths={() => handleBulkLdarDownload('path')}
+        onBulkDownloadPlans={() => handleBulkLdarDownload('plan')}
+      />
+
+      {/* Quick Log LDAR Survey Modal */}
+      {showLdarSurveyModal && (
+        <LDARSurveyModal
+          isOpen={showLdarSurveyModal}
+          onClose={() => setShowLdarSurveyModal(false)}
+          accountId={accountId}
+          userId={userId}
+          facilities={facilities}
+          onSaved={(savedSurvey) => {
+            if (savedSurvey?.id && savedSurvey?.facility_id) {
+              void onLdarRouteStopCompleted?.(savedSurvey.facility_id, savedSurvey.id);
+            }
+            void onFacilitiesChange();
+          }}
+        />
+      )}
+
+      {/* Facility-level LDAR Command Modal (row click in LDAR mode) */}
+      {ldarDetailFacility && (
+        <LDARFacilityDetailModal
+          facility={ldarDetailFacility}
+          accountId={accountId}
+          userId={userId}
+          onClose={() => setLdarDetailFacility(null)}
+          onFacilityUpdated={() => void onFacilitiesChange()}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void onLdarRouteStopCompleted?.(facId, survId);
+          }}
+          onOpenGeneralFacilityModal={(fac) => {
+            setForcedTab('general');
+            setSelectedFacility(fac);
+          }}
+        />
+      )}
+
       {/* Overview Type Picker (All mode) */}
       {showOverviewTypePicker && (
         <ModalPortal>
@@ -7312,6 +7693,24 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                   <p className="text-xs text-gray-500 dark:text-gray-400">Findings, flagged items, and action items</p>
                 </div>
               </button>
+              {canAccessLdarMode && (
+                <button
+                  onClick={() => {
+                    setShowOverviewTypePicker(false);
+                    setLdarOverviewTab('insights');
+                    setShowLdarOverview(true);
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-teal-50 dark:hover:bg-teal-900/20 hover:border-teal-300 dark:hover:border-teal-600 transition-colors text-left"
+                >
+                  <div className="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
+                    <Wind className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">LDAR Insights & Hub</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Schedule windows, open leaks, DOR approvals & cameras</p>
+                  </div>
+                </button>
+              )}
             </div>
             <div className="p-3 border-t border-gray-200 dark:border-gray-700">
               <button
@@ -8203,13 +8602,13 @@ function InvoiceStatusCell({
   onChange,
 }: {
   facility: Facility;
-  kind: 'plan' | 'inspection';
+  kind: 'plan' | 'inspection' | 'ldar';
   onChange: () => void;
 }) {
-  const invoicedField = kind === 'plan' ? 'plan_invoiced' : 'inspection_invoiced';
-  const invoicedAtField = kind === 'plan' ? 'plan_invoiced_at' : 'inspection_invoiced_at';
-  const paidField = kind === 'plan' ? 'plan_paid' : 'inspection_paid';
-  const paidAtField = kind === 'plan' ? 'plan_paid_at' : 'inspection_paid_at';
+  const invoicedField = kind === 'plan' ? 'plan_invoiced' : kind === 'inspection' ? 'inspection_invoiced' : 'ldar_invoiced';
+  const invoicedAtField = kind === 'plan' ? 'plan_invoiced_at' : kind === 'inspection' ? 'inspection_invoiced_at' : 'ldar_invoiced_at';
+  const paidField = kind === 'plan' ? 'plan_paid' : kind === 'inspection' ? 'inspection_paid' : 'ldar_paid';
+  const paidAtField = kind === 'plan' ? 'plan_paid_at' : kind === 'inspection' ? 'inspection_paid_at' : 'ldar_paid_at';
 
   const invoiced = !!(facility as any)[invoicedField];
   const paid = !!(facility as any)[paidField];

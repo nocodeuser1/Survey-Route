@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera, CheckCircle } from 'lucide-react';
+import { Navigation, AlertCircle, FileText, RefreshCw, Filter, ChevronDown, ChevronUp, History, Eye, List, Clock, Compass, Target, TrendingUp, Search, X, Calendar, Download, Route, MapPin, Stamp, Camera, CheckCircle, Wind, Flame } from 'lucide-react';
 import ExportSurveys from './ExportSurveys';
 import { Facility, Inspection, PlanRouteRunStop, RouteStatusScope, supabase, UserSettings, SPCCPlan, SurveyType as DBSurveyType } from '../lib/supabase';
 import { OptimizationResult } from '../services/routeOptimizer';
@@ -8,9 +8,14 @@ import InspectionViewer from './InspectionViewer';
 import NavigationPopup from './NavigationPopup';
 import FacilityInspectionsManager from './FacilityInspectionsManager';
 import SPCCPlanDetailModal from './SPCCPlanDetailModal';
+import LDARFacilityDetailModal from './LDARFacilityDetailModal';
+import LDARSurveyModal from './LDARSurveyModal';
+import LDARLeakModal from './LDARLeakModal';
 import SPCCStatusBadge from './SPCCStatusBadge';
 import SPCCInspectionBadge from './SPCCInspectionBadge';
 import { getFacilityInspectionExpiry, getNewestCompletedInspection, isFacilityInspectionCurrent, isInspectionValid } from '../utils/inspectionUtils';
+import { getFacilityLdarCompliance, canUserAccessLdarMode } from '../utils/ldar';
+import { useAuth } from '../contexts/AuthContext';
 import { getRouteStatusRenderModel, resolveInspectionDisplayStatus, type InspectionDisplayStatus } from '../utils/routeStatus';
 import { parseLocalDate } from '../utils/dateUtils';
 import { statePersistence, restoreScrollPosition, setupScrollPersistence } from '../utils/statePersistence';
@@ -67,6 +72,7 @@ interface SurveyModeProps {
     source: 'inspection' | 'manual_internal' | 'manual_external',
     sourceRecordId: string,
   ) => Promise<boolean>;
+  onLdarRouteStopCompleted?: (facilityId: string, surveyId: string) => Promise<boolean>;
   routeStatusStopsByScope?: Record<RouteStatusScope, Map<string, PlanRouteRunStop>>;
   routeStatusRunInitialized?: Record<RouteStatusScope, boolean>;
 }
@@ -79,31 +85,29 @@ interface FacilityWithDistance extends Facility {
 }
 
 type FilterType = 'all' | 'incomplete' | 'completed' | 'expired' | 'draft';
-type ViewModeType = 'all' | 'inspections' | 'plans';
+type ViewModeType = 'all' | 'inspections' | 'plans' | 'ldar';
 type SPCCPlanStatusType = 'valid' | 'recertified' | 'expiring' | 'expired' | 'overdue' | 'pending' | 'missing';
 
-export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId, onInspectionRouteStopCompleted, routeStatusStopsByScope, routeStatusRunInitialized }: SurveyModeProps) {
-  // Helper: normalize a surveyType prop (which can be 'all', a legacy SPCC enum
-  // string, or a survey_types.id UUID) to an internal ViewModeType.
-  const mapSurveyTypeToViewMode = (st: string | undefined): 'all' | 'inspections' | 'plans' | null => {
+export default function SurveyMode({ result, facilities, routeFacilityIds, userId, teamNumber, accountId, userRole = 'user', onFacilitiesChange, onShowOnMap, surveyType: externalSurveyType, onSurveyTypeChange, dbSurveyTypes, planRouteStopsByFacilityId, onPlanRouteStopChange, planRouteSavingFacilityId, onInspectionRouteStopCompleted, onLdarRouteStopCompleted, routeStatusStopsByScope, routeStatusRunInitialized }: SurveyModeProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
+
+  const mapSurveyTypeToViewMode = (st: string | undefined): ViewModeType | null => {
     if (!st) return null;
     if (st === 'spcc_plan') return 'plans';
     if (st === 'spcc_inspection') return 'inspections';
+    if (st === 'ldar') return canAccessLdarMode ? 'ldar' : 'all';
     if (st === 'all') return 'all';
-    // UUID — look up via system_kind, default to 'all' for custom types.
     const row = dbSurveyTypes?.find(t => t.id === st);
     if (row?.system_kind === 'spcc_plan') return 'plans';
     if (row?.system_kind === 'spcc_inspection') return 'inspections';
+    if (row?.system_kind === 'ldar') return canAccessLdarMode ? 'ldar' : 'all';
     return 'all';
   };
 
-  // Helper: pick the right outgoing value when the sidebar's view-mode buttons
-  // are clicked. Prefer the system_kind UUID (post-migration canonical form);
-  // fall back to the legacy enum string so the App.tsx migration useEffect
-  // can convert it on first load.
-  const viewModeToSurveyType = (mode: 'all' | 'inspections' | 'plans'): string => {
+  const viewModeToSurveyType = (mode: ViewModeType): string => {
     if (mode === 'all') return 'all';
-    const target = mode === 'plans' ? 'spcc_plan' : 'spcc_inspection';
+    const target = mode === 'plans' ? 'spcc_plan' : mode === 'ldar' ? 'ldar' : 'spcc_inspection';
     const row = dbSurveyTypes?.find(t => t.system_kind === target);
     return row?.id ?? target;
   };
@@ -122,6 +126,9 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [managingInspectionsFacility, setManagingInspectionsFacility] = useState<Facility | null>(null);
   const [spccPlanDetailFacility, setSpccPlanDetailFacility] = useState<Facility | null>(null);
+  const [ldarDetailFacility, setLdarDetailFacility] = useState<Facility | null>(null);
+  const [ldarSurveyFacility, setLdarSurveyFacility] = useState<Facility | null>(null);
+  const [ldarLeakFacility, setLdarLeakFacility] = useState<Facility | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
@@ -147,8 +154,16 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   const [viewMode, setViewModeInternal] = useState<ViewModeType>(() => {
     const fromProp = mapSurveyTypeToViewMode(externalSurveyType);
     if (fromProp) return fromProp;
-    return statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
+    const saved = statePersistence.get<ViewModeType>('surveyMode_viewMode', 'inspections') ?? 'inspections';
+    if (saved === 'ldar' && !canAccessLdarMode) return 'inspections';
+    return saved;
   });
+
+  useEffect(() => {
+    if (!canAccessLdarMode && viewMode === 'ldar') {
+      setViewModeInternal('all');
+    }
+  }, [canAccessLdarMode, viewMode]);
 
   // "Show off-route facilities" toggle. Only meaningful when a custom route
   // is active (routeFacilityIds non-null). When ON, the list expands to every
@@ -739,16 +754,30 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
   function getFacilityRouteRenderModel(facility: Facility) {
     const facilityInspections = inspections.filter(i => i.facility_id === facility.id);
     const planStatus = getSPCCPlanStatus(facility);
-    const kind = viewMode === 'inspections' ? 'spcc_inspection' : viewMode === 'plans' ? 'spcc_plan' : 'all';
+    const ldarComp = getFacilityLdarCompliance(facility);
+    const ldarCurrent =
+      (ldarComp.status === 'current' || ldarComp.status === 'due_60' || ldarComp.status === 'exempt') &&
+      ldarComp.openLeaksCount === 0;
+    const kind =
+      viewMode === 'inspections'
+        ? 'spcc_inspection'
+        : viewMode === 'plans'
+          ? 'spcc_plan'
+          : viewMode === 'ldar'
+            ? 'ldar'
+            : 'all';
     return getRouteStatusRenderModel({
       surveyTypeKind: kind,
       isCurrentRouteStop: !routeFacilityIds || routeFacilityIds.includes(facility.id),
       inspectionRunInitialized: routeStatusRunInitialized?.spcc_inspection ?? false,
       planRunInitialized: routeStatusRunInitialized?.spcc_plan ?? false,
+      ldarRunInitialized: routeStatusRunInitialized?.ldar ?? false,
       inspectionStop: routeStatusStopsByScope?.spcc_inspection.get(facility.id),
       planStop: routeStatusStopsByScope?.spcc_plan.get(facility.id) ?? planRouteStopsByFacilityId?.get(facility.id),
+      ldarStop: routeStatusStopsByScope?.ldar?.get(facility.id),
       inspectionComplianceCurrent: isFacilityInspectionCurrent(facility, facilityInspections),
       planComplianceCurrent: planStatus === 'valid' || planStatus === 'recertified',
+      ldarComplianceCurrent: ldarCurrent,
     });
   }
 
@@ -830,10 +859,17 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
       filtered = filtered.filter(f => {
         if (filter === 'completed') return getFacilityRouteRenderModel(f).showRouteCheck;
         if (filter === 'incomplete') return !getFacilityRouteRenderModel(f).showRouteCheck;
-        if (filter === 'draft') return viewMode !== 'plans' && getInspectionStatus(f) === 'draft';
+        if (filter === 'draft') {
+          if (viewMode === 'ldar') return (f.ldar_open_leaks_count ?? 0) > 0;
+          return viewMode !== 'plans' && getInspectionStatus(f) === 'draft';
+        }
         if (viewMode === 'plans') {
           const planStatus = getSPCCPlanStatus(f);
           return planStatus === 'expired' || planStatus === 'expiring' || planStatus === 'overdue';
+        }
+        if (viewMode === 'ldar') {
+          const ldarComp = getFacilityLdarCompliance(f);
+          return ldarComp.status === 'overdue' || ldarComp.status === 'due_soon_30';
         }
         return getInspectionStatus(f) === 'expired';
       });
@@ -883,11 +919,15 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
 
   const expiredCount = viewMode === 'plans'
     ? facilitiesWithDistance.filter(f => { const s = getSPCCPlanStatus(f); return s === 'expired' || s === 'expiring' || s === 'overdue'; }).length
-    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'expired').length;
+    : viewMode === 'ldar'
+      ? facilitiesWithDistance.filter(f => { const c = getFacilityLdarCompliance(f); return c.status === 'overdue' || c.status === 'due_soon_30'; }).length
+      : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'expired').length;
 
   const draftCount = viewMode === 'plans'
     ? 0
-    : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'draft').length;
+    : viewMode === 'ldar'
+      ? facilitiesWithDistance.filter(f => (f.ldar_open_leaks_count ?? 0) > 0).length
+      : facilitiesWithDistance.filter(f => getInspectionStatus(f) === 'draft').length;
 
   if (inspectingFacility) {
     return (
@@ -1015,15 +1055,26 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
               >
                 Plans
               </button>
+              {canAccessLdarMode && (
+                <button
+                  onClick={() => setViewMode('ldar')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'ldar'
+                    ? 'bg-white dark:bg-gray-800 text-teal-600 dark:text-teal-400 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
+                    }`}
+                >
+                  LDAR
+                </button>
+              )}
             </div>
           </div>
 
-          <div className={`grid ${viewMode === 'plans' ? 'grid-cols-4' : viewMode === 'all' ? 'grid-cols-5' : 'grid-cols-5'} gap-2 mb-3`}>
+          <div className={`grid ${viewMode === 'plans' ? 'grid-cols-4' : 'grid-cols-5'} gap-2 mb-3`}>
             <button
               onClick={() => setFilter('all')}
               className={`p-2 rounded-lg transition-all ${filter === 'all'
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
             >
               <div className="text-lg font-bold">{facilitiesWithDistance.length}</div>
@@ -1033,43 +1084,43 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
               onClick={() => setFilter('incomplete')}
               className={`p-2 rounded-lg transition-all ${filter === 'incomplete'
                 ? 'bg-orange-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
             >
               <div className="text-lg font-bold">{incompleteCount}</div>
-              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Missing' : 'Incomplete'}</div>
+              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Missing' : viewMode === 'ldar' ? 'Needed' : 'Incomplete'}</div>
             </button>
-            {(viewMode === 'inspections' || viewMode === 'all') && (
+            {(viewMode === 'inspections' || viewMode === 'all' || viewMode === 'ldar') && (
               <button
                 onClick={() => setFilter('draft')}
                 className={`p-2 rounded-lg transition-all ${filter === 'draft'
                   ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                   }`}
               >
                 <div className="text-lg font-bold">{draftCount}</div>
-                <div className="text-[10px] opacity-90">Draft</div>
+                <div className="text-[10px] opacity-90">{viewMode === 'ldar' ? 'Open Leaks' : 'Draft'}</div>
               </button>
             )}
             <button
               onClick={() => setFilter('completed')}
               className={`p-2 rounded-lg transition-all ${filter === 'completed'
                 ? 'bg-green-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
             >
               <div className="text-lg font-bold">{completedCount}</div>
-              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Valid' : 'Complete'}</div>
+              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Valid' : viewMode === 'ldar' ? 'Current' : 'Complete'}</div>
             </button>
             <button
               onClick={() => setFilter('expired')}
               className={`p-2 rounded-lg transition-all ${filter === 'expired'
                 ? 'bg-red-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 dark:text-gray-200 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
             >
               <div className="text-lg font-bold">{expiredCount}</div>
-              <div className="text-[10px] opacity-90">{viewMode === 'plans' ? 'Overdue' : 'Expired'}</div>
+              <div className="text-[10px] opacity-90">{viewMode === 'plans' || viewMode === 'ldar' ? 'Overdue' : 'Expired'}</div>
             </button>
           </div>
 
@@ -1454,7 +1505,7 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                 mode views we show one primary action and a
                                 Navigate button. */}
                             {viewMode === 'all' ? (
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className={`grid grid-cols-2 ${canAccessLdarMode ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2`}>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1484,6 +1535,62 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
                                 >
                                   <Stamp className="w-3.5 h-3.5" />
                                   SPCC Plan
+                                </button>
+                                {canAccessLdarMode && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLdarSurveyFacility(facility);
+                                    }}
+                                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-xs font-medium"
+                                  >
+                                    <Wind className="w-3.5 h-3.5" />
+                                    LDAR
+                                  </button>
+                                )}
+                              </div>
+                            ) : viewMode === 'ldar' ? (
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-3 gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNavigationTarget(facility);
+                                    }}
+                                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                                  >
+                                    <Navigation className="w-3.5 h-3.5" />
+                                    Navigate
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLdarSurveyFacility(facility);
+                                    }}
+                                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-xs font-medium"
+                                  >
+                                    <Wind className="w-3.5 h-3.5" />
+                                    Log Survey
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLdarLeakFacility(facility);
+                                    }}
+                                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium"
+                                  >
+                                    <Flame className="w-3.5 h-3.5" />
+                                    Tag Leak
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLdarDetailFacility(facility);
+                                  }}
+                                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 rounded-lg border border-teal-200 dark:border-teal-800 text-xs font-semibold"
+                                >
+                                  LDAR Details, Schedule & Walking Path
                                 </button>
                               </div>
                             ) : (
@@ -1817,6 +1924,46 @@ export default function SurveyMode({ result, facilities, routeFacilityIds, userI
           onViewInspectionDetails={() => {
             setInspectingFacility(spccPlanDetailFacility);
           }}
+        />
+      )}
+
+      {ldarDetailFacility && (
+        <LDARFacilityDetailModal
+          facility={ldarDetailFacility}
+          accountId={accountId}
+          userId={userId}
+          onClose={() => setLdarDetailFacility(null)}
+          onFacilityUpdated={() => onFacilitiesChange?.()}
+          onLdarSurveyCompleted={(facId, survId) => {
+            void onLdarRouteStopCompleted?.(facId, survId);
+          }}
+        />
+      )}
+
+      {ldarSurveyFacility && (
+        <LDARSurveyModal
+          isOpen={true}
+          onClose={() => setLdarSurveyFacility(null)}
+          accountId={accountId}
+          userId={userId}
+          facility={ldarSurveyFacility}
+          onSaved={async (savedSurvey) => {
+            if (savedSurvey.status === 'completed') {
+              await onLdarRouteStopCompleted?.(ldarSurveyFacility.id, savedSurvey.id);
+            }
+            onFacilitiesChange?.();
+          }}
+        />
+      )}
+
+      {ldarLeakFacility && (
+        <LDARLeakModal
+          isOpen={true}
+          onClose={() => setLdarLeakFacility(null)}
+          accountId={accountId}
+          userId={userId}
+          facility={ldarLeakFacility}
+          onSaved={() => onFacilitiesChange?.()}
         />
       )}
 

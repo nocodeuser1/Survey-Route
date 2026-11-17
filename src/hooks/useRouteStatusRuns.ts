@@ -39,7 +39,7 @@ export interface PendingInspectionRouteCompletion {
   message: string;
 }
 
-const SCOPES: RouteStatusScope[] = ['spcc_inspection', 'spcc_plan'];
+const SCOPES: RouteStatusScope[] = ['spcc_inspection', 'spcc_plan', 'ldar'];
 const cacheKey = (accountId: string, routePlanId: string, team: number, scope: RouteStatusScope) =>
   `surveyroute:route-status:v2:${accountId}:${routePlanId}:${team}:${scope}`;
 
@@ -106,7 +106,7 @@ export function useRouteStatusRuns({
   const { isOnline } = useOnlineStatus();
   const [runsByScope, setRunsByScope] = useState<Partial<Record<RouteStatusScope, RouteStatusRun>>>({});
   const [stopsByScope, setStopsByScope] = useState<Record<RouteStatusScope, RouteStatusRunStop[]>>({
-    spcc_inspection: [], spcc_plan: [],
+    spcc_inspection: [], spcc_plan: [], ldar: [],
   });
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -157,14 +157,14 @@ export function useRouteStatusRuns({
     void plannedStopsSignature;
     const sequence = ++loadSequence.current;
     setRunsByScope({});
-    setStopsByScope({ spcc_inspection: [], spcc_plan: [] });
+    setStopsByScope({ spcc_inspection: [], spcc_plan: [], ldar: [] });
     setResolvedIdentityByScope({});
     setStateIdentityKey(identityKey);
     setError(null);
     if (!accountId || !routePlanId) return;
 
     const cachedRuns: Partial<Record<RouteStatusScope, RouteStatusRun>> = {};
-    const cachedStops: Record<RouteStatusScope, RouteStatusRunStop[]> = { spcc_inspection: [], spcc_plan: [] };
+    const cachedStops: Record<RouteStatusScope, RouteStatusRunStop[]> = { spcc_inspection: [], spcc_plan: [], ldar: [] };
     SCOPES.forEach(scope => {
       const cached = readCache(accountId, routePlanId, teamNumber, scope);
       if (cached) { cachedRuns[scope] = cached.run; cachedStops[scope] = cached.stops; }
@@ -183,7 +183,7 @@ export function useRouteStatusRuns({
         .eq('status', 'active').in('survey_type', SCOPES);
       if (runError) throw runError;
       const nextRuns: Partial<Record<RouteStatusScope, RouteStatusRun>> = {};
-      const nextStops: Record<RouteStatusScope, RouteStatusRunStop[]> = { spcc_inspection: [], spcc_plan: [] };
+      const nextStops: Record<RouteStatusScope, RouteStatusRunStop[]> = { spcc_inspection: [], spcc_plan: [], ldar: [] };
       for (const row of (data || []) as RouteStatusRun[]) {
         if (!SCOPES.includes(row.survey_type)) continue;
         const { error: syncError } = await supabase.rpc('sync_route_status_run_stops', {
@@ -202,7 +202,7 @@ export function useRouteStatusRuns({
       if (sequence !== loadSequence.current) return;
       setRunsByScope(nextRuns);
       setStopsByScope(nextStops);
-      setResolvedIdentityByScope({ spcc_inspection: identityKey, spcc_plan: identityKey });
+      setResolvedIdentityByScope({ spcc_inspection: identityKey, spcc_plan: identityKey, ldar: identityKey });
       setSchemaUnavailable(false);
       SCOPES.forEach(scope => {
         const run = nextRuns[scope];
@@ -241,10 +241,15 @@ export function useRouteStatusRuns({
           response.team_number !== teamNumber || response.requested_scope !== scope) {
         throw new Error('The server returned route status for a different route scope.');
       }
-      const expectedScopes: RouteStatusScope[] = scope === 'all' ? SCOPES : [scope];
       const responseScopes = response.runs.map(item => item.survey_type);
-      const invalidPayload = response.runs.length !== expectedScopes.length ||
-        expectedScopes.some(domain => !responseScopes.includes(domain)) ||
+      const legacyScopes: RouteStatusScope[] = ['spcc_inspection', 'spcc_plan'];
+      const matchesExpectedScopes = scope === 'all'
+        ? (
+            (response.runs.length === SCOPES.length && SCOPES.every(domain => responseScopes.includes(domain))) ||
+            (response.runs.length === legacyScopes.length && legacyScopes.every(domain => responseScopes.includes(domain)))
+          )
+        : response.runs.length === 1 && responseScopes[0] === scope;
+      const invalidPayload = !matchesExpectedScopes ||
         response.runs.some(item =>
           item.run.account_id !== accountId || item.run.route_plan_id !== routePlanId ||
           item.run.team_number !== teamNumber || item.run.survey_type !== item.survey_type ||
@@ -274,7 +279,10 @@ export function useRouteStatusRuns({
       });
       return response;
     } catch (resetError: unknown) {
-      const message = errorDetails(resetError).message ?? 'Unable to reset route status.';
+      const rawMsg = errorDetails(resetError).message ?? 'Unable to reset route status.';
+      const message = scope === 'ldar' && /invalid route status scope/i.test(rawMsg)
+        ? 'LDAR route status reset requires the latest database update.'
+        : rawMsg;
       setError(message);
       throw new Error(message);
     } finally {
@@ -440,19 +448,67 @@ export function useRouteStatusRuns({
     );
   }, [completeInspectionStop, pendingInspectionCompletion]);
 
+  const completeLdarStop = useCallback(async (
+    facilityId: string,
+    surveyId: string,
+    requestId: string = crypto.randomUUID(),
+  ) => {
+    const run = runsByScope.ldar;
+    if (!run) return true;
+    const activeStop = stopsByScope.ldar.find(stop =>
+      stop.facility_id === facilityId && !stop.removed_at && stop.status !== 'removed'
+    );
+    if (!activeStop) return true;
+    if (!isOnline) {
+      setError('A network connection is required to update LDAR route status.');
+      return false;
+    }
+    setSavingFacilityIdByScope(current => ({ ...current, ldar: facilityId }));
+    try {
+      const { data, error: completionError } = await supabase.rpc('complete_ldar_route_stop', {
+        target_run_id: run.id,
+        target_facility_id: facilityId,
+        target_survey_id: surveyId,
+        target_idempotency_key: requestId,
+      });
+      if (completionError) throw completionError;
+      setStopsByScope(current => {
+        const nextStops = current.ldar.map(stop => stop.facility_id === facilityId
+          ? { ...stop, status: 'completed' as const, completed_at: data?.completed_at || new Date().toISOString() }
+          : stop);
+        if (accountId && routePlanId) {
+          writeCache({ version: 2, accountId, routePlanId, teamNumber, scope: 'ldar', run, stops: nextStops });
+        }
+        return { ...current, ldar: nextStops };
+      });
+      return true;
+    } catch (err: unknown) {
+      setError(errorDetails(err).message ?? 'Unable to complete LDAR route stop.');
+      void reload();
+      return false;
+    } finally {
+      setSavingFacilityIdByScope(current => ({ ...current, ldar: undefined }));
+    }
+  }, [accountId, isOnline, reload, routePlanId, runsByScope.ldar, stopsByScope.ldar, teamNumber]);
+
   const stopsMapByScope = useMemo(() => ({
     spcc_inspection: new Map(stopsByScope.spcc_inspection.filter(stop => stop.facility_id && !stop.removed_at && stop.status !== 'removed').map(stop => [stop.facility_id as string, stop])),
     spcc_plan: new Map(stopsByScope.spcc_plan.filter(stop => stop.facility_id && !stop.removed_at && stop.status !== 'removed').map(stop => [stop.facility_id as string, stop])),
+    ldar: new Map(stopsByScope.ldar.filter(stop => stop.facility_id && !stop.removed_at && stop.status !== 'removed').map(stop => [stop.facility_id as string, stop])),
   }), [stopsByScope]);
 
   const identityMatches = stateIdentityKey === identityKey;
   const visibleRunsByScope = identityMatches ? runsByScope : {};
   const visibleStopsByScope = identityMatches
     ? stopsByScope
-    : { spcc_inspection: [], spcc_plan: [] };
+    : { spcc_inspection: [], spcc_plan: [], ldar: [] };
   const visibleStopsMapByScope = identityMatches
     ? stopsMapByScope
-    : { spcc_inspection: new Map<string, RouteStatusRunStop>(), spcc_plan: new Map<string, RouteStatusRunStop>() };
+    : {
+        spcc_inspection: new Map<string, RouteStatusRunStop>(),
+        spcc_plan: new Map<string, RouteStatusRunStop>(),
+        ldar: new Map<string, RouteStatusRunStop>(),
+      };
   // While a saved route's active-run lookup is unresolved, route status must
   // remain authoritative. Falling back to historical compliance during this
   // gap briefly paints last year's checks before a reset run hydrates.
@@ -462,6 +518,9 @@ export function useRouteStatusRuns({
     ),
     spcc_plan: Boolean(visibleRunsByScope.spcc_plan) || Boolean(
       accountId && routePlanId && resolvedIdentityByScope.spcc_plan !== identityKey
+    ),
+    ldar: Boolean(visibleRunsByScope.ldar) || Boolean(
+      accountId && routePlanId && resolvedIdentityByScope.ldar !== identityKey
     ),
   };
 
@@ -473,7 +532,7 @@ export function useRouteStatusRuns({
     plannedStops, loading, resetting,
     savingFacilityIdByScope, error, schemaUnavailable, isOnline,
     pendingInspectionCompletion, pendingInspectionCompletionCount: pendingInspectionCompletions.length,
-    resetRouteStatus, completeInspectionStop, recordManualInspectionCompletion,
+    resetRouteStatus, completeInspectionStop, completeLdarStop, recordManualInspectionCompletion,
     retryInspectionCompletion,
     dismissInspectionCompletionError: () => setPendingInspectionCompletions(current => current.slice(1)),
     setPlanStopCompleted, reload,

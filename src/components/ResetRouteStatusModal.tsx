@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import type { ResetRouteStatusScope } from '../lib/supabase';
 import ModalPortal from './ModalPortal';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 
 interface Props {
   open: boolean;
@@ -20,21 +22,42 @@ interface Props {
 const LABELS: Record<ResetRouteStatusScope, string> = {
   spcc_inspection: 'SPCC Inspection',
   spcc_plan: 'SPCC Plan',
-  all: 'All Facilities',
+  ldar: 'LDAR',
+  all: 'All Domains',
 };
 
 export default function ResetRouteStatusModal({
   open, routeName, teamNumber, stopCount, defaultScope, canReset, offline,
   resetting, error, onClose, onReset,
 }: Props) {
-  const [scope, setScope] = useState<ResetRouteStatusScope>(defaultScope);
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
+  const visibleOptions = (Object.keys(LABELS) as ResetRouteStatusScope[]).filter(
+    option => option !== 'ldar' || canAccessLdarMode,
+  );
+  const [scope, setScope] = useState<ResetRouteStatusScope>(
+    defaultScope === 'ldar' && !canAccessLdarMode ? 'all' : defaultScope,
+  );
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     if (!open) return;
-    setScope(defaultScope);
+    setScope(defaultScope === 'ldar' && !canAccessLdarMode ? 'all' : defaultScope);
     setRequestId(crypto.randomUUID());
-  }, [defaultScope, open, routeName, teamNumber]);
+  }, [canAccessLdarMode, defaultScope, open, routeName, teamNumber]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !resetting) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [open, resetting, onClose]);
 
   const disabledReason = useMemo(() => {
     if (!canReset) return 'Save this route before resetting route status.';
@@ -46,8 +69,18 @@ export default function ResetRouteStatusModal({
 
   return (
     <ModalPortal>
-      <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 p-4" role="presentation">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-800" role="dialog" aria-modal="true" aria-labelledby="reset-route-status-title">
+      <div
+        className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-[1px] p-4"
+        role="presentation"
+        onClick={() => { if (!resetting) onClose(); }}
+      >
+        <div
+          className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reset-route-status-title"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="reset-route-status-title" className="text-lg font-semibold text-gray-900 dark:text-white">Reset route status</h2>
@@ -62,7 +95,7 @@ export default function ResetRouteStatusModal({
 
           <fieldset className="mt-5 space-y-2">
             <legend className="mb-2 text-sm font-medium text-gray-800 dark:text-gray-100">Status to reset</legend>
-            {(Object.keys(LABELS) as ResetRouteStatusScope[]).map(option => (
+            {visibleOptions.map(option => (
               <label key={option} className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border p-3 ${scope === option ? 'border-red-600 bg-red-600 text-white dark:border-red-600 dark:bg-red-600' : 'border-gray-200 dark:border-gray-700'}`}>
                 <input type="radio" name="reset-route-status-scope" value={option} checked={scope === option} onChange={() => { setScope(option); setRequestId(crypto.randomUUID()); }} disabled={resetting} />
                 <span className={`text-sm font-medium ${scope === option ? 'text-white' : 'text-gray-900 dark:text-white'}`}>{LABELS[option]}</span>
@@ -72,15 +105,17 @@ export default function ResetRouteStatusModal({
 
           <p className="mt-4 text-sm text-gray-700 dark:text-gray-200">
             {scope === 'all'
-              ? `${stopCount} current-route facilities are affected; both Inspection and Plan status domains will reset.`
+              ? `${stopCount} current-route facilities are affected; ${canAccessLdarMode ? 'Inspection, Plan, and LDAR' : 'both Inspection and Plan'} status domains will reset.`
               : `${stopCount} current-route stops are affected.`}
           </p>
           <p className="mt-3 rounded-xl bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-900/50 dark:text-gray-200">
             {scope === 'spcc_inspection'
               ? 'Every current-route facility will return to Pending in Survey Mode so you can start a new inspection. Prior inspection records and dates stay in History.'
-              : scope === 'all'
-                ? 'Every current-route facility will start fresh in both status domains. Prior inspection records, SPCC plans, photos, schedules, and route assignments are preserved.'
-                : 'This starts fresh Plan route status. SPCC plans, photos, schedules, route assignments, and inspection history are preserved.'}
+              : scope === 'ldar'
+                ? 'Every current-route facility will start fresh for LDAR route status. Prior OGI/AVO survey logs, leak tags, DOR records, and compliance schedules are preserved.'
+                : scope === 'all'
+                  ? `Every current-route facility will start fresh across ${canAccessLdarMode ? 'all' : 'both'} status domains. Prior inspection records, SPCC plans, photos, schedules, and route assignments are preserved.`
+                  : 'This starts fresh Plan route status. SPCC plans, photos, schedules, route assignments, and inspection history are preserved.'}
           </p>
 
           {(disabledReason || error) && (

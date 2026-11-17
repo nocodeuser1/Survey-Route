@@ -1,16 +1,19 @@
 import type { PlanRouteRunStop, RouteStatusScope } from '../lib/supabase';
 
-export type RouteSurveyTypeKind = 'all' | 'spcc_inspection' | 'spcc_plan' | 'custom';
+export type RouteSurveyTypeKind = 'all' | 'spcc_inspection' | 'spcc_plan' | 'ldar' | 'custom';
 
 interface RouteStatusRenderInput {
   surveyTypeKind: RouteSurveyTypeKind;
   isCurrentRouteStop: boolean;
   inspectionRunInitialized: boolean;
   planRunInitialized: boolean;
+  ldarRunInitialized?: boolean;
   inspectionStop?: PlanRouteRunStop;
   planStop?: PlanRouteRunStop;
+  ldarStop?: PlanRouteRunStop;
   inspectionComplianceCurrent: boolean;
   planComplianceCurrent: boolean;
+  ldarComplianceCurrent?: boolean;
 }
 
 export interface RouteStatusRenderModel {
@@ -59,30 +62,37 @@ export function getRouteStatusRenderModel(input: RouteStatusRenderInput): RouteS
     input.planStop,
     input.planComplianceCurrent,
   );
+  const ldar = domainStatus(
+    Boolean(input.ldarRunInitialized),
+    input.ldarStop,
+    Boolean(input.ldarComplianceCurrent),
+  );
 
   if (!input.isCurrentRouteStop || input.surveyTypeKind === 'custom') {
     return {
       showRouteCheck: false,
-      routeStatusByDomain: { spcc_inspection: inspection, spcc_plan: plan },
+      routeStatusByDomain: { spcc_inspection: inspection, spcc_plan: plan, ldar },
       markerRole: 'off-route',
     };
   }
 
-  const hasInitializedDomain = input.inspectionRunInitialized || input.planRunInitialized;
+  const hasInitializedDomain =
+    input.inspectionRunInitialized || input.planRunInitialized || Boolean(input.ldarRunInitialized);
   const showRouteCheck = input.surveyTypeKind === 'spcc_inspection'
     ? inspection === 'completed'
     : input.surveyTypeKind === 'spcc_plan'
       ? plan === 'completed'
-      : hasInitializedDomain
-        // Once a route cycle exists, legacy compliance from a domain without
-        // an active run must not make a freshly reset stop look completed.
-        ? (input.inspectionRunInitialized && inspection === 'completed') ||
-          (input.planRunInitialized && plan === 'completed')
-        : inspection === 'completed' || plan === 'completed';
+      : input.surveyTypeKind === 'ldar'
+        ? ldar === 'completed'
+        : hasInitializedDomain
+          ? (input.inspectionRunInitialized && inspection === 'completed') ||
+            (input.planRunInitialized && plan === 'completed') ||
+            (Boolean(input.ldarRunInitialized) && ldar === 'completed')
+          : inspection === 'completed' || plan === 'completed' || ldar === 'completed';
 
   return {
     showRouteCheck,
-    routeStatusByDomain: { spcc_inspection: inspection, spcc_plan: plan },
+    routeStatusByDomain: { spcc_inspection: inspection, spcc_plan: plan, ldar },
     markerRole: 'current-route',
   };
 }

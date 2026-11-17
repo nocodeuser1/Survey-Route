@@ -3,6 +3,8 @@ import { Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Zap, Home, Coffee, Na
 import { supabase, UserSettings } from '../lib/supabase';
 import { convertTo12Hour } from '../utils/timeFormat';
 import { getDefaultReturnByTime, minutesTo12Hour, getSunTimes, getSeasonLabel } from '../utils/sunset';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserAccessLdarMode } from '../utils/ldar';
 
 interface RoutePlanningSettingsProps {
   accountId: string;
@@ -13,20 +15,27 @@ interface RoutePlanningSettingsProps {
 }
 
 export default function RoutePlanningSettings({ accountId, authUserId, onVisitDurationChange, onApplyWithTimeRefresh, onApplyWithFullOptimization }: RoutePlanningSettingsProps) {
+  const { user: authUser, supabaseUser } = useAuth();
+  const canAccessLdarMode = canUserAccessLdarMode(authUser?.email || supabaseUser?.email);
   const [settings, setSettings] = useState<UserSettings>({
     id: '',
     user_id: accountId,
+    account_id: accountId,
     max_facilities_per_day: 8,
     max_hours_per_day: 8,
     default_visit_duration_minutes: 30,
     use_facilities_constraint: false,
     use_hours_constraint: true,
+    map_preference: 'google',
+    include_google_earth: false,
+    location_permission_granted: false,
     clustering_tightness: 0.75,
     cluster_balance_weight: 0.35,
     start_time: '08:00',
     team_count: 1,
     inspection_visit_duration_minutes: 30,
     plan_visit_duration_minutes: 60,
+    ldar_visit_duration_minutes: 45,
     updated_at: '',
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -139,6 +148,7 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
         team_count: settings.team_count,
         inspection_visit_duration_minutes: settings.inspection_visit_duration_minutes ?? 30,
         plan_visit_duration_minutes: settings.plan_visit_duration_minutes ?? 60,
+        ldar_visit_duration_minutes: settings.ldar_visit_duration_minutes ?? 45,
         // Time-budget fields — parity with the Update Route Settings modal so
         // editing in either surface persists to the same row and both UIs
         // reflect the same value on next mount.
@@ -238,7 +248,7 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-4 ${canAccessLdarMode ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
             <Clock className="inline w-4 h-4 mr-1" />
@@ -283,6 +293,30 @@ export default function RoutePlanningSettings({ accountId, authUserId, onVisitDu
             Onsite time per facility in SPCC Plans mode
           </p>
         </div>
+        {canAccessLdarMode && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+              <Clock className="inline w-4 h-4 mr-1" />
+              LDAR Survey Duration (min)
+            </label>
+            <input
+              type="number"
+              min="5"
+              max="480"
+              value={settings.ldar_visit_duration_minutes ?? 45}
+              onChange={(e) => {
+                setSettings({
+                  ...settings,
+                  ldar_visit_duration_minutes: parseInt(e.target.value) || 45,
+                });
+              }}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Onsite time per facility in LDAR mode (OGI / AVO)
+            </p>
+          </div>
+        )}
       </div>
 
       <div>
