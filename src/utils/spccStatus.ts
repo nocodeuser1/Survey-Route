@@ -45,6 +45,7 @@ export interface SPCCStatusFacility {
   spcc_workflow_status_overridden?: boolean | null;
   field_visit_date?: string | null;
   photos_taken?: boolean | null;
+  recertification_decision?: RecertificationDecision | null;
 }
 
 export type RecertificationDecision = 'no_changes' | 'changes_found';
@@ -52,7 +53,11 @@ export type RecertificationDecision = 'no_changes' | 'changes_found';
 /**
  * True when a facility is in (or past) the SPCC plan recertification window:
  * has an existing plan AND the 5-year clock is within 90 days of expiry, has
- * already expired, or has been recertified in the last 5 years.
+ * already expired, or has been recertified in the last 5 years AND still has
+ * a recorded decision to show. A recertified facility with no decision on
+ * file (the cycle finished and the decision was cleared, or the recert date
+ * was entered by hand) is done until the next window, so it must not read
+ * "Pending Decision".
  *
  * Drives visibility of the "Recertification Status" UI everywhere — Facilities
  * tab column, FacilityDetailModal, SPCCPlanDetailModal, and the map popup.
@@ -62,7 +67,8 @@ export type RecertificationDecision = 'no_changes' | 'changes_found';
 export function isRecertificationActive(facility: SPCCStatusFacility): boolean {
   const result = getSPCCPlanStatus(facility);
   if (!result.hasPlan) return false;
-  return result.status === 'expiring' || result.status === 'expired' || result.status === 'recertified';
+  if (result.status === 'expiring' || result.status === 'expired') return true;
+  return result.status === 'recertified' && !!facility.recertification_decision;
 }
 
 /** Per-berm recertification window check. Mirrors `isRecertificationActive`

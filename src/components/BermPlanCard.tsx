@@ -1027,8 +1027,12 @@ export default function BermPlanCard({
             2. The plan already has any recertification data recorded (so the
                user can review/edit a previously recorded decision), or
             3. The facility-level rollup considers this facility in a recert
-               state (e.g., facility.recertified_date is set, which is why the
-               rollup tells the user to "Edit per-berm in the SPCC Plan tab").
+               state (window open/expired, or recertified with a decision
+               still on file).
+
+            A berm that's simply recertified (recertified_date set, outside
+            the window, no decision recorded) is done — showing the card there
+            only produced a misleading "Pending Decision" pill.
 
             EXCEPT: once the recertification PDF has actually been generated
             for this berm (recertification_pdf_generated_at set), the review
@@ -1040,7 +1044,6 @@ export default function BermPlanCard({
           || !!plan.recertification_decision
           || !!plan.recertification_decision_at
           || !!plan.recertification_decision_notes
-          || !!plan.recertified_date
           || isRecertificationActive(facility)) && (
           <div
             className={`rounded-lg border p-3 ${
