@@ -13,6 +13,8 @@ import FacilitySurveyView from './FacilitySurveyView';
 import * as XLSX from 'xlsx';
 import FacilityDetailModal from './FacilityDetailModal';
 import InspectionViewer from './InspectionViewer';
+import InspectionFindingsModal from './InspectionFindingsModal';
+import { summarizeInspectionFindings } from '../utils/inspectionFindings';
 import CSVUpload from './CSVUpload';
 import SearchInput from './SearchInput';
 import InspectionReportExport from './InspectionReportExport';
@@ -130,7 +132,7 @@ function TouchTooltipButton({
 }
 
 type BaseColumnId = 'name' | 'address' | 'latitude' | 'longitude' | 'visit_duration' | 'county' | 'camino_facility_id' | 'facility_group' | 'tags' | 'historical_name' |
-  'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'recertification_status' | 'notes' |
+  'spcc_status' | 'spcc_plan_uploaded' | 'inspection_status' | 'inspection_findings' | 'recertification_status' | 'notes' |
   'first_prod_date' | 'spcc_due_date' | 'spcc_inspection_date' | 'spcc_pe_stamp_date' | 'spcc_completion_type' |
   'photos_taken' | 'latest_photo_date' | 'field_visit_date' | 'estimated_oil_per_day' |
   'berm_depth_inches' | 'berm_length' | 'berm_width' |
@@ -173,7 +175,7 @@ const BASE_COLUMNS_ORDER: BaseColumnId[] = [
   'name', 'spcc_status', 'ldar_schedule_status', 'ldar_open_leaks', 'ldar_frequency_method', 'ldar_last_survey_date', 'ldar_next_survey_due', 'ldar_regulations',
   'historical_name', 'address', 'latitude', 'longitude', 'visit_duration', 'county', 'camino_facility_id', 'facility_group', 'tags',
   'status', 'day_assignment', 'team_assignment',
-  'spcc_plan_uploaded', 'inspection_status', 'recertification_status', 'notes',
+  'spcc_plan_uploaded', 'inspection_status', 'inspection_findings', 'recertification_status', 'notes',
   'first_prod_date', 'spcc_due_date', 'spcc_pe_stamp_date', 'spcc_inspection_date', 'spcc_completion_type',
   'photos_taken', 'latest_photo_date', 'field_visit_date', 'estimated_oil_per_day',
   'berm_depth_inches', 'berm_length', 'berm_width',
@@ -208,6 +210,7 @@ const COLUMN_LABELS: Record<BaseColumnId, string> = {
   spcc_status: 'SPCC Plan Status',
   spcc_plan_uploaded: 'SPCC Plan Uploaded',
   inspection_status: 'SPCC Inspection Status',
+  inspection_findings: 'Last Inspection Findings',
   recertification_status: 'Recertification Status',
   notes: 'Notes',
   first_prod_date: 'Initial Production',
@@ -350,6 +353,11 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
 
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [inspections, setInspections] = useState<Map<string, Inspection>>(new Map());
+  // inspection_id → question_ids checked off in the Last Inspection Findings
+  // modal (inspection_item_followups). Only loaded for each facility's latest
+  // completed inspection, which is all the column shows.
+  const [inspectionFollowups, setInspectionFollowups] = useState<Map<string, Set<string>>>(new Map());
+  const [findingsInspection, setFindingsInspection] = useState<Inspection | null>(null);
   const [latestPhotoDates, setLatestPhotoDates] = useState<Map<string, string>>(new Map());
   const [facilitiesWithPhotoHistory, setFacilitiesWithPhotoHistory] = useState<Set<string>>(new Set());
   const latestPhotoLoadSequence = useRef(0);
@@ -765,7 +773,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       ];
     }
     const planColumns: ColumnId[] = ['spcc_due_date', 'spcc_inspection_date', 'spcc_status'];
-    const inspectionColumns: ColumnId[] = ['inspection_status'];
+    const inspectionColumns: ColumnId[] = ['inspection_status', 'inspection_findings'];
     let cols = [...DEFAULT_VISIBLE_COLUMNS];
     if (mode === 'all') {
       planColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
@@ -1768,6 +1776,23 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
         }
       });
       setInspections(inspectionMap);
+
+      const latestIds = Array.from(inspectionMap.values()).map(i => i.id);
+      const followups = new Map<string, Set<string>>();
+      if (latestIds.length > 0) {
+        const { data: followupRows, error: followupError } = await supabase
+          .from('inspection_item_followups')
+          .select('inspection_id, question_id')
+          .in('inspection_id', latestIds);
+        // Table may not exist yet if the migration hasn't been run — the
+        // column still works, it just shows nothing as checked off.
+        if (followupError) console.warn('Error loading inspection follow-ups:', followupError);
+        followupRows?.forEach(row => {
+          if (!followups.has(row.inspection_id)) followups.set(row.inspection_id, new Set());
+          followups.get(row.inspection_id)!.add(row.question_id);
+        });
+      }
+      setInspectionFollowups(followups);
     } catch (err) {
       console.error('Error loading inspections:', err);
     }
@@ -2207,6 +2232,12 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
               no_ip: 7,
             };
             return order[status];
+          }
+          case 'inspection_findings': {
+            // Most open findings first on desc; never-inspected sinks.
+            const insp = inspections.get(facility.id);
+            if (!insp) return -1;
+            return summarizeInspectionFindings(insp, inspectionFollowups.get(insp.id)).open;
           }
           case 'recertification_status': {
             // Pending decisions float to the top of the asc sort so the user
@@ -3308,6 +3339,16 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       if (!inspection) return 'Pending';
       return isInspectionValid(inspection) ? 'Inspected' : 'Expired';
     }
+    if (columnId === 'inspection_findings') {
+      const insp = inspections.get(facility.id);
+      if (!insp) return '';
+      const f = summarizeInspectionFindings(insp, inspectionFollowups.get(insp.id));
+      if (f.total === 0) return 'All passed';
+      const parts = [`${f.total} flagged`];
+      if (f.actionRequired > 0) parts.push(`${f.actionRequired} action required`);
+      if (f.done > 0) parts.push(`${f.done} done`);
+      return parts.join(', ');
+    }
     if (columnId === 'recertification_status') {
       if (!isRecertificationActive(facility)) return '';
       const d = facility.recertification_decision;
@@ -4353,6 +4394,43 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       }
       case 'inspection_status':
         return getVerificationIcon(facility);
+      case 'inspection_findings': {
+        const insp = inspections.get(facility.id);
+        if (!insp) return <span className="text-gray-400 dark:text-gray-500">—</span>;
+        const f = summarizeInspectionFindings(insp, inspectionFollowups.get(insp.id));
+        if (f.total === 0) {
+          return (
+            <span className="inline-flex items-center gap-1 text-gray-600 dark:text-gray-300">
+              <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+              All passed
+            </span>
+          );
+        }
+        const allDone = f.open === 0;
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                allDone
+                  ? 'bg-gray-100 dark:bg-gray-700/60 text-gray-400 dark:text-gray-500 line-through'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'
+              }`}
+            >
+              {f.total} flagged
+            </span>
+            {!allDone && f.actionRequired > 0 && (
+              <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                {f.actionRequired} action
+              </span>
+            )}
+            {f.done > 0 && (
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                {allDone ? 'all done' : `${f.done} done`}
+              </span>
+            )}
+          </span>
+        );
+      }
       case 'recertification_status':
         return (
           <RecertificationStatusField
@@ -6841,7 +6919,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                             data-col={columnId}
                             style={columnWidths[columnId] ? { width: columnWidths[columnId], minWidth: columnWidths[columnId], maxWidth: columnWidths[columnId] } : undefined}
                             className={`px-2 py-1 text-xs text-gray-600 dark:text-gray-300 ${columnId === 'notes' ? '' : 'cursor-pointer'} border-r border-gray-200 dark:border-gray-600 ${columnWidths[columnId] ? 'overflow-hidden whitespace-nowrap text-ellipsis' : (columnId === 'name' ? 'max-w-xs' : 'whitespace-nowrap')
-                              } ${columnId === 'spcc_status' || columnId === 'inspection_status' || columnId === 'ldar_site_plan_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
+                              } ${columnId === 'spcc_status' || columnId === 'inspection_status' || columnId === 'inspection_findings' || columnId === 'ldar_site_plan_status' ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}`}
                             onClick={(e) => {
                               if (columnId === 'notes') return;
                               // Invoice columns own their own buttons +
@@ -6865,6 +6943,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
                                 setForcedTab('inspections');
                                 setSelectedFacility(facility);
                                 return;
+                              }
+                              if (columnId === 'inspection_findings') {
+                                const insp = inspections.get(facility.id);
+                                if (insp) {
+                                  e.stopPropagation();
+                                  setFindingsInspection(insp);
+                                  return;
+                                }
                               }
                               if (columnId === 'ldar_site_plan_status') {
                                 e.stopPropagation();
@@ -7263,6 +7349,22 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
           />
         )
       }
+
+      {findingsInspection && (
+        <InspectionFindingsModal
+          inspection={findingsInspection}
+          facilityName={facilities.find(f => f.id === findingsInspection.facility_id)?.name ?? 'Facility'}
+          doneQuestionIds={inspectionFollowups.get(findingsInspection.id) ?? new Set()}
+          onDoneChange={(inspectionId, next) => {
+            setInspectionFollowups(prev => new Map(prev).set(inspectionId, next));
+          }}
+          onViewFullReport={() => {
+            setViewingInspection(findingsInspection);
+            setFindingsInspection(null);
+          }}
+          onClose={() => setFindingsInspection(null)}
+        />
+      )}
 
       {
         viewingInspection && (() => {
