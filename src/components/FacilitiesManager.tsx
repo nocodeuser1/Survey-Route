@@ -148,6 +148,13 @@ type ColumnId = BaseColumnId | ChecklistColumnId;
 // for the plan/invoice views — keeps status next to the facility name).
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['name', 'spcc_status', 'latitude', 'longitude', 'inspection_status', 'recertification_status', 'notes'];
 
+// Standard Plans-mode layout for every account that hasn't saved its own
+// (Israel's curated Camino layout, 2026-11-25). Array order is the on-screen
+// column order.
+const PLAN_DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
+  'name', 'spcc_status', 'spcc_due_date', 'latest_photo_date', 'photos_taken', 'spcc_inspection_date',
+];
+
 // Fixed, focused column set for the Invoice sub-view — Facility Name, the
 // mode-appropriate Status column, and the Invoice (date + action buttons)
 // column. This overrides the user's normal column layout while invoice view
@@ -736,7 +743,14 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     return merged;
   }, [allColumnsOrder]);
 
+  const getDefaultColumnOrder = (mode: string): ColumnId[] => {
+    if (mode !== 'plan') return allColumnsOrder;
+    const lead = PLAN_DEFAULT_VISIBLE_COLUMNS.filter(id => allColumnsOrder.includes(id));
+    return [...lead, ...allColumnsOrder.filter(id => !lead.includes(id))];
+  };
+
   const getDefaultVisibleColumns = (mode: string): ColumnId[] => {
+    if (mode === 'plan') return [...PLAN_DEFAULT_VISIBLE_COLUMNS];
     if (mode === 'ldar') {
       return [
         'name',
@@ -770,7 +784,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
     const prefsCols = facPrefs.columns[getColumnsKey()];
     if (prefsCols?.order) return mergeColumnOrder(prefsCols.order as ColumnId[]);
     const saved = localStorage.getItem(getStorageKey('column_order'));
-    return saved ? mergeColumnOrder(JSON.parse(saved)) : allColumnsOrder;
+    return saved ? mergeColumnOrder(JSON.parse(saved)) : getDefaultColumnOrder(spccMode);
   });
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
     const prefsCols = facPrefs.columns[getColumnsKey()];
@@ -1557,7 +1571,7 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       setColumnOrder(mergeColumnOrder(prefsCols.order as ColumnId[]));
     } else {
       const savedOrder = localStorage.getItem(getStorageKey('column_order'));
-      setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : allColumnsOrder);
+      setColumnOrder(savedOrder ? mergeColumnOrder(JSON.parse(savedOrder)) : getDefaultColumnOrder(spccMode));
     }
 
     if (prefsCols?.visible) {
@@ -3746,8 +3760,8 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
   };
 
   const resetColumns = () => {
-    setDraftColumnOrder(allColumnsOrder);
-    setDraftVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+    setDraftColumnOrder(getDefaultColumnOrder(spccMode));
+    setDraftVisibleColumns(getDefaultVisibleColumns(spccMode));
   };
 
   const handleDragStart = (columnId: ColumnId) => {
