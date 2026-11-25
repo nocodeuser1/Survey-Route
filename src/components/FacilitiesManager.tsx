@@ -775,7 +775,9 @@ export default function FacilitiesManager({ facilities, accountId, userId, onFac
       cols = cols.filter(col => !inspectionColumns.includes(col));
     } else {
       inspectionColumns.forEach(col => { if (!cols.includes(col)) cols.push(col); });
-      cols = cols.filter(col => !planColumns.includes(col));
+      // Recertification Status is the SPCC *plan's* 5-year PE recert, not an
+      // inspection field, so it doesn't belong in the Inspections default.
+      cols = cols.filter(col => !planColumns.includes(col) && col !== 'recertification_status');
     }
     return cols;
   };
